@@ -26,6 +26,63 @@ from src.core.buffered_logger import get_logger
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
 
 
+# Служебные слова: не могут быть отдельной «концепцией».
+# «такое» в этом списке — причина бага «что такое такое» (252 938 повторов
+# в логе, см. docs/BASELINE.md).
+_STOP_WORDS = frozenset({
+    # местоимения
+    'меня', 'тебя', 'себя', 'нас', 'вас', 'их', 'его', 'ее', 'мне', 'тебе',
+    'себе', 'нам', 'вам', 'им', 'мной', 'тобой', 'собой', 'нами', 'вами', 'ими',
+    'которой', 'которого', 'который', 'которые', 'которым', 'которую',
+    'ты', 'я', 'он', 'она', 'оно', 'мы', 'вы', 'они',
+    # вопрос и указатели
+    'что', 'кто', 'где', 'когда', 'как', 'почему', 'зачем', 'какой', 'какая',
+    'какие', 'каких', 'сколько', 'куда', 'откуда', 'чей', 'чья',
+    'такое', 'такой', 'такая', 'такие', 'такого', 'таком', 'это', 'этот',
+    'эта', 'эти', 'этого', 'этом', 'самый', 'самая', 'самое', 'самые',
+    # частицы / наречия / предлоги
+    'тут', 'там', 'здесь', 'сейчас', 'тогда', 'потом', 'всегда', 'никогда',
+    'очень', 'можно', 'нужно', 'надо', 'есть', 'быть', 'был', 'была', 'было',
+    'были', 'будет', 'чем', 'для', 'про', 'при', 'над', 'под', 'без', 'или',
+    'либо', 'тоже', 'также', 'вообще', 'просто', 'уже', 'ещё', 'еще',
+})
+
+# Явный список частых глагольных форм: морфологии у агента нет, а эвристика
+# по окончаниям путает «нейросети» с глаголом. Применяется только если
+# после фильтра остаётся хотя бы одно другое слово — иначе «как работает
+# мышление» превращалось в «что такое работает».
+_VERB_FORMS = frozenset({
+    'работает', 'делает', 'значит', 'может', 'хочет', 'думает', 'знает',
+    'понимает', 'живёт', 'живет', 'любит', 'идёт', 'идет', 'стоит', 'имеет',
+    'даёт', 'дает', 'видит', 'слышит', 'говорит', 'пишет', 'читает',
+    'учится', 'учит', 'помогает', 'мешает', 'создаёт', 'создает', 'меняет',
+    'влияет', 'зависит', 'отличается', 'называется', 'является', 'происходит',
+    'случается', 'получается', 'используется', 'применяется', 'сравнить',
+    'понять', 'узнать', 'объяснить',
+})
+
+# Вопросительные обёртки, которые не являются частью имени концепции.
+_CONCEPT_PREFIXES = (
+    "что такое ", "что значит ", "что означает ",
+    "объясни ", "расскажи про ", "расскажи о ",
+    "как работает ", "почему ",
+)
+
+
+def normalize_concept_name(raw: str) -> str:
+    """Приводит запрос к имени концепции: «что такое счастье» → «счастье».
+
+    Без этого в графе ментальных моделей появляются узлы-фразы
+    («что такое счастье»), которые дублируют друг друга и не связываются
+    с уже известными понятиями.
+    """
+    text = str(raw).strip().lower().rstrip("?.!,")
+    for prefix in _CONCEPT_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix):].strip()
+    return text
+
+
 class ThinkingPipeline:
     """Пайплайн мышления агента.
 
@@ -170,6 +227,7 @@ class ThinkingPipeline:
 
     def _decompose_query(self, query: str) -> Optional[list]:
         """Разбивает сложный запрос на более простые части."""
+        normalized = re.sub(r"[\s?!.,]+$", "", str(query).strip().lower())
         decompositions = {
             "трансформер архитектура": [
                 "что такое трансформер",
@@ -199,34 +257,31 @@ class ThinkingPipeline:
         }
 
         for key, parts in decompositions.items():
-            if key.lower() in query.lower() or query.lower() in key.lower():
-                return parts
+            if key.lower() in normalized or normalized in key.lower():
+                return list(parts)
 
-        keywords = [w for w in query.split() if len(w) > 3]
-        # Strip punctuation from keywords
-        keywords = [kw.rstrip('?.!,') for kw in keywords]
+        words = [w for w in re.split(r"[^\wё-]+", normalized) if len(w) > 2]
+        meaningful = [w for w in words if w not in _STOP_WORDS]
+        # Дедупликация с сохранением порядка: «что такое жизнь и жизнь».
+        meaningful = list(dict.fromkeys(meaningful))
 
-        # Filter out pronouns and common words that aren't meaningful concepts
-        pronouns = {'меня', 'тебя', 'себя', 'нас', 'вас', 'их', 'его', 'ее', 'их',
-                    'мне', 'тебе', 'себе', 'нам', 'вам', 'им',
-                    'мной', 'тобой', 'собой', 'нами', 'вами', 'ими',
-                    'которой', 'которого', 'который', 'которые',
-                    'что', 'кто', 'где', 'когда', 'как', 'почему',
-                    'тут', 'там', 'здесь', 'там', 'сейчас', 'тогда',
-                    'ты', 'я', 'он', 'она', 'оно', 'мы', 'вы', 'они'}
-        # Keep only meaningful words (verbs, nouns, adjectives)
-        meaningful = [kw for kw in keywords if kw.lower() not in pronouns]
+        # «что такое X» — уже простой вопрос, дробить его не на что.
+        # Именно это порождало «что такое такое» (252 938 раз в логе).
+        if normalized.startswith("что такое") and len(meaningful) < 2:
+            return None
+        if len(meaningful) < 2:
+            return None
 
-        if len(meaningful) >= 2:
-            # Prioritize verbs (often end in -ть, -ти, -ать, -еть, -ить, -уть, -ыть)
-            # and longer words (more likely to be meaningful concepts)
-            meaningful.sort(key=lambda w: (w.endswith(('ть', 'ти', 'ать', 'еть', 'ить', 'уть', 'ыть', 'сти')), len(w)), reverse=True)
-            return [f"что такое {kw}" for kw in meaningful[:3]]
-        elif len(keywords) >= 2:
-            # Fallback: use original keywords but prioritize longer ones
-            keywords.sort(key=len, reverse=True)
-            return [f"что такое {kw}" for kw in keywords[:3]]
-        return None
+        # Глагольные формы убираем, только если есть что оставить.
+        without_verbs = [w for w in meaningful if w not in _VERB_FORMS]
+        if without_verbs:
+            meaningful = without_verbs
+
+        meaningful.sort(key=len, reverse=True)
+        parts = [f"что такое {kw}" for kw in meaningful[:3]]
+        # Не предлагаем вопрос, совпадающий с исходным, и не дублируем части.
+        parts = [p for p in parts if p.lower() != normalized]
+        return list(dict.fromkeys(parts)) or None
 
     def _try_ask_user_about_complex(self, concept: str, decomposed: list) -> None:
         """Пытается задать вопрос пользователю о сложной концепции."""
@@ -421,20 +476,27 @@ class ThinkingPipeline:
     def _register_unknown_concept(self, clean_data: str, original_data: str) -> None:
         """Регистрирует новую концепцию в ментальных моделях."""
         agent = self.agent
-        context = f"цикл_{agent.cycle_count}_{clean_data}"
-        keywords = [w for w in clean_data.split() if len(w) > 3]
+        # Служебное слово — не концепция. Иначе «такое»/«это» становятся
+        # узлами графа и порождают бессмысленные под-вопросы.
+        # «что такое счастье» → «счастье»: узел должен связываться
+        # с уже известными понятиями, а не дублировать вопрос.
+        concept_name = normalize_concept_name(clean_data)
+        if concept_name in _STOP_WORDS or len(concept_name) < 3:
+            return
+        context = f"цикл_{agent.cycle_count}_{concept_name}"
+        keywords = [w for w in concept_name.split() if len(w) > 3]
         if keywords:
             outcome = f"Новая концепция, связана с: {'/'.join(keywords[:3])}"
         else:
-            outcome = f"Неизвестный стимул: '{clean_data}'"
+            outcome = f"Неизвестный стимул: '{concept_name}'"
         valence = 0.0 if "вопрос" in original_data else 0.3
         node = agent.mental_models.encounter_concept(
-            concept_name=clean_data,
+            concept_name=concept_name,
             context=context,
             outcome=outcome,
             valence=valence,
         )
-        get_logger().log(f"Новый концепт: '{clean_data}' (уверенность: {node.confidence:.0%})")
+        get_logger().log(f"Новый концепт: '{concept_name}' (уверенность: {node.confidence:.0%})")
 
     def _search_external_knowledge(self, clean_data: str, original_data: str) -> str:
         """Этап 2.5: локальный поиск → web-фоллбэк через Wikipedia.
@@ -561,9 +623,10 @@ class ThinkingPipeline:
         
         final_confidence = max(0.1, min(0.95, base_confidence + related_bonus - contradiction_penalty + self_check_bonus))
 
-        # 3. Зарегистрировать в mental_models с обоснованной уверенностью
+        # 3. Зарегистрировать в mental_models с обоснованной уверенностью.
+        # Имя узла — без вопросительной обёртки: «что такое счастье» → «счастье».
         agent.mental_models.encounter_concept(
-            clean_data,
+            normalize_concept_name(clean_data),
             f"web:{lang}_wikipedia",
             extract[:80],
             final_confidence,

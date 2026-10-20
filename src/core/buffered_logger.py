@@ -14,12 +14,20 @@ from datetime import datetime
 
 
 class BufferedLogger:
-    """Буферизированный логгер для записей действий агента."""
+    """Буферизированный логгер для записей действий агента.
 
-    def __init__(self, log_file='data/logs/agent_log.txt', buffer_size=10):
+    Ротация: когда файл вырастает до ``max_bytes``, он переименовывается
+    в ``agent_log.txt.1``, старые сдвигаются, самый старый удаляется.
+    Без этого лог за 4 месяца вырос до 420 МБ (см. docs/BASELINE.md).
+    """
+
+    def __init__(self, log_file='data/logs/agent_log.txt', buffer_size=10,
+                 max_bytes=10 * 1024 * 1024, backup_count=3):
         self.log_file = log_file
         self.buffer_size = buffer_size
         self.buffer = []
+        self.max_bytes = max_bytes
+        self.backup_count = backup_count
 
         # Гарантирует что директория существует
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -41,6 +49,37 @@ class BufferedLogger:
         # Когда буфер полон - flush
         if len(self.buffer) >= self.buffer_size:
             self.flush()
+
+    def _rotate_if_needed(self) -> None:
+        """Сдвигает файлы лога, если текущий достиг ``max_bytes``.
+
+        Ошибки файловой системы не должны ломать жизнь агента,
+        поэтому любые сбои здесь проглатываются осознанно.
+        """
+        if not self.max_bytes or not os.path.exists(self.log_file):
+            return
+        try:
+            if os.path.getsize(self.log_file) < self.max_bytes:
+                return
+
+            if self.backup_count <= 0:
+                # Ротация отключена — просто начинаем файл заново.
+                open(self.log_file, 'w', encoding='utf-8').close()
+                return
+
+            oldest = f"{self.log_file}.{self.backup_count}"
+            if os.path.exists(oldest):
+                os.remove(oldest)
+
+            for i in range(self.backup_count - 1, 0, -1):
+                src = f"{self.log_file}.{i}"
+                if os.path.exists(src):
+                    os.replace(src, f"{self.log_file}.{i + 1}")
+
+            os.replace(self.log_file, f"{self.log_file}.1")
+        except OSError:
+            # Диск занят/нет прав — пишем дальше в текущий файл.
+            pass
     
     def flush(self):
         """Записывает весь буфер на диск и очищает его."""
@@ -48,6 +87,7 @@ class BufferedLogger:
             return
         
         try:
+            self._rotate_if_needed()
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.writelines(self.buffer)
             # Очищаем буфер ПОСЛЕ записи
@@ -63,6 +103,7 @@ class BufferedLogger:
         log_entry = f"[{timestamp}] {message}\n"
         
         try:
+            self._rotate_if_needed()
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
         except Exception:
