@@ -33,6 +33,8 @@ import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 
+from src.core.paths import data_path
+
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +221,7 @@ class MetricsCollector:
         """Сохраняет снимок в JSON-файл. Возвращает путь."""
         snap = self.snapshot(last_n=self._maxlen)
         path = path or os.path.join(
-            self._persist_dir or "data/metrics",
+            self._persist_dir or data_path("metrics"),
             f"{self._agent_name}_metrics_{int(time.time())}.json",
         )
         try:

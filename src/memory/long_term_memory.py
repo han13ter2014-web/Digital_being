@@ -5,6 +5,8 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Set
 import os
 
+from src.core.paths import data_path
+
 
 def _lr_config():
     """Ленивый импорт LR_CONFIG (избегаем циклов)."""
@@ -106,8 +108,8 @@ class LongTermMemory:
         self._consolidation_count = 0
         self._decay_events_count = 0
 
-        self.memory_file = f'data/memory/{agent_name}_long_term.json'
-        os.makedirs('data/memory', exist_ok=True)
+        self.memory_file = data_path("memory", f"{agent_name}_long_term.json")
+        os.makedirs(data_path("memory"), exist_ok=True)
 
         self._load_from_disk()
 

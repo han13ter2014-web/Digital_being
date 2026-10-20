@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
+from src.core.paths import data_path
+
 
 @dataclass
 class CodeModification:
@@ -27,9 +29,11 @@ class SelfEvolutionAnalyzer:
         self.modification_history: List[CodeModification] = []
         self.performance_metrics: Dict[str, List[float]] = {}
         self.identified_bottlenecks: List[Dict] = []
-        self.evolution_file = f'data/evolution/{agent.name}_self_modifications.json'
+        self.evolution_file = data_path(
+            "evolution", f"{agent.name}_self_modifications.json"
+        )
 
-        os.makedirs('data/evolution', exist_ok=True)
+        os.makedirs(data_path("evolution"), exist_ok=True)
         self._load_history()
 
     def analyze_performance(self) -> Dict:

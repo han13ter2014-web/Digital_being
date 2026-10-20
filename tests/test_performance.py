@@ -191,7 +191,7 @@ def test_long_term_memory_apply_episodic_limit():
         simulation_config.LR_CONFIG.MAX_EPISODIC_MEMORIES = original
 
 
-def test_save_knowledge_base_debounces():
+def test_save_knowledge_base_debounces(tmp_path):
     """_save_knowledge_base не пишет на диск чаще debounce."""
     from src.core.agent import DigitalBeing
     import os
@@ -204,7 +204,7 @@ def test_save_knowledge_base_debounces():
     class _MockAgent:
         _last_kb_save_ts = 0.0
         _last_kb_save_size = 0
-        knowledge_file = "data/test_kb_debounce.json"
+        knowledge_file = str(tmp_path / "test_kb_debounce.json")
         knowledge_base = {f"k_{i}": "v" for i in range(20)}
 
         def _prune_knowledge_base(self):

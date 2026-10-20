@@ -14,6 +14,7 @@ import json
 import os
 from typing import Dict, List, Optional
 
+from src.core.paths import data_path
 from src.memory.knowledge_quality import check_entry, clean_knowledge_base
 
 
@@ -168,13 +169,13 @@ class KnowledgeSubsystem:
     }
 
     def __init__(self, agent_name: str,
-                 knowledge_file: str = "data/knowledge_base.json",
+                 knowledge_file: str = None,
                  max_entries: int = 500,
                  prune_amount: int = 100,
                  contradiction_threshold: float = 0.7,
                  detect_contradictions: bool = True):
         self.agent_name = agent_name
-        self.knowledge_file = knowledge_file
+        self.knowledge_file = knowledge_file or data_path("knowledge_base.json")
         self.max_entries = max_entries
         self.prune_amount = prune_amount
         self.contradiction_threshold = contradiction_threshold

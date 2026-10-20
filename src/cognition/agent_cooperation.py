@@ -5,6 +5,8 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import os
 
+from src.core.paths import data_path
+
 
 class MessageType(Enum):
     """Типы сообщений между агентами."""
@@ -66,9 +68,9 @@ class AgentCooperationHub:
         self.collaboration_groups: Dict[str, List[str]] = {}  # {group_id: [agent_ids]}
         self.shared_knowledge_base: Dict[str, Dict] = {}  # {topic: {agent_id: knowledge}}
         self.agent_relationships: Dict[str, Dict] = {}  # {agent_id: {other_agent_id: reputation}}
-        self.hub_file = 'data/cooperation/hub_state.json'
+        self.hub_file = data_path("cooperation", "hub_state.json")
 
-        os.makedirs('data/cooperation', exist_ok=True)
+        os.makedirs(data_path("cooperation"), exist_ok=True)
         self._load_state()
 
     def register_agent(self, agent):

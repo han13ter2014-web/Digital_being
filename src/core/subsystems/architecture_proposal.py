@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from config.will_config import WILL_CONFIG
+from src.core.paths import data_path
 from src.core.subsystems.will_registry import WillRegistry
 
 
@@ -27,10 +28,10 @@ class ArchitectureProposal:
     PROPOSAL_TYPES = ["method_add", "config_change", "module_add", "behavior_change"]
 
     def __init__(self, registry: WillRegistry,
-                 proposals_dir: str = "data/architecture_proposals"):
+                 proposals_dir: str = None):
         self.registry = registry
-        self.proposals_dir = proposals_dir
-        os.makedirs(proposals_dir, exist_ok=True)
+        self.proposals_dir = proposals_dir or data_path("architecture_proposals")
+        os.makedirs(self.proposals_dir, exist_ok=True)
 
     def propose(self, proposal_type: str, title: str, description: str,
                 code_snippet: str = "", cycle: int = 0) -> Dict:

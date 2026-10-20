@@ -16,7 +16,9 @@ class Settings:
 
     # === Пути ===
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DATA_DIR = os.path.join(BASE_DIR, "data")
+    # DIGITAL_BEING_DATA_DIR перенаправляет изменяемые данные во временную
+    # папку (используется тестами), не меняя путь к ресурсам проекта.
+    DATA_DIR = os.environ.get("DIGITAL_BEING_DATA_DIR") or os.path.join(BASE_DIR, "data")
     CHECKPOINT_DIR = os.path.join(DATA_DIR, "checkpoints")
     LOG_DIR = os.path.join(DATA_DIR, "logs")
     MENTAL_MODELS_PATH = os.path.join(DATA_DIR, "mind", "mental_models.json")

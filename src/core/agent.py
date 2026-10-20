@@ -44,6 +44,7 @@ from src.perception.user_interaction import UserInteraction, UserPromptHandler
 # Импорт LongTermMemory через нормальный пакет (Этап 2.2).
 from src.memory import LongTermMemory
 from src.memory.knowledge_quality import REASON_TITLES, clean_knowledge_base
+from src.core.paths import data_path
 # Bootstrap knowledge (родовые знания)
 from src.core.bootstrap_knowledge import load_initial_knowledge
 # Internal motivation (внутренняя мотивация)
@@ -179,10 +180,10 @@ class DigitalBeing:
         )
         self._open_questions_strategy = "round_robin"
 
-        os.makedirs('data/checkpoints', exist_ok=True)
-        os.makedirs('data/logs', exist_ok=True)
+        os.makedirs(data_path('checkpoints'), exist_ok=True)
+        os.makedirs(data_path('logs'), exist_ok=True)
 
-        self.knowledge_file = 'data/knowledge_base.json'
+        self.knowledge_file = data_path('knowledge_base.json')
 
         # Для умных чекпоинтов
         self._last_saved_intelligence = 0
@@ -272,13 +273,13 @@ class DigitalBeing:
                                     ),                                                       "energy",                                              20),
         ("knowledge_subsystem",     lambda name: KnowledgeSubsystem(
                                         agent_name=name,
-                                        knowledge_file="data/knowledge_base.json",
+                                        knowledge_file=data_path("knowledge_base.json"),
                                         max_entries=SIM_CONFIG.MAX_KNOWLEDGE_BASE,
                                         prune_amount=SIM_CONFIG.KNOWLEDGE_PRUNE_AMOUNT,
                                         detect_contradictions=LR_CONFIG.CONTRADICTION_DETECTION,
                                     ),                                                       "knowledge",                                           30),
         ("checkpoint_subsystem",   lambda name: CheckpointSubsystem(
-                                        checkpoint_dir="data/checkpoints",
+                                        checkpoint_dir=data_path("checkpoints"),
                                         interval=SIM_CONFIG.CHECKPOINT_INTERVAL,
                                         save_on_evolution=SIM_CONFIG.SAVE_ON_EVOLUTION,
                                         max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
@@ -1980,8 +1981,9 @@ class DigitalBeing:
                 short = node.definition_hypothesis[:70] + "..." if len(node.definition_hypothesis) > 70 else node.definition_hypothesis
                 print(f"     Гипотеза: '{short}'")
 
-    def save_mental_models(self, filename='data/mind/mental_models.json'):
+    def save_mental_models(self, filename=None):
         """Сохраняет ментальные модели в файл."""
+        filename = filename or data_path("mind", "mental_models.json")
         try:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             
@@ -1991,8 +1993,9 @@ class DigitalBeing:
         except Exception as e:
             get_logger().log(f"[{self.name}] Ошибка сохранения: {e}")
 
-    def load_mental_models(self, filename='data/mind/mental_models.json'):
+    def load_mental_models(self, filename=None):
         """Загружает ментальные модели из файла."""
+        filename = filename or data_path("mind", "mental_models.json")
         try:
             if not os.path.exists(filename):
                 get_logger().log(f"[{self.name}] Файл ментальных моделей не найден: {filename}")

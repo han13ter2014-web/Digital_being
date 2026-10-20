@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 
 from config.will_config import WILL_CONFIG
+from src.core.paths import data_path
 from src.core.subsystems.will_registry import WillRegistry
 
 
@@ -182,7 +183,7 @@ class MindDream:
             return {"handled": False, "reason": "нет агента"}
 
         # Создаём папку Ясли
-        nursery_dir = WILL_CONFIG.NURSERY_DIR
+        nursery_dir = data_path("nursery")
         os.makedirs(nursery_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         seed_folder = f"{nursery_dir}/{self.agent_name}_seed_{timestamp}"
