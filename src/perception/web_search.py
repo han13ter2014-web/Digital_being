@@ -27,6 +27,13 @@ import urllib.request
 from collections import OrderedDict
 from typing import Dict, Optional
 
+from src.memory.knowledge_quality import (
+    is_relevant,
+    is_valid_definition,
+    is_worth_searching,
+    normalize_concept_name,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +143,14 @@ class WebSearcher:
         if not query:
             return self._empty("empty_query")
 
+        # В Wikipedia идём с чистым названием концепции, а не с целым
+        # вопросом. Мусорные запросы («?», «s_1») отсекаем до сети.
+        query = normalize_concept_name(query)
+        if not is_worth_searching(query):
+            self._stats["misses"] += 1
+            logger.info(f"[WebSearcher] Запрос отклонён как неинформативный: {query!r}")
+            return self._empty("not_worth_searching")
+
         # Нормализуем запрос для кэша: lower + strip.
         cache_key = f"{self.lang}:{query.lower()}"
         if cache_key in self._cache:
@@ -151,7 +166,10 @@ class WebSearcher:
         # Делаем фоллбэк ТОЛЬКО если первая попытка была "не нашли" (no_*),
         # а не "ошибка сети". Иначе при DNS-ошибке делаем 2 запроса и удваиваем
         # время отказа.
-        NOT_FOUND_REASONS = ("no_pages", "no_extract", "not_found")
+        NOT_FOUND_REASONS = (
+            "no_pages", "no_extract", "not_found",
+            "low_quality", "irrelevant",
+        )
         if (
             not result["found"]
             and self.fallback_to_en
@@ -284,6 +302,25 @@ class WebSearcher:
         if not extract or not extract.strip():
             self._stats["misses"] += 1
             return self._empty("no_extract")
+
+        # Страницы-неоднозначности («S1 ... may refer to:») и слишком
+        # короткие ответы знанием не являются.
+        if not is_valid_definition(extract):
+            self._stats["misses"] += 1
+            logger.info(
+                f"[WebSearcher] Низкое качество статьи '{title}' "
+                f"(lang={lang}): {extract[:60]!r}"
+            )
+            return self._empty("low_quality")
+
+        # Статья должна хоть как-то относиться к запросу.
+        if not is_relevant(query, title, extract):
+            self._stats["misses"] += 1
+            logger.info(
+                f"[WebSearcher] Статья '{title}' не относится к '{query}' "
+                f"(lang={lang})"
+            )
+            return self._empty("irrelevant")
 
         # Обрезаем extract до max_chars.
         if len(extract) > self.max_chars:

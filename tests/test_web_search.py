@@ -119,9 +119,13 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_search_user_agent_in_request(self):
         """User-Agent обязательно передаётся в запросе."""
-        fake_body = _make_wiki_response("Test", "Test extract", "https://ru.wikipedia.org/wiki/Test")
+        fake_body = _make_wiki_response(
+            "Сознание",
+            "Сознание — состояние психической жизни человека.",
+            "https://ru.wikipedia.org/wiki/Сознание",
+        )
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)) as mock_urlopen:
-            self.ws.search("Test")
+            self.ws.search("сознание")
             call_args = mock_urlopen.call_args
             request_obj = call_args[0][0]
             # urllib нормализует имя заголовка до "User-agent" (HTTP-стиль).
@@ -138,7 +142,11 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_cache_hit(self):
         """Повторный запрос отдаёт из кэша без HTTP-вызова."""
-        fake_body = _make_wiki_response("Сознание", "Текст", "https://ru.wikipedia.org/wiki/Сознание")
+        fake_body = _make_wiki_response(
+            "Сознание",
+            "Сознание — состояние психической жизни человека.",
+            "https://ru.wikipedia.org/wiki/Сознание",
+        )
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)) as mock_urlopen:
             r1 = self.ws.search("сознание")  # HTTP-вызов
             r2 = self.ws.search("Сознание")  # cache_hit
@@ -151,18 +159,23 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_cache_lru_eviction(self):
         """При переполнении кэша вытесняется самый старый."""
-        fake_body = _make_wiki_response("X", "Text", "https://ru.wikipedia.org/wiki/X")
+        fake_body = _make_wiki_response(
+            "Понятие",
+            "Понятие — это альфа, бета, гамма, дельта и эпсилон.",
+            "https://ru.wikipedia.org/wiki/Понятие",
+        )
+        queries = ["альфа", "бета", "гамма", "дельта", "эпсилон"]
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)):
             # cache_size=3, добавим 5 разных запросов.
-            for i in range(5):
-                self.ws.search(f"concept_{i}")
+            for query in queries:
+                self.ws.search(query)
 
-        # Должно остаться только 3 последних: concept_2, concept_3, concept_4.
+        # Должно остаться только 3 последних: гамма, дельта, эпсилон.
         self.assertEqual(len(self.ws._cache), 3)
-        self.assertNotIn("ru:concept_0", self.ws._cache)
-        self.assertNotIn("ru:concept_1", self.ws._cache)
-        self.assertIn("ru:concept_2", self.ws._cache)
-        self.assertIn("ru:concept_4", self.ws._cache)
+        self.assertNotIn("ru:альфа", self.ws._cache)
+        self.assertNotIn("ru:бета", self.ws._cache)
+        self.assertIn("ru:гамма", self.ws._cache)
+        self.assertIn("ru:эпсилон", self.ws._cache)
 
     # ---------- Fallback RU → EN ----------
 
@@ -206,7 +219,7 @@ class WebSearcherTests(unittest.TestCase):
             code=503, msg="Service Unavailable", hdrs=None, fp=None,
         )
         with patch("urllib.request.urlopen", side_effect=err):
-            result = self.ws.search("test")
+            result = self.ws.search("сознание")
 
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "http_503")
@@ -220,7 +233,7 @@ class WebSearcherTests(unittest.TestCase):
         import urllib.error
         err = urllib.error.URLError("DNS failure")
         with patch("urllib.request.urlopen", side_effect=err):
-            result = self.ws.search("test")
+            result = self.ws.search("сознание")
 
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "network_error")
@@ -228,7 +241,7 @@ class WebSearcherTests(unittest.TestCase):
     def test_timeout(self):
         """TimeoutError → graceful fail."""
         with patch("urllib.request.urlopen", side_effect=TimeoutError("timeout")):
-            result = self.ws.search("test")
+            result = self.ws.search("сознание")
 
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "timeout")
@@ -282,10 +295,14 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_stats(self):
         """Статистика обновляется."""
-        fake_body = _make_wiki_response("X", "Y", "url")
+        fake_body = _make_wiki_response(
+            "Сознание",
+            "Сознание — состояние психической жизни человека.",
+            "https://ru.wikipedia.org/wiki/Сознание",
+        )
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)):
-            self.ws.search("X")
-            self.ws.search("X")  # cache hit
+            self.ws.search("сознание")
+            self.ws.search("сознание")  # cache hit
         s = self.ws.get_stats()
         self.assertEqual(s["found"], 1)
         self.assertEqual(s["cache_hits"], 1)
@@ -293,9 +310,13 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_clear_cache(self):
         """clear_cache очищает."""
-        fake_body = _make_wiki_response("X", "Y", "url")
+        fake_body = _make_wiki_response(
+            "Сознание",
+            "Сознание — состояние психической жизни человека.",
+            "https://ru.wikipedia.org/wiki/Сознание",
+        )
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)):
-            self.ws.search("X")
+            self.ws.search("сознание")
         self.assertEqual(len(self.ws._cache), 1)
         self.ws.clear_cache()
         self.assertEqual(len(self.ws._cache), 0)

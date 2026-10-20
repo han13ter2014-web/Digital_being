@@ -14,6 +14,8 @@ import json
 import os
 from typing import Dict, List, Optional
 
+from src.memory.knowledge_quality import check_entry, clean_knowledge_base
+
 
 class KnowledgeSubsystem:
     """Подсистема хранения и управления знаниями агента."""
@@ -184,11 +186,19 @@ class KnowledgeSubsystem:
     # ============================================================
     # Прунинг
     # ============================================================
+    def clean(self) -> int:
+        """Удаляет некачественные записи. Возвращает число удалённых."""
+        _, removed = clean_knowledge_base(self.knowledge_base)
+        for key in removed:
+            self.knowledge_base.pop(key, None)
+        return len(removed)
+
     def prune_if_needed(self) -> bool:
-        """Прунит базу знаний до лимита (перед добавлением).
-        Возвращает True если прунинг произошёл."""
+        """Чистит мусор и прунит базу до лимита.
+        Возвращает True если база изменилась."""
+        changed = self.clean() > 0
         if len(self.knowledge_base) <= self.max_entries:
-            return False
+            return changed
 
         # Удаляем самые старые (первые по порядку) записи
         keys_to_remove = list(self.knowledge_base.keys())[:self.prune_amount]
@@ -204,12 +214,13 @@ class KnowledgeSubsystem:
     # Чтение/запись
     # ============================================================
     def load(self) -> int:
-        """Загружает базу знаний из файла. Возвращает количество загруженных."""
+        """Загружает базу знаний из файла. Возвращает количество принятых."""
         if not os.path.exists(self.knowledge_file):
             return 0
         try:
             with open(self.knowledge_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
+            saved, _removed = clean_knowledge_base(saved)
             self.knowledge_base.update(saved)
             return len(saved)
         except Exception:
@@ -311,12 +322,19 @@ class KnowledgeSubsystem:
     # ============================================================
     def add_definition(self, topic: str, definition: str,
                        context: str = "") -> Dict:
-        """Добавляет определение. Возвращает {'added', 'pruned', 'contradictions'}."""
+        """Добавляет определение. Возвращает {'added', 'reason', 'pruned', 'contradictions'}."""
         result = {
             "added": False,
+            "reason": None,
             "pruned": False,
             "contradictions": [],
         }
+
+        # Мусор не должен попадать в базу знаний даже через явный вызов.
+        reason = check_entry(topic, definition)
+        if reason:
+            result["reason"] = reason
+            return result
 
         contradictions = self.detect_contradiction(topic, definition)
         result["contradictions"] = contradictions

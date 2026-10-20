@@ -23,29 +23,14 @@ import random
 from typing import Optional, List, Dict
 
 from src.core.buffered_logger import get_logger
+from src.memory.knowledge_quality import (
+    STOP_WORDS as _STOP_WORDS,
+    check_entry,
+    is_worth_searching,
+    normalize_concept_name,
+)
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
 
-
-# Служебные слова: не могут быть отдельной «концепцией».
-# «такое» в этом списке — причина бага «что такое такое» (252 938 повторов
-# в логе, см. docs/BASELINE.md).
-_STOP_WORDS = frozenset({
-    # местоимения
-    'меня', 'тебя', 'себя', 'нас', 'вас', 'их', 'его', 'ее', 'мне', 'тебе',
-    'себе', 'нам', 'вам', 'им', 'мной', 'тобой', 'собой', 'нами', 'вами', 'ими',
-    'которой', 'которого', 'который', 'которые', 'которым', 'которую',
-    'ты', 'я', 'он', 'она', 'оно', 'мы', 'вы', 'они',
-    # вопрос и указатели
-    'что', 'кто', 'где', 'когда', 'как', 'почему', 'зачем', 'какой', 'какая',
-    'какие', 'каких', 'сколько', 'куда', 'откуда', 'чей', 'чья',
-    'такое', 'такой', 'такая', 'такие', 'такого', 'таком', 'это', 'этот',
-    'эта', 'эти', 'этого', 'этом', 'самый', 'самая', 'самое', 'самые',
-    # частицы / наречия / предлоги
-    'тут', 'там', 'здесь', 'сейчас', 'тогда', 'потом', 'всегда', 'никогда',
-    'очень', 'можно', 'нужно', 'надо', 'есть', 'быть', 'был', 'была', 'было',
-    'были', 'будет', 'чем', 'для', 'про', 'при', 'над', 'под', 'без', 'или',
-    'либо', 'тоже', 'также', 'вообще', 'просто', 'уже', 'ещё', 'еще',
-})
 
 # Явный список частых глагольных форм: морфологии у агента нет, а эвристика
 # по окончаниям путает «нейросети» с глаголом. Применяется только если
@@ -60,27 +45,6 @@ _VERB_FORMS = frozenset({
     'случается', 'получается', 'используется', 'применяется', 'сравнить',
     'понять', 'узнать', 'объяснить',
 })
-
-# Вопросительные обёртки, которые не являются частью имени концепции.
-_CONCEPT_PREFIXES = (
-    "что такое ", "что значит ", "что означает ",
-    "объясни ", "расскажи про ", "расскажи о ",
-    "как работает ", "почему ",
-)
-
-
-def normalize_concept_name(raw: str) -> str:
-    """Приводит запрос к имени концепции: «что такое счастье» → «счастье».
-
-    Без этого в графе ментальных моделей появляются узлы-фразы
-    («что такое счастье»), которые дублируют друг друга и не связываются
-    с уже известными понятиями.
-    """
-    text = str(raw).strip().lower().rstrip("?.!,")
-    for prefix in _CONCEPT_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix):].strip()
-    return text
 
 
 class ThinkingPipeline:
@@ -527,27 +491,33 @@ class ThinkingPipeline:
         if filepath:
             docstring = self._read_docstring(filepath)
             if docstring:
-                contradictions = self._detect_contradiction(clean_data, docstring)
-                if contradictions:
-                    warning = "\n  ⚠️ Обнаружены возможные противоречия с известными:"
-                    for c in contradictions[:2]:
-                        warning += (f"\n     - '{c['known_topic']}': {c['known_def'][:40]}..."
-                                    f" (конфликт: {c['conflict_ratio']:.0%})")
-                    get_logger().log(warning)
+                reason = check_entry(clean_data, docstring)
+                if reason:
+                    thought = (f"Нашел файл {filepath}, но запись отклонена "
+                               f"фильтром качества ({reason}).")
+                    get_logger().log(thought)
+                else:
+                    contradictions = self._detect_contradiction(clean_data, docstring)
+                    if contradictions:
+                        warning = "\n  ⚠️ Обнаружены возможные противоречия с известными:"
+                        for c in contradictions[:2]:
+                            warning += (f"\n     - '{c['known_topic']}': {c['known_def'][:40]}..."
+                                        f" (конфликт: {c['conflict_ratio']:.0%})")
+                        get_logger().log(warning)
 
-                agent._known_definitions[clean_data] = docstring
-                agent._prune_knowledge_base_if_needed()
-                agent.knowledge_base[clean_data] = docstring
-                agent._save_knowledge_base()
+                    agent._known_definitions[clean_data] = docstring
+                    agent._prune_knowledge_base_if_needed()
+                    agent.knowledge_base[clean_data] = docstring
+                    agent._save_knowledge_base()
 
-                context = f"поиск_в_файле:{filepath}"
-                outcome = docstring[:80]
-                agent.mental_models.encounter_concept(clean_data, context, outcome, 0.5)
+                    context = f"поиск_в_файле:{filepath}"
+                    outcome = docstring[:80]
+                    agent.mental_models.encounter_concept(clean_data, context, outcome, 0.5)
 
-                thought = f"Нашел ответ в файле {filepath}: {docstring[:100]}..."
-                agent.success_streak += 1
-                agent._check_goal_progress(clean_data)
-                return thought
+                    thought = f"Нашел ответ в файле {filepath}: {docstring[:100]}..."
+                    agent.success_streak += 1
+                    agent._check_goal_progress(clean_data)
+                    return thought
             thought = f"Файл {filepath} найден, но не содержит документации"
         else:
             thought = (f"Не нашел файл для '{clean_data}'. "
@@ -566,9 +536,20 @@ class ThinkingPipeline:
         return thought
 
     def _search_web(self, clean_data: str) -> dict:
-        """Безопасный вызов WebSearcher.search с try/except."""
+        """Безопасный вызов WebSearcher.search с нормализацией запроса.
+
+        В Wikipedia идёт «счастье», а не «что такое счастье»: точное
+        совпадение заголовка находится гораздо чаще, а мусорные запросы
+        («?», «s_1») отсекаются до сети.
+        """
+        query = normalize_concept_name(clean_data)
+        if not is_worth_searching(query):
+            get_logger().log(
+                f"WebSearcher: запрос '{clean_data}' отклонён как неинформативный"
+            )
+            return {"found": False, "error": "not_worth_searching"}
         try:
-            return self.web_searcher.search(clean_data)
+            return self.web_searcher.search(query)
         except Exception as e:
             get_logger().log(f"WebSearcher упал: {e}")
             return {"found": False, "error": "exception"}
@@ -588,7 +569,16 @@ class ThinkingPipeline:
         extract = web_result["extract"]
         title = web_result["title"]
         url = web_result["url"]
-        lang = web_result.get("lang", self.web_searcher.lang)
+
+        # Финальная проверка перед записью в KB: даже если WebSearcher
+        # пропустил мусор, в базу знаний он не попадёт.
+        reason = check_entry(clean_data, extract)
+        if reason:
+            get_logger().log(
+                f"Web-результат отклонён ({reason}): '{clean_data}' → '{title}'"
+            )
+            return fallback_thought
+        lang = web_result.get("lang") or getattr(self.web_searcher, "lang", "ru")
 
         # 1. Сохранить в knowledge_base и mental_models.
         agent._known_definitions[clean_data] = extract

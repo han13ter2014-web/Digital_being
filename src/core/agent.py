@@ -43,6 +43,7 @@ from src.core.subsystems import (
 from src.perception.user_interaction import UserInteraction, UserPromptHandler
 # Импорт LongTermMemory через нормальный пакет (Этап 2.2).
 from src.memory import LongTermMemory
+from src.memory.knowledge_quality import REASON_TITLES, clean_knowledge_base
 # Bootstrap knowledge (родовые знания)
 from src.core.bootstrap_knowledge import load_initial_knowledge
 # Internal motivation (внутренняя мотивация)
@@ -931,7 +932,24 @@ class DigitalBeing:
 
     # === Прунинг knowledge_base (вызывается из __init__ и save_state) ===
     def _prune_knowledge_base(self) -> None:
-        """Прунит базу знаний до лимита SIM_CONFIG.MAX_KNOWLEDGE_BASE."""
+        """Удаляет некачественные записи, затем прунит до лимита.
+
+        Фильтр качества лечит базу, даже если мусор пришёл из старого
+        чекпоинта или файла: запись не переживёт ближайшее сохранение.
+        """
+        _, removed = clean_knowledge_base(self.knowledge_base)
+        if removed:
+            for key in removed:
+                self.knowledge_base.pop(key, None)
+            preview = "; ".join(
+                f"'{key}' ({REASON_TITLES.get(reason, reason)})"
+                for key, reason in list(removed.items())[:5]
+            )
+            suffix = "" if len(removed) <= 5 else f" и ещё {len(removed) - 5}"
+            get_logger().log(
+                f"KB: удалено некачественных записей: {len(removed)} — {preview}{suffix}"
+            )
+
         max_kb = SIM_CONFIG.MAX_KNOWLEDGE_BASE
         if len(self.knowledge_base) <= max_kb:
             return
@@ -962,13 +980,17 @@ class DigitalBeing:
         return True
 
     def _load_knowledge_base(self):
-        """Загружает сохраненную базу знаний"""
+        """Загружает сохраненную базу знаний, отбрасывая мусорные записи."""
         if os.path.exists(self.knowledge_file):
             try:
                 with open(self.knowledge_file, 'r', encoding='utf-8') as f:
                     saved_kb = json.load(f)
-                    self.knowledge_base.update(saved_kb)
-                    get_logger().flush_immediate(f"База знаний загружена: {len(saved_kb)} записей")
+                    cleaned, removed = clean_knowledge_base(saved_kb)
+                    self.knowledge_base.update(cleaned)
+                    message = f"База знаний загружена: {len(cleaned)} записей"
+                    if removed:
+                        message += f", отброшено некачественных: {len(removed)}"
+                    get_logger().flush_immediate(message)
             except Exception as e:
                 get_logger().log(f"Ошибка при загрузке базы знаний: {e}")
 
