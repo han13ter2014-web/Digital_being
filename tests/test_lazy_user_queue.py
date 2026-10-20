@@ -13,10 +13,9 @@ AgentRunner стартовал, и оно исчезало бесследно).
 4. start() создаёт очередь, если сообщений ещё не было.
 5. Несколько сообщений до start() обрабатываются в правильном порядке.
 """
-import asyncio
 import os
 import sys
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 

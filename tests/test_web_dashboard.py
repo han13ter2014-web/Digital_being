@@ -19,8 +19,6 @@ import json
 import os
 import socket
 import sys
-import tempfile
-import threading
 import time
 
 import pytest

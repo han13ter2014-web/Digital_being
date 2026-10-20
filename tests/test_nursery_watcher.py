@@ -16,8 +16,6 @@ import os
 import shutil
 import sys
 import tempfile
-import time
-from pathlib import Path
 
 import pytest
 
@@ -291,7 +289,6 @@ def test_nursery_watcher_attach_agent_idempotent():
 def test_nursery_watcher_registers_in_registry():
     """Watcher автоматически регистрируется в PluginRegistry через DigitalBeing."""
     from src.core.agent import DigitalBeing
-    from src.core.subsystem_base import PluginRegistry
 
     agent = DigitalBeing("TestSubject")
     reg = agent.plugin_registry

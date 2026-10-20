@@ -17,7 +17,7 @@ Active Concept Searcher (ActiveConceptSearcher)
 """
 
 import random
-from typing import List, Tuple, Optional
+from typing import List
 from dataclasses import dataclass
 
 
@@ -95,7 +95,6 @@ class ActiveConceptSearcher:
             >>> # Вернёт: ["Машинное обучение", "Эволюционные алгоритмы", "Когнитивные исследования"]
         """
         
-        import datetime
         
         available_concepts = self._get_available_new_concepts(max_count=20)
         

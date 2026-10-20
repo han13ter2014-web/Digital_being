@@ -4,7 +4,7 @@
 Аналогия: Это метаболизм личности — постоянная потребность в росте и смысле существования, а не просто реакция на награду.
 """
 import random
-from typing import List, Dict, Optional
+from typing import Optional
 
 class IntrinsicMeaningFinder:
     """

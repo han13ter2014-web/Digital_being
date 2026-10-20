@@ -1,6 +1,3 @@
-import random
-from datetime import datetime
-from src.cognition.reflection_engine import ReflectionEngine
 from config.simulation_config import LR_CONFIG
 
 class LifeCycleManager:

@@ -21,7 +21,7 @@ if sys.stdout.encoding != "utf-8":
 # Добавляем корень проекта в путь
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.core.event_bus import EventBus, Events, Event
+from src.core.event_bus import EventBus
 from src.core.energy_policy import EnergyPolicy
 
 

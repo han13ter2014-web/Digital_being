@@ -7,10 +7,7 @@
 временную папку.
 """
 
-import os
 from pathlib import Path
-
-import pytest
 
 from src.core.paths import DATA_DIR_ENV, data_dir, data_path
 

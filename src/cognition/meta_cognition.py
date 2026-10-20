@@ -10,7 +10,6 @@
 """
 
 from collections import defaultdict
-from typing import Optional
 from datetime import datetime
 
 

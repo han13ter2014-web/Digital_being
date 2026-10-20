@@ -1,6 +1,4 @@
-import json
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional
 # Здесь будут импорты из других модулей после рефакторинга (например, from src.motivation.profiles import MotivationProfile)
 
 class Goal:

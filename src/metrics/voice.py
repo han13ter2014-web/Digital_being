@@ -26,13 +26,11 @@ Digital Being — текстовое существо, и голос для не
 и запускать агента в headless-режиме без голоса.
 """
 
-import json
 import logging
 import os
 import threading
-import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -273,7 +271,7 @@ class WhisperSTTEngine(VoiceEngine):
         try:
             # Захватываем аудио с микрофона
             import sounddevice as sd  # type: ignore
-            import numpy as np
+            import numpy as np  # noqa: F401 — проверка наличия numpy для распознавания
             duration = min(timeout, 10.0)
             sample_rate = 16000
             audio = sd.rec(

@@ -1,8 +1,6 @@
 import os
-import json
 import sys
 import io
-import random
 import time
 from datetime import datetime
 from src.core.agent import DigitalBeing

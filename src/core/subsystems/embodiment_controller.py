@@ -14,7 +14,7 @@ EmbodimentLayer переводит эти сигналы в эмоциональ
 которое влияет на креативность, скорость обучения, мотивацию.
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 
 class EmbodimentController:

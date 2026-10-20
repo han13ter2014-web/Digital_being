@@ -194,13 +194,13 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 293 теста проходят (Этап 4 + Этап 5, июль 2026)
+### ✅ 421 тест проходит (после этапов 1–4, октябрь 2026)
 ```bash
 $ python -m pytest tests/ -q
-293 passed, 1 skipped in ~90s
+421 passed, 2 skipped in ~8,5 мин (включая benchmarks)
 ```
 
-Подробная история роста покрытия — в **[CHANGELOG.md](CHANGELOG.md)**. Этапы 4-5 добавили:
+Ранее (этапы 4–5) добавлены:
 * `OpenQuestionsManager` — вынесен из `DigitalBeing` (минус 121 строка, полная обратная совместимость).
 * `StimulusSelector` + `CheckpointSerializer` — единые точки выбора стимула и сериализации чекпоинтов, gzip-сжатие чекпоинтов (`compress=True`).
 * `GET /health` endpoint в Web Dashboard — liveness + readiness для мониторинга (Kubernetes/Healthchecks.io).
@@ -275,7 +275,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (293 теста, ~42% покрытия) + собственный `test_performance.py`
+- **Тесты**: pytest (421 тест) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---

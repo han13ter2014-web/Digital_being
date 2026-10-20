@@ -15,7 +15,7 @@ DecisionArbitrator — единая точка принятия решений.
 эмоции, память, этику и интуицию в одно решение.
 """
 
-from typing import Dict, Optional, List
+from typing import Dict
 
 
 class DecisionArbitrator:

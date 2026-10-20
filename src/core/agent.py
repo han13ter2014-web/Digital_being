@@ -1,7 +1,6 @@
 import json
 import time
 import gc
-import re
 import random
 import numpy as np
 from datetime import datetime
@@ -11,7 +10,7 @@ from src.cognition.reflection_engine import ReflectionEngine
 from src.cognition.mental_models import MentalModel
 from src.cognition.thinking_pipeline import ThinkingPipeline
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
-from src.core.buffered_logger import get_logger, flush_logs
+from src.core.buffered_logger import get_logger
 from src.core.subsystems import (
     GoalSubsystem,
     KnowledgeSubsystem,
@@ -36,11 +35,9 @@ from src.core.subsystems import (
     SelfTermination,
     ArchitectureProposal,
     ProactiveCommunication,
-    ContextAwareness,
-    StyleAdapter,
     NamingDialogue,
 )
-from src.perception.user_interaction import UserInteraction, UserPromptHandler
+from src.perception.user_interaction import UserInteraction
 # Импорт LongTermMemory через нормальный пакет (Этап 2.2).
 from src.memory import LongTermMemory
 from src.memory.knowledge_quality import REASON_TITLES, clean_knowledge_base
@@ -50,7 +47,7 @@ from src.core.bootstrap_knowledge import load_initial_knowledge
 # Internal motivation (внутренняя мотивация)
 from src.core.internal_motivation import create_motivation_system
 # Active Inference (активный вывод / свободная энергия)
-from src.cognition.active_inference import create_active_inference_engine, run_active_inference_step, encode_observations
+from src.cognition.active_inference import create_active_inference_engine, encode_observations
 # New systems: Interoception, Continuous Time, Meta-Learning, Social Cell, Death Risk
 from src.core.interoception import create_interoceptive_model
 from src.core.continuous_time import create_continuous_time_engine, EventType
@@ -60,7 +57,6 @@ from src.core.death_risk import create_death_risk_engine
 # Этап 3.5: PluginRegistry — единый реестр всех подсистем для dashboard/расширяемости.
 from src.core.subsystem_base import (
     PluginRegistry,
-    Subsystem,
     attach_existing_subsystem,
 )
 
@@ -502,17 +498,18 @@ class DigitalBeing:
             w = self.plugin_registry.get("nursery_watcher")
             if w is not None and not getattr(w, "_agent_attached", False):
                 w.attach_agent(self)
-        except Exception:
-            # Если модуль ещё не импортирован / нет атрибута — не критично.
-            pass
+        except Exception as exc:
+            # Если модуль ещё не импортирован / нет атрибута — не критично,
+            # но ошибку полезно видеть в логе.
+            get_logger().log(f"[{self.name}] NurseryWatcher не подключён: {exc}")
         # Health Dashboard (Этап 2: уже был) — теперь как плагин
         try:
             from src.core.health_dashboard import HealthDashboardSubsystem
             existing = self.plugin_registry.get("health_dashboard")
             if existing is None:
                 self.plugin_registry.register(HealthDashboardSubsystem(agent_name=self.name))
-        except Exception:
-            pass
+        except Exception as exc:
+            get_logger().log(f"[{self.name}] HealthDashboard не подключён: {exc}")
 
     def get_subsystems_status(self) -> Dict:
         """Снимок всех подсистем для дашборда (Этап 3.5)."""
@@ -1818,8 +1815,10 @@ class DigitalBeing:
                     get_logger().flush_immediate(
                         f"🧹 Лимит ментальных моделей: -{forgotten} слабых концепций"
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                get_logger().log(
+                    f"[{self.name}] Не удалось применить лимит концепций: {exc}"
+                )
 
         # === Шаг 5: принудительное забывание под давлением памяти ===
         if wd.should_force_forget():
@@ -1853,8 +1852,10 @@ class DigitalBeing:
                     core.identity_stability_score = min(
                         1.0, core.identity_stability_score + 0.05
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    get_logger().log(
+                        f"[{self.name}] Не удалось укрепить core_self: {exc}"
+                    )
 
     def reflect(self):
         """Анализирует собственную производительность.

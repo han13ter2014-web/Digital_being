@@ -295,7 +295,6 @@ class NurseryWatcher(Subsystem):
         )
         # Через EventBus (если подключена).
         try:
-            from src.core.event_bus import EventBus
             bus = getattr(self._context.get("registry"), "_global_event_bus", None) \
                 if self._context else None
             if bus is not None:
@@ -315,8 +314,6 @@ class NurseryWatcher(Subsystem):
         """Уведомить об удалении seed-а."""
         logger.info(f"[{self.name}] seed удалён из Яслей: {seed_name}")
         try:
-            from src.core.event_bus import EventBus  # noqa: F401
-            from src.core.event_bus import Event
             bus = getattr(self._context.get("registry"), "_global_event_bus", None) \
                 if self._context else None
             if bus is not None:

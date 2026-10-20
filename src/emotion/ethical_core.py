@@ -3,9 +3,8 @@
 
 Аналогия с Суперэго: система самоконтроля и морального долга.
 """
-import json
-from typing import List, Dict, Optional
-from dataclasses import dataclass, field
+from typing import List, Dict
+from dataclasses import dataclass
 
 @dataclass
 class MoralDilemma:

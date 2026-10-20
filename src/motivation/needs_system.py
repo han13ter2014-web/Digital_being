@@ -5,8 +5,6 @@
 Агент развивается от базовых нужд к сложным драйвам.
 """
 
-from collections import defaultdict
-from typing import Optional
 from datetime import datetime
 
 

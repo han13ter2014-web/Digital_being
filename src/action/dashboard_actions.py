@@ -7,7 +7,6 @@ Dashboard Actions — бизнес-логика для веб-дашборда (
 """
 
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 
 def pause_agent(agent: Any) -> Dict[str, Any]:

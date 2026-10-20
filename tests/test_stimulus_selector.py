@@ -9,9 +9,6 @@ test_stimulus_selector.py — тесты для src.core.stimulus_selector.
 - Безопасный fallback при отсутствии active_goal.
 - Сценарий «детерминированный» для CLI (p=0) и трея (p=1).
 """
-import random
-
-import pytest
 
 from src.core.stimulus_selector import (
     DEFAULT_GOAL_PRIORITY_PROB,
@@ -177,7 +174,7 @@ def test_no_active_goal_uses_random_pool():
 
 def test_prioritize_disabled_uses_random():
     """Если PRIORITIZE_STIMULI=False в конфиге — случайный стимул."""
-    from config.simulation_config import LR_CONFIG, SimulationConfig
+    from config.simulation_config import LR_CONFIG
     original = LR_CONFIG.PRIORITIZE_STIMULI
     try:
         LR_CONFIG.PRIORITIZE_STIMULI = False

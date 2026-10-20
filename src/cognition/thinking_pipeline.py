@@ -19,17 +19,17 @@ _detect_contradiction, _self_check_knowledge) жили прямо в DigitalBein
 
 import os
 import re
-import random
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 from src.core.buffered_logger import get_logger
+from src.core.paths import project_root
 from src.memory.knowledge_quality import (
     STOP_WORDS as _STOP_WORDS,
     check_entry,
     is_worth_searching,
     normalize_concept_name,
 )
-from config.simulation_config import SIM_CONFIG, LR_CONFIG
+from config.simulation_config import LR_CONFIG
 
 
 # Явный список частых глагольных форм: морфологии у агента нет, а эвристика
@@ -489,7 +489,9 @@ class ThinkingPipeline:
                 break
 
         if filepath:
-            docstring = self._read_docstring(filepath)
+            docstring = self._read_docstring(
+                os.path.join(project_root(), filepath)
+            )
             if docstring:
                 reason = check_entry(clean_data, docstring)
                 if reason:
@@ -796,16 +798,19 @@ class ThinkingPipeline:
         """Возвращает кэш имён файлов в src/."""
         if cls._SRC_FILE_INDEX is None:
             cls._SRC_FILE_INDEX = set()
+            src_root = os.path.join(project_root(), "src")
             try:
-                for root, _dirs, files in os.walk("src"):
+                for root, _dirs, files in os.walk(src_root):
                     for f in files:
                         if f.endswith(".py"):
                             rel = os.path.relpath(
-                                os.path.join(root, f), "src"
+                                os.path.join(root, f), src_root
                             ).replace("\\", "/")
                             cls._SRC_FILE_INDEX.add(rel)
-            except Exception:
-                pass
+            except OSError as exc:
+                # Без индекса локальный поиск по коду просто не сработает —
+                # лучше оставить след, чем молча искать в пустоте.
+                get_logger().log(f"[ПОИСК] Не удалось проиндексировать src/: {exc}")
         return cls._SRC_FILE_INDEX
 
     @classmethod

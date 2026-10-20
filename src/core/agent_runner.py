@@ -38,7 +38,7 @@ import os
 import time
 from typing import Optional
 
-from config.simulation_config import SIM_CONFIG, LR_CONFIG
+from config.simulation_config import LR_CONFIG
 from src.core.event_bus import EventBus, Events
 from src.core.energy_policy import EnergyPolicy
 from src.core.stimulus_selector import (

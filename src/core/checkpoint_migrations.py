@@ -28,7 +28,7 @@ checkpoint_migrations.py — миграции чекпоинтов между в
     Должна быть идемпотентной (повторный вызов = no-op).
 """
 
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, Tuple
 
 
 # === Текущая версия схемы чекпоинта ===

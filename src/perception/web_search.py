@@ -25,7 +25,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
-from typing import Dict, Optional
 
 from src.memory.knowledge_quality import (
     is_relevant,

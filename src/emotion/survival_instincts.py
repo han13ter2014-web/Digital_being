@@ -10,9 +10,8 @@
 3. Защитные механизмы от перегрузки
 4. Автономное поддержание гомеостаза
 """
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-import random
 
 
 @dataclass

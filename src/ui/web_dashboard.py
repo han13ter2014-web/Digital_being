@@ -29,13 +29,11 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
 import threading
 import time
-import traceback
 from collections import deque
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Deque, Dict, List, Optional, TYPE_CHECKING
 
 try:
     from aiohttp import web
@@ -822,8 +820,6 @@ class WebDashboard:
 
 def _cli_main(host: str, port: int) -> int:
     """Простой режим — без агента, ручной ввод мыслей."""
-    import http.server
-    import socketserver
     print(f"⚠️  Запущен CLI-режим без aiohttp-сервера.")
     print(f"   Для полного dashboard: pip install aiohttp")
     print(f"   http://{host}:{port}/ (только статическая страница)")

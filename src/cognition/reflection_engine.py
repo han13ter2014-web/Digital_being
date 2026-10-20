@@ -201,7 +201,8 @@ class ReflectionEngine:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     reports = json.load(f)
-            except:
+            except (OSError, json.JSONDecodeError, TypeError):
+                # Файла нет или он повреждён — начинаем новый список отчётов.
                 reports = []
 
             reports.append(report)

@@ -1,5 +1,4 @@
 """Эмоциональное сердце — центральный эмоциональный обработчик цифровой жизни."""
-import json
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field

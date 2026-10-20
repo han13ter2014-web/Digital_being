@@ -9,11 +9,9 @@ test_health_endpoint.py — тесты для /health endpoint в web_dashboard.
 - /health не требует наличия агента (работает в standalone-режиме).
 - Endpoint зарегистрирован в роутере.
 """
-import asyncio
 import os
 import socket
 import sys
-import threading
 import time
 
 import pytest
