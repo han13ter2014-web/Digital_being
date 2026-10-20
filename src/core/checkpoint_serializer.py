@@ -51,6 +51,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.buffered_logger import get_logger
 from src.core.checkpoint_migrations import migrate_state
+from src.core.paths import data_path
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +336,7 @@ class CheckpointSerializer:
 
     def __init__(
         self,
-        checkpoint_dir: str = DEFAULT_CHECKPOINT_DIR,
+        checkpoint_dir: str = None,
         max_checkpoints: int = 20,
         compress: bool = False,
         compress_level: int = 6,
@@ -347,7 +348,7 @@ class CheckpointSerializer:
             compress: использовать ли gzip-сжатие (Этап 5 оптимизации).
             compress_level: уровень сжатия 1-9 (по умолчанию 6 — хороший баланс).
         """
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = checkpoint_dir or data_path("checkpoints")
         self.max_checkpoints = max_checkpoints
         self.compress = compress
         self.compress_level = max(1, min(9, compress_level))

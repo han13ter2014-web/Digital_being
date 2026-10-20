@@ -12,6 +12,8 @@ import os
 import atexit
 from datetime import datetime
 
+from src.core.paths import data_path
+
 
 class BufferedLogger:
     """Буферизированный логгер для записей действий агента.
@@ -21,16 +23,18 @@ class BufferedLogger:
     Без этого лог за 4 месяца вырос до 420 МБ (см. docs/BASELINE.md).
     """
 
-    def __init__(self, log_file='data/logs/agent_log.txt', buffer_size=10,
+    def __init__(self, log_file=None, buffer_size=10,
                  max_bytes=10 * 1024 * 1024, backup_count=3):
-        self.log_file = log_file
+        self.log_file = log_file or data_path("logs", "agent_log.txt")
         self.buffer_size = buffer_size
         self.buffer = []
         self.max_bytes = max_bytes
         self.backup_count = backup_count
 
         # Гарантирует что директория существует
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        log_dir = os.path.dirname(self.log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
         # Шаг 3: гарантированный flush при выходе
         # atexit сработает при нормальном завершении и большинстве исключений.

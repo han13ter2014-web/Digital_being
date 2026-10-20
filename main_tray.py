@@ -69,6 +69,15 @@ else:
 # Переключаем cwd в BASE_DIR, чтобы относительные пути к config/ работали
 os.chdir(BASE_DIR)
 
+# DIGITAL_BEING_DATA_DIR перенаправляет изменяемые данные (тесты, отдельный
+# профиль). Указывает прямо на папку data, без вложенного «data».
+_data_override = os.environ.get("DIGITAL_BEING_DATA_DIR")
+DATA_ROOT = (
+    os.path.abspath(_data_override)
+    if _data_override
+    else os.path.join(USER_DATA_DIR, "data")
+)
+
 # Сначала создаём логгер (с минимальной конфигурацией), чтобы иметь
 # возможность логировать ошибки при дальнейшей инициализации (в т.ч. при
 # перенастройке stdout/stderr в UTF-8).
@@ -98,7 +107,7 @@ for _stream_name in ("stdout", "stderr"):
 
 # Логирование — пишем в USER_DATA_DIR (рядом с .exe), а не во временную
 # папку PyInstaller. Добавляем файл-хэндлер к уже созданному логгеру.
-log_dir = os.path.join(USER_DATA_DIR, "data", "logs")
+log_dir = os.path.join(DATA_ROOT, "logs")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, "tray_agent.log")
 # Ротация: иначе tray_agent.log растёт без предела, как agent_log.txt (420 МБ).
@@ -119,11 +128,12 @@ if sys.stdout is not None:
 # Не дублируем логи в корневой logger (иначе каждое сообщение идёт 2 раза).
 logger.propagate = False
 
-# Создаём нужные директории в USER_DATA_DIR
+# Создаём нужные директории в DATA_ROOT
 for sub in ("checkpoints", "logs", "mind", "memory", "nursery",
            "evolution", "cooperation", "architecture_proposals"):
-    os.makedirs(os.path.join(USER_DATA_DIR, "data", sub), exist_ok=True)
+    os.makedirs(os.path.join(DATA_ROOT, sub), exist_ok=True)
 logger.info(f"Пользовательские данные: {USER_DATA_DIR}")
+logger.info(f"Папка данных: {DATA_ROOT}")
 logger.info(f"Ресурсы приложения: {BASE_DIR}")
 
 

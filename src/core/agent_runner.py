@@ -48,6 +48,7 @@ from src.core.stimulus_selector import (
 )
 from src.core.watchdog import get_watchdog, Watchdog
 from src.core.buffered_logger import flush_logs
+from src.core.paths import data_path
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 def get_latest_checkpoint(agent_name: str) -> Optional[str]:
     """Найти путь к последнему чекпоинту агента. None если нет."""
-    checkpoint_dir = 'data/checkpoints'
+    checkpoint_dir = data_path('checkpoints')
     if not os.path.exists(checkpoint_dir):
         return None
     checkpoints = [f for f in os.listdir(checkpoint_dir)

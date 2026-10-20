@@ -12,21 +12,23 @@ import os
 from datetime import datetime
 from typing import Dict, Optional
 
+from src.core.paths import data_path
+
 
 class CheckpointSubsystem:
     """Подсистема управления чекпоинтами."""
 
     def __init__(self,
-                 checkpoint_dir: str = "data/checkpoints",
+                 checkpoint_dir: str = None,
                  interval: int = 10,
                  save_on_evolution: bool = True,
                  max_checkpoints: int = 20):
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = checkpoint_dir or data_path("checkpoints")
         self.interval = interval
         self.save_on_evolution = save_on_evolution
         self.max_checkpoints = max_checkpoints
 
-        os.makedirs(checkpoint_dir, exist_ok=True)
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         self._last_saved_intelligence = 0
 

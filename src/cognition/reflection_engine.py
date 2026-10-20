@@ -3,6 +3,8 @@ import json
 from datetime import datetime
 from collections import defaultdict
 
+from src.core.paths import data_path
+
 
 class ReflectionEngine:
     """Анализирует собственную производительность и адаптирует поведение"""
@@ -191,8 +193,9 @@ class ReflectionEngine:
         }
         return report
 
-    def save_reflection_report(self, report, filename='data/logs/reflection_report.json'):
+    def save_reflection_report(self, report, filename=None):
         """Сохраняет отчёт о самоанализе"""
+        filename = filename or data_path("logs", "reflection_report.json")
         try:
             reports = []
             try:
