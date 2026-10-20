@@ -205,6 +205,20 @@ def select_stimulus(
     if open_q:
         return open_q
 
+    return _select_from_pool(
+        agent,
+        goal_priority_prob=goal_priority_prob,
+        stimuli_pool=stimuli_pool,
+    )
+
+
+def _select_from_pool(
+    agent,
+    *,
+    goal_priority_prob: float = DEFAULT_GOAL_PRIORITY_PROB,
+    stimuli_pool: list[str] | None = None,
+) -> str:
+    """Выбор стимула только из пула (без открытых вопросов)."""
     pool = stimuli_pool if stimuli_pool is not None else LR_CONFIG.STIMULI_POOL
 
     # === Приоритет 2: приоритезация по активной цели ===
@@ -218,6 +232,71 @@ def select_stimulus(
         return random.choice(high_priority)
 
     return random.choice(low_priority) if low_priority else _pick_random(pool)
+
+
+def _stimulus_key(stimulus: str) -> str:
+    """Нормализованный ключ стимула для учёта повторов."""
+    return stimulus.strip().lower()
+
+
+def is_open_question_stimulus(stimulus: str) -> bool:
+    """Является ли стимул открытым вопросом агента (а не пунктом пула).
+
+    ``_consume_open_question`` добавляет к тексту ``[стратегия=...]``,
+    поэтому такие стимулы уникальны и не должны попадать под кулдаун.
+    """
+    return "[стратегия=" in stimulus
+
+
+def select_novel_stimulus(
+    agent,
+    recent: dict[str, int],
+    tick: int,
+    cooldown: int,
+    *,
+    goal_priority_prob: float = DEFAULT_GOAL_PRIORITY_PROB,
+    stimuli_pool: list[str] | None = None,
+) -> str | None:
+    """Выбрать стимул, который агент не использовал последние ``cooldown`` тиков.
+
+    Зачем: за 4 месяца агент повторил один и тот же стимул 13 596 раз
+    (см. docs/BASELINE.md). Кулдаун превращает «бесконечный повтор»
+    в осмысленный обход пула.
+
+    Args:
+        agent: экземпляр DigitalBeing.
+        recent: словарь ``{ключ стимула: тик последнего использования}``.
+            Мутируется вызывающим кодом, здесь только читается.
+        tick: текущий номер тика (монотонно растёт).
+        cooldown: сколько тиков стимул считается «скучным». 0 — выключено.
+        goal_priority_prob: как в ``select_stimulus``.
+        stimuli_pool: пул стимулов (по умолчанию ``LR_CONFIG.STIMULI_POOL``).
+
+    Returns:
+        Текст стимула или ``None``, если все стимулы на кулдауне —
+        это сигнал «отдохнуть», а не повторять себя.
+    """
+    # Открытый вопрос — всегда свежий и одноразовый, кулдаун к нему не применяется.
+    open_q = _try_consume_open_question(agent)
+    if open_q:
+        return open_q
+
+    pool = stimuli_pool if stimuli_pool is not None else LR_CONFIG.STIMULI_POOL
+
+    if cooldown > 0 and recent:
+        fresh = [
+            s for s in pool
+            if tick - recent.get(_stimulus_key(s), -(10 ** 9)) >= cooldown
+        ]
+        if not fresh:
+            return None
+        pool = fresh
+
+    return _select_from_pool(
+        agent,
+        goal_priority_prob=goal_priority_prob,
+        stimuli_pool=pool,
+    )
 
 
 # Backwards-compat: функции, которые жили в main.py и agent_runner.py.
@@ -235,5 +314,7 @@ __all__ = [
     "TRAIL_GOAL_PRIORITY_PROB",
     "FALLBACK_STIMULUS",
     "select_stimulus",
+    "select_novel_stimulus",
+    "is_open_question_stimulus",
     "generate_prioritized_stimulus",
 ]

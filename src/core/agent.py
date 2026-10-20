@@ -951,9 +951,10 @@ class DigitalBeing:
         """Проверка жизнеспособности.
 
         Returns:
-            True если агент жив (есть энергия и не превышен max_cycles).
+            True если агент жив. Истощение (energy == 0) — не смерть:
+            агент замедляется и отдыхает (см. EnergyPolicy).
         """
-        if self.energy <= 0:
+        if self.energy < 0:
             return False
         # max_cycles=0 означает «без лимита» (бесконечная жизнь)
         if self.max_cycles > 0 and self.cycle_count >= self.max_cycles:

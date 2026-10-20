@@ -41,6 +41,11 @@ from typing import Optional
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
 from src.core.event_bus import EventBus, Events
 from src.core.energy_policy import EnergyPolicy
+from src.core.stimulus_selector import (
+    TRAIL_GOAL_PRIORITY_PROB,
+    is_open_question_stimulus,
+    select_novel_stimulus,
+)
 from src.core.watchdog import get_watchdog, Watchdog
 from src.core.buffered_logger import flush_logs
 
@@ -136,6 +141,12 @@ class AgentRunner:
         self._tick_count = 0
         self._last_auto_save_ts = time.time()
         self._last_user_message_at = 0  # время последнего сообщения пользователя
+
+        # Дедупликация стимулов: не повторять один и тот же вопрос
+        # чаще, чем раз в STIMULUS_COOLDOWN_TICKS тиков (см. docs/BASELINE.md).
+        self._recent_stimuli: dict = {}
+        self._loop_tick = 0
+        self._idle_ticks = 0
 
         # Энергетическая политика
         self.energy_policy = EnergyPolicy(
@@ -348,7 +359,7 @@ class AgentRunner:
             stimulus = user_message
             user_initiated = True
         except asyncio.TimeoutError:
-            stimulus = generate_prioritized_stimulus(self.agent)
+            stimulus = self._next_stimulus()
             user_initiated = False
         except asyncio.CancelledError:
             self.watchdog.on_cycle_end()
@@ -359,10 +370,15 @@ class AgentRunner:
         self.energy_policy.regenerate(elapsed)
 
         # === Собственно один «цикл жизни» агента ===
-        try:
-            self._do_one_agent_cycle(stimulus, user_initiated=user_initiated)
-        except Exception as e:
-            logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
+        if stimulus is None:
+            # Все стимулы на кулдауне: лучше отдохнуть, чем 13 000 раз
+            # повторить один и тот же вопрос (см. docs/BASELINE.md).
+            self._rest_tick()
+        else:
+            try:
+                self._do_one_agent_cycle(stimulus, user_initiated=user_initiated)
+            except Exception as e:
+                logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
 
         # === Watchdog: конец цикла ===
         self.watchdog.on_cycle_end()
@@ -379,6 +395,46 @@ class AgentRunner:
         # === Минимальная пауза для CPU (этичный throttle) ===
         if LR_CONFIG.MIN_CYCLE_INTERVAL_SEC > 0:
             await asyncio.sleep(LR_CONFIG.MIN_CYCLE_INTERVAL_SEC)
+
+    def _next_stimulus(self) -> Optional[str]:
+        """Следующий стимул с учётом кулдауна повторов.
+
+        Returns:
+            Текст стимула или ``None``, если всё «скучно» — тогда отдых.
+        """
+        cooldown = int(getattr(LR_CONFIG, "STIMULUS_COOLDOWN_TICKS", 0) or 0)
+        stimulus = select_novel_stimulus(
+            self.agent,
+            self._recent_stimuli,
+            self._loop_tick,
+            cooldown,
+            goal_priority_prob=TRAIL_GOAL_PRIORITY_PROB,
+        )
+        self._loop_tick += 1
+
+        if stimulus and cooldown > 0 and not is_open_question_stimulus(stimulus):
+            self._recent_stimuli[stimulus.strip().lower()] = self._loop_tick
+            self._prune_stimulus_history(cooldown)
+
+        return stimulus
+
+    def _prune_stimulus_history(self, cooldown: int) -> None:
+        """Удаляет из истории стимулы, давно вышедшие из кулдауна."""
+        horizon = self._loop_tick - cooldown * 2
+        if horizon <= 0:
+            return
+        for key, seen in list(self._recent_stimuli.items()):
+            if seen < horizon:
+                del self._recent_stimuli[key]
+
+    def _rest_tick(self) -> None:
+        """Тик отдыха: подсистемы живут, но агент не повторяет себя."""
+        self._idle_ticks += 1
+        try:
+            report = self.agent.autonomous_tick()
+            self._log_autonomous_events(report)
+        except Exception as e:
+            logger.exception(f"[{self.name}] idle autonomous_tick failed: {e}")
 
     def _do_one_agent_cycle(self, stimulus: str, user_initiated: bool = False) -> None:
         """Один полный цикл агента: perceive → think → act → evolve.
@@ -826,6 +882,7 @@ class AgentRunner:
             "running": self._running,
             "paused": self._paused,
             "tick_count": self._tick_count,
+            "idle_ticks": self._idle_ticks,
             "agent_cycle": self.agent.cycle_count,
             "energy": self.energy_policy.get_status(),
             "watchdog": self.watchdog.get_status(),

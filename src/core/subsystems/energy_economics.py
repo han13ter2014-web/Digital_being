@@ -25,8 +25,11 @@ class EnergySubsystem:
                  critical_threshold: float = 5,
                  gc_interval: int = 5):
 
-        self.energy = starting_energy
+        # max_energy должен быть известен до первой записи в energy:
+        # свойство energy клампит значение в [0, max_energy].
         self.max_energy = max_energy
+        self._energy = 0.0
+        self.energy = starting_energy
         self.regen_per_cycle = regen_per_cycle
         self.low_threshold = low_threshold
         self.critical_threshold = critical_threshold
@@ -50,8 +53,26 @@ class EnergySubsystem:
         self._concept_usage_count: Dict[str, int] = {}
 
     # ============================================================
-    # Энергия
+    # Энергия — инвариант: всегда в [0, max_energy]
     # ============================================================
+    @property
+    def energy(self) -> float:
+        return self._energy
+
+    @energy.setter
+    def energy(self, value: float) -> None:
+        """Клампит энергию в [0, max_energy].
+
+        Раньше здесь было обычное поле, и агент доходил до -2.34
+        (см. docs/BASELINE.md). Отрицательная энергия ломала
+        ``is_alive()`` и делала бессмысленными пороги усталости.
+        """
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = 0.0
+        self._energy = min(float(self.max_energy), max(0.0, numeric))
+
     def regenerate(self) -> None:
         """Восстанавливает энергию на regen_per_cycle (не выше max)."""
         if self.energy < self.max_energy:
@@ -69,7 +90,17 @@ class EnergySubsystem:
         return self.energy < self.low_threshold
 
     def is_alive(self) -> bool:
-        return self.energy > 0
+        """Жив ли агент по энергии.
+
+        Энергия больше не убивает (см. README: «энергия только замедляет»),
+        поэтому 0 — это не смерть, а истощение. Смерть определяется
+        max_cycles и внешними причинами.
+        """
+        return self.energy >= 0
+
+    def is_exhausted(self) -> bool:
+        """Энергии нет: агент может только отдыхать и восстанавливаться."""
+        return self.energy <= 0
 
     # ============================================================
     # Адаптивные стоимости действий
@@ -79,7 +110,10 @@ class EnergySubsystem:
         return self._action_costs.get(action_type, 2)
 
     def pay(self, action_type: str = "default") -> int:
-        """Списывает энергию за действие. Возвращает списанную сумму."""
+        """Списывает энергию за действие. Возвращает списанную сумму.
+
+        Ниже нуля энергия не опускается — клампит свойство ``energy``.
+        """
         cost = self.cost_for(action_type)
         self.energy -= cost
         return cost

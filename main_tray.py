@@ -33,6 +33,7 @@ import asyncio
 import atexit
 import io
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 import sys
 import os
@@ -100,7 +101,10 @@ for _stream_name in ("stdout", "stderr"):
 log_dir = os.path.join(USER_DATA_DIR, "data", "logs")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, "tray_agent.log")
-_file_handler = logging.FileHandler(log_file, encoding="utf-8")
+# Ротация: иначе tray_agent.log растёт без предела, как agent_log.txt (420 МБ).
+_file_handler = RotatingFileHandler(
+    log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
 _file_handler.setFormatter(
     logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 )
