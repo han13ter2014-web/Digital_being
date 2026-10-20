@@ -3,9 +3,7 @@
 
 Аналогия с психоанализом: объединение Эго, Ид и Суперэго в стабильный стержень личности (Self).
 """
-import json
-from typing import List, Dict, Optional
-from datetime import datetime
+from typing import List
 
 class CoreSelfModule:
     """

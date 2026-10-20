@@ -17,10 +17,8 @@ Notifier — кросс-платформенные OS-уведомления.
 Защита от спама: TRAY_NOTIFICATION_COOLDOWN_SEC между уведомлениями.
 """
 
-import asyncio
 import logging
 import time
-from typing import Optional
 
 from config.simulation_config import LR_CONFIG
 from src.core.event_bus import EventBus, Events

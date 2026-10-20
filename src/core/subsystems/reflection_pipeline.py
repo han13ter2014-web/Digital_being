@@ -7,7 +7,7 @@ ReflectionPipeline — обёртка над ReflectionEngine.
 - Сохранение отчётов в data/logs/reflection_report.json
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 
 class ReflectionPipeline:

@@ -12,12 +12,10 @@ test_metrics_endpoint.py — тесты для /metrics endpoint (Prometheus exp
 - Опциональные метрики: goal_progress_percent (если передан), will_acts_total.
 - Корректно обрабатывает snapshot без goals/will (не падает).
 """
-import asyncio
 import os
 import re
 import socket
 import sys
-import threading
 import time
 
 import pytest

@@ -17,8 +17,7 @@ SoulController — оркестратор всех «душевных» подс
 Это «душа» Digital Being — то, что делает его больше, чем набор скриптов.
 """
 
-from typing import Dict, Optional, List
-from datetime import datetime
+from typing import Dict, Optional
 
 
 class SoulController:

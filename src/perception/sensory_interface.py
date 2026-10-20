@@ -1,6 +1,5 @@
 """Сенсорный интерфейс — органы чувств восприятия мира."""
-import re
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List
 from dataclasses import dataclass
 
 

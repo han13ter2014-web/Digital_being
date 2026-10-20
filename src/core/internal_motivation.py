@@ -12,7 +12,7 @@
 """
 
 import random
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
 
@@ -278,7 +278,8 @@ class InternalMotivation:
                 title = template.format(idea=idea)
             else:
                 title = template
-        except:
+        except (KeyError, IndexError, ValueError):
+            # Шаблон с неизвестным плейсхолдером — оставляем его как есть.
             title = template
         
         return {

@@ -224,7 +224,7 @@ def test_06_knowledge_add_definition():
 def test_07_knowledge_save_load_roundtrip():
     """07. KnowledgeSubsystem.save() + новый load() восстанавливает данные."""
     from src.core.subsystems import KnowledgeSubsystem
-    import tempfile, json, shutil
+    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         kb_file = os.path.join(tmp, "test_kb.json")
         # Создаём и сохраняем
@@ -353,7 +353,7 @@ def test_14_open_questions_consume():
 def test_15_checkpoint_save_load():
     """15. save_state() и load_state() работают roundtrip."""
     from src.core.agent import DigitalBeing
-    import tempfile, json
+    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         os.makedirs("data/checkpoints", exist_ok=True)

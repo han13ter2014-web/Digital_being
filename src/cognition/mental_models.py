@@ -13,7 +13,7 @@
 """
 
 from collections import defaultdict, Counter
-from typing import Optional, Dict, Tuple
+from typing import Dict, Tuple
 from datetime import datetime
 
 

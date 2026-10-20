@@ -9,9 +9,8 @@
 - Цифровую версию усталости через накопленные вычисления
 - Соматическую память (воспоминания о физических действиях)
 """
-import json
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List, Optional
 from dataclasses import dataclass, field
 
 

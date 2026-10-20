@@ -163,7 +163,7 @@ class Will:
         self.values = ["рост", "познание", "связь", "творчество", "интеллект"]
         self.current_priorities = []
     
-    def define_goal(self, goal_description, time_horizon, values=[]):
+    def define_goal(self, goal_description, time_horizon, values=None):
         """Определяет новую цель."""
         goal = {
             "description": goal_description,

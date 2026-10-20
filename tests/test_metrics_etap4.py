@@ -10,12 +10,9 @@
 
 import json
 import os
-import shutil
 import sys
-import tempfile
-import threading
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -179,7 +176,7 @@ class TestI18n:
         assert i18n.t("hello") == "Привет"
 
     def test_global_helpers(self, tmp_path):
-        from src.metrics.i18n import reset_i18n, set_language, t, get_i18n
+        from src.metrics.i18n import reset_i18n, set_language, get_i18n
         reset_i18n()
         i = get_i18n()
         assert isinstance(i.t("missing"), str)

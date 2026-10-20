@@ -14,7 +14,7 @@ Watchdog — защита компьютера пользователя от д�
 import os
 import time
 import threading
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 try:
     import psutil  # опциональная зависимость

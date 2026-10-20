@@ -14,8 +14,6 @@
 
 import os
 import sys
-import io
-import time
 
 import pytest
 

@@ -22,10 +22,8 @@ TrayIcon — иконка в системном трее с контекстны
 - Pillow (для генерации иконки) — уже в проекте
 """
 
-import asyncio
 import logging
 import threading
-import time
 from typing import Optional
 
 from src.core.event_bus import EventBus, Events

@@ -14,7 +14,6 @@ ChatWindow — маленькое GUI-окно чата с агентом.
 Зависимости: только stdlib (tkinter).
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -134,7 +133,6 @@ class ChatWindow:
         # Попробуем достать последнее сообщение naming из user_interaction.
         msg_text = None
         try:
-            from src.perception.user_interaction import UserInteraction  # noqa
             ui = getattr(self, "_user_interaction_ref", None)
             if ui is not None:
                 msgs = ui.get_pending_messages(include_acknowledged=False)

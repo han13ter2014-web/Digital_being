@@ -9,7 +9,6 @@
 """
 
 from src.evolution.thinking_patterns import ThinkingPattern, ThinkingPatternLibrary
-from collections import defaultdict
 from typing import Optional
 from datetime import datetime
 

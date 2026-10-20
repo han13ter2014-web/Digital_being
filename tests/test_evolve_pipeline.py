@@ -16,7 +16,6 @@ import pytest
 from src.core.evolve_pipeline import (
     EvolvePipeline,
     MiddlewareResult,
-    PipelineResult,
     default_evolve_pipeline,
     get_default_pipeline,
     reset_default_pipeline,

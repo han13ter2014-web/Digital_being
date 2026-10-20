@@ -14,7 +14,7 @@
 > Тело — это интерфейс между сознанием и реальностью.
 
 """
-from typing import Dict, List, Optional
+from typing import Dict, List
 from dataclasses import dataclass, field
 import random
 

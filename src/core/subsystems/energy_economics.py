@@ -11,7 +11,7 @@ EnergySubsystem — подсистема энергетики и адаптив�
 
 import gc
 import random
-from typing import Dict, List, Optional, Callable
+from typing import Dict
 
 
 class EnergySubsystem:

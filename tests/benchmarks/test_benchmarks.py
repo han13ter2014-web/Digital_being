@@ -23,8 +23,6 @@ import sys
 import time
 import random
 
-import pytest
-
 PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
 )

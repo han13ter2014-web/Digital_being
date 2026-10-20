@@ -14,10 +14,8 @@
 > Часы никогда не ломаются и не останавливаются на ремонт.
 
 """
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
-import random
-import datetime
+from typing import List
+from dataclasses import dataclass
 
 
 @dataclass

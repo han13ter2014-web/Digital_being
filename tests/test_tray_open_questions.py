@@ -9,11 +9,8 @@
 а ответы публикуются через AGENT_THOUGHT, который слушает ChatWindow.
 """
 
-import asyncio
-import pytest
 from src.core.agent_runner import (
     generate_prioritized_stimulus,
-    load_agent_from_checkpoint,
 )
 from src.core.event_bus import EventBus, Events
 

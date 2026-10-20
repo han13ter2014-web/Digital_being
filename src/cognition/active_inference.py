@@ -8,7 +8,7 @@ Active Inference Engine — реализация принципа свободн
 
 import numpy as np
 import random
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Tuple
 from dataclasses import dataclass, field
 from collections import deque
 from src.core.buffered_logger import get_logger

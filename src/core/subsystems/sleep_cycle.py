@@ -11,7 +11,7 @@ SleepCycle — «сон» агента.
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 class SleepCycle:

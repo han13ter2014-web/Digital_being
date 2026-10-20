@@ -11,9 +11,6 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 вопросы/сообщения агента так же, как и терминальный режим через print().
 """
 
-from src.core.buffered_logger import get_logger
-
-
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
 def _get_events_class():
     try:

@@ -20,7 +20,6 @@ Adaptive Cost Reducer (DynamicCostReducer)
 """
 
 from enum import Enum
-from typing import Tuple
 
 
 class EnergyState(Enum):

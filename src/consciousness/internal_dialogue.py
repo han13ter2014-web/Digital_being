@@ -1,8 +1,7 @@
 """Внутренний голос — кишечник цифровой жизни (внутренняя экосистема)."""
-import json
 from datetime import datetime
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
+from typing import List, Optional
+from dataclasses import dataclass
 
 
 @dataclass

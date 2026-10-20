@@ -12,9 +12,6 @@ test_checkpoint_serializer.py — тесты для src.core.checkpoint_serializ
 import json
 import os
 import tempfile
-from pathlib import Path
-
-import pytest
 
 from src.core.checkpoint_serializer import (
     DEFAULT_CHECKPOINT_DIR,
@@ -443,7 +440,6 @@ def test_default_checkpoint_dir():
 # ============================================================
 # Gzip-сжатие (Этап 5: оптимизация)
 # ============================================================
-import gzip
 
 
 def test_gzip_save_load_roundtrip():

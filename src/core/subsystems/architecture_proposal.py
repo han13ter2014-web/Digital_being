@@ -15,7 +15,7 @@ ArchitectureProposal — агент предлагает изменить сво
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from config.will_config import WILL_CONFIG
 from src.core.paths import data_path

@@ -1,8 +1,7 @@
 """Тесты для WebSearcher — все с моком urllib, сеть не нужна."""
 import json
 import unittest
-from collections import OrderedDict
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.perception.web_search import WebSearcher
 

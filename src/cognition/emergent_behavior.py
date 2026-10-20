@@ -9,9 +9,7 @@
 """
 
 from collections import defaultdict
-from typing import Optional
 from datetime import datetime
-import hashlib
 
 
 class BehaviorPattern:

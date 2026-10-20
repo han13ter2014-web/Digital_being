@@ -14,7 +14,6 @@
 import time
 import sys
 import os
-import io
 
 # Добавляем корень проекта в sys.path
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -192,64 +191,45 @@ def test_long_term_memory_apply_episodic_limit():
 
 
 def test_save_knowledge_base_debounces(tmp_path):
-    """_save_knowledge_base не пишет на диск чаще debounce."""
+    """_save_knowledge_base не пишет на диск чаще debounce.
+
+    Тест вызывает настоящий метод агента, а не его копию: раньше здесь
+    была продублирована логика debounce, и тест проверял сам себя.
+    """
     from src.core.agent import DigitalBeing
-    import os
 
-    # ВАЖНО: этот тест требует реальной инициализации DigitalBeing,
-    # что может быть долго. Используем прямое тестирование debounce логики.
-    import time as _time
-
-    # Симулируем
-    class _MockAgent:
+    class _Agent:
+        knowledge_file = str(tmp_path / "kb.json")
+        knowledge_base = {f"k_{i}": "v" for i in range(20)}
         _last_kb_save_ts = 0.0
         _last_kb_save_size = 0
-        knowledge_file = str(tmp_path / "test_kb_debounce.json")
-        knowledge_base = {f"k_{i}": "v" for i in range(20)}
+        prune_calls = 0
 
         def _prune_knowledge_base(self):
-            pass
+            self.prune_calls += 1
 
-        @staticmethod
-        def _save_knowledge_base():
-            from src.core.buffered_logger import get_logger
-            from config.simulation_config import LR_CONFIG
-            import time as _time
-            now = _time.time()
-            last = _MockAgent._last_kb_save_ts
-            debounce_sec = getattr(LR_CONFIG, "KNOWLEDGE_SAVE_DEBOUNCE_SEC", 30)
-            min_delta = getattr(LR_CONFIG, "KNOWLEDGE_SAVE_MIN_DELTA", 10)
-            size_delta = abs(len(_MockAgent.knowledge_base) - _MockAgent._last_kb_save_size)
-            if (now - last) < debounce_sec and size_delta < min_delta:
-                return  # пропущено
-            try:
-                os.makedirs(os.path.dirname(_MockAgent.knowledge_file), exist_ok=True)
-                import json
-                with open(_MockAgent.knowledge_file, "w", encoding="utf-8") as f:
-                    json.dump(_MockAgent.knowledge_base, f)
-                _MockAgent._last_kb_save_ts = now
-                _MockAgent._last_kb_save_size = len(_MockAgent.knowledge_base)
-                _wrote = True
-            except Exception:
-                _wrote = False
-            return _wrote
+    agent = _Agent()
+    save = DigitalBeing._save_knowledge_base.__get__(agent)
 
-    agent = _MockAgent()
-    # Первый вызов — пишем
-    res1 = agent._save_knowledge_base()
-    # Сразу второй — должен быть пропущен
-    res2 = agent._save_knowledge_base()
-    # Добавляем много записей (delta > min_delta)
+    # Первый вызов — пишем (последняя запись была давно).
+    save()
+    assert os.path.exists(agent.knowledge_file)
+    first_mtime = os.stat(agent.knowledge_file).st_mtime_ns
+    first_size = os.stat(agent.knowledge_file).st_size
+
+    # Сразу второй — debounce: файл не перезаписан.
+    time.sleep(0.02)
+    save()
+    assert os.stat(agent.knowledge_file).st_mtime_ns == first_mtime
+
+    # Дельта размера >= KNOWLEDGE_SAVE_MIN_DELTA — пишем снова.
     agent.knowledge_base.update({f"new_{i}": "v" for i in range(20)})
-    res3 = agent._save_knowledge_base()
-
-    assert res1 is not None, "первый вызов должен записать"
-    assert res2 is None, "второй вызов должен быть пропущен debounce"
-    assert res3 is not None, "третий вызов с дельтой должен записать"
-    # Чистим
-    if os.path.exists(agent.knowledge_file):
-        os.remove(agent.knowledge_file)
-    print(f"  ✅ Debounce работает: запись → пропуск → запись (после дельты)")
+    time.sleep(0.02)
+    save()
+    final = os.stat(agent.knowledge_file)
+    assert final.st_mtime_ns != first_mtime
+    assert final.st_size > first_size
+    assert agent.prune_calls == 3
 
 
 def test_smoke_100_cycles_in_seconds():
