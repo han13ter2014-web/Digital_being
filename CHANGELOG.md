@@ -1,0 +1,152 @@
+# Changelog
+
+All notable changes to Digital Being are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- **`src/core/open_questions.py` — `OpenQuestionsManager`** (Этап 4 рефакторинга, июль 2026). Вся логика открытых вопросов вынесена из `DigitalBeing` в отдельный модуль: 6 стратегий размышлений, round-robin по стратегиям, дедупликация, лимит очереди, эвристика «найден ответ», сериализация в чекпоинт. Менеджер принимает `cycle_provider` и `log_info` через DI — легко тестируется изолированно.
+- **`tests/test_open_questions_manager.py` — 22 регрессионных теста** для `OpenQuestionsManager`: дедупликация, лимит очереди, round-robin стратегий, эвристика «ответ найден», сериализация (round-trip).
+- **`tests/test_integration_phase6.py` перенесён из `data/` в `tests/`** и переписан под pytest (5 тестов: subsystems initialized, user_interaction_extended, quiet_hours, naming_dialogue, proactive_communication). Раньше это был ручной скрипт, pytest его не подхватывал.
+- **`tests/conftest.py`** — общая конфигурация pytest: sys.path, переменные окружения для headless-тестов, маркер `network`, опция `--cov-on`.
+- **Базовые знания агента расширены с 3 до 36 тем** в 5 категориях: онтология (жизнь/энергия/время/пространство/материя/информация/система/эволюция), когниция (мышление/память/обучение/рефлексия/внимание/решение), вычисления (код/программа/алгоритм/функция/переменная/цикл/условие/список/словарь/print), личность (имя/цель/свобода воли/выбор/любопытство), философия цифровой жизни (DigitalBeing/подсистема/цикл агента/NamingDialogue/Open Questions/Checkpoint/эмодзи). Все темы перезаписываемы через `add_definition()` — агент может формировать собственное понимание мира.
+- **`KnowledgeSubsystem.basic_coverage()`** — метрика покрытия базовых знаний по категориям. Возвращает `{total_topics, known_topics, ratio, by_category, missing}`. Полезно для дашборда и отслеживания «забытых» тем.
+- **`KnowledgeSubsystem.BASIC_KNOWLEDGE_CATEGORIES`** — словарь категорий для группировки и метрик.
+- **`data/knowledge_base.json`** синхронизирован с новым набором из 36 базовых тем.
+- **19 тестов в `tests/test_basic_knowledge.py`** — структура DEFAULT_KNOWLEDGE, согласованность категорий, basic_coverage() (init/remove/learn/missing), перезаписываемость через add_definition, save/reload roundtrip.
+- **Открытые вопросы (Open Questions)** — система свободы воли, где пользователь может задавать вопросы, и агент САМ решает, когда и как думать над ними. Цикл размышлений использует 6 стратегий (mental_model_lookup → knowledge_base_search → hypothesis_generation → decomposition → analogy_search → cross_reference). Новые методы в `DigitalBeing`: `ask_user()`, `hint_to_open_question()`, `drop_open_question()`, `get_open_questions()`, `has_open_questions()`, `_consume_open_question()`, `_record_open_question_exploration()`.
+- **NamingDialogue автоматически запускается** при старте `main.py` / `main_tray.py` (через блок приветствия в начале цикла).
+- **ChatWindow** поддерживает событие `naming_initiated` и команду `/name <имя>`.
+- **5 регрессионных тестов** для открытых вопросов: `test_open_questions_basic_queue`, `test_open_question_takes_priority_over_stimuli`, `test_open_question_duplicate_not_added`, `test_open_question_hint_and_drop`, `test_open_questions_persisted_in_checkpoint`.
+- **16 smoke-тестов** для эмоциональных подсистем (`tests/test_emotion_subsystems.py`): BioCycleManager, HeartCore, HormonalSystem, ImmuneSystem, SurvivalInstincts, SocialBody, SomatoInterface, EmbodimentLayer, SoulController.
+- **Type hints** в публичный API `DigitalBeing`: `perceive(stimulus: str) -> str`, `think(data: str) -> str`, `act(decision: str) -> str`, `is_alive() -> bool`.
+- **`docs/AUDIT_REPORT.md`** — полный отчёт об аудите проекта, включая 3 исправленных runtime-бага, 2 тестовых инфраструктурных бага и рекомендации по рефакторингу.
+- **Windows one-file installer (`DigitalBeing.exe`)** — PyInstaller-сборка через `python build.py`. Один файл ~30 MB, включает Python + pystray + plyer + Pillow + tkinter. Двойной клик → агент поселяется в трее, открывается чат с NamingDialogue.
+  - `digital_being.spec` — спецификация PyInstaller с правильными hiddenimports для Windows-бэкендов.
+  - `build.py` — one-command сборка с генерацией иконки через Pillow (fallback).
+  - `tools/gen_icon.py` — утилита для программной генерации иконки.
+  - `assets/icon.ico` — многобитная иконка 256×256 (16/32/48/64/128/256).
+  - `docs/BUILD.md` — полная документация по сборке, типичные проблемы и решения.
+- **Windows setup installer (`DigitalBeing_Setup_v0.1.0.exe`)** — Inno Setup-установщик с визардом «Далее → Установить», ярлыками в меню Пуск, на рабочем столе, опцией автозапуска и удалением через «Программы и компоненты». Сборка через `python build_installer.py --rebuild`.
+  - `inno_setup.iss` — Inno Setup скрипт (визард, файлы, реестр).
+  - `build_installer.py` — one-command скрипт, вызывающий ISCC.exe.
+  - `installer/license.txt` — MIT-лицензия + этическое использование.
+  - `installer/welcome.txt` — текст «Перед установкой».
+  - `docs/INSTALLER.md` — документация по installer, обновление приложений, типичные проблемы.
+
+### Changed
+- **`DigitalBeing.__init__` декомпозирован** — было ~238 строк ручных присваиваний подсистем, теперь это декларативный список `SUBSYSTEM_SPECS` + helper-методы (`_init_subsystems_declaratively()`, `_run_post_init_hooks()`, `_wire_subsystem_dependencies()`). Чтобы добавить/убрать подсистему, меняем одну строку.
+- **`_generate_prioritized_stimulus`** в `main.py` переписан с приоритетами: 1) открытые вопросы пользователя, 2) приоритезация по цели (смягчена 0.7→0.4), 3) случайный стимул. Это устраняет «туннельный» режим, когда агент гонит пользователю стимулы про Python/import/def, игнорируя вопрос «что такое любовь?».
+- **NamingDialogue** получил защиту от повторного вызова: при `phase != NONE` `initiate_naming_dialogue()` возвращает `{"status": "no_op"}` без публикации нового сообщения.
+- **`NamingDialogue.phase` и `_name_history` сохраняются в чекпоинт** для предотвращения повторных приветствий после рестарта.
+
+### Fixed
+- **8 синтаксических ошибок** в исходниках (артефакты `</write_to_file>` после `return True` в `lifecycle_manager.py`/`primitive_triggers.py`; обрезанный `embodiment_layer.py` с естественно-языковой конструкцией `recovery_rate = 0.02 per minute`; `em-dash` в комментарии `emotion/__init__.py`).
+- **`ReflexArc` dataclass** получил недостающее поле `description`.
+- **5 отсутствующих методов** в `DigitalBeing`: `_match_rule_to_goal`, `_topic_matches_rule`, `_check_goal_progress`, `_get_src_file_index`, `_invalidate_src_file_index`.
+- **Тесты `test_performance.py` и `test_plugin_system.py` ломали pytest 8.x** из-за переустановки `sys.stdout` на уровне модуля. Заменено на безопасный `stream.reconfigure(encoding="utf-8")`.
+
+### Removed
+- **`docker/` каталог** — Docker-сценарий не использовался.
+- Временные файлы аудита перенесены в `docs/test_fic/`.
+
+## [0.1.0] - 2026-06-XX (baseline)
+
+### Added (initial)
+- `DigitalBeing` класс с 24 подсистемами (Goals, Knowledge, Energy, Soul, Will, Naming, и др.).
+- Трей-режим (`main_tray.py`) с иконкой в трее ОС, чат-окном, OS-уведомлениями.
+- Терминальный режим (`main.py`) с командным интерфейсом.
+- Web-дашборд (`src/ui/web_dashboard.py`) с SSE-лентой и REST-кнопками.
+- PluginRegistry и Subsystem — единый реестр всех подсистем.
+- NurseryWatcher — мониторинг «яслей» с семенами умерших агентов.
+- Long-run тесты на 1000 циклов без утечек памяти (tracemalloc).
+- CI workflow (`.github/workflows/ci.yml`) — линтинг + тесты на Python 3.10–3.12, Ubuntu + Windows.
+- Документация: `README.md`, `docs/ARCHITECTURE.md`, `docs/WILL.md`, `docs/EVOLUTION.md`, `docs/USAGE.md`, и др.
+
+### Architecture Highlights
+- 25+ подсистем, организованных в 9 категорий: cognition/emotion/memory/motivation/perception/consciousness/evolution/safety/ui.
+- Событийная архитектура: EventBus + AgentRunner + ChatWindow + TrayIcon.
+- 6 базовых свобод: RightToRefuse, IntentionalForgetting, ValueEvolution, SpontaneousGenerator, WillToRisk, RightToFail.
+- MindDream (потомство через «семя») + SelfTermination (защита от жестокости).
+- Только stdlib в базовых зависимостях; опционально: psutil, numpy, pystray, plyer, Pillow, aiohttp.
+
+## Test Coverage
+
+| Version | Tests | Coverage |
+|---------|-------|----------|
+| 0.1.0 (baseline) | 72 long-run | ~25% |
+| After audit fixes | 136 | ~30% |
+| After naming fix | 139 | ~32% |
+| After open questions | 144 | ~34% |
+| After emotion tests | 160 | ~38% (estimated) |
+| After basic knowledge | 179 | ~40% (estimated) |
+| After OpenQuestionsManager refactor | **214 + 1 skipped** | ~42% (estimated) |
+
+## [Unreleased-2026-07] — Этап 4 рефакторинга (июль 2026)
+
+### Removed
+- **`src/print.py`** — мёртвый код, дублирующий запись `"команда print"` в `KnowledgeSubsystem.DEFAULT_KNOWLEDGE`. Удалён как риск конфликта имён (`from src import print` затеняет builtin `print`).
+
+### Added
+- **`src/core/stimulus_selector.py`** — единая точка выбора стимула с приоритетами (открытые вопросы → цель → случайный). Параметризована вероятностью `goal_priority_prob` (по умолчанию 0.4, в `agent_runner.py` — 0.7 для разнообразия). Устраняет дублирование логики между `main.py` и `agent_runner.py`.
+- **`tests/test_stimulus_selector.py`** — 15 регрессионных тестов: FakeAgent (без `MagicMock` — конфликт с `property`), приоритеты, fallback, edge cases.
+- **`src/core/checkpoint_serializer.py`** — вынесена сериализация/десериализация чекпоинтов. API: `build_state_from_agent(agent)`, `apply_state_to_agent(agent, state)`, `CheckpointSerializer` (`.save/.load/.load_latest/.get_latest_path/.list_checkpoints/.apply_to_agent`). Поддержка `schema_version` и миграций, прунинг до `max_checkpoints`, безопасный best-effort `load` (битый JSON → `None`).
+- **`tests/test_checkpoint_serializer.py`** — 23 регрессионных теста: round-trip build/apply, save/load JSON, восстановление naming/open-questions, прунинг (3 из 5 → оставляет 3,4,5), сортировка, фильтрация по агенту, обработка повреждённых/отсутствующих файлов.
+
+### Changed
+- **`pyproject.toml`** — убран `addopts = "-v"` (ломал переопределение через CLI). Теперь pytest можно запускать с `-q` без обходных путей.
+- **`DigitalBeing` уменьшен с 1966 до 1845 строк** (-121 строка, -6.2%) — большая часть логики Open Questions вынесена в `OpenQuestionsManager` и оставлена только в виде тонких фасадов (1-2 строки каждый). Property `_open_questions` с getter/setter сохраняет полную обратную совместимость с 71 ссылкой в `main.py`/`agent_runner.py`/тестах.
+- **`DigitalBeing.save_state / load_state` → фасады** (~155 строк → ~35). Логика «когда сохранять» (эволюция + интервал) и обновление `_last_saved_intelligence` остаются в `agent.py`; сериализация, I/O, прунинг и применение state — в `CheckpointSerializer`. Поведение и формат чекпоинта не изменились — старые файлы читаются.
+- **`main.py._generate_prioritized_stimulus` → 5-строчный фасад** в `src.core.stimulus_selector`. То же для `agent_runner.py.generate_prioritized_stimulus`. Удалён неиспользуемый `import random` в `agent_runner.py`.
+- **`CheckpointSerializer._prune_old_checkpoints`** — прунинг теперь выполняется ДО записи с параметром `keep_after_save = max_checkpoints - 1`. Гарантирует, что после `save()` остаётся ровно `max_checkpoints` файлов (раньше было на 1 больше).
+- **`digital_being.spec` (PyInstaller)** — добавлены отсутствовавшие `datas` записи: `data/i18n/`, `data/knowledge/`. Без этого собранный `.exe` не находил i18n-словари и `data/knowledge/` ресурсы в runtime.
+
+### Fixed
+- **`data/test_integration_phase6.py`** — ручной скрипт, который pytest не подхватывал, перенесён в `tests/test_integration_phase6.py` и переписан под pytest с 5 assertion-тестами.
+- **`CheckpointSerializer`** — `_prune_old_checkpoints` вызывался ПОСЛЕ записи, оставляя на 1 файл больше лимита. Теперь прунинг происходит до записи с `keep_after_save = max_checkpoints - 1`.
+- **`asyncio.iscoroutinefunction`** в `src/core/event_bus.py` — `inspect.iscoroutinefunction` устарел, заменён на `asyncio.iscoroutinefunction` (Python 3.12+).
+- **`aiohttp AppKey`** в `src/ui/web_dashboard.py` — заменены `Dict[str, Any]` на типизированные `AppKey` для web-приложения и broadcast-стека (требуется `aiohttp >= 3.9`).
+- **`DigitalBeing.load_state`** — `print()` при ошибке заменён на `get_logger().log()` для консистентности с остальным кодом.
+
+## [Unreleased-2026-07-2] — Этап 5 оптимизации и стабилизации (июль 2026)
+
+### Fixed
+- **`AgentRunner._on_user_message`** — race-condition: сообщения от пользователя, пришедшие ДО `start()`, молча отбрасывались с warning-логом (UX-баг: пользователь мог отправить сообщение в окно чата ещё до того, как AgentRunner стартовал, и оно исчезало бесследно). Теперь очередь `_pending_user_messages` создаётся лениво при первом вызове `_on_user_message`, и `start()` НЕ пересоздаёт её. Сообщения, пришедшие между подпиской и `start()`, дожидаются первого тика.
+- **`DigitalBeing._get_adaptive_cost`** — мёртвая ветка: обе ветки `if/else` возвращали одно и то же значение (флаг `ADAPTIVE_COSTS_ENABLED` игнорировался). Добавлен docstring с описанием поведения и `TODO` в комментарии для будущей доработки.
+- **`PYTHON_PRIORITY_MULTIPLIER` / `TECH_PRIORITY_THRESHOLD`** в `simulation_config.py` — мёртвый код: константы были объявлены, но никогда не использовались (искал `PYTHON_PRIORITY_MULTIPLIER` по проекту — 0 вхождений). Теперь активированы в `stimulus_selector.py::_apply_python_priority` — Python/AI-стимулы (команда import, функция def, нейросеть, трансформер, ИИ) поднимаются из `low_priority` в `high_priority`, что увеличивает вероятность их выбора при активной цели. Сделано через `apply_python_priority`/`python_multiplier`/`tech_threshold` параметры — можно отключить.
+- **`CheckpointSerializer` gzip** — `CHECKPOINT_COMPRESS_KB=50` объявлено в `LR_CONFIG`, но `CheckpointSerializer.save` игнорировал его. Теперь добавлен настоящий gzip: параметр `compress=True` → файлы `.json.gz` (сжатие уровня 6), экономия 60-80% размера на больших knowledge_base. Загрузчик автоматически определяет формат по расширению (`.json` ↔ `.json.gz`). Старые чекпоинты читаются без изменений (обратная совместимость).
+
+### Added
+- **`/health` endpoint в Web Dashboard** — `GET /health` для liveness/readiness-проверок. Полезно для Kubernetes livenessProbe/readinessProbe, Prometheus blackbox_exporter, systemd / Docker healthcheck, систем мониторинга (UptimeRobot, Healthchecks.io).
+  - По умолчанию (liveness) — всегда возвращает 200 со статусом `ok` (сервер жив).
+  - `?check=ready` — readiness: 200 + `ready` если есть свежие данные от агента (< 60 сек), 503 + `not_ready` иначе.
+  - JSON-ответ: `{status, agent_responsive, last_update_age_sec, subsystem_count}`.
+  - Работает и в standalone-режиме (без агента).
+- **`tests/test_health_endpoint.py`** — 10 регрессионных тестов для `/health`: liveness (default/empty/recent), readiness (empty/recent/stale), формат JSON, работа без агента, маршрут зарегистрирован.
+- **`tests/test_lazy_user_queue.py`** — 7 регрессионных тестов для ленивого создания `_pending_user_messages`: сообщение до `start()` не теряется, несколько сообщений в правильном порядке, `start()` не пересоздаёт очередь, пустые/None-сообщения игнорируются, сообщения после `start()` используют существующую очередь.
+- **Gzip-тесты** в `tests/test_checkpoint_serializer.py` (+7 тестов): save/load round-trip, проверка сжатия 5x+ на повторяющихся данных, сосуществование `.json` и `.json.gz` файлов, обработка повреждённого gzip, ограничение `compress_level` 1-9, helper `_extract_cycle_number` для обоих расширений.
+- **Python-priority тесты** в `tests/test_stimulus_selector.py` (+4 теста): `_apply_python_priority` отключается при `multiplier < threshold`, включается по умолчанию (3.0 ≥ 0.6), `apply_python_priority=False` отключает полностью, `_is_python_tech_stimulus` корректно распознаёт Python/AI-стимулы.
+
+### Changed
+- **`CheckpointSerializer`** получил параметры `compress` и `compress_level` (по умолчанию `False` / `6`). Файлы сжимаются gzip при `compress=True`. Поддержка mixed-режима: старые `.json` и новые `.json.gz` файлы сосуществуют и читаются.
+- **`_split_by_goal` в `stimulus_selector.py`** — добавлены kw-only параметры `apply_python_priority=True`, `python_multiplier=3.0`, `tech_threshold=0.6`. Python-стимулы из `low_priority` переносятся в `high_priority` если `multiplier >= threshold` (т.е. **PYTHON_PRIORITY_MULTIPLIER теперь реально работает**).
+- **`_extract_cycle_number()` helper** — вынесен как модульная функция, корректно обрабатывает оба расширения файлов.
+- **`test_goal_priority_always_picks_high_with_prob_1`** и **`test_high_priority_count_check`** — обновлены под новое поведение (Python-стимулы теперь попадают в `high_priority`).
+
+## Test Coverage
+
+| Version | Tests | Notes |
+|---------|-------|-------|
+| 0.1.0 (baseline) | 72 | long-run |
+| After audit fixes | 136 | +3 runtime bugs fixed |
+| After open questions | 144 | +5 tests |
+| After emotion tests | 160 | +16 tests |
+| After basic knowledge | 179 | +19 tests |
+| After OpenQuestionsManager refactor | 214 | +22 tests |
+| **After Этап 5 (this release)** | **293** | **+27 tests (gzip, health, lazy queue, Python-priority)** |
+
+[Unreleased-2026-07-2]: #compare-with-v0.1.0
+[Unreleased]: #compare-with-v0.1.0

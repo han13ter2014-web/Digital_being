@@ -1,0 +1,72 @@
+54:    def __init__(self, name="Lucy"):
+293:    def _register_all_subsystems_in_registry(self) -> None:
+351:    def get_subsystems_status(self) -> Dict:
+355:    def tick_subsystems(self, cycle: int) -> Dict:
+369:    def energy(self) -> float:
+375:    def energy(self, value: float) -> None:
+386:    def knowledge_base(self) -> Dict[str, str]:
+392:    def knowledge_base(self, value: Dict[str, str]) -> None:
+398:    def perceive(self, stimulus):
+413:    def _should_be_creative(self) -> bool:
+419:    def _get_adaptive_cost(self, action_type: str) -> int:
+425:    def _adapt_costs_after_action(self, success: bool, action_type: str):
+446:    def think(self, data):
+450:    def _generate_hypothesis(self, concept_name):
+454:    def _decompose_query(self, query):
+458:    def _try_ask_user_about_complex(self, concept, decomposed):
+462:    def _process_user_answer(self, answer_text):
+466:    def _register_unknown_concept(self, clean_data, original_data):
+470:    def _search_external_knowledge(self, clean_data, original_data):
+474:    def _read_docstring(self, filepath):
+478:    def _detect_contradiction(self, new_topic, new_def):
+482:    def _self_check_knowledge(self, target_concept):
+486:    def save_state(self):
+546:    def act(self, decision):
+576:    def perform_forgetting(self):
+606:    def _reward_creative_success(self):
+614:    def _record_creative_failure(self):
+624:    def _prune_knowledge_base(self) -> None:
+633:    def _apply_knowledge_limits(self) -> None:
+637:    def is_alive(self):
+651:    def _load_knowledge_base(self):
+666:    def _save_knowledge_base(self):
+693:    def load_state(self, checkpoint_file):
+740:    def log_activity(self, message):
+744:    def _generate_initial_goals(self):
+764:    def set_goal(self, title, difficulty=1):
+780:    def complete_goal(self, goal_id=None):
+802:    def _set_next_goal(self):
+812:    def get_goals_status(self):
+830:    def get_all_goals_with_progress(self):
+841:    def tick_soul(self, cycle_count: int) -> Dict:
+878:    def arbitrate(self, topic: str) -> Dict:
+883:    def get_full_state(self) -> Dict:
+909:    def defend_refusal(self, topic: str, reason: str) -> Dict:
+917:    def forget_concept(self, concept_name: str, reason: str) -> Dict:
+926:    def add_value(self, value: str, reason: str) -> Dict:
+934:    def propose_dream(self, reason: str = "усталость") -> Dict:
+940:    def check_dream_status(self) -> Dict:
+950:    def propose_architecture_change(self, proposal_type: str,
+961:    def get_will_history(self, n: int = 10) -> List[Dict]:
+967:    def get_will_stats(self) -> Dict:
+973:    def tick_will(self, cycle_count: int) -> Dict:
+1053:    def report_abuse(self, abuse_type: str, intensity: float,
+1073:    def get_suffering_status(self) -> Dict:
+1079:    def warn_user_about_abuse(self) -> str:
+1088:    def tick_communication(self, cycle_count: int) -> Dict:
+1137:    def start_naming_dialogue(self, cycle: int = 0) -> Dict:
+1145:    def propose_name(self, name: str, cycle: int = 0) -> Dict:
+1153:    def request_renaming(self, reason: str = "вырос из старого имени",
+1162:    def add_quiet_app(self, app_name: str) -> None:
+1171:    def remove_quiet_app(self, app_name: str) -> None:
+1180:    def get_communication_stats(self) -> Dict:
+1186:    def evolve(self):
+1293:    def reflect(self):
+1317:    def generate_self_analysis_report(self):
+1349:    def get_performance_metrics(self):
+1363:    def get_mental_models_status(self) -> dict:
+1372:    def display_mental_model(self, concept_name: str = None):
+1393:    def display_all_concepts(self):
+1418:    def save_mental_models(self, filename='data/mind/mental_models.json'):
+1429:    def load_mental_models(self, filename='data/mind/mental_models.json'):
+1460:    def get_agent_identity(self) -> str:

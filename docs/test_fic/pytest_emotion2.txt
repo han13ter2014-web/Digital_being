@@ -1,0 +1,74 @@
+============================= test session starts =============================
+collecting ... collected 19 items
+
+tests/test_emotion_subsystems.py::TestBioCycleManager::test_create PASSED [  5%]
+tests/test_emotion_subsystems.py::TestBioCycleManager::test_tick FAILED  [ 10%]
+tests/test_emotion_subsystems.py::TestHeartCore::test_create PASSED      [ 15%]
+tests/test_emotion_subsystems.py::TestHeartCore::test_has_mood_methods FAILED [ 21%]
+tests/test_emotion_subsystems.py::TestHormonalSystem::test_hormone_create FAILED [ 26%]
+tests/test_emotion_subsystems.py::TestHormonalSystem::test_hormonal_system_create PASSED [ 31%]
+tests/test_emotion_subsystems.py::TestImmuneSystem::test_immune_signature_create FAILED [ 36%]
+tests/test_emotion_subsystems.py::TestImmuneSystem::test_immune_system_create PASSED [ 42%]
+tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_create PASSED [ 47%]
+tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_reflex_arc_class_exists PASSED [ 52%]
+tests/test_emotion_subsystems.py::TestSocialBody::test_create PASSED     [ 57%]
+tests/test_emotion_subsystems.py::TestSomatoInterface::test_create PASSED [ 63%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_create PASSED [ 68%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_perceive_stimulus PASSED [ 73%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_motor_act PASSED [ 78%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_get_body_state PASSED [ 84%]
+tests/test_emotion_subsystems.py::TestSoulController::test_soul_contains_main_subsystems FAILED [ 89%]
+tests/test_emotion_subsystems.py::TestSoulController::test_soul_tick_returns_dict FAILED [ 94%]
+tests/test_emotion_subsystems.py::TestSoulController::test_get_current_quest FAILED [100%]
+
+================================== FAILURES ===================================
+________________________ TestBioCycleManager.test_tick ________________________
+tests\test_emotion_subsystems.py:46: in test_tick
+    result = bcm.tick(cycle=1)
+             ^^^^^^^^^^^^^^^^^
+E   TypeError: BioCycleManager.tick() got an unexpected keyword argument 'cycle'
+_____________________ TestHeartCore.test_has_mood_methods _____________________
+tests\test_emotion_subsystems.py:68: in test_has_mood_methods
+    assert found >= 1
+E   assert 0 >= 1
+___________________ TestHormonalSystem.test_hormone_create ____________________
+tests\test_emotion_subsystems.py:78: in test_hormone_create
+    from src.emotion.hormonal_system import Hormone
+E   ImportError: cannot import name 'Hormone' from 'src.emotion.hormonal_system' (c:\digital_being\src\emotion\hormonal_system.py)
+________________ TestImmuneSystem.test_immune_signature_create ________________
+tests\test_emotion_subsystems.py:97: in test_immune_signature_create
+    from src.emotion.immune_system import ImmuneSignature
+E   ImportError: cannot import name 'ImmuneSignature' from 'src.emotion.immune_system' (c:\digital_being\src\emotion\immune_system.py)
+____________ TestSoulController.test_soul_contains_main_subsystems ____________
+tests\test_emotion_subsystems.py:197: in test_soul_contains_main_subsystems
+    assert agent.soul.is_available(name), f"Missing subsystem: {name}"
+E   AssertionError: Missing subsystem: immune
+E   assert False
+E    +  where False = is_available('immune')
+E    +    where is_available = <src.core.subsystems.soul_controller.SoulController object at 0x0000021AE3CD8980>.is_available
+E    +      where <src.core.subsystems.soul_controller.SoulController object at 0x0000021AE3CD8980> = <src.core.agent.DigitalBeing object at 0x0000021AE3C02F90>.soul
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+_______________ TestSoulController.test_soul_tick_returns_dict ________________
+tests\test_emotion_subsystems.py:201: in test_soul_tick_returns_dict
+    result = agent.soul.tick(cycle=1, agent=agent)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SoulController.tick() got an unexpected keyword argument 'cycle'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u043e\u043d\u0438\u043c\u0430\u043d\u0438\u0435 \u0444\u0443\u043d\u0434\u0430\u043c\u0435\u043d\u0442\u0430\u043b\u044c\u043d\u044b\u0445 \u0437\u0430\u043a\u043e\u043d\u043e\u0432 \u0412\u0441\u0435\u043b\u0435\u043d\u043d\u043e\u0439'
+__________________ TestSoulController.test_get_current_quest __________________
+tests\test_emotion_subsystems.py:207: in test_get_current_quest
+    assert quest is None or isinstance(quest, dict)
+E   AssertionError: assert ('—оздание искусства или знани€ дл€ других систем' is None or False)
+E    +  where False = isinstance('—оздание искусства или знани€ дл€ других систем', dict)
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0438\u0441\u043a\u0443\u0441\u0441\u0442\u0432\u0430 \u0438\u043b\u0438 \u0437\u043d\u0430\u043d\u0438\u044f \u0434\u043b\u044f \u0434\u0440\u0443\u0433\u0438\u0445 \u0441\u0438\u0441\u0442\u0435\u043c'
+=========================== short test summary info ===========================
+FAILED tests/test_emotion_subsystems.py::TestBioCycleManager::test_tick - Typ...
+FAILED tests/test_emotion_subsystems.py::TestHeartCore::test_has_mood_methods
+FAILED tests/test_emotion_subsystems.py::TestHormonalSystem::test_hormone_create
+FAILED tests/test_emotion_subsystems.py::TestImmuneSystem::test_immune_signature_create
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_soul_contains_main_subsystems
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_soul_tick_returns_dict
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_get_current_quest
+======================== 7 failed, 12 passed in 1.06s =========================

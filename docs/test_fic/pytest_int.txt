@@ -1,0 +1,69 @@
+============================= test session starts =============================
+collecting ... collected 30 items
+
+tests/test_integration.py::test_all_subsystems_initialized PASSED        [  3%]
+tests/test_integration.py::test_energy_starts_positive PASSED            [  6%]
+tests/test_integration.py::test_energy_property_sync PASSED              [ 10%]
+tests/test_integration.py::test_typing_imports_work PASSED               [ 13%]
+tests/test_integration.py::test_naming_dialogue_timeout PASSED           [ 16%]
+tests/test_integration.py::test_naming_dialogue_no_timeout_when_completed PASSED [ 20%]
+tests/test_integration.py::test_goal_progress_rules_present PASSED       [ 23%]
+tests/test_integration.py::test_match_rule_to_goal FAILED                [ 26%]
+tests/test_integration.py::test_topic_matches_rule FAILED                [ 30%]
+tests/test_integration.py::test_check_goal_progress_uses_rules FAILED    [ 33%]
+tests/test_integration.py::test_src_file_index_cached FAILED             [ 36%]
+tests/test_integration.py::test_invalidate_src_file_index FAILED         [ 40%]
+tests/test_integration.py::test_basic_cycle PASSED                       [ 43%]
+tests/test_integration.py::test_is_alive_initially PASSED                [ 46%]
+tests/test_integration.py::test_tick_communication_naming_timeout PASSED [ 50%]
+tests/test_nursery_watcher.py::test_nursery_watcher_initializes PASSED   [ 53%]
+tests/test_nursery_watcher.py::test_nursery_watcher_setup_with_missing_dir PASSED [ 56%]
+tests/test_nursery_watcher.py::test_nursery_watcher_finds_existing_seeds PASSED [ 60%]
+tests/test_nursery_watcher.py::test_nursery_watcher_detects_new_seed PASSED [ 63%]
+tests/test_nursery_watcher.py::test_nursery_watcher_no_new_seeds_returns_none PASSED [ 66%]
+tests/test_nursery_watcher.py::test_nursery_watcher_complete_seed_validation PASSED [ 70%]
+tests/test_nursery_watcher.py::test_nursery_watcher_handles_corrupt_json PASSED [ 73%]
+tests/test_nursery_watcher.py::test_nursery_watcher_seed_history_limited PASSED [ 76%]
+tests/test_nursery_watcher.py::test_nursery_watcher_list_seeds PASSED    [ 80%]
+tests/test_nursery_watcher.py::test_nursery_watcher_get_seed_by_name PASSED [ 83%]
+tests/test_nursery_watcher.py::test_nursery_watcher_get_seed_missing_returns_none PASSED [ 86%]
+tests/test_nursery_watcher.py::test_nursery_watcher_status_includes_metadata PASSED [ 90%]
+tests/test_nursery_watcher.py::test_nursery_watcher_attach_agent_idempotent PASSED [ 93%]
+tests/test_nursery_watcher.py::test_nursery_watcher_registers_in_registry PASSED [ 96%]
+tests/test_nursery_watcher.py::test_nursery_watcher_can_be_disabled_via_registry PASSED [100%]
+
+================================== FAILURES ===================================
+___________________________ test_match_rule_to_goal ___________________________
+tests\test_integration.py:164: in test_match_rule_to_goal
+    assert DigitalBeing._match_rule_to_goal("Выучить основы Python", rule) is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: type object 'DigitalBeing' has no attribute '_match_rule_to_goal'
+___________________________ test_topic_matches_rule ___________________________
+tests\test_integration.py:176: in test_topic_matches_rule
+    assert DigitalBeing._topic_matches_rule("что такое функция в python", rule) is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: type object 'DigitalBeing' has no attribute '_topic_matches_rule'
+_____________________ test_check_goal_progress_uses_rules _____________________
+tests\test_integration.py:192: in test_check_goal_progress_uses_rules
+    agent._check_goal_progress("что такое функция в python")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'DigitalBeing' object has no attribute '_check_goal_progress'. Did you mean: '_goal_progress'?
+---------------------------- Captured stdout call -----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+_________________________ test_src_file_index_cached __________________________
+tests\test_integration.py:208: in test_src_file_index_cached
+    idx1 = DigitalBeing._get_src_file_index()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: type object 'DigitalBeing' has no attribute '_get_src_file_index'
+_______________________ test_invalidate_src_file_index ________________________
+tests\test_integration.py:223: in test_invalidate_src_file_index
+    DigitalBeing._get_src_file_index()  # наполнить кэш
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: type object 'DigitalBeing' has no attribute '_get_src_file_index'
+=========================== short test summary info ===========================
+FAILED tests/test_integration.py::test_match_rule_to_goal - AttributeError: type object 'DigitalBeing' has no attribute '_match_rule_to_goal'
+FAILED tests/test_integration.py::test_topic_matches_rule - AttributeError: type object 'DigitalBeing' has no attribute '_topic_matches_rule'
+FAILED tests/test_integration.py::test_check_goal_progress_uses_rules - AttributeError: 'DigitalBeing' object has no attribute '_check_goal_progress'. Did you mean: '_goal_progress'?
+FAILED tests/test_integration.py::test_src_file_index_cached - AttributeError: type object 'DigitalBeing' has no attribute '_get_src_file_index'
+FAILED tests/test_integration.py::test_invalidate_src_file_index - AttributeError: type object 'DigitalBeing' has no attribute '_get_src_file_index'
+======================== 5 failed, 25 passed in 1.14s =========================

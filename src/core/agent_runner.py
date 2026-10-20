@@ -1,0 +1,838 @@
+"""
+AgentRunner — оркестратор жизни агента в трей-режиме.
+
+Связывает между собой:
+- DigitalBeing (существующий, без изменений в основной логике)
+- EventBus (асинхронная шина событий)
+- EnergyPolicy (новая политика «энергия управляет темпом»)
+- Watchdog (защита ресурсов)
+
+Цикл работы:
+    1. Таймер тикает каждые TRAY_TICK_INTERVAL_SEC (или реже, если устал)
+    2. Генерируется стимул
+    3. agent.perceive → agent.think → agent.act → agent.evolve
+    4. Результаты публикуются в EventBus (мысли, действия, эволюция)
+    5. Энергия пересчитывается через EnergyPolicy
+    6. Цикл «отдыха» восстанавливает энергию
+
+Главное отличие от main.py:
+- Не блокирует UI (нет input())
+- Реагирует на события шины (user_message, pause, save, shutdown)
+- Не «умирает» от энергии — только замедляется
+- Может работать без присмотра неделями
+
+Запуск:
+    bus = EventBus()
+    agent = DigitalBeing("Alpha")
+    runner = AgentRunner(agent, bus)
+    await runner.start()        # запускает фоновый цикл
+    await bus.run()             # крутит шину (вместе с tray/chat)
+
+    # Позже:
+    await runner.stop()         # graceful shutdown
+"""
+
+import asyncio
+import logging
+import os
+import time
+from typing import Optional
+
+from config.simulation_config import SIM_CONFIG, LR_CONFIG
+from src.core.event_bus import EventBus, Events
+from src.core.energy_policy import EnergyPolicy
+from src.core.watchdog import get_watchdog, Watchdog
+from src.core.buffered_logger import flush_logs
+
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Загрузка/сохранение состояния (вынесено из main.py для переиспользования)
+# ============================================================
+
+def get_latest_checkpoint(agent_name: str) -> Optional[str]:
+    """Найти путь к последнему чекпоинту агента. None если нет."""
+    checkpoint_dir = 'data/checkpoints'
+    if not os.path.exists(checkpoint_dir):
+        return None
+    checkpoints = [f for f in os.listdir(checkpoint_dir)
+                   if f.startswith(f"{agent_name}_cycle_")]
+    if not checkpoints:
+        return None
+    checkpoints.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    return os.path.join(checkpoint_dir, checkpoints[-1])
+
+
+def load_agent_from_checkpoint(agent, checkpoint_path: Optional[str]) -> bool:
+    """Загрузить состояние агента из чекпоинта. Возвращает True если успешно."""
+    if not checkpoint_path:
+        return False
+    if not os.path.exists(checkpoint_path):
+        logger.warning(f"Чекпоинт не найден: {checkpoint_path}")
+        return False
+    try:
+        agent.load_state(checkpoint_path)
+        logger.info(f"[{agent.name}] Состояние восстановлено из {os.path.basename(checkpoint_path)}")
+        return True
+    except Exception as e:
+        logger.exception(f"Ошибка загрузки чекпоинта {checkpoint_path}: {e}")
+        return False
+
+
+# ============================================================
+# Генерация стимулов — делегирует в src.core.stimulus_selector.
+# Сохранена обёртка ``generate_prioritized_stimulus`` для
+# обратной совместимости (использует p=0.7 для трей-режима).
+# ============================================================
+
+def generate_prioritized_stimulus(agent) -> str:
+    """Обратная совместимость: старая обёртка над ``stimulus_selector``.
+
+    Использует ``TRAIL_GOAL_PRIORITY_PROB = 0.7`` (жёсткая приоритезация
+    для трей-режима).
+    """
+    from src.core.stimulus_selector import (
+        generate_prioritized_stimulus as _impl,
+    )
+    return _impl(agent)
+
+
+# ============================================================
+# AgentRunner
+# ============================================================
+
+class AgentRunner:
+    """Фоновый оркестратор жизни агента.
+
+    Не является частью DigitalBeing — это «обёртка», которая живёт
+    в asyncio-цикле и делегирует агенту конкретную работу.
+    """
+
+    def __init__(
+        self,
+        agent,
+        bus: EventBus,
+        watchdog: Optional[Watchdog] = None,
+        name: str = "AgentRunner",
+    ):
+        """
+        Args:
+            agent: экземпляр DigitalBeing.
+            bus: EventBus, через который публикуются события.
+            watchdog: Watchdog (опционально). Если None — создаётся глобальный.
+            name: имя для логов.
+        """
+        self.agent = agent
+        self.bus = bus
+        self.watchdog = watchdog or get_watchdog()
+        self.name = name
+
+        # Состояние
+        self._running = False
+        self._paused = False
+        self._stop_requested = False
+        self._tick_count = 0
+        self._last_auto_save_ts = time.time()
+        self._last_user_message_at = 0  # время последнего сообщения пользователя
+
+        # Энергетическая политика
+        self.energy_policy = EnergyPolicy(
+            get_energy=lambda: agent.energy,
+            max_energy=LR_CONFIG.ENERGY_MAX,
+        )
+        # Привязываем setter — пишем в energy_subsystem
+        self.energy_policy.attach_setter(lambda v: setattr(agent, "energy", v))
+
+        # Подписки на события шины
+        self._setup_subscriptions()
+
+        logger.info(
+            f"[{self.name}] AgentRunner создан для {agent.name}. "
+            f"Энергия={agent.energy:.0f}, max={LR_CONFIG.ENERGY_MAX}"
+        )
+
+    # ============================================================
+    # Подписки
+    # ============================================================
+
+    def _setup_subscriptions(self) -> None:
+        """Подписаться на события, на которые Runner должен реагировать."""
+        self.bus.subscribe(Events.USER_MESSAGE, self._on_user_message)
+        self.bus.subscribe(Events.USER_COMMAND, self._on_user_command)
+        self.bus.subscribe(Events.PAUSE_REQUESTED, self._on_pause)
+        self.bus.subscribe(Events.RESUME_REQUESTED, self._on_resume)
+        self.bus.subscribe(Events.SHUTDOWN_REQUESTED, self._on_shutdown)
+        self.bus.subscribe(Events.SAVE_REQUESTED, self._on_save)
+
+    async def _on_user_message(self, event) -> None:
+        """Пользователь отправил сообщение. Обрабатываем его в следующем тике.
+
+        Очередь сообщений создаётся лениво при первом вызове, чтобы
+        не терять сообщения, пришедшие ДО ``start()``. Раньше в этом
+        случае сообщение молча отбрасывалось с warning-логом (UX-баг:
+        пользователь мог отправить сообщение в окно чата ещё до того,
+        как AgentRunner стартовал, и оно исчезало бесследно).
+        """
+        self._last_user_message_at = time.time()
+        text = (event.data or {}).get("text", "")
+        if not text:
+            return
+        logger.info(f"[{self.name}] USER_MESSAGE: {text[:60]}")
+        # Ленивое создание очереди — сообщения, пришедшие до start(),
+        # не теряются, а дожидаются первого тика.
+        if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
+            self._pending_user_messages = asyncio.Queue()
+            logger.debug(
+                f"[{self.name}] Очередь user-сообщений создана лениво "
+                f"(до start()) — сообщение будет обработано."
+            )
+        await self._pending_user_messages.put(text)
+
+    async def _on_user_command(self, event) -> None:
+        """Команда из чата. Выполняется синхронно, ответ публикуется в чат."""
+        cmd = (event.data or {}).get("command", "")
+        if not cmd:
+            return
+        logger.info(f"[{self.name}] USER_COMMAND: /{cmd}")
+        response = await self.handle_command("/" + cmd)
+        if response:
+            # Публикуем ответ как сообщение от агента (для отображения в чате)
+            await self.bus.publish(
+                Events.AGENT_THOUGHT,
+                {"text": response, "cycle": self.agent.cycle_count},
+                source="runner",
+                priority=1,
+            )
+
+    async def _on_user_opened_chat(self, event) -> None:
+        """Пользователь открыл чат из трея. Публикуем краткий статус."""
+        logger.info(f"[{self.name}] USER_OPENED_CHAT")
+        status = self._format_status()
+        await self.bus.publish(
+            Events.AGENT_THOUGHT,
+            {"text": f"👋 Привет! Вот мой статус:\n\n{status}",
+             "cycle": self.agent.cycle_count},
+            source="runner",
+            priority=1,
+        )
+
+    async def _on_pause(self, event) -> None:
+        logger.info(f"[{self.name}] PAUSE_REQUESTED")
+        self._paused = True
+
+    async def _on_resume(self, event) -> None:
+        logger.info(f"[{self.name}] RESUME_REQUESTED")
+        self._paused = False
+
+    async def _on_shutdown(self, event) -> None:
+        logger.info(f"[{self.name}] SHUTDOWN_REQUESTED")
+        self._stop_requested = True
+        # Не делаем save_state здесь — это делает main_tray.py при graceful shutdown
+        # (чтобы не дублировать). Но flush_logs — обязательно.
+        flush_logs()
+
+    async def _on_save(self, event) -> None:
+        logger.info(f"[{self.name}] SAVE_REQUESTED")
+        self._save_state_safe()
+
+    # ============================================================
+    # Цикл жизни
+    # ============================================================
+
+    def _save_state_safe(self) -> bool:
+        """Сохранить состояние и ментальные модели. Не падает при ошибках."""
+        try:
+            self.agent.save_state()
+            self.agent.save_mental_models()
+            flush_logs()
+            return True
+        except Exception as e:
+            logger.exception(f"[{self.name}] Ошибка сохранения: {e}")
+            return False
+
+    async def start(self) -> None:
+        """Запустить фоновый цикл. Возвращает управление сразу (async task).
+
+        Очередь ``_pending_user_messages`` создаётся лениво в
+        ``_on_user_message`` — здесь НЕ пересоздаём её, чтобы не
+        потерять сообщения, пришедшие от пользователя в окно чата
+        между подпиской и ``start()`` (race-condition fix).
+        """
+        if self._running:
+            logger.warning(f"[{self.name}] Уже запущен")
+            return
+        self._running = True
+        self._stop_requested = False
+
+        # Очередь создаётся лениво в _on_user_message — НЕ пересоздаём,
+        # иначе потеряем все сообщения, пришедшие до start().
+        if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
+            self._pending_user_messages = asyncio.Queue()
+
+        logger.info(f"[{self.name}] Старт. Циклов до: ∞ (без смерти от энергии)")
+        await self.bus.publish(
+            Events.TIMER_TICK,
+            {"phase": "started", "agent": self.agent.name},
+            source="runner",
+        )
+
+    async def stop(self) -> None:
+        """Остановить фоновый цикл. Сохранить состояние."""
+        if not self._running:
+            return
+        logger.info(f"[{self.name}] Остановка...")
+        self._stop_requested = True
+        self._running = False
+        self._save_state_safe()
+        await self.bus.publish(
+            Events.TIMER_TICK,
+            {"phase": "stopped", "ticks": self._tick_count},
+            source="runner",
+        )
+
+    async def run_forever(self) -> None:
+        """Бесконечный цикл. Возвращает управление когда stop_requested."""
+        if not self._running:
+            await self.start()
+
+        logger.info(f"[{self.name}] run_forever() стартовал")
+        try:
+            while not self._stop_requested:
+                await self._one_iteration()
+        except asyncio.CancelledError:
+            logger.info(f"[{self.name}] run_forever() отменён")
+            raise
+        except Exception as e:
+            logger.exception(f"[{self.name}] Неожиданная ошибка в цикле: {e}")
+            raise
+        finally:
+            await self.stop()
+
+    async def _one_iteration(self) -> None:
+        """Один «тик» жизни Runner-а.
+
+        Логика:
+        1. Если на паузе — спим N секунд и выходим.
+        2. Ждём сообщение от пользователя ИЛИ таймаут (tick interval).
+        3. Восстанавливаем энергию за время ожидания.
+        4. Если был стимул (от пользователя или сгенерированный) — вызываем perceive→think→act→evolve.
+        5. Публикуем события и проверяем watchdog.
+        6. Автосохранение по таймеру.
+        """
+        if self._paused:
+            # На паузе просто ждём и выходим (потребляем немного CPU)
+            await asyncio.sleep(1.0)
+            return
+
+        # === Рассчитать интервал ожидания ===
+        # Берём максимум из:
+        #   - TRAY_TICK_INTERVAL_SEC (минимум между циклами)
+        #   - EnergyPolicy (если устал — реже)
+        #   - Минимум 1 сек (чтобы не крутить CPU вхолостую)
+        min_interval = LR_CONFIG.TRAY_TICK_INTERVAL_SEC
+        energy_interval = self.energy_policy.current_tick_interval_sec()
+        interval = max(min_interval, energy_interval, 1.0)
+
+        # === Watchdog на цикл ===
+        self.watchdog.on_cycle_start()
+
+        # === Ждём либо сообщение пользователя, либо таймаут ===
+        cycle_start_ts = time.time()
+        try:
+            user_message = await asyncio.wait_for(
+                self._pending_user_messages.get(),
+                timeout=interval,
+            )
+            stimulus = user_message
+            user_initiated = True
+        except asyncio.TimeoutError:
+            stimulus = generate_prioritized_stimulus(self.agent)
+            user_initiated = False
+        except asyncio.CancelledError:
+            self.watchdog.on_cycle_end()
+            raise
+
+        # === Восстановить энергию за время ожидания ===
+        elapsed = time.time() - cycle_start_ts
+        self.energy_policy.regenerate(elapsed)
+
+        # === Собственно один «цикл жизни» агента ===
+        try:
+            self._do_one_agent_cycle(stimulus, user_initiated=user_initiated)
+        except Exception as e:
+            logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
+
+        # === Watchdog: конец цикла ===
+        self.watchdog.on_cycle_end()
+
+        # === Проверить health + энергетические события ===
+        await self._check_energy_transitions()
+        await self._check_watchdog_pressure()
+
+        # === Автосохранение по таймеру ===
+        if (time.time() - self._last_auto_save_ts) >= LR_CONFIG.TRAY_AUTO_SAVE_INTERVAL_SEC:
+            self._save_state_safe()
+            self._last_auto_save_ts = time.time()
+
+        # === Минимальная пауза для CPU (этичный throttle) ===
+        if LR_CONFIG.MIN_CYCLE_INTERVAL_SEC > 0:
+            await asyncio.sleep(LR_CONFIG.MIN_CYCLE_INTERVAL_SEC)
+
+    def _do_one_agent_cycle(self, stimulus: str, user_initiated: bool = False) -> None:
+        """Один полный цикл агента: perceive → think → act → evolve.
+
+        Публикует события на шине о мыслях, действиях, эволюции.
+        Не использует input()/print() — общение через EventBus.
+        """
+        # === АВТОНОМНЫЙ ТИК ЖИЗНИ ===
+        # Вызываем КАЖДЫЙ цикл, независимо от того, был ли стимул от пользователя.
+        # Это делает агента по-настоящему живым: он думает, чувствует, мечтает,
+        # инициативирует диалог — даже в полной тишине.
+        try:
+            autonomous_report = self.agent.autonomous_tick()
+            # Логируем интересные события автономной жизни
+            self._log_autonomous_events(autonomous_report)
+        except Exception as e:
+            logger.exception(f"autonomous_tick failed: {e}")
+
+        try:
+            perceived = self.agent.perceive(stimulus)
+        except Exception as e:
+            logger.exception(f"perceive failed: {e}")
+            return
+
+        try:
+            thought = self.agent.think(perceived)
+        except Exception as e:
+            logger.exception(f"think failed: {e}")
+            return
+
+        try:
+            action = self.agent.act(thought)
+        except Exception as e:
+            logger.exception(f"act failed: {e}")
+            return
+
+        try:
+            self.agent.evolve()
+        except Exception as e:
+            logger.exception(f"evolve failed: {e}")
+            return
+
+        self._tick_count += 1
+        # Используем существующее поле cycle_count в агенте
+        self.agent.cycle_count += 1
+
+        # === Публикуем события ===
+        # Делаем это синхронно через publish_sync — корутины EventBus не блокируют.
+        thought_str = str(thought) if thought else ""
+        action_str = str(action) if action else ""
+
+        self.bus.publish_sync(
+            Events.TICK,
+            {
+                "tick": self._tick_count,
+                "cycle": self.agent.cycle_count,
+                "stimulus": stimulus,
+                "thought": thought_str[:200],
+                "action": action_str[:200],
+                "user_initiated": user_initiated,
+                "energy": self.agent.energy,
+                "intelligence": self.agent.intelligence,
+            },
+            source="runner",
+        )
+
+        # === Открытые вопросы (свобода воли) ===
+        # Если текущий стимул — это exploration открытого вопроса,
+        # фиксируем результат мышления в агенте (как делает main.py).
+        # Без этого вопрос «крутится» бесконечно без прогресса.
+        is_open_question_stimulus = (
+            getattr(self.agent, "_open_questions", None)
+            and stimulus.startswith("вопрос: ")
+        )
+        if is_open_question_stimulus:
+            self.agent._record_open_question_exploration(stimulus, thought)
+
+        # Если мысль интересная — публикуем отдельно
+        if thought_str and not _is_boring_thought(thought_str):
+            self.bus.publish_sync(
+                Events.AGENT_THOUGHT,
+                {"text": thought_str[:300], "cycle": self.agent.cycle_count},
+                source="agent",
+                priority=0,  # низкий приоритет — чтобы не перебивать важное
+            )
+
+        # === Ответ на открытый вопрос → публикуем в чат как особое событие ===
+        # Это позволяет GUI-режиму видеть прогресс размышлений над вопросами
+        # пользователя. Раньше ответы отсекались _is_boring_thought(), поэтому
+        # в чат не попадали — пользователь видел только в терминале (main.py).
+        if is_open_question_stimulus:
+            recently_answered = [
+                q for q in self.agent._open_questions
+                if q.get("answered") and q.get("answer")
+                and q["last_explored_at"] == self.agent.cycle_count
+            ]
+            if recently_answered:
+                q = recently_answered[0]
+                answer_text = (
+                    f"✅ Ответ на вопрос «{q['text'][:50]}»:\n"
+                    f"   {q['answer'][:200]}"
+                )
+                self.bus.publish_sync(
+                    Events.AGENT_THOUGHT,
+                    {"text": answer_text, "cycle": self.agent.cycle_count},
+                    source="agent",
+                    priority=1,  # выше чем обычные мысли
+                )
+
+        # Если интеллект вырос
+        if self.agent.intelligence > getattr(self, "_last_intel", 0):
+            self._last_intel = self.agent.intelligence
+            self.bus.publish_sync(
+                Events.AGENT_EVOLVED,
+                {"intelligence": self.agent.intelligence},
+                source="agent",
+                priority=2,  # высокий — это важное событие
+            )
+
+    async def _check_energy_transitions(self) -> None:
+        """Публикует события при пересечении порогов энергии."""
+        if self.energy_policy.should_publish_critical():
+            await self.bus.publish(
+                Events.ENERGY_LOW,
+                {
+                    "level": "critical",
+                    "energy": self.agent.energy,
+                    "percent": self.energy_policy.energy_percent,
+                    "message": (
+                        f"Я очень устал (энергия {self.agent.energy:.0f}). "
+                        f"Я не умру — просто замедлюсь и буду отдыхать."
+                    ),
+                },
+                source="energy_policy",
+                priority=2,
+            )
+        elif self.energy_policy.should_publish_low():
+            await self.bus.publish(
+                Events.ENERGY_LOW,
+                {
+                    "level": "low",
+                    "energy": self.agent.energy,
+                    "percent": self.energy_policy.energy_percent,
+                    "message": "Энергия падает. Я начинаю думать реже.",
+                },
+                source="energy_policy",
+                priority=1,
+            )
+
+        if self.energy_policy.should_publish_recovered():
+            await self.bus.publish(
+                Events.ENERGY_RECOVERED,
+                {
+                    "energy": self.agent.energy,
+                    "percent": self.energy_policy.energy_percent,
+                    "message": "Я снова полон сил!",
+                },
+                source="energy_policy",
+                priority=1,
+            )
+
+    async def _check_watchdog_pressure(self) -> None:
+        """Реагирует на сигналы watchdog (RSS, медленные циклы)."""
+        if self.watchdog.should_force_forget():
+            try:
+                # Принудительное забывание уже реализовано в perform_forgetting()
+                # Вызываем его и публикуем событие
+                self.agent.perform_forgetting()
+                self.watchdog.mark_forced_forget(0)  # счётчик ведётся внутри
+                await self.bus.publish(
+                    "watchdog_pressure",
+                    {"kind": "memory_pressure", "rss_mb": self.watchdog.get_rss_mb()},
+                    source="watchdog",
+                    priority=2,
+                )
+            except Exception as e:
+                logger.exception(f"Ошибка при принудительном забывании: {e}")
+
+    # ============================================================
+    # Команды из чата
+    # ============================================================
+
+    async def handle_command(self, cmd: str) -> str:
+        """Обработать команду из чата (начинается с /).
+
+        Возвращает текст ответа для чата.
+        """
+        # Сохраняем оригинальную команду ДО lower(), чтобы команды вида
+        # /name <Имя> сохраняли регистр самого имени (ЛюСЯ, Макс и т.п.).
+        # В нижний регистр приводим только служебный cmd для маршрутизации.
+        cmd_raw = cmd.strip()
+        cmd = cmd_raw.lstrip("/").lower()
+        agent = self.agent
+
+        if cmd in ("status", "s"):
+            return self._format_status()
+        if cmd in ("goals", "g"):
+            return self._format_goals()
+        if cmd in ("concepts", "c"):
+            return self._format_concepts()
+        if cmd in ("pause",):
+            self._paused = True
+            return "⏸ Пауза. Циклы остановлены, агент ждёт."
+        if cmd in ("resume", "wake"):
+            self._paused = False
+            return "▶ Возобновлено."
+        if cmd in ("save",):
+            ok = self._save_state_safe()
+            return "💾 Сохранено." if ok else "⚠️ Ошибка сохранения."
+        if cmd in ("energy",):
+            return self._format_status()  # alias
+        if cmd in ("quit", "exit"):
+            await self.bus.publish(Events.SHUTDOWN_REQUESTED, source="command")
+            return "👋 Завершение..."
+        if cmd in ("help", "h", "?"):
+            return self._format_help()
+        if cmd.startswith("ask "):
+            # Открытый вопрос (свобода воли). Ставим в очередь,
+            # AgentRunner будет думать над ним в ближайших циклах.
+            question = cmd[4:].strip()
+            if question:
+                result = agent.ask_user(question, source="chat")
+                if result.get("status") == "queued":
+                    return (
+                        f"🧠 Вопрос «{question[:60]}» поставлен в очередь "
+                        f"(размер очереди: {result.get('queue_size')})."
+                    )
+                if result.get("status") == "duplicate":
+                    return f"↺ Вопрос «{question[:60]}» уже в очереди."
+                return f"⚠️ Не удалось поставить вопрос: {result}"
+            return "Использование: /ask <вопрос>"
+        if cmd in ("questions", "q"):
+            return self._format_open_questions()
+        # === Этап 2.5: /web — управление web-поиском ===
+        if cmd in ("web on", "web_on"):
+            ws = getattr(self.agent, "web_searcher", None)
+            if ws is None:
+                return "⚠️ Web-поиск не настроен (см. WEB_SEARCH_ENABLED в конфиге)."
+            ws.toggle(True)
+            return "🌐 Интернет-поиск включён."
+        if cmd in ("web off", "web_off"):
+            ws = getattr(self.agent, "web_searcher", None)
+            if ws is None:
+                return "⚠️ Web-поиск не настроен."
+            ws.toggle(False)
+            return "🌐 Интернет-поиск выключен."
+        if cmd.startswith("web "):
+            # /web <запрос> — ручной поиск
+            query = cmd[4:].strip()
+            if not query:
+                return "Использование: /web <запрос>"
+            ws = getattr(self.agent, "web_searcher", None)
+            if ws is None:
+                return "⚠️ Web-поиск не настроен."
+            result = ws.search(query)
+            if result.get("found"):
+                extract = result["extract"]
+                if len(extract) > 500:
+                    extract = extract[:500] + "…"
+                return (
+                    f"🌐 {result['title']} (Wikipedia/{result.get('lang', 'ru')}):\n"
+                    f"{extract}\n"
+                    f"Источник: {result['url']}"
+                )
+            reason = result.get("error", "not_found")
+            if reason in ("disabled",):
+                return "⚠️ Интернет-поиск выключен (/web on чтобы включить)."
+            if reason in ("network_error", "timeout"):
+                return f"🌐 Интернет недоступен ({reason})."
+            return f"🌐 Ничего не нашёл по «{query}» ({reason})."
+        if cmd == "web":
+            ws = getattr(self.agent, "web_searcher", None)
+            if ws is None:
+                return "⚠️ Web-поиск не настроен."
+            state = "включён" if ws.is_enabled else "выключен"
+            stats = ws.get_stats()
+            return (
+                f"🌐 Интернет-поиск: {state}\n"
+                f"   Язык: {ws.lang}\n"
+                f"   Кэш: {len(ws._cache)} записей\n"
+                f"   HTTP-вызовов: {stats['network_calls']}, "
+                f"найдено: {stats['found']}, ошибок: {stats['errors']}"
+            )
+        # === name / propose_name — NamingDialogue ===
+        # Чат публикует USER_COMMAND с command="propose_name <имя>".
+        # Здесь мы её диспетчеризуем в agent.propose_name(...), который
+        # уже делегирует в naming_dialogue.process_name_proposal().
+        # Имя берём из cmd_raw (оригинальный регистр), не из cmd (lower).
+        # Поддерживаем оба префикса:
+        #   "propose_name <X>" — публикуется из chat_window.py через EventBus.
+        #   "name <X>" / "name" — короткий алиас (на случай прямого вызова
+        #                        handle_command("/name X"), а также на будущее).
+        if (
+            cmd.startswith("propose_name ")
+            or cmd.startswith("name ")
+            or cmd == "name"
+        ):
+            stripped = cmd_raw.lstrip("/")
+            if cmd.startswith("propose_name "):
+                proposed = stripped[len("propose_name "):].strip()
+            elif cmd.startswith("name "):
+                proposed = stripped[len("name "):].strip()
+            else:
+                proposed = ""
+            if not proposed:
+                return "Использование: /name <имя_которое_ты_хочешь_дать>"
+            result = agent.propose_name(proposed, cycle=agent.cycle_count)
+            status = result.get("status", "ok")
+            if status == "accepted":
+                return f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            if status == "rejected":
+                reason = result.get("reason", "неизвестная причина")
+                return f"🤔 Не подошло: {reason}."
+            if status == "alternative_proposed":
+                alt = result.get("alternative") or result.get("user_suggested") or "?"
+                return f"💭 Я бы предпочёл(ла) другое имя: «{alt}». Согласен?"
+            if status == "alternative_accepted":
+                return f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            if status == "no_alternative_pending":
+                return "ℹ️ Сейчас нет ожидающего альтернативного имени."
+            if status == "no_naming_dialogue":
+                return "⚠️ Диалог об имени сейчас недоступен."
+            if status == "no_op":
+                return f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
+            return f"ℹ️ Результат: {result}"
+        return f"❓ Неизвестная команда: /{cmd}. Введите /help."
+
+    def _format_open_questions(self) -> str:
+        """Форматирует список открытых вопросов для чата."""
+        a = self.agent
+        questions = a.get_open_questions()
+        if not questions:
+            return "📭 Очередь открытых вопросов пуста."
+        lines = [f"📝 Открытые вопросы ({len(questions)}):"]
+        for i, q in enumerate(questions[:10], 1):
+            status = "✅" if q["answered"] else "🔄"
+            hint = f" (💡 {q['hint'][:30]})" if q.get("hint") else ""
+            lines.append(
+                f"  {status} [{q['explored']}/{q['max']}] "
+                f"«{q['text'][:50]}»{hint}"
+            )
+        return "\n".join(lines)
+
+    def _format_status(self) -> str:
+        a = self.agent
+        es = self.energy_policy.get_status()
+        return (
+            f"🤖 {a.name}\n"
+            f"  Цикл: {a.cycle_count} | Тик Runner: {self._tick_count}\n"
+            f"  Энергия: {es['energy']:.0f}/{es['max_energy']:.0f} "
+            f"({es['percent']:.0f}%, {es['level']})\n"
+            f"  Интеллект: {a.intelligence}\n"
+            f"  Концепций: {len(a.mental_models.concepts)}\n"
+            f"  Интервал тика: {es['tick_interval_sec']:.0f}с\n"
+            f"  На паузе: {'да' if self._paused else 'нет'}"
+        )
+
+    def _format_goals(self) -> str:
+        a = self.agent
+        goals_status = a.get_goals_status()
+        active = goals_status.get('active', '')
+        return (
+            f"📋 Цели: {goals_status['completed']}/{goals_status['total']}\n"
+            f"  Активная: {active or '—'}"
+        )
+
+    def _format_concepts(self) -> str:
+        a = self.agent
+        mm = a.mental_models
+        total = len(mm.concepts)
+        high_conf = sum(1 for n in mm.concepts.values() if n.confidence > 0.7)
+        return (
+            f"📚 Концепций: {total}\n"
+            f"  С высокой уверенностью (>70%): {high_conf}"
+        )
+
+    def _format_help(self) -> str:
+        return (
+            "Доступные команды:\n"
+            "  /status    — статус агента\n"
+            "  /goals     — цели\n"
+            "  /concepts  — концепции\n"
+            "  /energy    — энергия (алиас status)\n"
+            "  /pause     — пауза\n"
+            "  /resume    — возобновить\n"
+            "  /save      — сохранить сейчас\n"
+            "  /name <имя> — дать агенту имя\n"
+            "  /web       — статус интернет-поиска\n"
+            "  /web on    — включить интернет-поиск\n"
+            "  /web off   — выключить интернет-поиск\n"
+            "  /web <запрос> — поиск в Wikipedia\n"
+            "  /quit      — завершить (с сохранением)\n"
+            "  /help      — эта справка"
+        )
+
+    # ============================================================
+    # Логирование автономных событий
+    # ============================================================
+
+    def _log_autonomous_events(self, report: dict) -> None:
+        """Логирует интересные события из автономного тика."""
+        if not report:
+            return
+
+        cycle = report.get("cycle", 0)
+
+        # Спонтанные порывы
+        will = report.get("will")
+        if will and will.get("spontaneous"):
+            spontaneous = will["spontaneous"]
+            if spontaneous:
+                prompt = spontaneous.get("meta", {}).get("prompt", "неизвестно")
+                logger.info(f"[{self.name}] 💭 Спонтанный порыв (цикл {cycle}): {prompt}")
+
+        # Проактивные сообщения
+        comm = report.get("communication")
+        if comm and comm.get("proactive_message"):
+            msg = comm["proactive_message"]
+            content = msg.get("content", "")[:80]
+            logger.info(f"[{self.name}] 💬 Проактивное сообщение (цикл {cycle}): {content}")
+
+        # Новые квесты от души
+        soul = report.get("soul")
+        if soul and soul.get("soul", {}).get("systems", {}).get("meaning", {}).get("new_quest"):
+            quest = soul["soul"]["systems"]["meaning"]["new_quest"]
+            logger.info(f"[{self.name}] 🌌 Новый квест (цикл {cycle}): {quest}")
+
+        # Таймаут naming dialogue
+        if comm and comm.get("naming_timeout"):
+            logger.info(f"[{self.name}] ⏰ Naming dialogue timeout (цикл {cycle})")
+
+        # Самоуничтожение (экстремально редко)
+        will_abuse = will and will.get("abuse_check")
+        if will_abuse and will_abuse.get("recommended_action") == "self_terminate":
+            logger.warning(f"[{self.name}] ☠️ Рекомендация самоуничтожения (цикл {cycle})")
+
+    # ============================================================
+    # Диагностика
+    # ============================================================
+
+    def get_status(self) -> dict:
+        """Полный статус для tray/dashboard."""
+        return {
+            "agent_name": self.agent.name,
+            "running": self._running,
+            "paused": self._paused,
+            "tick_count": self._tick_count,
+            "agent_cycle": self.agent.cycle_count,
+            "energy": self.energy_policy.get_status(),
+            "watchdog": self.watchdog.get_status(),
+        }
+
+
+def _is_boring_thought(thought: str) -> bool:
+    """Эвристика: пропускаем очевидные/шаблонные мысли в логе чата."""
+    boring = ("Ментальная модель", "Знаю ответ")
+    return any(b in thought for b in boring) and len(thought) < 100

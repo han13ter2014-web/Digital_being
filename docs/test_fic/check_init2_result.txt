@@ -1,0 +1,7 @@
+size: 380
+first 30 bytes hex: 2320d0add0bcd0bed186d0b8d0bed0bdd0b0d0bbd18cd0bdd18bd0b920d1
+lines with em-dash?
+  line 4 HAS valid UTF-8 em-dash
+  line 5 HAS valid UTF-8 em-dash
+  line 6 HAS valid UTF-8 em-dash
+  line 7 HAS valid UTF-8 em-dash

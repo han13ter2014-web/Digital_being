@@ -1,0 +1,8 @@
+90:        self._goal_progress = {}  # progress по целям {goal_id: percentage}
+129:        self._goal_progress = self.goal_subsystem._goal_progress
+520:            '_goal_progress': {k: list(v.get("matched_concepts", [])) for k, v in self._goal_progress.items()},
+721:                gp_data = state.get('_goal_progress', {})
+724:                    self._goal_progress[goal_id] = {
+756:            self._goal_progress[goal["id"]] = {
+824:            progress_data = self._goal_progress.get(goal_id, {})
+835:            progress_data = self._goal_progress.get(goal["id"], {})

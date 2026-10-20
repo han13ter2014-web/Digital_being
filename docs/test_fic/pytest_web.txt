@@ -1,0 +1,38 @@
+============================= test session starts =============================
+collecting ... collected 18 items
+
+tests/test_web_dashboard.py::test_shared_state_update_and_snapshot PASSED [  5%]
+tests/test_web_dashboard.py::test_shared_state_push_pop_action PASSED    [ 11%]
+tests/test_web_dashboard.py::test_shared_state_push_thought PASSED       [ 16%]
+tests/test_web_dashboard.py::test_shared_state_thoughts_limited_to_maxlen PASSED [ 22%]
+tests/test_web_dashboard.py::test_shared_state_sse_subscribers PASSED    [ 27%]
+tests/test_web_dashboard.py::test_dashboard_serves_html PASSED           [ 33%]
+tests/test_web_dashboard.py::test_dashboard_status_endpoint PASSED       [ 38%]
+tests/test_web_dashboard.py::test_dashboard_thoughts_endpoint PASSED     [ 44%]
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_validates PASSED [ 50%]
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_queues PASSED [ 55%]
+tests/test_web_dashboard.py::test_dashboard_unknown_action_rejected PASSED [ 61%]
+tests/test_web_dashboard.py::test_dashboard_subsystems_endpoint PASSED   [ 66%]
+tests/test_web_dashboard.py::test_dashboard_sse_streams_thoughts PASSED  [ 72%]
+tests/test_web_dashboard.py::test_apply_action_pause_and_resume PASSED   [ 77%]
+tests/test_web_dashboard.py::test_apply_action_set_goal PASSED           [ 83%]
+tests/test_web_dashboard.py::test_apply_action_no_agent_returns_no_agent PASSED [ 88%]
+tests/test_web_dashboard.py::test_dashboard_stops_cleanly PASSED         [ 94%]
+tests/test_web_dashboard.py::test_dashboard_publish_methods_with_agent PASSED [100%]
+
+============================== warnings summary ===============================
+tests/test_web_dashboard.py::test_dashboard_serves_html
+tests/test_web_dashboard.py::test_dashboard_status_endpoint
+tests/test_web_dashboard.py::test_dashboard_thoughts_endpoint
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_validates
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_queues
+tests/test_web_dashboard.py::test_dashboard_unknown_action_rejected
+tests/test_web_dashboard.py::test_dashboard_subsystems_endpoint
+tests/test_web_dashboard.py::test_dashboard_sse_streams_thoughts
+tests/test_web_dashboard.py::test_dashboard_stops_cleanly
+  c:\digital_being\src\ui\web_dashboard.py:520: NotAppKeyWarning: It is recommended to use web.AppKey instances for keys.
+  https://docs.aiohttp.org/en/stable/web_advanced.html#application-s-config
+    app["state"] = self.state
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 18 passed, 9 warnings in 54.01s =======================

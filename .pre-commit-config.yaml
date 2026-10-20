@@ -1,0 +1,53 @@
+# Pre-commit hooks для Digital Being
+# Установка: pip install pre-commit && pre-commit install
+# Запуск вручную: pre-commit run --all-files
+
+repos:
+  # --- Форматирование и линтинг ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python]
+      - id: ruff-format
+        types_or: [python]
+
+  # --- Проверка типов (mypy) ---
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [aiohttp, psutil, numpy]
+        args: [--config-file, pyproject.toml]
+        types_or: [python]
+
+  # --- Базовые проверки ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: debug-logger
+      - id: detect-private-key
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # --- Bandit — поиск security issues ---
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8
+    hooks:
+      - id: bandit
+        args: [-r, src, -ll, --skip=B101,B601]
+        exclude: tests/
+
+# Конфигурация для CI: fail fast на первых ошибках
+fail_fast: true
+
+# Время жизни кэша (в днях)
+default_stages: [commit]

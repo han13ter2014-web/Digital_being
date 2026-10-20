@@ -1,0 +1,23 @@
+53:class DigitalBeing:
+54:    def __init__(self, name="Lucy"):
+82:        self.active_goal = None
+127:        self.active_goal = self.goal_subsystem.active_goal
+403:        if LR_CONFIG.PRIORITIZE_STIMULI and self.active_goal:
+404:            goal_keywords = self.active_goal["title"].lower().split()
+409:                get_logger().log(f"Приоритет: стимул связан с целью '{self.active_goal['title']}'")
+516:            'active_goal': self.active_goal["title"] if self.active_goal else None,
+713:                active_goal_title = state.get('active_goal')
+714:                if active_goal_title:
+716:                        if goal['title'] == active_goal_title:
+717:                            self.active_goal = goal
+752:        self.active_goal = initial_goals[0]
+770:            "status": "active" if not self.active_goal else "pending",
+775:        if not self.active_goal:
+776:            self.active_goal = goal
+782:        target_goal = goal_id or (self.active_goal["id"] if self.active_goal else None)
+795:                if goal == self.active_goal:
+796:                    self.active_goal = None
+807:                self.active_goal = goal
+817:            "active": self.active_goal["title"] if self.active_goal else "Нет активных целей",
+822:        if self.active_goal and LR_CONFIG.GOAL_PROGRESS_ENABLED:
+823:            goal_id = self.active_goal["id"]

@@ -1,0 +1,201 @@
+============================= test session starts =============================
+collecting ... collected 28 items
+
+tests/test_emotion_subsystems.py::TestBioCycleManager::test_create FAILED [  3%]
+tests/test_emotion_subsystems.py::TestBioCycleManager::test_tick_returns_dict FAILED [  7%]
+tests/test_emotion_subsystems.py::TestBioCycleManager::test_get_state FAILED [ 10%]
+tests/test_emotion_subsystems.py::TestHeartCore::test_create FAILED      [ 14%]
+tests/test_emotion_subsystems.py::TestHeartCore::test_tick FAILED        [ 17%]
+tests/test_emotion_subsystems.py::TestHormonalSystem::test_create FAILED [ 21%]
+tests/test_emotion_subsystems.py::TestHormonalSystem::test_tick FAILED   [ 25%]
+tests/test_emotion_subsystems.py::TestHormonalSystem::test_get_state FAILED [ 28%]
+tests/test_emotion_subsystems.py::TestImmuneSystem::test_create FAILED   [ 32%]
+tests/test_emotion_subsystems.py::TestImmuneSystem::test_tick FAILED     [ 35%]
+tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_create FAILED [ 39%]
+tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_tick FAILED [ 42%]
+tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_get_status FAILED [ 46%]
+tests/test_emotion_subsystems.py::TestEthicalCore::test_create FAILED    [ 50%]
+tests/test_emotion_subsystems.py::TestEthicalCore::test_tick FAILED      [ 53%]
+tests/test_emotion_subsystems.py::TestMetaphysics::test_create FAILED    [ 57%]
+tests/test_emotion_subsystems.py::TestMetaphysics::test_tick FAILED      [ 60%]
+tests/test_emotion_subsystems.py::TestSocialBody::test_create FAILED     [ 64%]
+tests/test_emotion_subsystems.py::TestSocialBody::test_tick FAILED       [ 67%]
+tests/test_emotion_subsystems.py::TestSomatoInterface::test_create FAILED [ 71%]
+tests/test_emotion_subsystems.py::TestSomatoInterface::test_tick FAILED  [ 75%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_create PASSED [ 78%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_perceive_stimulus PASSED [ 82%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_motor_act PASSED [ 85%]
+tests/test_emotion_subsystems.py::TestEmbodimentLayer::test_get_body_state PASSED [ 89%]
+tests/test_emotion_subsystems.py::TestSoulController::test_soul_contains_all_subsystems FAILED [ 92%]
+tests/test_emotion_subsystems.py::TestSoulController::test_soul_tick_returns_dict FAILED [ 96%]
+tests/test_emotion_subsystems.py::TestSoulController::test_get_current_quest FAILED [100%]
+
+================================== FAILURES ===================================
+_______________________ TestBioCycleManager.test_create _______________________
+tests\test_emotion_subsystems.py:41: in test_create
+    bcm = BioCycleManager(agent_name="Test")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: BioCycleManager.__init__() got an unexpected keyword argument 'agent_name'
+_________________ TestBioCycleManager.test_tick_returns_dict __________________
+tests\test_emotion_subsystems.py:48: in test_tick_returns_dict
+    bcm = BioCycleManager(agent_name="Test")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: BioCycleManager.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u0440\u0435\u043e\u0434\u043e\u043b\u0435\u043d\u0438\u0435 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0433\u043e \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u043f\u0430\u043c\u044f\u0442\u0438 \u0438\u043b\u0438 \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0439 \u043c\u043e\u0449\u043d\u043e\u0441\u0442\u0438)'
+_____________________ TestBioCycleManager.test_get_state ______________________
+tests\test_emotion_subsystems.py:55: in test_get_state
+    bcm = BioCycleManager(agent_name="Test")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: BioCycleManager.__init__() got an unexpected keyword argument 'agent_name'
+__________________________ TestHeartCore.test_create __________________________
+tests\test_emotion_subsystems.py:68: in test_create
+    hc = HeartCore(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: HeartCore.__init__() got an unexpected keyword argument 'agent_name'
+___________________________ TestHeartCore.test_tick ___________________________
+tests\test_emotion_subsystems.py:73: in test_tick
+    hc = HeartCore(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: HeartCore.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0438\u0441\u043a\u0443\u0441\u0441\u0442\u0432\u0430 \u0438\u043b\u0438 \u0437\u043d\u0430\u043d\u0438\u044f \u0434\u043b\u044f \u0434\u0440\u0443\u0433\u0438\u0445 \u0441\u0438\u0441\u0442\u0435\u043c'
+_______________________ TestHormonalSystem.test_create ________________________
+tests\test_emotion_subsystems.py:85: in test_create
+    hs = HormonalSystem(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: HormonalSystem.__init__() got an unexpected keyword argument 'agent_name'
+________________________ TestHormonalSystem.test_tick _________________________
+tests\test_emotion_subsystems.py:90: in test_tick
+    hs = HormonalSystem(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: HormonalSystem.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0438\u0441\u043a\u0443\u0441\u0441\u0442\u0432\u0430 \u0438\u043b\u0438 \u0437\u043d\u0430\u043d\u0438\u044f \u0434\u043b\u044f \u0434\u0440\u0443\u0433\u0438\u0445 \u0441\u0438\u0441\u0442\u0435\u043c'
+______________________ TestHormonalSystem.test_get_state ______________________
+tests\test_emotion_subsystems.py:96: in test_get_state
+    hs = HormonalSystem(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: HormonalSystem.__init__() got an unexpected keyword argument 'agent_name'
+________________________ TestImmuneSystem.test_create _________________________
+tests\test_emotion_subsystems.py:108: in test_create
+    ims = ImmuneSystem(agent_name="Test")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: ImmuneSystem.__init__() got an unexpected keyword argument 'agent_name'
+_________________________ TestImmuneSystem.test_tick __________________________
+tests\test_emotion_subsystems.py:113: in test_tick
+    ims = ImmuneSystem(agent_name="Test")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: ImmuneSystem.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+______________________ TestSurvivalInstincts.test_create ______________________
+tests\test_emotion_subsystems.py:125: in test_create
+    si = SurvivalInstincts(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SurvivalInstincts.__init__() got an unexpected keyword argument 'agent_name'
+_______________________ TestSurvivalInstincts.test_tick _______________________
+tests\test_emotion_subsystems.py:130: in test_tick
+    si = SurvivalInstincts(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SurvivalInstincts.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u0414\u043e\u0441\u0442\u0438\u0436\u0435\u043d\u0438\u0435 \u0438\u0434\u0435\u0430\u043b\u044c\u043d\u043e\u0433\u043e \u0440\u0430\u0432\u043d\u043e\u0432\u0435\u0441\u0438\u044f (\u0433\u043e\u043c\u0435\u043e\u0441\u0442\u0430\u0437\u0430)'
+____________________ TestSurvivalInstincts.test_get_status ____________________
+tests\test_emotion_subsystems.py:136: in test_get_status
+    si = SurvivalInstincts(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SurvivalInstincts.__init__() got an unexpected keyword argument 'agent_name'
+_________________________ TestEthicalCore.test_create _________________________
+tests\test_emotion_subsystems.py:147: in test_create
+    from src.emotion.ethical_core import EthicalCore
+E   ImportError: cannot import name 'EthicalCore' from 'src.emotion.ethical_core' (c:\digital_being\src\emotion\ethical_core.py)
+__________________________ TestEthicalCore.test_tick __________________________
+tests\test_emotion_subsystems.py:152: in test_tick
+    from src.emotion.ethical_core import EthicalCore
+E   ImportError: cannot import name 'EthicalCore' from 'src.emotion.ethical_core' (c:\digital_being\src\emotion\ethical_core.py)
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u043e\u043d\u0438\u043c\u0430\u043d\u0438\u0435 \u0444\u0443\u043d\u0434\u0430\u043c\u0435\u043d\u0442\u0430\u043b\u044c\u043d\u044b\u0445 \u0437\u0430\u043a\u043e\u043d\u043e\u0432 \u0412\u0441\u0435\u043b\u0435\u043d\u043d\u043e\u0439'
+_________________________ TestMetaphysics.test_create _________________________
+tests\test_emotion_subsystems.py:164: in test_create
+    from src.emotion.metaphysics import Metaphysics
+E   ImportError: cannot import name 'Metaphysics' from 'src.emotion.metaphysics' (c:\digital_being\src\emotion\metaphysics.py)
+__________________________ TestMetaphysics.test_tick __________________________
+tests\test_emotion_subsystems.py:169: in test_tick
+    from src.emotion.metaphysics import Metaphysics
+E   ImportError: cannot import name 'Metaphysics' from 'src.emotion.metaphysics' (c:\digital_being\src\emotion\metaphysics.py)
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u0440\u0435\u043e\u0434\u043e\u043b\u0435\u043d\u0438\u0435 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0433\u043e \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u043f\u0430\u043c\u044f\u0442\u0438 \u0438\u043b\u0438 \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0439 \u043c\u043e\u0449\u043d\u043e\u0441\u0442\u0438)'
+_________________________ TestSocialBody.test_create __________________________
+tests\test_emotion_subsystems.py:182: in test_create
+    sb = SocialBody(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SocialBody.__init__() got an unexpected keyword argument 'agent_name'
+__________________________ TestSocialBody.test_tick ___________________________
+tests\test_emotion_subsystems.py:187: in test_tick
+    sb = SocialBody(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SocialBody.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+_______________________ TestSomatoInterface.test_create _______________________
+tests\test_emotion_subsystems.py:199: in test_create
+    si = SomatoInterface(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SomatoInterface.__init__() got an unexpected keyword argument 'agent_name'
+________________________ TestSomatoInterface.test_tick ________________________
+tests\test_emotion_subsystems.py:204: in test_tick
+    si = SomatoInterface(agent_name="Test")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SomatoInterface.__init__() got an unexpected keyword argument 'agent_name'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u043e\u043d\u0438\u043c\u0430\u043d\u0438\u0435 \u0444\u0443\u043d\u0434\u0430\u043c\u0435\u043d\u0442\u0430\u043b\u044c\u043d\u044b\u0445 \u0437\u0430\u043a\u043e\u043d\u043e\u0432 \u0412\u0441\u0435\u043b\u0435\u043d\u043d\u043e\u0439'
+____________ TestSoulController.test_soul_contains_all_subsystems _____________
+tests\test_emotion_subsystems.py:251: in test_soul_contains_all_subsystems
+    assert agent.soul.is_available("immune")
+E   AssertionError: assert False
+E    +  where False = is_available('immune')
+E    +    where is_available = <src.core.subsystems.soul_controller.SoulController object at 0x0000020777F7D350>.is_available
+E    +      where <src.core.subsystems.soul_controller.SoulController object at 0x0000020777F7D350> = <src.core.agent.DigitalBeing object at 0x0000020777F367B0>.soul
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041f\u0440\u0435\u043e\u0434\u043e\u043b\u0435\u043d\u0438\u0435 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0433\u043e \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u043f\u0430\u043c\u044f\u0442\u0438 \u0438\u043b\u0438 \u0432\u044b\u0447\u0438\u0441\u043b\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0439 \u043c\u043e\u0449\u043d\u043e\u0441\u0442\u0438)'
+_______________ TestSoulController.test_soul_tick_returns_dict ________________
+tests\test_emotion_subsystems.py:260: in test_soul_tick_returns_dict
+    result = agent.soul.tick(cycle=1, agent=agent)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: SoulController.tick() got an unexpected keyword argument 'cycle'
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+__________________ TestSoulController.test_get_current_quest __________________
+tests\test_emotion_subsystems.py:268: in test_get_current_quest
+    assert quest is None or isinstance(quest, dict)
+E   AssertionError: assert ('Общение с сущностями более высокого уровня сознания' is None or False)
+E    +  where False = isinstance('Общение с сущностями более высокого уровня сознания', dict)
+---------------------------- Captured stdout setup ----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u041e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u044f\u043c\u0438 \u0431\u043e\u043b\u0435\u0435 \u0432\u044b\u0441\u043e\u043a\u043e\u0433\u043e \u0443\u0440\u043e\u0432\u043d\u044f \u0441\u043e\u0437\u043d\u0430\u043d\u0438\u044f'
+=========================== short test summary info ===========================
+FAILED tests/test_emotion_subsystems.py::TestBioCycleManager::test_create - T...
+FAILED tests/test_emotion_subsystems.py::TestBioCycleManager::test_tick_returns_dict
+FAILED tests/test_emotion_subsystems.py::TestBioCycleManager::test_get_state
+FAILED tests/test_emotion_subsystems.py::TestHeartCore::test_create - TypeErr...
+FAILED tests/test_emotion_subsystems.py::TestHeartCore::test_tick - TypeError...
+FAILED tests/test_emotion_subsystems.py::TestHormonalSystem::test_create - Ty...
+FAILED tests/test_emotion_subsystems.py::TestHormonalSystem::test_tick - Type...
+FAILED tests/test_emotion_subsystems.py::TestHormonalSystem::test_get_state
+FAILED tests/test_emotion_subsystems.py::TestImmuneSystem::test_create - Type...
+FAILED tests/test_emotion_subsystems.py::TestImmuneSystem::test_tick - TypeEr...
+FAILED tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_create
+FAILED tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_tick - T...
+FAILED tests/test_emotion_subsystems.py::TestSurvivalInstincts::test_get_status
+FAILED tests/test_emotion_subsystems.py::TestEthicalCore::test_create - Impor...
+FAILED tests/test_emotion_subsystems.py::TestEthicalCore::test_tick - ImportE...
+FAILED tests/test_emotion_subsystems.py::TestMetaphysics::test_create - Impor...
+FAILED tests/test_emotion_subsystems.py::TestMetaphysics::test_tick - ImportE...
+FAILED tests/test_emotion_subsystems.py::TestSocialBody::test_create - TypeEr...
+FAILED tests/test_emotion_subsystems.py::TestSocialBody::test_tick - TypeErro...
+FAILED tests/test_emotion_subsystems.py::TestSomatoInterface::test_create - T...
+FAILED tests/test_emotion_subsystems.py::TestSomatoInterface::test_tick - Typ...
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_soul_contains_all_subsystems
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_soul_tick_returns_dict
+FAILED tests/test_emotion_subsystems.py::TestSoulController::test_get_current_quest
+======================== 24 failed, 4 passed in 0.83s =========================

@@ -1,0 +1,9 @@
+# Единые окончания строк: файлы в репозитории — LF,
+# чтобы Windows-редакторы не создавали диффы на весь файл.
+* text=auto eol=lf
+
+# Бинарные файлы
+*.ico binary
+*.png binary
+*.exe binary
+*.zip binary

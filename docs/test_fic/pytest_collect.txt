@@ -1,0 +1,232 @@
+============================= test session starts =============================
+collecting ... Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest\__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+                     ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\config\__init__.py", line 201, in console_main
+    code = main()
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\config\__init__.py", line 175, in main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pluggy\_callers.py", line 167, in _multicall
+    raise exception
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\main.py", line 336, in pytest_cmdline_main
+    return wrap_session(config, _main)
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\main.py", line 331, in wrap_session
+    config._ensure_unconfigure()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\config\__init__.py", line 1131, in _ensure_unconfigure
+    self._cleanup_stack.close()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 627, in close
+    self.__exit__(None, None, None)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 619, in __exit__
+    raise exc
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 604, in __exit__
+    if cb(*exc_details):
+       ~~^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 482, in _exit_wrapper
+    callback(*args, **kwds)
+    ~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\capture.py", line 778, in stop_global_capturing
+    self._global_capturing.pop_outerr_to_orig()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\capture.py", line 659, in pop_outerr_to_orig
+    out, err = self.readouterr()
+               ~~~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\capture.py", line 706, in readouterr
+    out = self.out.snap() if self.out else ""
+          ~~~~~~~~~~~~~^^
+  File "C:\Users\GamePK\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\_pytest\capture.py", line 591, in snap
+    self.tmpfile.seek(0)
+    ~~~~~~~~~~~~~~~~~^^^
+ValueError: I/O operation on closed file.
+collected 74 items
+
+<Dir digital_being>
+  <Package tests>
+    <Module test_integration.py>
+      Интеграционные тесты Digital Being (Phase 6).
+      
+      Запускать через:
+          pytest tests/
+          или
+          pytest tests/test_integration.py -v
+      
+      Покрывает:
+      - инициализацию всех подсистем DigitalBeing
+      - NamingDialogue (фазы, таймаут, fallback)
+      - конфигурируемые правила прогресса целей
+      - кэширование src/* индекса
+      - \u043f\u043e\u0432\u0435\u0434\u0435\u043d\u0438\u0435 \u044d\u043d\u0435\u0440\u0433\u0438\u0438 (property \u2194 energy_subsystem)
+      <Function test_all_subsystems_initialized>
+        Все 24 подсистемы должны быть проинициализированы.
+      <Function test_energy_starts_positive>
+        Энергия должна быть положительной после инициализации.
+      <Function test_energy_property_sync>
+        self.energy и energy_subsystem.energy должны быть синхронизированы.
+      <Function test_typing_imports_work>
+        Проверяем, что Optional/Dict/List импортированы (был баг).
+      <Function test_naming_dialogue_timeout>
+        Через NAME_TIMEOUT_CYCLES должен сработать fallback.
+      <Function test_naming_dialogue_no_timeout_when_completed>
+        После завершения диалога таймаут не должен срабатывать.
+      <Function test_goal_progress_rules_present>
+        LR_CONFIG должен содержать GOAL_PROGRESS_RULES с правилами.
+      <Function test_match_rule_to_goal>
+        Правило должно матчиться по title.
+      <Function test_topic_matches_rule>
+        Topic должен матчиться хотя бы по одному ключевому слову.
+      <Function test_check_goal_progress_uses_rules>
+        _check_goal_progress должен применять конфигурируемые правила.
+      <Function test_src_file_index_cached>
+        После первого вызова _get_src_file_index кэш должен быть заполнен.
+      <Function test_invalidate_src_file_index>
+        _invalidate_src_file_index сбрасывает кэш.
+      <Function test_basic_cycle>
+        Базовый цикл жизни агента не должен падать.
+      <Function test_is_alive_initially>
+        Свежесозданный агент должен быть жив.
+      <Function test_tick_communication_naming_timeout>
+        tick_communication должен реагировать на таймаут NamingDialogue.
+    <Module test_long_run_scenarios.py>
+      Сценарные тесты Этапа 4.3 — long-run без утечек.
+      
+      Покрывает:
+      1. 1000 \u0446\u0438\u043a\u043b\u043e\u0432 perceive\u2192think\u2192act\u2192evolve \u0431\u0435\u0437 \u0440\u043e\u0441\u0442\u0430 RSS (\u0432 \u043f\u0440\u0435\u0434\u0435\u043b\u0430\u0445 \u0434\u043e\u043f\u0443\u0441\u043a\u0430).
+      2. PluginRegistry не накапливает подсистемы при долгой работе.
+      3. SSE-лента не растёт бесконечно (cap=maxlen).
+      4. NurseryWatcher не утекает при множественных tick().
+      5. Конкурентный доступ к SharedState из нескольких потоков.
+      6. Evolve + tick_subsystems не должны ломать друг друга.
+      
+      Эти тесты помечены маркером `long_run` и запускаются отдельно от быстрых.
+      <Function test_1000_cycles_no_significant_rss_growth>
+        1000 циклов не должны приводить к неконтролируемому росту RSS.
+      <Function test_plugin_registry_doesnt_accumulate_during_lifecycle>
+        PluginRegistry не должен накапливать подсистемы за время жизни агента.
+      <Function test_subsystem_tick_count_grows_monotonically>
+        За 100 тиков _tick_count растёт ровно на 100 у каждой подсистемы.
+      <Function test_shared_state_thoughts_capped_at_maxlen>
+        10000 push_thought() не должны занять больше max_thoughts памяти.
+      <Function test_shared_state_actions_capped_at_maxlen>
+        10000 push_action() не должны занять больше max_actions памяти.
+      <Function test_shared_state_concurrent_push_no_corruption>
+        10 потоков одновременно публикуют мысли — ничего не теряется,
+        ничего не ломается.
+      <Function test_plugin_registry_concurrent_register>
+        Конкурентная регистрация подсистем не должна ломать реестр.
+      <Function test_nursery_watcher_no_leak_under_many_ticks>
+        1000 tick() на пустой директории не должны накапливать состояние.
+      <Function test_nursery_watcher_history_capped_at_100>
+        История ограничена 100 записями даже при 200 новых seed-ах.
+      <Function test_evolve_and_tick_subsystems_run_together>
+        Эволюция агента не ломает tick_subsystems и наоборот.
+      <Function test_subsystems_teardown_clean>
+        teardown_all() корректно освобождает ресурсы.
+      <Function test_plugin_registry_status_all_thread_safe>
+        status_all() безопасен под конкурентными tick().
+      <Function test_dashboard_publish_no_leak_over_many_cycles>
+        500 циклов publish_* не должны накапливать состояние.
+      <Function test_no_significant_memory_leak_tracemalloc>
+        tracemalloc фиксирует top-5 аллокаций — проверяем что нет утечки.
+    <Module test_metrics_etap4.py>
+      Тесты Этапа 4 — экспериментальные фичи (3.2, 3.6, 3.7, 3.8).
+      
+      Покрывает:
+      - MetricsCollector (3.6): record, get_history, snapshot, экспорт.
+      - I18n (3.7): перевод, fallback, интерполяция.
+      - WebhookManager (3.8): очередь, rate-limit, fallback.
+      - VoiceRouter (3.2): ConsoleVoiceEngine, capabilities.
+      <Class TestMetricsCollector>
+        <Function test_record_and_get_history>
+        <Function test_get_current_returns_latest>
+        <Function test_get_stats>
+        <Function test_maxlen_caps_history>
+        <Function test_increment_records_rate>
+        <Function test_snapshot>
+        <Function test_export_json>
+        <Function test_list_channels>
+      <Class TestI18n>
+        <Function test_default_language_loads>
+        <Function test_set_language_creates>
+        <Function test_fallback_to_default>
+        <Function test_interpolation>
+        <Function test_missing_key_returns_key>
+        <Function test_save_translations>
+        <Function test_global_helpers>
+      <Class TestWebhookManager>
+        <Function test_empty_manager_send>
+        <Function test_add_remove>
+        <Function test_blocking_send_calls_all_webhooks>
+        <Function test_rate_limit>
+        <Function test_async_queue_and_worker>
+        <Function test_webhook_status>
+        <Function test_create_default_manager_no_env>
+          Без env переменных — менеджер пуст.
+      <Class TestVoiceRouter>
+        <Function test_console_engine_capabilities>
+          ConsoleVoiceEngine имеет tts но не stt.
+        <Function test_console_engine_disabled_returns_false>
+        <Function test_router_with_only_console>
+        <Function test_router_status>
+        <Function test_router_speak_no_tts>
+          Если ни один движок не имеет TTS — speak возвращает False.
+        <Function test_router_hear_no_stt>
+        <Function test_create_default_router_has_console>
+        <Function test_pyttsx_engine_handles_missing_module>
+          PyttsxVoiceEngine без установленного pyttsx3 должен быть безопасным.
+    <Module test_nursery_watcher.py>
+      Тесты Этапа 3.3 — NurseryWatcher.
+      
+      Покрывает:
+      1. Инициализацию и setup() без падения (даже если директории нет).
+      2. Обнаружение новых seed-ов.
+      3. Валидацию структуры seed-а (is_complete).
+      4. Историю обнаруженных seed-ов.
+      5. Удаление seed-ов (notify).
+      6. list_seeds() — внешний API.
+      7. Регистрацию в PluginRegistry.
+      <Function test_nursery_watcher_initializes>
+        Watcher создаётся без падения.
+      <Function test_nursery_watcher_setup_with_missing_dir>
+        setup() не падает, если директории нет.
+      <Function test_nursery_watcher_finds_existing_seeds>
+        При setup() фиксирует уже существующие seed-ы как известные.
+      <Function test_nursery_watcher_detects_new_seed>
+        tick() обнаруживает новые seed-ы после setup.
+      <Function test_nursery_watcher_no_new_seeds_returns_none>
+        tick() без новых seed-ов возвращает None.
+      <Function test_nursery_watcher_complete_seed_validation>
+        is_complete = True только при наличии всех обязательных файлов.
+      <Function test_nursery_watcher_handles_corrupt_json>
+        Битый JSON не валит watcher.
+      <Function test_nursery_watcher_seed_history_limited>
+        История seed-ов ограничена 100 записями.
+      <Function test_nursery_watcher_list_seeds>
+        list_seeds() возвращает все seed-ы с метаданными.
+      <Function test_nursery_watcher_get_seed_by_name>
+        get_seed(name) возвращает детали одного seed-а.
+      <Function test_nursery_watcher_get_seed_missing_returns_none>
+        get_seed() несуществующего — возвращает None.
+      <Function test_nursery_watcher_status_includes_metadata>
+        status() содержит снимок для dashboard.
+      <Function test_nursery_watcher_attach_agent_idempotent>
+        attach_agent() идемпотентен — повторный вызов игнорируется.
+      <Function test_nursery_watcher_registers_in_registry>
+        Watcher автоматически регистрируется в PluginRegistry через DigitalBeing.
+      <Function test_nursery_watcher_can_be_disabled_via_registry>
+        Можно отключить watcher через registry.set_enabled(False).
+
+========================= 74 tests collected in 0.05s =========================
