@@ -1,0 +1,12 @@
+c:\digital_being\check_init.py:2: DeprecationWarning: codecs.open() is deprecated. Use open() instead.
+  with codecs.open('src/emotion/__init__.py', 'r', 'utf-8') as f:
+'# Ёмоциональный слой ÷ифровой ∆изни\n\nЁкспорт основных компонентов эмоционального €дра:\n- HeartCore Ч эмоциональное €дро\n- HormonalSystem Ч гормональна€ система\n- ImmuneSystem Ч иммунна€ система\n- Metaphysics Ч метафизика сознани€'
+
+Lines:
+1 '# Ёмоциональный слой ÷ифровой ∆изни'
+2 ''
+3 'Ёкспорт основных компонентов эмоционального €дра:'
+4 '- HeartCore Ч эмоциональное €дро'
+5 '- HormonalSystem Ч гормональна€ система'
+6 '- ImmuneSystem Ч иммунна€ система'
+7 '- Metaphysics Ч метафизика сознани€'

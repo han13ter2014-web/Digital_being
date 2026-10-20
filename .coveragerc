@@ -1,0 +1,49 @@
+# Coverage configuration for Digital Being.
+# Используется pytest-cov (опциональная dev-зависимость).
+# Запуск: pytest --cov=src --cov=config
+# В CI gate: COVERAGE_FAIL_UNDER=40 pytest --cov=src --cov=config
+
+[run]
+source = src, config
+branch = false
+
+# Файлы, которые не имеют смысла для покрытия (scaffolds, guides, пустые __init__).
+omit =
+    src/guides/*
+    src/cognition/__init__.py
+    src/core/subsystems/__init__.py
+    src/emotion/__init__.py
+    src/evolution/__init__.py
+    src/memory/__init__.py
+    src/metrics/__init__.py
+    src/motivation/__init__.py
+    src/perception/__init__.py
+    src/ui/__init__.py
+
+[report]
+# Сортировка: файлы с самым низким покрытием — сверху (что чинить первым).
+sort = Cover
+
+# Минимальный порог покрытия. По умолчанию 0 (не падаем в локальных запусках).
+# CI поднимает через переменную окружения:
+#   COVERAGE_FAIL_UNDER=40 pytest --cov=src --cov=config --cov-fail-under=$COVERAGE_FAIL_UNDER
+# или:
+#   pytest --cov=src --cov=config --cov-fail-under=40
+fail_under = 0
+
+# Показывать пропущенные строки в терминале.
+show_missing = true
+# (skip_covered управляется через CLI: --cov-report=term:skip-covered)
+skip_covered = false
+
+# Исключения из coverage: точно недостижимые ветки / debug-prints.
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    \.\.\.
+    pass
+
+[html]
+directory = htmlcov

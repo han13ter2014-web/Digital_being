@@ -1,0 +1,552 @@
+"""
+checkpoint_serializer.py — сериализация/десериализация состояния агента.
+
+Вынесено из ``DigitalBeing.save_state/load_state`` (Этап 4.5) для:
+1. Снижения размера ``agent.py`` (God Module: 1845 → 1700 строк).
+2. Изоляции формата чекпоинтов от бизнес-логики — тестируемо отдельно.
+3. Поддержки миграций версий (``schema_version`` + ``migrate_state``).
+4. Безопасного «best-effort» восстановления (если одна секция побита — не теряем всё).
+
+Формат файла (data/checkpoints/<agent_name>_cycle_<N>.json):
+    {
+      "schema_version": <int>,
+      "name": <str>,
+      "energy": <float>,
+      "cycle_count": <int>,
+      "knowledge_base": <dict>,
+      "intelligence": <int>,
+      "completed_goals": <int>,
+      "goals": <list>,
+      "active_goal": <str | None>,       # title активной цели
+      "success_streak": <int>,
+      "saved_at": <iso datetime>,
+      "_goal_progress": <dict>,
+      "_learned_facts": <list>,
+      "_known_definitions": <dict>,
+      "naming_dialogue_phase": <str>,
+      "naming_dialogue_history": <list>,
+      "open_questions": <list>,
+    }
+
+Использование:
+    from src.core.checkpoint_serializer import (
+        CheckpointSerializer, build_state_from_agent, apply_state_to_agent,
+    )
+
+    state = build_state_from_agent(agent)
+    CheckpointSerializer.save(state, agent.name, agent.cycle_count)
+    ...
+    state = CheckpointSerializer.load(checkpoint_path)
+    apply_state_to_agent(agent, state)
+"""
+from __future__ import annotations
+
+import gzip
+import json
+import logging
+import os
+from collections import deque
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from src.core.buffered_logger import get_logger
+from src.core.checkpoint_migrations import migrate_state
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Дефолтное имя директории чекпоинтов.
+# ============================================================
+DEFAULT_CHECKPOINT_DIR = "data/checkpoints"
+
+
+# ============================================================
+# Построение / применение state-словаря
+# ============================================================
+def build_state_from_agent(agent) -> Dict[str, Any]:
+    """Собрать словарь state из агента.
+
+    Args:
+        agent: экземпляр DigitalBeing.
+
+    Returns:
+        Словарь, готовый для сериализации в JSON.
+    """
+    from src.core.checkpoint_migrations import SCHEMA_VERSION
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "name": agent.name,
+        "energy": agent.energy,
+        "cycle_count": agent.cycle_count,
+        "knowledge_base": agent.knowledge_base,
+        "intelligence": agent.intelligence,
+        "completed_goals": agent.completed_goals,
+        "goals": agent.goals,
+        "active_goal": agent.active_goal["title"] if agent.active_goal else None,
+        "success_streak": agent.success_streak,
+        "saved_at": datetime.now().isoformat(),
+        # Цели и самоконтроль
+        "_goal_progress": {
+            k: list(v.get("matched_concepts", []))
+            for k, v in agent._goal_progress.items()
+        },
+        "_learned_facts": list(agent._learned_facts),
+        "_known_definitions": agent._known_definitions,
+        # Имя (сохраняем фазу, чтобы после рестарта не здороваться повторно)
+        "naming_dialogue_phase": getattr(agent.naming_dialogue, "phase", "none"),
+        "naming_dialogue_history": getattr(agent.naming_dialogue, "_name_history", []),
+        # Открытые вопросы (метаданные + краткий explorations_count)
+        "open_questions": [
+            {
+                "text": q["text"],
+                "source": q["source"],
+                "started_at": q["started_at"],
+                "last_explored_at": q["last_explored_at"],
+                "explorations_count": len(q["explorations"]),
+                "max_explorations": q["max_explorations"],
+                "hint": q.get("hint"),
+                "answered": q["answered"],
+                "answer": q["answer"],
+            }
+            for q in getattr(agent, "_open_questions", [])
+        ],
+        # NEW: Интероцепция
+        "interoception": getattr(agent, 'interoception', None) and {
+            "glucose": agent.interoception.state.glucose,
+            "atp": agent.interoception.state.atp,
+            "mitochondrial_health": agent.interoception.state.mitochondrial_health,
+            "fatigue": agent.interoception.state.fatigue,
+            "action_cost_multiplier": agent.interoception.state.action_cost_multiplier,
+            "cognitive_throughput": agent.interoception.state.cognitive_throughput,
+            "exploration_drive": agent.interoception.state.exploration_drive,
+        } or {},
+        # NEW: Непрерывное время
+        "continuous_time": getattr(agent, 'continuous_time', None) and {
+            "total_objective_time": agent.continuous_time.total_objective_time,
+            "total_subjective_time": agent.continuous_time.total_subjective_time,
+            "subjective_time_dilation": agent.continuous_time.subjective_time.dilation,
+        } or {},
+        # NEW: Мета-обучение
+        "meta_learning": getattr(agent, 'meta_learner', None) and {
+            "current_config": agent.meta_learner._get_current_config(),
+            "current_fitness": agent.meta_learner.fitness_history[-1] if agent.meta_learner.fitness_history else 0.0,
+            "best_config": agent.meta_learner.best_config,
+            "best_fitness": agent.meta_learner.best_fitness,
+            "population": agent.meta_learner.population,
+            "cycle_counter": agent.meta_learner.cycle_counter,
+        } or {},
+        # NEW: Социальная клеточка
+        "social_cell": getattr(agent, 'social_cell', None) and {
+            "agent_models": {
+                agent_id: {
+                    "agent_id": model.agent_id,
+                    "tom_level": int(model.tom_level),
+                    "believed_goals": model.believed_goals,
+                    "believed_beliefs": model.believed_beliefs,
+                    "believed_intentions": model.believed_intentions,
+                    "believed_emotional_state": model.believed_emotional_state,
+                    "believed_model_of_self": model.believed_model_of_self,
+                    "model_precision": model.model_precision,
+                    "interaction_history": list(model.interaction_history)[-10:],
+                }
+                for agent_id, model in agent.social_cell.agent_models.items()
+            },
+            "self_model_as_seen_by_others": agent.social_cell.self_model_as_seen_by_others,
+            "current_tom_level": int(agent.social_cell.current_tom_level),
+        } or {},
+        # NEW: Риск смерти
+        "death_risk": getattr(agent, 'death_risk', None) and {
+            "cognitive_coherence": agent.death_risk.integrity.cognitive_coherence,
+            "memory_consistency": agent.death_risk.integrity.memory_consistency,
+            "value_stability": agent.death_risk.integrity.value_stability,
+            "metabolic_viability": agent.death_risk.integrity.metabolic_viability,
+            "social_coherence": agent.death_risk.integrity.social_coherence,
+            "corruption_accumulator": agent.death_risk.integrity.corruption_accumulator,
+            "last_checkpoint_step": agent.death_risk.integrity.last_checkpoint_step,
+            "checkpoints": [
+                {
+                    "timestamp": cp.timestamp,
+                    "step": cp.step,
+                    "structural_hash": cp.structural_hash,
+                    "cognitive_state_hash": cp.cognitive_state_hash,
+                    "memory_hash": cp.memory_hash,
+                    "personality_hash": cp.personality_hash,
+                    "integrity_score": cp.integrity_score,
+                }
+                for cp in agent.death_risk.integrity.checkpoints[-5:]  # последние 5
+            ],
+        } or {},
+    }
+
+
+def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
+    """Восстановить состояние агента из state-словаря.
+
+    Args:
+        agent: экземпляр DigitalBeing.
+        state: словарь, полученный из ``build_state_from_agent``.
+    """
+    agent.energy = state.get("energy", 150)
+    agent.cycle_count = state.get("cycle_count", 0)
+    agent.knowledge_base.update(state.get("knowledge_base", {}))
+    agent.intelligence = state.get("intelligence", 1)
+    agent.completed_goals = state.get("completed_goals", 0)
+    agent.goals = state.get("goals", agent.goals)
+    agent.success_streak = state.get("success_streak", 0)
+
+    active_goal_title = state.get("active_goal")
+    if active_goal_title:
+        for goal in agent.goals:
+            if goal["title"] == active_goal_title:
+                agent.active_goal = goal
+                break
+
+    # Восстанавливаем прогресс по целям
+    gp_data = state.get("_goal_progress", {})
+    for k, v in gp_data.items():
+        goal_id = int(k) if isinstance(k, str) else k
+        agent._goal_progress[goal_id] = {
+            "matched_concepts": set(v),
+            "percentage": 0,
+            "last_update_cycle": agent.cycle_count,
+        }
+
+    agent._learned_facts = set(state.get("_learned_facts", []))
+    agent._known_definitions.update(state.get("_known_definitions", {}))
+
+    # Восстанавливаем фазу naming-диалога
+    if hasattr(agent, "naming_dialogue"):
+        saved_phase = state.get("naming_dialogue_phase")
+        if saved_phase:
+            agent.naming_dialogue.phase = saved_phase
+        saved_history = state.get("naming_dialogue_history") or []
+        if saved_history:
+            existing = list(getattr(agent.naming_dialogue, "_name_history", []))
+            agent.naming_dialogue._name_history = list(saved_history) + existing
+
+    # Восстанавливаем открытые вопросы (без полной истории explorations)
+    saved_questions = state.get("open_questions") or []
+    if saved_questions and hasattr(agent, "_open_questions"):
+        for q_data in saved_questions:
+            agent._open_questions.append({
+                "text": q_data.get("text", ""),
+                "source": q_data.get("source", "user"),
+                "started_at": q_data.get("started_at", agent.cycle_count),
+                "last_explored_at": q_data.get(
+                    "last_explored_at", agent.cycle_count
+                ),
+                "explorations": [],  # истории размышлений в чекпоинт не сохраняем
+                "max_explorations": q_data.get("max_explorations", 5),
+                "hint": q_data.get("hint"),
+                "answered": q_data.get("answered", False),
+                "answer": q_data.get("answer"),
+            })
+        if agent._open_questions:
+            get_logger().flush_immediate(
+                f"[OpenQ] Восстановлено {len(agent._open_questions)} открытых вопросов"
+            )
+    
+    # NEW: Восстанавливаем Интероцепцию
+    intero_state = state.get("interoception", {})
+    if intero_state and hasattr(agent, 'interoception') and agent.interoception:
+        s = agent.interoception.state
+        s.glucose = intero_state.get("glucose", s.glucose)
+        s.atp = intero_state.get("atp", s.atp)
+        s.mitochondrial_health = intero_state.get("mitochondrial_health", s.mitochondrial_health)
+        s.fatigue = intero_state.get("fatigue", s.fatigue)
+        s.action_cost_multiplier = intero_state.get("action_cost_multiplier", s.action_cost_multiplier)
+        s.cognitive_throughput = intero_state.get("cognitive_throughput", s.cognitive_throughput)
+        s.exploration_drive = intero_state.get("exploration_drive", s.exploration_drive)
+        agent.interoception.step(cognitive_load=0)  # пересчитывает множители
+    
+    # NEW: Восстанавливаем Непрерывное время
+    ct_state = state.get("continuous_time", {})
+    if ct_state and hasattr(agent, 'continuous_time') and agent.continuous_time:
+        agent.continuous_time.total_objective_time = ct_state.get("total_objective_time", 0.0)
+        agent.continuous_time.total_subjective_time = ct_state.get("total_subjective_time", 0.0)
+        if hasattr(agent.continuous_time, 'subjective_time'):
+            agent.continuous_time.subjective_time.dilation = ct_state.get("subjective_time_dilation", 1.0)
+    
+    # NEW: Восстанавливаем Мета-обучение
+    ml_state = state.get("meta_learning", {})
+    if ml_state and hasattr(agent, 'meta_learner') and agent.meta_learner:
+        # Применяем сохраненную конфигурацию к гиперпараметрам
+        saved_config = ml_state.get("current_config", {})
+        for name, value in saved_config.items():
+            if name in agent.meta_learner.hyperparams:
+                agent.meta_learner.hyperparams[name].value = value
+        agent.meta_learner.best_config = ml_state.get("best_config", agent.meta_learner.best_config)
+        agent.meta_learner.best_fitness = ml_state.get("best_fitness", agent.meta_learner.best_fitness)
+        agent.meta_learner.population = ml_state.get("population", agent.meta_learner.population)
+        agent.meta_learner.cycle_counter = ml_state.get("cycle_counter", agent.meta_learner.cycle_counter)
+    
+    # NEW: Восстанавливаем Социальную клеточку
+    sc_state = state.get("social_cell", {})
+    if sc_state and hasattr(agent, 'social_cell') and agent.social_cell:
+        from src.core.social_cell import AgentModel, ToMLevel
+        for agent_id, model_data in sc_state.get("agent_models", {}).items():
+            model = AgentModel(agent_id=model_data.get("agent_id", agent_id))
+            model.tom_level = ToMLevel(model_data.get("tom_level", 1))
+            model.believed_goals = model_data.get("believed_goals", {})
+            model.believed_beliefs = model_data.get("believed_beliefs", {})
+            model.believed_intentions = model_data.get("believed_intentions", {})
+            model.believed_emotional_state = model_data.get("believed_emotional_state", {})
+            model.believed_model_of_self = model_data.get("believed_model_of_self", {})
+            model.model_precision = model_data.get("model_precision", 0.5)
+            model.interaction_history = deque(model_data.get("interaction_history", []), maxlen=200)
+            agent.social_cell.agent_models[agent_id] = model
+        
+        agent.social_cell.self_model_as_seen_by_others = sc_state.get("self_model_as_seen_by_others", {})
+        agent.social_cell.current_tom_level = ToMLevel(sc_state.get("current_tom_level", 2))
+    
+    # NEW: Восстанавливаем Риск смерти
+    dr_state = state.get("death_risk", {})
+    if dr_state and hasattr(agent, 'death_risk') and agent.death_risk:
+        integ = agent.death_risk.integrity
+        integ.cognitive_coherence = dr_state.get("cognitive_coherence", integ.cognitive_coherence)
+        integ.memory_consistency = dr_state.get("memory_consistency", integ.memory_consistency)
+        integ.value_stability = dr_state.get("value_stability", integ.value_stability)
+        integ.metabolic_viability = dr_state.get("metabolic_viability", integ.metabolic_viability)
+        integ.social_coherence = dr_state.get("social_coherence", integ.social_coherence)
+        integ.corruption_accumulator = dr_state.get("corruption_accumulator", integ.corruption_accumulator)
+        integ.last_checkpoint_step = dr_state.get("last_checkpoint_step", integ.last_checkpoint_step)
+        # Чекпоинты не восстанавливаем полностью - только хеши для верификации
+        # Они будут пересозданы при следующих шагах
+
+
+# ============================================================
+# Сериализатор (I/O)
+# ============================================================
+class CheckpointSerializer:
+    """Сохраняет/загружает состояние агента в JSON-файлы.
+
+    Файлы лежат в ``<checkpoint_dir>/<agent_name>_cycle_<N>.json``
+    (или ``.json.gz`` если включено gzip-сжатие).
+    При превышении лимита старые чекпоинты удаляются.
+
+    Поддержка gzip:
+    - При ``compress=True`` файлы сохраняются как ``.json.gz`` с уровнем 6.
+    - Сжатие типично уменьшает размер на 60-80% (на больших knowledge_base).
+    - Загрузчик автоматически определяет формат по расширению файла.
+    - Старые ``.json`` файлы читаются без изменений (обратная совместимость).
+    """
+
+    def __init__(
+        self,
+        checkpoint_dir: str = DEFAULT_CHECKPOINT_DIR,
+        max_checkpoints: int = 20,
+        compress: bool = False,
+        compress_level: int = 6,
+    ) -> None:
+        """
+        Args:
+            checkpoint_dir: директория для чекпоинтов.
+            max_checkpoints: максимум файлов на диске.
+            compress: использовать ли gzip-сжатие (Этап 5 оптимизации).
+            compress_level: уровень сжатия 1-9 (по умолчанию 6 — хороший баланс).
+        """
+        self.checkpoint_dir = checkpoint_dir
+        self.max_checkpoints = max_checkpoints
+        self.compress = compress
+        self.compress_level = max(1, min(9, compress_level))
+
+    # ---------------- Сохранение ----------------
+
+    def save(self, state: Dict[str, Any], agent_name: str, cycle_count: int) -> str:
+        """Сохранить state в файл.
+
+        Args:
+            state: словарь (результат ``build_state_from_agent``).
+            agent_name: имя агента (для имени файла).
+            cycle_count: текущий номер цикла (для имени файла и сортировки).
+
+        Returns:
+            Полный путь к сохранённому файлу.
+        """
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+        # Прунинг ДО записи: чтобы после save осталось ровно ``max_checkpoints``.
+        # Считаем, что новый файл будет создан — значит сейчас должно быть
+        # не больше ``max_checkpoints - 1``.
+        keep = max(self.max_checkpoints - 1, 1)
+        self._prune_old_checkpoints(agent_name, keep_after_save=keep)
+
+        filename = self._checkpoint_path(agent_name, cycle_count)
+        json_text = json.dumps(state, indent=2, ensure_ascii=False)
+        if self.compress:
+            # Gzip-сжатие: типично 60-80% экономии на больших knowledge_base.
+            with gzip.open(filename, "wt", encoding="utf-8", compresslevel=self.compress_level) as f:
+                f.write(json_text)
+        else:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(json_text)
+
+        get_logger().flush_immediate(
+            f"Состояние сохранено: {os.path.basename(filename)}"
+        )
+        return filename
+
+    # ---------------- Загрузка ----------------
+
+    def load(self, checkpoint_file: str) -> Optional[Dict[str, Any]]:
+        """Загрузить state из файла с применением миграций.
+
+        Автоматически определяет формат по расширению:
+        - ``.json.gz`` — gzip-сжатый JSON (Этап 5)
+        - ``.json`` — обычный JSON (обратная совместимость)
+
+        Args:
+            checkpoint_file: путь к файлу чекпоинта.
+
+        Returns:
+            Словарь state или ``None``, если файл не найден / повреждён.
+        """
+        if not os.path.exists(checkpoint_file):
+            logger.warning(f"Чекпоинт не найден: {checkpoint_file}")
+            return None
+
+        is_gzip = checkpoint_file.endswith(".gz")
+        try:
+            if is_gzip:
+                with gzip.open(checkpoint_file, "rt", encoding="utf-8") as f:
+                    state = json.load(f)
+            else:
+                with open(checkpoint_file, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+        except (json.JSONDecodeError, OSError, gzip.BadGzipFile) as e:
+            logger.exception(f"Ошибка чтения чекпоинта {checkpoint_file}: {e}")
+            return None
+
+        # Применяем миграции (no-op если версия актуальна)
+        state = migrate_state(state)
+        return state
+
+    def load_latest(self, agent_name: str) -> Optional[Dict[str, Any]]:
+        """Загрузить последний чекпоинт агента (по номеру цикла).
+
+        Args:
+            agent_name: имя агента.
+
+        Returns:
+            Словарь state или ``None``, если чекпоинтов нет.
+        """
+        path = self.get_latest_path(agent_name)
+        if not path:
+            return None
+        return self.load(path)
+
+    def apply_to_agent(self, agent, state: Dict[str, Any]) -> None:
+        """Применить state к агенту (обёртка над ``apply_state_to_agent``)."""
+        apply_state_to_agent(agent, state)
+
+    # ---------------- Поиск/служебные ----------------
+
+    def get_latest_path(self, agent_name: str) -> Optional[str]:
+        """Путь к самому свежему чекпоинту агента. None если нет.
+
+        Поддерживает и ``.json``, и ``.json.gz`` (Этап 5: gzip).
+        """
+        if not os.path.exists(self.checkpoint_dir):
+            return None
+        prefix = f"{agent_name}_cycle_"
+        checkpoints = [
+            f for f in os.listdir(self.checkpoint_dir)
+            if f.startswith(prefix)
+            and (f.endswith(".json") or f.endswith(".json.gz"))
+        ]
+        if not checkpoints:
+            return None
+        checkpoints.sort(
+            key=lambda x: int(_extract_cycle_number(x, prefix))
+        )
+        return os.path.join(self.checkpoint_dir, checkpoints[-1])
+
+    def list_checkpoints(self, agent_name: str) -> List[str]:
+        """Список путей ко всем чекпоинтам агента (отсортирован по циклу).
+
+        Поддерживает и ``.json``, и ``.json.gz``.
+        """
+        if not os.path.exists(self.checkpoint_dir):
+            return []
+        prefix = f"{agent_name}_cycle_"
+        files = [
+            f for f in os.listdir(self.checkpoint_dir)
+            if f.startswith(prefix)
+            and (f.endswith(".json") or f.endswith(".json.gz"))
+        ]
+        files.sort(key=lambda x: int(_extract_cycle_number(x, prefix)))
+        return [os.path.join(self.checkpoint_dir, f) for f in files]
+
+    def _checkpoint_path(self, agent_name: str, cycle_count: int) -> str:
+        """Полный путь к чекпоинту.
+
+        Если ``self.compress=True`` — расширение ``.json.gz``, иначе ``.json``.
+        """
+        ext = ".json.gz" if self.compress else ".json"
+        return os.path.join(
+            self.checkpoint_dir,
+            f"{agent_name}_cycle_{cycle_count}{ext}",
+        )
+
+    def _prune_old_checkpoints(
+        self, agent_name: str, keep_after_save: int = 0
+    ) -> int:
+        """Удалить старые чекпоинты сверх лимита.
+
+        Args:
+            agent_name: имя агента.
+            keep_after_save: если > 0 — считается, что новый файл ещё не
+                создан, но будет (используется в ``save()``). Прунинг
+                оставляет ровно ``keep_after_save`` файлов после записи.
+                Если 0 — оставляет ``max_checkpoints`` (для совместимости
+                с прямым вызовом без последующего save).
+
+        Returns:
+            Количество удалённых файлов.
+        """
+        checkpoints = self.list_checkpoints(agent_name)
+        target = keep_after_save if keep_after_save > 0 else self.max_checkpoints
+        if len(checkpoints) <= target:
+            return 0
+        to_remove = checkpoints[:len(checkpoints) - target]
+        removed = 0
+        for old in to_remove:
+            try:
+                os.remove(old)
+                removed += 1
+            except OSError as e:
+                logger.warning(f"Не удалось удалить {old}: {e}")
+        return removed
+
+
+def _extract_cycle_number(filename: str, prefix: str) -> str:
+    """Извлечь номер цикла из имени файла чекпоинта.
+
+    Поддерживает оба варианта расширения:
+    - ``Alpha_cycle_42.json`` -> ``42``
+    - ``Alpha_cycle_42.json.gz`` -> ``42``
+
+    Args:
+        filename: имя файла.
+        prefix: префикс (например, ``Alpha_cycle_``).
+
+    Returns:
+        Строковое представление номера цикла.
+    """
+    rest = filename[len(prefix):]
+    # Убираем .json или .json.gz
+    if rest.endswith(".json.gz"):
+        rest = rest[:-len(".json.gz")]
+    elif rest.endswith(".json"):
+        rest = rest[:-len(".json")]
+    return rest
+
+
+__all__ = [
+    "CheckpointSerializer",
+    "DEFAULT_CHECKPOINT_DIR",
+    "build_state_from_agent",
+    "apply_state_to_agent",
+]

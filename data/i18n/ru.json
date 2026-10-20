@@ -1,0 +1,48 @@
+{
+  "dashboard.title": "Digital Being — Dashboard",
+  "dashboard.status": "Статус",
+  "dashboard.controls": "Управление",
+  "dashboard.thoughts": "Лента мыслей (SSE)",
+  "dashboard.subsystems": "Подсистемы",
+  "dashboard.metrics": "Графики метрик",
+
+  "stat.name": "Имя",
+  "stat.energy": "Энергия",
+  "stat.intelligence": "Интеллект",
+  "stat.cycles": "Циклов",
+  "stat.goals": "Целей завершено",
+  "stat.concepts": "Концепций",
+  "stat.rss": "RSS (МБ)",
+  "stat.subsystems": "Подсистем",
+  "stat.alive": "Жив",
+
+  "btn.pause": "⏸ Пауза",
+  "btn.resume": "▶ Продолжить",
+  "btn.save": "💾 Сохранить",
+  "btn.reflect": "🔍 Рефлексия",
+  "btn.status": "📋 Полный статус",
+  "btn.thought": "💭 Попросить мысль",
+  "btn.shutdown": "🛑 Завершить",
+
+  "msg.paused": "поставлен на паузу",
+  "msg.resumed": "продолжает",
+  "msg.saved": "сохранено",
+  "msg.reflected": "рефлексия выполнена",
+  "msg.shutting_down": "запрошено завершение",
+  "msg.thought_prefix": "мысль от {name}",
+
+  "agent.born": "🌅 НОВАЯ ЖИЗНЬ! Агент {name} инициализирован.",
+  "agent.died": "💀 Агент {name} прекратил существование",
+  "agent.cycle_banner": "🤖 [{name}] Цикл {cycle} | Интеллект: {intelligence} | Энергия: {energy}",
+
+  "error.invalid_json": "невалидный JSON",
+  "error.action_required": "требуется action",
+  "error.unknown_action": "неизвестное действие: {action}",
+  "error.title_required": "set_goal требует args.title",
+  "error.app_required": "add_quiet_app требует args.app",
+
+  "ok.queued": "в очереди",
+
+  "footer.disconnect": "SSE отключён, пробуем снова...",
+  "footer.last_n": "Последние {n} мыслей"
+}

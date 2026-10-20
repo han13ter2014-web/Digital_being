@@ -1,0 +1,4 @@
+First line: '# Ёмоциональный слой ÷ифровой ∆изни'
+SyntaxError: invalid character 'Ч' (U+2014) (src/emotion/__init__.py, line 4)
+Added coding declaration
+First 20 bytes: 23202d2a2d20636f64696e673a207574662d3820

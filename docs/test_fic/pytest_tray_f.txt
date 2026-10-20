@@ -1,0 +1,30 @@
+============================= test session starts =============================
+collecting ... collected 12 items
+
+tests/test_tray_foundation.py::test_eventbus_basic PASSED                [  8%]
+tests/test_tray_foundation.py::test_eventbus_wildcard PASSED             [ 16%]
+tests/test_tray_foundation.py::test_eventbus_multiple_subscribers PASSED [ 25%]
+tests/test_tray_foundation.py::test_eventbus_subscribe_requires_async PASSED [ 33%]
+tests/test_tray_foundation.py::test_eventbus_history PASSED              [ 41%]
+tests/test_tray_foundation.py::test_eventbus_stats PASSED                [ 50%]
+tests/test_tray_foundation.py::test_eventbus_run_and_stop PASSED         [ 58%]
+tests/test_tray_foundation.py::test_energy_levels PASSED                 [ 66%]
+tests/test_tray_foundation.py::test_energy_regenerate PASSED             [ 75%]
+tests/test_tray_foundation.py::test_energy_thresholds PASSED             [ 83%]
+tests/test_tray_foundation.py::test_energy_status PASSED                 [ 91%]
+tests/test_tray_foundation.py::test_energy_no_setter_safe PASSED         [100%]
+
+============================== warnings summary ===============================
+tests/test_tray_foundation.py::test_eventbus_basic
+tests/test_tray_foundation.py::test_eventbus_wildcard
+tests/test_tray_foundation.py::test_eventbus_multiple_subscribers
+tests/test_tray_foundation.py::test_eventbus_multiple_subscribers
+tests/test_tray_foundation.py::test_eventbus_subscribe_requires_async
+tests/test_tray_foundation.py::test_eventbus_history
+tests/test_tray_foundation.py::test_eventbus_stats
+tests/test_tray_foundation.py::test_eventbus_run_and_stop
+  c:\digital_being\src\core\event_bus.py:103: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if not asyncio.iscoroutinefunction(callback):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 12 passed, 8 warnings in 1.10s ========================

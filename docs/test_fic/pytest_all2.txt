@@ -1,0 +1,30 @@
+........................................................................ [ 44%]
+..........s............................................................. [ 89%]
+.................                                                        [100%]
+============================== warnings summary ===============================
+tests/test_tray_foundation.py::test_eventbus_basic
+tests/test_tray_foundation.py::test_eventbus_wildcard
+tests/test_tray_foundation.py::test_eventbus_multiple_subscribers
+tests/test_tray_foundation.py::test_eventbus_multiple_subscribers
+tests/test_tray_foundation.py::test_eventbus_subscribe_requires_async
+tests/test_tray_foundation.py::test_eventbus_history
+tests/test_tray_foundation.py::test_eventbus_stats
+tests/test_tray_foundation.py::test_eventbus_run_and_stop
+  c:\digital_being\src\core\event_bus.py:103: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if not asyncio.iscoroutinefunction(callback):
+
+tests/test_web_dashboard.py::test_dashboard_serves_html
+tests/test_web_dashboard.py::test_dashboard_status_endpoint
+tests/test_web_dashboard.py::test_dashboard_thoughts_endpoint
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_validates
+tests/test_web_dashboard.py::test_dashboard_action_endpoint_queues
+tests/test_web_dashboard.py::test_dashboard_unknown_action_rejected
+tests/test_web_dashboard.py::test_dashboard_subsystems_endpoint
+tests/test_web_dashboard.py::test_dashboard_sse_streams_thoughts
+tests/test_web_dashboard.py::test_dashboard_stops_cleanly
+  c:\digital_being\src\ui\web_dashboard.py:520: NotAppKeyWarning: It is recommended to use web.AppKey instances for keys.
+  https://docs.aiohttp.org/en/stable/web_advanced.html#application-s-config
+    app["state"] = self.state
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+160 passed, 1 skipped, 17 warnings in 78.55s (0:01:18)

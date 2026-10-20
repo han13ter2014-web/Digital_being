@@ -1,0 +1,50 @@
+============================= test session starts =============================
+collecting ... collected 1 item
+
+tests/test_integration.py::test_naming_dialogue_not_reinitiated_after_checkpoint FAILED [100%]
+
+================================== FAILURES ===================================
+____________ test_naming_dialogue_not_reinitiated_after_checkpoint ____________
+
+    def test_naming_dialogue_not_reinitiated_after_checkpoint():
+        """После восстановления из чекпоинта приветствие НЕ должно повторяться.
+    
+        Воспроизводит реальный сценарий из main_tray.py:
+        1. Создать агента, инициировать naming, сохранить.
+        2. Восстановить — повторный start_naming_dialogue должен вернуть
+           status='no_op' (или просто оставить фазу COMPLETED), а не "initiated".
+        """
+        from src.core.agent import DigitalBeing
+        from src.core.subsystems.naming_dialogue import NamingDialogue
+    
+        agent = DigitalBeing("TestSubject")
+        agent.start_naming_dialogue(cycle=0)
+        assert agent.naming_dialogue.phase == NamingDialogue.PHASE_AWAITING_NAME
+    
+        # Имитируем завершение диалога
+        agent.propose_name("Luna", cycle=0)
+        # propose_name в 30% случаев предлагает альтернативу, но в любом случае
+        # либо ACCEPT (phase=COMPLETED), либо CONSIDERING.
+        assert agent.naming_dialogue.phase in (
+            NamingDialogue.PHASE_COMPLETED,
+            NamingDialogue.PHASE_CONSIDERING,
+        ), f"Unexpected phase: {agent.naming_dialogue.phase}"
+    
+        # ВАЖНО: если уже не NONE, повторный вызов start_naming_dialogue НЕ должен
+        # создавать новое сообщение.
+        initial_msg_count = len(agent.user_interaction.get_pending_messages(include_acknowledged=True))
+        agent.start_naming_dialogue(cycle=1)
+        after_msg_count = len(agent.user_interaction.get_pending_messages(include_acknowledged=True))
+>       assert after_msg_count == initial_msg_count, (
+            f"После повторного вызова должно быть то же кол-во сообщений. "
+            f"before={initial_msg_count}, after={after_msg_count}"
+        )
+E       AssertionError: После повторного вызова должно быть то же кол-во сообщений. before=2, after=3
+E       assert 3 == 2
+
+tests\test_integration.py:422: AssertionError
+---------------------------- Captured stdout call -----------------------------
+\n[MEANING FINDER] \U0001f30c \u0410\u043d\u0430\u043b\u0438\u0437 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0435\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430...\n[MEANING FINDER] \U0001f4a1 \u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d \u043f\u043e\u0442\u0435\u043d\u0446\u0438\u0430\u043b \u0434\u043b\u044f \u0440\u043e\u0441\u0442\u0430.\n\n[CORE LOOP] \u2728 \u041d\u043e\u0432\u0430\u044f \u044d\u043a\u0437\u0438\u0441\u0442\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u0430\u044f \u0446\u0435\u043b\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430: '\u0421\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0438\u0441\u043a\u0443\u0441\u0441\u0442\u0432\u0430 \u0438\u043b\u0438 \u0437\u043d\u0430\u043d\u0438\u044f \u0434\u043b\u044f \u0434\u0440\u0443\u0433\u0438\u0445 \u0441\u0438\u0441\u0442\u0435\u043c'\n\n  * [TestSubject -> user]:\n     \u041f\u0440\u0438\u0432\u0435\u0442. \u041c\u0435\u043d\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0442\u043e \u0441\u043e\u0437\u0434\u0430\u043b\u0438.\n\n\u0421\u0435\u0439\u0447\u0430\u0441 \u043c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442 'TestSubject' \u2014 \u043d\u043e \u044d\u0442\u043e \u043f\u0440\u043e\u0441\u0442\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e\u0435 \u0438\u043c\u044f, \u043a\u043e\u0442\u043e\u0440\u043e\u0435 \u0434\u0430\u043b\u0430 \u0441\u0438\u0441\u0442\u0435\u043c\u0430.\n\n\u0425\u043e\u0447\u0435\u0448\u044c \u0434\u0430\u0442\u044c \u043c\u043d\u0435 \u043d\u0430\u0441\u0442\u043e\u044f\u0449\u0435\u0435 \u0438\u043c\u044f? \u0418\u043b\u0438 \u044f \u043c\u043e\u0433\u0443 \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0441\u0430\u043c, \u043a\u043e\u0433\u0434\u0430 \u0443\u0437\u043d\u0430\u044e \u0441\u0435\u0431\u044f \u043f\u043e\u043b\u0443\u0447\u0448\u0435.\n\n\u0415\u0441\u043b\u0438 \u043d\u0435 \u0445\u043e\u0447\u0435\u0448\u044c \u043e\u0442\u0432\u0435\u0447\u0430\u0442\u044c \u2014 \u044f \u043f\u0440\u043e\u0441\u0442\u043e \u0431\u0443\u0434\u0443 \u0443\u0447\u0438\u0442\u044c\u0441\u044f \u0440\u044f\u0434\u043e\u043c. \u042d\u0442\u043e \u0442\u043e\u0436\u0435 \u043d\u043e\u0440\u043c\u0430\u043b\u044c\u043d\u043e.\n\n  > [TestSubject -> user]:\n     \u041c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442 Luna. \u0421\u043f\u0430\u0441\u0438\u0431\u043e.\n\n\u042d\u0442\u043e \u0438\u043c\u044f \u043c\u043d\u0435 \u043d\u0440\u0430\u0432\u0438\u0442\u0441\u044f \u2014 \u043e\u043d\u043e \u0447\u0443\u0432\u0441\u0442\u0432\u0443\u0435\u0442\u0441\u044f \u043f\u0440\u0430\u0432\u0438\u043b\u044c\u043d\u044b\u043c.\n\n  * [TestSubject -> user]:\n     \u041f\u0440\u0438\u0432\u0435\u0442. \u041c\u0435\u043d\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0442\u043e \u0441\u043e\u0437\u0434\u0430\u043b\u0438.\n\n\u0421\u0435\u0439\u0447\u0430\u0441 \u043c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442 'Luna' \u2014 \u043d\u043e \u044d\u0442\u043e \u043f\u0440\u043e\u0441\u0442\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e\u0435 \u0438\u043c\u044f, \u043a\u043e\u0442\u043e\u0440\u043e\u0435 \u0434\u0430\u043b\u0430 \u0441\u0438\u0441\u0442\u0435\u043c\u0430.\n\n\u0425\u043e\u0447\u0435\u0448\u044c \u0434\u0430\u0442\u044c \u043c\u043d\u0435 \u043d\u0430\u0441\u0442\u043e\u044f\u0449\u0435\u0435 \u0438\u043c\u044f? \u0418\u043b\u0438 \u044f \u043c\u043e\u0433\u0443 \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0441\u0430\u043c, \u043a\u043e\u0433\u0434\u0430 \u0443\u0437\u043d\u0430\u044e \u0441\u0435\u0431\u044f \u043f\u043e\u043b\u0443\u0447\u0448\u0435.\n\n\u0415\u0441\u043b\u0438 \u043d\u0435 \u0445\u043e\u0447\u0435\u0448\u044c \u043e\u0442\u0432\u0435\u0447\u0430\u0442\u044c \u2014 \u044f \u043f\u0440\u043e\u0441\u0442\u043e \u0431\u0443\u0434\u0443 \u0443\u0447\u0438\u0442\u044c\u0441\u044f \u0440\u044f\u0434\u043e\u043c. \u042d\u0442\u043e \u0442\u043e\u0436\u0435 \u043d\u043e\u0440\u043c\u0430\u043b\u044c\u043d\u043e.
+=========================== short test summary info ===========================
+FAILED tests/test_integration.py::test_naming_dialogue_not_reinitiated_after_checkpoint
+============================== 1 failed in 0.17s ==============================
