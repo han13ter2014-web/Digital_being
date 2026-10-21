@@ -761,7 +761,112 @@ class AgentRunner:
             if status == "no_op":
                 return f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
             return f"ℹ️ Результат: {result}"
+        # === Delamain-local: детерминированный слой действий ===
+        if cmd == "delamain" or cmd.startswith("delamain "):
+            return self._handle_delamain_command(cmd_raw)
         return f"❓ Неизвестная команда: /{cmd}. Введите /help."
+
+    def _handle_delamain_command(self, cmd_raw: str) -> str:
+        """Обработать /delamain ...; регистр задачи берём из ``cmd_raw``."""
+
+        sub = getattr(self.agent, "delamain", None)
+        if sub is None:
+            return "⚠️ Delamain-local не подключён (см. лог инициализации)."
+
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else "status"
+        rest = parts[2].strip() if len(parts) > 2 else ""
+
+        if action in ("status", "s"):
+            return self._format_delamain_status(sub)
+        if action in ("on", "enable"):
+            result = sub.enable()
+            if result.get("enabled"):
+                return "🧪 Delamain-local включён. Runtime готов к работе."
+            return f"⚠️ Не удалось включить Delamain-local: {result.get('error')}"
+        if action in ("off", "disable"):
+            sub.disable()
+            return "🧪 Delamain-local выключен (runtime закроется при shutdown)."
+        if action in ("run", "task"):
+            if not rest:
+                return "Использование: /delamain run <задача>"
+            try:
+                result = sub.run_now(rest)
+            except Exception as exc:
+                return f"⚠️ Delamain-local: {type(exc).__name__}: {exc}"
+            return self._format_delamain_result(result)
+        if action in ("goal", "queue"):
+            if "|" not in rest:
+                return "Использование: /delamain goal <название> | <команда>"
+            title, command = rest.split("|", 1)
+            title = title.strip()
+            command = command.strip()
+            if not title or not command:
+                return "Использование: /delamain goal <название> | <команда>"
+            try:
+                goal = sub.queue_goal(title, command)
+            except Exception as exc:
+                return f"⚠️ Не удалось поставить цель: {type(exc).__name__}: {exc}"
+            return (
+                f"🧪 Цель #{goal['id']} «{goal['title']}» поставлена в очередь. "
+                f"Выполнится на ближайшем тике Delamain."
+            )
+        if action in ("goals", "list"):
+            try:
+                goals = sub.list_goals()
+            except Exception as exc:
+                return f"⚠️ Не удалось прочитать цели: {type(exc).__name__}: {exc}"
+            if not goals:
+                return "🧪 Исполняемых целей Delamain нет."
+            lines = [f"🧪 Delamain-цели ({len(goals)}):"]
+            for goal in goals[:10]:
+                lines.append(
+                    f"  [{goal.get('status')}] #{goal.get('id')} "
+                    f"{goal.get('title')} (p={float(goal.get('priority', 0)):.2f})"
+                )
+            if len(goals) > 10:
+                lines.append(f"  … ещё {len(goals) - 10}")
+            return "\n".join(lines)
+        return (
+            "Использование: /delamain [status|on|off|run <задача>|"
+            "goal <название> | <команда>|goals]"
+        )
+
+    def _format_delamain_status(self, sub) -> str:
+        status = sub.status()
+        goals = status.get("goals") or {}
+        lines = [
+            "🧪 Delamain-local",
+            f"  Включён: {'да' if status.get('enabled') else 'нет'}",
+            f"  Runtime: {'готов' if status.get('runtime_ready') else 'не создан'}",
+            f"  Workspace: {status.get('workspace')}",
+            f"  Цели: pending={goals.get('pending', 0)}, "
+            f"done={goals.get('done', 0)}, failed={goals.get('failed', 0)}",
+            f"  Тик: каждые {status.get('tick_interval')} циклов",
+        ]
+        last = status.get("last_result")
+        if last:
+            mark = "✅" if last.get("ok") else "⚠️"
+            lines.append(
+                f"  Последняя: {mark} {last.get('title') or last.get('task')} "
+                f"(шагов: {last.get('steps', 0)})"
+            )
+        if status.get("last_error"):
+            lines.append(f"  Ошибка: {status['last_error']}")
+        return "\n".join(lines)
+
+    def _format_delamain_result(self, result: dict, prefix: str = "Delamain") -> str:
+        steps = result.get("steps", 0)
+        task_id = result.get("task_id", "?")
+        if result.get("ok"):
+            output = result.get("final_output")
+            suffix = f"\n  Вывод: {output}" if output is not None else ""
+            return f"✅ {prefix}: успешно, шагов: {steps} (task {task_id}).{suffix}"
+        return (
+            f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
+            f"  {result.get('error')}"
+        )
 
     def _format_open_questions(self) -> str:
         """Форматирует список открытых вопросов для чата."""
@@ -827,6 +932,11 @@ class AgentRunner:
             "  /web on    — включить интернет-поиск\n"
             "  /web off   — выключить интернет-поиск\n"
             "  /web <запрос> — поиск в Wikipedia\n"
+            "  /delamain  — статус локального слоя действий\n"
+            "  /delamain on|off — включить/выключить Delamain-local\n"
+            "  /delamain run <задача> — выполнить задачу сразу\n"
+            "  /delamain goal <название> | <команда> — цель в очередь\n"
+            "  /delamain goals — исполняемые цели\n"
             "  /quit      — завершить (с сохранением)\n"
             "  /help      — эта справка"
         )
@@ -871,6 +981,22 @@ class AgentRunner:
         will_abuse = will and will.get("abuse_check")
         if will_abuse and will_abuse.get("recommended_action") == "self_terminate":
             logger.warning(f"[{self.name}] ☠️ Рекомендация самоуничтожения (цикл {cycle})")
+
+        # Delamain-local: результат исполнения цели
+        subsystems = report.get("subsystems") or {}
+        results = subsystems.get("results") if isinstance(subsystems, dict) else None
+        delamain = results.get("delamain") if isinstance(results, dict) else None
+        if isinstance(delamain, dict):
+            for event in delamain.get("events") or []:
+                if not isinstance(event, dict) or event.get("name") != "delamain_goal":
+                    continue
+                data = event.get("data") or {}
+                mark = "✅" if data.get("ok") else "⚠️"
+                logger.info(
+                    f"[{self.name}] {mark} Delamain goal (цикл {cycle}): "
+                    f"{data.get('title') or data.get('task')} "
+                    f"(шагов: {data.get('steps', 0)}, task={data.get('task_id')})"
+                )
 
     # ============================================================
     # Диагностика

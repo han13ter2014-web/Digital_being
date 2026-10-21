@@ -1,9 +1,12 @@
 # Delamain-local: локальное ядро действия и памяти
 
-> **Статус:** рабочий вертикальный срез, 2026-10-21.
+> **Статус:** этап 8 — опциональная интеграция с основным агентом, 2026-10-21.
 > Это не «сильный ИИ» и не доказательство сознания. Это детерминированное
 > ядро, которое умеет выполнить задачу, проверить результат и записать опыт
 > в локальную память. Модель пока не подключена — и ядро работает без неё.
+>
+> Слой **выключен по умолчанию**. Без явного включения он не открывает
+> SQLite и не трогает файлы.
 
 ## 1. Зачем этот слой
 
@@ -59,6 +62,7 @@ DelamainRuntime
 | `src/delamain/memory.py` | SQLite: эпизоды, факты+FTS5, self-model, цели, навыки |
 | `src/delamain/planner.py` | детерминированный планировщик простых команд |
 | `src/delamain/runtime.py` | выполнение плана, остановка на ошибке, запись эпизодов |
+| `src/delamain/subsystem.py` | опциональная `DelamainSubsystem`: lazy runtime, очередь целей, tick |
 | `src/delamain/__main__.py` | CLI-демо без модели |
 
 ### 3.1. Sandbox
@@ -125,6 +129,45 @@ SQLite-база содержит:
 Но фундамент для него уже есть — результат каждого шага доступен следующему
 планировщику.
 
+### 3.5. Интеграция с `DigitalBeing` (этап 8)
+
+`DelamainSubsystem` — нативная подсистема (`Subsystem`, priority 200),
+которую `DigitalBeing` регистрирует напрямую, без `LegacySubsystemAdapter`.
+
+Что важно:
+
+* **Выключена по умолчанию.** `DELAMAIN_LOCAL_ENABLED=False`; runtime
+  создаётся лениво, только при включении.
+* **Свои пути.** Workspace по умолчанию — `data/delamain/workspace`, база —
+  `data/delamain/delamain.sqlite3`. Оба пути можно переопределить через
+  env или config.
+* **Один шаг за тик.** Раз в `DELAMAIN_TICK_INTERVAL` автономных циклов
+  подсистема берёт одну `pending`-цель, у которой есть `metadata.command`
+  или `metadata.plan`, выполняет её и обновляет статус.
+* **Честный результат.** Успех → `done`, ошибка → `failed`; в `skills`
+  пишется успех или неудача. Автоматических повторов пока нет.
+* **Исполняемые цели отделены от когнитивных.** Это таблица `goals` в
+  SQLite Delamain, а не `agent.goals` / `GoalSubsystem`. Связывание двух
+  моделей целей — следующий осознанный шаг, а не побочный эффект интеграции.
+
+Пример цикла:
+
+```text
+/delamain goal Проверить README | прочитай README.md
+        │
+        ▼
+goals(status=pending, metadata.command="прочитай README.md")
+        │  tick каждые N циклов
+        ▼
+DelamainRuntime.run_task → read_file → episode
+        │
+        ├── ok  → goals.status = done,   skills.success_count += 1
+        └── err → goals.status = failed, skills.failure_count += 1
+```
+
+`DelamainSubsystem.run_now()` выполняет задачу сразу, не создавая цель;
+`queue_goal()` создаёт durable-цель; `tick()` двигает очередь.
+
 ## 4. Как запустить
 
 Из корня проекта:
@@ -144,8 +187,9 @@ python -m src.delamain --root workspace --task "запомни проект = Di
 python -m src.delamain --root workspace --task "вспомни проект"
 ```
 
-По умолчанию память лежит в `data/delamain/delamain.sqlite3`, workspace —
-в `workspace/`. Оба пути можно переопределить:
+В CLI по умолчанию память лежит в `data/delamain/delamain.sqlite3`,
+workspace — в `workspace/`. У подсистемы другие значения по умолчанию
+(см. раздел 3.5). Оба пути CLI можно переопределить:
 
 ```powershell
 python -m src.delamain `
@@ -170,10 +214,58 @@ python -m src.delamain `
   --plan-file plan.json
 ```
 
+### 4.1. Команды в трей-чате
+
+Если агент запущен через `main_tray.py`, слой доступен командами:
+
+| Команда | Что делает |
+|---|---|
+| `/delamain` или `/delamain status` | состояние, пути, счётчики целей |
+| `/delamain on` | включить и создать runtime |
+| `/delamain off` | выключить автономные тики (runtime не закрывается) |
+| `/delamain run <задача>` | выполнить задачу сразу |
+| `/delamain goal <название> \| <команда>` | поставить durable-цель в очередь |
+| `/delamain goals` | показать цели Delamain |
+
+Примеры:
+
+```text
+/delamain run запиши в notes/hello.txt: привет
+/delamain goal Проверить заметку | проверь notes/hello.txt на привет
+/delamain goals
+```
+
+### 4.2. Включение через окружение и config
+
+```powershell
+# Только на текущий запуск
+$env:DELAMAIN_ENABLED = "1"
+python main_tray.py
+```
+
+Переменные окружения:
+
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `DELAMAIN_ENABLED` | `0` | главный выключатель (алиас: `DELAMAIN_LOCAL_ENABLED`) |
+| `DELAMAIN_TICK_INTERVAL` | `20` | раз в сколько автономных циклов пробовать цель |
+| `DELAMAIN_MAX_GOALS_PER_TICK` | `1` | сколько целей максимум за один tick |
+| `DELAMAIN_MAX_FILE_BYTES` | `1000000` | лимит файла в песочнице |
+| `DELAMAIN_WORKSPACE` | `data/delamain/workspace` | корень файловой песочницы |
+| `DELAMAIN_DB` | `data/delamain/delamain.sqlite3` | путь к SQLite |
+
+Те же значения есть в `config/simulation_config.py` как `DELAMAIN_*`.
+Env имеет приоритет над config.
+
 ## 5. Тесты
 
 ```powershell
-python -m pytest tests/test_delamain_sandbox.py tests/test_delamain_memory.py tests/test_delamain_planner.py tests/test_delamain_runtime.py -q
+python -m pytest `
+  tests/test_delamain_sandbox.py `
+  tests/test_delamain_memory.py `
+  tests/test_delamain_planner.py `
+  tests/test_delamain_runtime.py `
+  tests/test_delamain_subsystem.py -q
 ```
 
 Проверяется:
@@ -184,7 +276,10 @@ python -m pytest tests/test_delamain_sandbox.py tests/test_delamain_memory.py te
 * эпизоды, факты, FTS, self-model, цели, навыки;
 * остановка плана на первой ошибке;
 * запись `task.start` / `task.finish`;
-* эвристический planner для русских и английских команд.
+* эвристический planner для русских и английских команд;
+* ленивое включение подсистемы и отсутствие runtime по умолчанию;
+* очередь целей, интервал tick, успех/ошибка и запись skill;
+* регистрация `DelamainSubsystem` в `DigitalBeing` и команды `/delamain`.
 
 ## 6. Что пока не сделано
 
@@ -192,12 +287,13 @@ python -m pytest tests/test_delamain_sandbox.py tests/test_delamain_memory.py te
 
 * **Нет LLM-планировщика.** Он появится как опциональный слой; ядро должно
   работать при `LLM_MODE=off`.
-* **Нет автономного цикла.** `run_task()` выполняет внешнюю задачу, а не
-  выбирает цель сам.
+* **Автономия ограничена очередью.** Подсистема сама выбирает только уже
+  поставленные цели с явной командой или планом. Она не придумывает новые
+  цели и не связывает их с когнитивным `GoalSubsystem`.
 * **Нет человеческого подтверждения** для опасных действий. `write_file`
   может перезаписать файл; используйте отдельный workspace.
-* **Нет интеграции с `DigitalBeing`.** Новый слой пока не подключён к
-  `AgentRunner` и подсистемам; это следующий шаг.
+* **Нет политики повторов.** Ошибка сразу переводит цель в `failed`;
+  backoff, повторные попытки и перепланирование — будущая работа.
 * **Нет полноценной проверки смысла.** `verify_file` проверяет факт, но не
   «правильность» решения.
 * **Нет самоизменения.** И это правильно: сначала нужны sandbox, тесты,
@@ -205,12 +301,11 @@ python -m pytest tests/test_delamain_sandbox.py tests/test_delamain_memory.py te
 
 ## 7. Следующие шаги
 
-1. Подключить `DelamainRuntime` как опциональную подсистему к существующему
-   агенту, не ломая текущий цикл.
-2. Добавить цикл целей: выбрать цель → построить план → выполнить →
-   проверить → обновить статус.
-3. Добавить интерфейс LLM-планировщика (Ollama/llama.cpp, JSON-схема
+1. Добавить интерфейс LLM-планировщика (Ollama/llama.cpp, JSON-схема
    действий) с откатом на эвристики.
-4. Ввести политику подтверждения для записи/удаления/запуска кода.
-5. Научиться переиспользовать `skills` после успешных планов.
-6. Прогнать полный набор тестов проекта и зафиксировать этап 7.
+2. Связать когнитивные цели `GoalSubsystem` с исполняемыми целями Delamain
+   или явно разделить их в UI и метриках.
+3. Ввести политику подтверждения для записи/удаления/запуска кода.
+4. Научиться переиспользовать `skills` после успешных планов.
+5. Добавить retry/backoff и перепланирование после ошибки.
+6. Прогнать полный набор тестов проекта и зафиксировать этап 8.

@@ -515,6 +515,21 @@ class DigitalBeing:
                 self.plugin_registry.register(HealthDashboardSubsystem(agent_name=self.name))
         except Exception as exc:
             get_logger().log(f"[{self.name}] HealthDashboard не подключён: {exc}")
+        # Delamain-local (этап 8): нативная Subsystem, выключена по умолчанию.
+        # Регистрируем напрямую, без LegacySubsystemAdapter: у неё собственный
+        # tick() и ленивый runtime.
+        try:
+            from src.delamain.subsystem import DelamainSubsystem
+
+            existing = self.plugin_registry.get("delamain")
+            if existing is None:
+                self.delamain = DelamainSubsystem(agent_name=self.name)
+                self.plugin_registry.register(self.delamain)
+            else:
+                self.delamain = existing
+        except Exception as exc:
+            self.delamain = None
+            get_logger().log(f"[{self.name}] Delamain-local не подключён: {exc}")
 
     def get_subsystems_status(self) -> Dict:
         """Снимок всех подсистем для дашборда (Этап 3.5)."""

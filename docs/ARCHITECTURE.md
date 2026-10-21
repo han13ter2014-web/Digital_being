@@ -73,19 +73,27 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Экспериментальный слой действия (этап 7)
+## 🧪 Слой действия Delamain-local (этапы 7–8)
 
-Рядом с основным циклом появился отдельный, пока не подключённый к
-`AgentRunner` слой `src/delamain/`. Это локальное детерминированное ядро:
+Рядом с основным циклом работает локальное детерминированное ядро
+`src/delamain/`:
 
 * `Sandbox` — файловые операции только внутри workspace;
 * `ActionRegistry` — именованные действия с наблюдаемыми результатами;
 * `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки;
 * `DelamainRuntime` — выполнение плана и остановка на первой ошибке;
-* `HeuristicPlanner` — fallback без LLM.
+* `HeuristicPlanner` — fallback без LLM;
+* `DelamainSubsystem` — опциональная подсистема с очередью целей и `tick()`.
 
-Слой можно запускать отдельно: `python -m src.delamain`. Подробности и
-ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md).
+С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
+`/delamain` в трей-чате. Она **выключена по умолчанию**: без
+`DELAMAIN_ENABLED=1`, config-флага или `/delamain on` runtime не создаётся.
+Исполняемые цели Delamain пока отделены от когнитивных целей
+`GoalSubsystem`.
+
+Слой можно запускать и отдельно: `python -m src.delamain`. Подробности и
+ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md), итоги этапа —
+в [STAGE8_REPORT.md](STAGE8_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

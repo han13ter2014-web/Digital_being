@@ -6,7 +6,8 @@ first working vertical slice of the new architecture:
 * a path-sandboxed file workspace;
 * typed actions with observable results;
 * SQLite episodic/semantic memory;
-* a runtime that executes a plan and records every step.
+* a runtime that executes a plan and records every step;
+* an optional, disabled-by-default subsystem adapter for Digital Being.
 
 The LLM layer is deliberately optional and not imported here. The core must
 work without any model at all.
@@ -24,6 +25,7 @@ from .models import (
 from .planner import HeuristicPlanner, PlannerError
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox, SandboxError
+from .subsystem import DelamainSubsystem
 
 __all__ = [
     "Action",
@@ -33,6 +35,7 @@ __all__ = [
     "ActionRequest",
     "ActionSpec",
     "DelamainRuntime",
+    "DelamainSubsystem",
     "HeuristicPlanner",
     "MemoryStore",
     "PlannerError",
