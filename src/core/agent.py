@@ -2,6 +2,7 @@ import json
 import time
 import gc
 import random
+import re
 import numpy as np
 from datetime import datetime
 import os
@@ -125,6 +126,10 @@ class DigitalBeing:
         self._goal_progress = {}  # progress по целям {goal_id: percentage}
         self._learned_facts = set()  # Усвоенные факты (для отслеживания дубликатов)
         self._known_definitions = {}  # Известные определения {topic: definition}
+
+        # Распределение реальных типов действий (hypothesis/decomposition/...).
+        # Нужно, чтобы «смысл» действий был измерим, а не только строка "Ответ:".
+        self._action_type_counts: Dict[str, int] = {}
         
         # === Адаптивные энергетические затраты ===
         self._action_costs = {  # Базовые затраты, которые адаптируются
@@ -817,8 +822,7 @@ class DigitalBeing:
             Отформатированная строка действия ("Ответ: ...").
         """
         action = f"Ответ: {decision}"
-        get_logger().log(f"Выполняет: {action}")
-        
+
         # === Определяем тип действия и его стоимость ===
         decision_str = str(decision).lower()
         
@@ -826,8 +830,17 @@ class DigitalBeing:
             action_type = "hypothesis"
         elif "декомпозиц" in decision_str:
             action_type = "decomposition"
-        elif "ментальная модель" in decision_str or "знаю ответ" in decision_str:
+        elif ("ментальная модель" in decision_str
+              or "знаю ответ" in decision_str
+              or "нашел ответ" in decision_str
+              or "нашёл ответ" in decision_str):
             action_type = "know_answer"
+        elif ("не нашел" in decision_str
+              or "не нашёл" in decision_str
+              or "не найдено" in decision_str):
+            action_type = "search_miss"
+        elif "пользователь ответил" in decision_str:
+            action_type = "user_answer"
         elif "repair" in decision_str or "ремонт" in decision_str:
             action_type = "repair"
         elif "deep_rest" in decision_str or "глубокий отдых" in decision_str:
@@ -836,6 +849,13 @@ class DigitalBeing:
             action_type = "checkpoint_now"
         else:
             action_type = "default"
+
+        self._action_type_counts[action_type] = (
+            self._action_type_counts.get(action_type, 0) + 1
+        )
+        # Тип действия — в логе, иначе метрика «смысла» не восстанавливается
+        # из истории после перезапуска.
+        get_logger().log(f"Выполняет [{action_type}]: {action}")
         
         base_cost = self._get_adaptive_cost(action_type)
         
@@ -1078,53 +1098,93 @@ class DigitalBeing:
         
         get_logger().flush_immediate(f"Агент {self.name} инициализирован, целей: {len(self.goals)}")
 
-    def set_goal(self, title, difficulty=1):
-        """Устанавливает новую цель"""
+    def set_goal(self, title, difficulty=1, activate=False):
+        """Устанавливает новую цель.
+
+        Args:
+            activate: если True — сделать цель активной сразу, а прежнюю
+                активную вернуть в ``pending``. Нужно внутренней мотивации:
+                срочная потребность не должна создавать «цель без id».
+        """
         goal_id = len(self.goals) + 1
         goal = {
             "id": goal_id,
             "title": title,
-            "status": "active" if not self.active_goal else "pending",
+            "status": "pending",
             "difficulty": difficulty,
             "created_at": datetime.now().isoformat()
         }
         self.goals.append(goal)
-        if not self.active_goal:
+        self._goal_progress.setdefault(goal_id, {
+            "matched_concepts": set(),
+            "percentage": 0,
+            "last_update_cycle": self.cycle_count,
+        })
+        if activate:
+            if self.active_goal is not None and self.active_goal is not goal:
+                self.active_goal["status"] = "pending"
+            goal["status"] = "active"
             self.active_goal = goal
+        elif not self.active_goal:
+            goal["status"] = "active"
+            self.active_goal = goal
+        if hasattr(self, "goal_subsystem"):
+            # Списки общие, но активная цель — отдельное поле подсистемы.
+            self.goal_subsystem.active_goal = self.active_goal
         get_logger().log(f"[{self.name}] Новая цель: {title} (сложность: {difficulty})")
         return goal_id
 
     def complete_goal(self, goal_id=None):
-        """Завершает активную цель или цель по ID"""
+        """Завершает активную цель или цель по ID.
+
+        Идемпотентен: повторный вызов для уже завершённой цели возвращает 0
+        и не увеличивает счётчик. Источник правды по счётчику — GoalSubsystem.
+        """
         target_goal = goal_id or (self.active_goal["id"] if self.active_goal else None)
+        if target_goal is None:
+            return 0
 
-        for goal in self.goals:
-            if goal["id"] == target_goal:
-                goal["status"] = "completed"
-                goal["completed_at"] = datetime.now().isoformat()
-                self.completed_goals += 1
-                get_logger().flush_immediate(f"Цель завершена: {goal['title']}")
+        goal = next(
+            (g for g in self.goals if g.get("id") == target_goal), None
+        )
+        if goal is None or goal.get("status") == "completed":
+            return 0
 
-                reward = goal["difficulty"] * 10
-                self.success_streak += goal["difficulty"]
-                self.energy += reward // 2
+        if hasattr(self, "goal_subsystem"):
+            reward = self.goal_subsystem.complete_goal(target_goal)
+            self.completed_goals = self.goal_subsystem.completed_goals
+            self.active_goal = self.goal_subsystem.active_goal
+        else:
+            goal["status"] = "completed"
+            goal["completed_at"] = datetime.now().isoformat()
+            self.completed_goals += 1
+            reward = goal.get("difficulty", 1) * 10
+            if goal == self.active_goal:
+                self.active_goal = None
+                self._set_next_goal()
 
-                if goal == self.active_goal:
-                    self.active_goal = None
-                    self._set_next_goal()
-
-                return reward
-        return 0
+        difficulty = int(goal.get("difficulty", 1) or 1)
+        self.success_streak += difficulty
+        self.energy = min(LR_CONFIG.ENERGY_MAX, self.energy + reward // 2)
+        get_logger().flush_immediate(f"Цель завершена: {goal['title']}")
+        return reward
 
     def _set_next_goal(self):
         """Устанавливает следующую цель из очереди"""
-        for goal in self.goals:
-            if goal["status"] == "pending":
-                goal["status"] = "active"
-                self.active_goal = goal
-                get_logger().log(f"[{self.name}] Активная цель: {goal['title']}")
-                return
-        get_logger().log(f"[{self.name}] Все цели завершены!")
+        if hasattr(self, "goal_subsystem"):
+            self.goal_subsystem._set_next_goal()
+            self.active_goal = self.goal_subsystem.active_goal
+        else:
+            for goal in self.goals:
+                if goal["status"] == "pending":
+                    goal["status"] = "active"
+                    self.active_goal = goal
+                    break
+
+        if self.active_goal:
+            get_logger().log(f"[{self.name}] Активная цель: {self.active_goal['title']}")
+        else:
+            get_logger().log(f"[{self.name}] Все цели завершены!")
 
     def get_goals_status(self):
         """Возвращает статус целей с прогрессом"""
@@ -1214,6 +1274,7 @@ class DigitalBeing:
                 "cycle_count": self.cycle_count,
                 "success_streak": self.success_streak,
                 "completed_goals": self.completed_goals,
+                "action_types": dict(self._action_type_counts),
             },
             "goals": self.get_goals_status(),
             "mental_models": self.get_mental_models_status(),
@@ -2087,41 +2148,116 @@ class DigitalBeing:
 
     @staticmethod
     def _topic_matches_rule(topic: str, rule: dict) -> bool:
-        """Проверяет, содержит ли тема хотя бы одно ключевое слово из правила."""
+        """Проверяет, содержит ли тема хотя бы одно ключевое слово из правила.
+
+        Короткие слова (1–2 символа, например «я») матчатся только как
+        отдельные токены. Иначе «я» находится внутри «функция» и цель
+        «понять себя» прогрессирует на любых технических вопросах.
+        """
         match_keywords = rule.get("match_topic_keywords", []) or []
         topic_lower = topic.lower()
-        return any(kw.lower() in topic_lower for kw in match_keywords)
+        for keyword in match_keywords:
+            kw = str(keyword).lower().strip()
+            if not kw:
+                continue
+            if len(kw) <= 2 and kw.isalpha():
+                if re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", topic_lower):
+                    return True
+            elif kw in topic_lower:
+                return True
+        return False
 
-    def _check_goal_progress(self, topic: str):
-        """Проверяет прогресс активной цели согласно правилам из LR_CONFIG.GOAL_PROGRESS_RULES."""
+    def _check_goal_progress(self, topic: str, answered: bool = False) -> Dict:
+        """Проверяет прогресс активной цели согласно правилам из LR_CONFIG.
+
+        Прогресс накапливается по уникальным темам: каждое новое совпадение
+        увеличивает долю от ``matches_needed``. При 100% цель завершается
+        ровно один раз, начисляется бонусная энергия.
+
+        Args:
+            topic: тема/вопрос, с которой столкнулся агент.
+            answered: True, если по теме реально найден ответ (KB, файл,
+                web, ментальная модель). Правила с ``requires_answer``
+                (Python, факты) не растут от одних только попыток.
+
+        Returns:
+            ``{"pct": int, "completed": bool, "reward": int}``.
+        """
+        result = {"pct": 0, "completed": False, "reward": 0}
         if not getattr(self, "active_goal", None):
-            return
+            return result
+        if not getattr(LR_CONFIG, "GOAL_PROGRESS_ENABLED", True):
+            return result
 
         goal_title = self.active_goal.get("title", "")
         goal_id = self.active_goal.get("id")
 
         # Гарантируем наличие записи прогресса
-        if goal_id not in self._goal_progress:
-            self._goal_progress[goal_id] = {
-                "matched_concepts": set(),
-                "percentage": 0,
-                "last_update_cycle": 0,
-            }
-
-        progress = self._goal_progress[goal_id]
+        progress = self._goal_progress.setdefault(goal_id, {
+            "matched_concepts": set(),
+            "percentage": 0,
+            "last_update_cycle": 0,
+        })
+        matched = progress.get("matched_concepts")
+        if not isinstance(matched, set):
+            # После восстановления из старого чекпоинта может лежать list.
+            matched = set(matched or [])
+            progress["matched_concepts"] = matched
 
         rules = getattr(LR_CONFIG, "GOAL_PROGRESS_RULES", []) or []
-        for rule in rules:
-            if not self._match_rule_to_goal(goal_title, rule):
-                continue
-            if self._topic_matches_rule(topic, rule):
-                # обновляем прогресс
-                matches_needed = max(1, int(rule.get("matches_needed", 3)))
-                percentage = min(100, int(100 / matches_needed))
-                progress["percentage"] = max(progress.get("percentage", 0), percentage)
-                progress["rule_name"] = rule.get("name", "unnamed")
-                progress["last_update_cycle"] = getattr(self, "cycle_count", 0)
-                matched = progress.setdefault("matched_concepts", set())
-                if isinstance(matched, set):
-                    matched.add(topic)
-                break
+        applicable_rule = next(
+            (rule for rule in rules if self._match_rule_to_goal(goal_title, rule)),
+            None,
+        )
+        if applicable_rule is None:
+            # У цели нет специализированного правила («Построить модель мира»,
+            # «Развивать способности»). Без fallback такие цели не завершатся
+            # никогда: прогресс просто некуда записывать. Считаем любые новые
+            # темы — это честный «общий учебный» прогресс.
+            rule = {
+                "name": "general_learning",
+                "matches_needed": max(1, int(
+                    getattr(LR_CONFIG, "PROGRESS_KNOWLEDGE_MATCHES", 5)
+                )),
+                "bonus_energy": 5,
+            }
+        elif self._topic_matches_rule(topic, applicable_rule):
+            rule = applicable_rule
+        else:
+            # Цель конкретная (Python/факты/самопонимание), а тема не про неё.
+            result["pct"] = int(progress.get("percentage", 0))
+            return result
+
+        if rule.get("requires_answer") and not answered:
+            # Встретил вопрос — ещё не выучил и не собрал факт.
+            result["pct"] = int(progress.get("percentage", 0))
+            return result
+
+        matched.add(topic)
+        matches_needed = max(1, int(rule.get("matches_needed", 3)))
+        percentage = min(100, int(len(matched) / matches_needed * 100))
+        min_increment = max(0, int(
+            getattr(LR_CONFIG, "MIN_PROGRESS_INCREMENT", 0)
+        ))
+        completed = percentage >= 100
+        if not completed and percentage - int(progress.get("percentage", 0)) < min_increment:
+            # Тема уже учтена или прирост слишком мал — не дёргаем метрики.
+            result["pct"] = int(progress.get("percentage", 0))
+            return result
+
+        progress["percentage"] = max(int(progress.get("percentage", 0)), percentage)
+        progress["rule_name"] = rule.get("name", "unnamed")
+        progress["last_update_cycle"] = getattr(self, "cycle_count", 0)
+        result["pct"] = progress["percentage"]
+
+        if completed:
+            bonus = max(0, int(rule.get("bonus_energy", 0) or 0))
+            if bonus:
+                self.energy = min(LR_CONFIG.ENERGY_MAX, self.energy + bonus)
+            result["reward"] = self.complete_goal()
+            result["completed"] = True
+            get_logger().flush_immediate(
+                f"🎯 Цель достигнута: {goal_title} "
+                f"(+{bonus} энергии, награда {result['reward']})"
+            )
+        return result

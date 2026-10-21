@@ -292,24 +292,38 @@ class InternalMotivation:
         }
     
     def _set_intrinsic_goal(self, goal: dict, need: Need):
-        goal_data = {
-            "title": goal["title"],
+        metadata = {
             "type": "intrinsic",
             "source": "intrinsic",
             "source_need": need.name,
             "priority": goal["priority"],
             "urgency": goal["urgency"],
             "context": goal["context"],
-            "created_at_cycle": self.agent.cycle_count
+            "created_at_cycle": self.agent.cycle_count,
         }
-        
-        if hasattr(self.agent, '_set_active_goal'):
-            self.agent._set_active_goal(goal_data)
+
+        if hasattr(self.agent, "set_goal"):
+            # Важно: цель должна попасть в agent.goals и получить id.
+            # Раньше active_goal подменялся словарём без id — прогресс
+            # писался в никуда, а complete_goal() не находил цель.
+            goal_id = self.agent.set_goal(
+                goal["title"], difficulty=1, activate=True
+            )
+            new_goal = next(
+                (g for g in self.agent.goals if g.get("id") == goal_id), None
+            )
+            if new_goal is not None:
+                new_goal.update(metadata)
         else:
+            goal_data = {"title": goal["title"], **metadata}
             self.agent.active_goal = goal_data
-        
-        logger.log(f"[MOTIVATION] 🎯 Внутренняя цель: {goal['title']} (потребность: {need.label}, срочность: {need.urgency():.2f})")
-        
+            new_goal = goal_data
+
+        logger.log(
+            f"[MOTIVATION] 🎯 Внутренняя цель: {goal['title']} "
+            f"(потребность: {need.label}, срочность: {need.urgency():.2f})"
+        )
+
         self.goal_history.append({
             "cycle": self.agent.cycle_count,
             "need": need.name,

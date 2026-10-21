@@ -66,6 +66,9 @@ class ThinkingPipeline:
         """
         self.agent = agent
         self.web_searcher = web_searcher
+        # Уже разобранные запросы. Без этого один и тот же стимул снова и
+        # снова декомпозируется на те же части (в baseline — 84% действий).
+        self._decomposed_queries: set[str] = set()
 
     # ============================================================
     # Главный метод — think()
@@ -82,8 +85,19 @@ class ThinkingPipeline:
         5. Регистрируем неизвестную концепцию.
         6. Ищем информацию в файлах.
         """
-        clean_data = data.replace("вопрос: ", "").strip()
+        # Служебную аннотацию стратегии ("[стратегия=..., попытка 1/5]")
+        # нельзя отдавать в декомпозицию и поиск: иначе агент разбирает
+        # на части собственные внутренние слова и зацикливается.
+        clean_data = re.sub(r"\s*\[стратегия=[^\]]*\]\s*$", "", str(data))
+        clean_data = clean_data.replace("вопрос: ", "").strip()
         agent = self.agent
+
+        # Встреча с релевантной темой — уже прогресс по цели, даже если
+        # ответ пока не найден. Иначе прогресс зависит от доступности
+        # интернета/файлов, и цели стоят на нуле годами.
+        check_progress = getattr(agent, "_check_goal_progress", None)
+        if callable(check_progress):
+            check_progress(clean_data)
 
         # === Шаг 1: Ментальные модели ===
         if agent.mental_models.can_answer_about(clean_data):
@@ -96,14 +110,14 @@ class ThinkingPipeline:
                     top_related = related[:2]
                     thought += f"\n   Связано с: {[r['concept'] for r in top_related]}"
                 agent.success_streak += 1
-                agent._check_goal_progress(clean_data)
+                agent._check_goal_progress(clean_data, answered=True)
                 return thought
 
         # === Шаг 2: База знаний ===
         if clean_data in agent.knowledge_base:
             thought = f"Знаю ответ: {agent.knowledge_base[clean_data]}"
             agent.success_streak += 1
-            agent._check_goal_progress(clean_data)
+            agent._check_goal_progress(clean_data, answered=True)
             return thought
 
         # === Шаг 3: Гипотеза ===
@@ -120,11 +134,47 @@ class ThinkingPipeline:
             return thought
 
         # === Шаг 4: Декомпозиция ===
-        decomposed = self._decompose_query(clean_data)
+        query_key = clean_data.strip().lower()
+        decomposed = (
+            None
+            if query_key in self._decomposed_queries
+            else self._decompose_query(clean_data)
+        )
         if decomposed and len(decomposed) > 1:
+            self._decomposed_queries.add(query_key)
             thought = f"[Декомпозиция] '{clean_data}' разбиваю на:"
             for i, part in enumerate(decomposed[:3], 1):
                 thought += f"\n   {i}. {part}"
+            # Под-вопросы не должны исчезать. Но и забивать ими очередь
+            # нельзя: открытые вопросы имеют приоритет над пулом, и по
+            # 3 вопроса × 5 попыток декомпозиция вытесняла всё остальное.
+            # Поэтому — один ещё не встречавшийся под-вопрос, одна попытка.
+            open_questions = (
+                agent.get_open_questions()
+                if hasattr(agent, "get_open_questions")
+                else []
+            )
+            known_questions = {
+                str(q.get("text", "")).strip().lower() for q in open_questions
+            }
+            unanswered = sum(1 for q in open_questions if not q.get("answered"))
+            if unanswered < 3:
+                for sub_question in decomposed[:3]:
+                    key = sub_question.strip().lower()
+                    if not key or key in known_questions or "стратегия=" in key:
+                        continue
+                    try:
+                        agent.ask_user(
+                            sub_question,
+                            source="decomposition",
+                            max_explorations=1,
+                        )
+                    except Exception as exc:
+                        get_logger().log(
+                            f"[Декомпозиция] Не удалось поставить в очередь "
+                            f"'{sub_question}': {exc}"
+                        )
+                    break
             self._try_ask_user_about_complex(clean_data, decomposed)
             return thought
 
@@ -234,6 +284,16 @@ class ThinkingPipeline:
         if normalized.startswith("что такое") and len(meaningful) < 2:
             return None
         if len(meaningful) < 2:
+            return None
+
+        # Общая эвристика — только явная связка («X и Y», «X vs Y»).
+        # Вопросы «как/почему/в чем» и словосочетания не дробим: статические
+        # разборы выше покрывают известные сложные темы, а generic-путь
+        # порождал «что такое компьютерное» и «что такое жизни».
+        has_connector = bool(re.search(
+            r"(?<!\w)(и|или|vs|против|между)(?!\w)", normalized
+        ))
+        if not has_connector:
             return None
 
         # Глагольные формы убираем, только если есть что оставить.
@@ -518,7 +578,7 @@ class ThinkingPipeline:
 
                     thought = f"Нашел ответ в файле {filepath}: {docstring[:100]}..."
                     agent.success_streak += 1
-                    agent._check_goal_progress(clean_data)
+                    agent._check_goal_progress(clean_data, answered=True)
                     return thought
             thought = f"Файл {filepath} найден, но не содержит документации"
         else:
@@ -650,7 +710,7 @@ class ThinkingPipeline:
             # Плохое качество обучения — сбрасываем стрик
             agent.success_streak = max(0, agent.success_streak - 1)
             
-        agent._check_goal_progress(clean_data)
+        agent._check_goal_progress(clean_data, answered=True)
 
         # 6. Публикуем событие в EventBus (обогащённое метаданными)
         self._publish_web_result(clean_data, title, extract, url, lang, {

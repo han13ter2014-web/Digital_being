@@ -225,6 +225,10 @@ def run_long_living_agent():
     try:
         while agent.is_alive():
             cycle_count += 1
+            # Счётчик агента — источник правды для чекпоинтов, эволюции и
+            # метрик. Раньше CLI увеличивал только локальную переменную,
+            # и agent.cycle_count оставался нулевым.
+            agent.cycle_count = cycle_count
             
             # === ОБРАБОТКА ОТВЕТА ПОЛЬЗОВАТЕЛЯ ===
             user_answered = prompt_user_for_answer(agent, cycle_count)
@@ -247,7 +251,7 @@ def run_long_living_agent():
                     get_logger().flush_immediate(f"⚠️ КРИТИЧЕСКАЯ ЭНЕРГИЯ: {agent.energy:.0f}. Ждем восстановления...")
                     print(f"\n  ⚠️ АГЕНТ УСТАЛ (энергия: {agent.energy:.0f})... Отдыхает...")
                     time.sleep(2)
-                    agent.energy = min(100, agent.energy + 30)
+                    agent.energy = min(LR_CONFIG.ENERGY_MAX, agent.energy + 30)
                     critical_energy_handled = False
                     continue
                 

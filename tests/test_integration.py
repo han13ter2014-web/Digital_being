@@ -188,9 +188,13 @@ def test_check_goal_progress_uses_rules():
             agent.active_goal = g
             break
 
-    # Симулируем встречу с темой, подходящей под правило python_learning
+    # Симулируем найденный ответ по теме, подходящей под правило python_learning.
+    # Встреча без ответа не должна засчитываться (requires_answer=True).
     agent._check_goal_progress("что такое функция в python")
     goal_id = agent.active_goal["id"]
+    assert agent._goal_progress[goal_id]["percentage"] == 0
+
+    agent._check_goal_progress("что такое функция в python", answered=True)
     progress = agent._goal_progress[goal_id]
     assert progress["percentage"] > 0
     assert progress.get("rule_name") == "python_learning"

@@ -133,7 +133,10 @@ class GoalSubsystem:
         return goal_id
 
     def complete_goal(self, goal_id: Optional[int] = None) -> int:
-        """Завершает активную цель (или по id). Возвращает награду."""
+        """Завершает активную цель (или по id). Возвращает награду.
+
+        Идемпотентен: уже завершённая цель не увеличивает счётчик повторно.
+        """
         target_id = goal_id or (self.active_goal["id"] if self.active_goal else None)
         if target_id is None:
             return 0
@@ -141,6 +144,8 @@ class GoalSubsystem:
         reward = 0
         for goal in self.goals:
             if goal["id"] == target_id:
+                if goal.get("status") == "completed":
+                    return 0
                 goal["status"] = "completed"
                 goal["completed_at"] = datetime.now().isoformat()
                 self.completed_goals += 1
@@ -175,39 +180,44 @@ class GoalSubsystem:
                        min_increment: int = 5) -> Dict:
         """Проверяет прогресс по активной цели на основе новой темы.
         Возвращает {'pct', 'completed', 'reward'}.
+
+        Прогресс накапливается по уникальным темам. Раньше ветка «фактов»
+        прибавляла к ``completed_goals`` по 0.5 — счётчик завершённых целей
+        становился дробным и не отражал реальность.
         """
         if not self.active_goal:
             return {"pct": 0, "completed": False, "reward": 0}
 
         goal_id = self.active_goal["id"]
-        if goal_id not in self._goal_progress:
-            self._goal_progress[goal_id] = {
-                "matched_concepts": set(),
-                "percentage": 0,
-                "last_update_cycle": cycle_count,
-            }
+        progress = self._goal_progress.setdefault(goal_id, {
+            "matched_concepts": set(),
+            "percentage": 0,
+            "last_update_cycle": cycle_count,
+        })
+        matched = progress.get("matched_concepts")
+        if not isinstance(matched, set):
+            matched = set(matched or [])
+            progress["matched_concepts"] = matched
 
-        progress = self._goal_progress[goal_id]
+        matched.add(topic)
+        matches_needed = max(1, int(progress_knowledge_matches))
+        pct = min(100, int(len(matched) / matches_needed * 100))
 
-        if "Python" in self.active_goal["title"]:
-            progress["matched_concepts"].add(topic)
-            matches = len(progress["matched_concepts"])
-            pct = min(100, int(matches / progress_knowledge_matches * 100))
-            if pct > progress["percentage"]:
-                progress["percentage"] = pct
-                if pct >= 100:
-                    reward = self.complete_goal()
-                    return {"pct": pct, "completed": True, "reward": reward}
+        if pct >= 100:
+            progress["percentage"] = 100
+            progress["last_update_cycle"] = cycle_count
+            reward = self.complete_goal()
+            return {"pct": 100, "completed": True, "reward": reward}
 
-        elif "фактов" in self.active_goal["title"]:
-            if topic not in progress.get("seen_topics", set()):
-                progress.setdefault("seen_topics", set()).add(topic)
-                self.completed_goals += 0.5
-                if self.completed_goals >= len(self.goals):
-                    reward = self.complete_goal()
-                    return {"pct": 100, "completed": True, "reward": reward}
+        if pct >= int(progress.get("percentage", 0)) + max(0, int(min_increment)):
+            progress["percentage"] = pct
+            progress["last_update_cycle"] = cycle_count
 
-        return {"pct": progress["percentage"], "completed": False, "reward": 0}
+        return {
+            "pct": progress["percentage"],
+            "completed": False,
+            "reward": 0,
+        }
 
     # ============================================================
     # API для UI и обратной совместимости

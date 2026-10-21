@@ -194,11 +194,16 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 421 тест проходит (после этапов 1–4, октябрь 2026)
+### ✅ 435 тестов проходит (после этапов 1–5, октябрь 2026)
 ```bash
 $ python -m pytest tests/ -q
-421 passed, 2 skipped in ~8,5 мин (включая benchmarks)
+435 passed, 2 skipped in ~8,5 мин (включая benchmarks)
 ```
+
+Этап 5: прогресс целей накапливается по уникальным темам, цели
+завершаются ровно один раз, типы действий измеряются
+(`action_types`), декомпозиция не повторяет один и тот же запрос.
+Подробно — `docs/STAGE5_REPORT.md`.
 
 Ранее (этапы 4–5) добавлены:
 * `OpenQuestionsManager` — вынесен из `DigitalBeing` (минус 121 строка, полная обратная совместимость).
@@ -275,7 +280,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (421 тест) + бенчмарки в `tests/benchmarks/`
+- **Тесты**: pytest (435 тестов) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---
