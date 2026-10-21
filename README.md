@@ -56,6 +56,8 @@ python main.py
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime |
+| **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -64,7 +66,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–6
+### 🧭 Ревизия 2026-10: этапы 0–7
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -77,6 +79,9 @@ python main.py
 * **Смысл и метрики** — цели накапливают прогресс и завершаются ровно один
   раз; типы действий измеряются; декомпозиция не повторяет один и тот же
   запрос. Подробно — **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)**.
+* **Первый замкнутый контур** — `src/delamain/`: sandbox, файловые действия,
+  SQLite-память, проверка результата и runtime без обязательной LLM.
+  Подробно — **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 

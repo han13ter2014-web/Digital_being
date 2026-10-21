@@ -73,6 +73,7 @@ packages = [
     "src.motivation",
     "src.perception",
     "src.action",
+    "src.delamain",
     "src.safety",
     "src.ui",
 ]

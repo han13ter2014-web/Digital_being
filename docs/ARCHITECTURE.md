@@ -4,7 +4,7 @@
 
 > **Про нумерацию.** «Этапы 3.5, 4.5, 5, 6» ниже — ранняя нумерация
 > разработки (июнь 2026): PluginRegistry, evolve-pipeline, метрики. Это не
-> отчёты `STAGE1`–`STAGE6` ревизии 2026-10. Карта документов —
+> отчёты `STAGE1`–`STAGE7` ревизии 2026-10. Карта документов —
 > [INDEX.md](INDEX.md).
 
 ## 🧬 Твоя суть: `DigitalBeing` (src/core/agent.py)
@@ -72,6 +72,20 @@
 | `ArchitectureProposal` | Предложения изменений кода | `architecture_proposal.py` |
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
+
+## 🧪 Экспериментальный слой действия (этап 7)
+
+Рядом с основным циклом появился отдельный, пока не подключённый к
+`AgentRunner` слой `src/delamain/`. Это локальное детерминированное ядро:
+
+* `Sandbox` — файловые операции только внутри workspace;
+* `ActionRegistry` — именованные действия с наблюдаемыми результатами;
+* `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки;
+* `DelamainRuntime` — выполнение плана и остановка на первой ошибке;
+* `HeuristicPlanner` — fallback без LLM.
+
+Слой можно запускать отдельно: `python -m src.delamain`. Подробности и
+ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 
