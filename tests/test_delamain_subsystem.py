@@ -259,6 +259,43 @@ def test_teardown_closes_runtime(tmp_path: Path) -> None:
     assert sub.status()["runtime_ready"] is False
 
 
+def test_planner_is_heuristic_by_default(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path)
+    sub.enable()
+
+    info = sub.status()["planner"]
+    assert info["enabled"] is False
+    assert info["mode"] == "heuristic"
+    assert sub.runtime.planner.__class__.__name__ == "HeuristicPlanner"
+    sub.teardown()
+
+
+def test_llm_planner_status_does_not_require_network(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, llm_enabled=True, llm_model="fake-model")
+    sub.enable()
+
+    info = sub.status()["planner"]
+    assert info["enabled"] is True
+    assert info["mode"] == "ollama:fake-model+fallback"
+    assert info["model"] == "fake-model"
+    assert info["base_url"] == "http://127.0.0.1:11434"
+    assert info["last_used"] == "none"
+    assert info["last_error"] is None
+    assert sub.runtime.planner.__class__.__name__ == "FallbackPlanner"
+    sub.teardown()
+
+
+def test_invalid_llm_config_falls_back_to_heuristic(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, llm_enabled=True, llm_model="   ")
+    sub.enable()
+
+    info = sub.status()["planner"]
+    assert info["mode"] == "heuristic (LLM setup failed)"
+    assert "model" in (info["error"] or "").lower()
+    assert sub.runtime.planner.__class__.__name__ == "HeuristicPlanner"
+    sub.teardown()
+
+
 def test_agent_runner_delamain_commands(tmp_path: Path) -> None:
     import asyncio
 
@@ -286,6 +323,7 @@ def test_agent_runner_delamain_commands(tmp_path: Path) -> None:
         status = await runner.handle_command("/delamain status")
         assert "Delamain-local" in status
         assert "Runtime: готов" in status
+        assert "Планировщик: heuristic" in status
 
         result = await runner.handle_command("/delamain run запиши в cmd.txt: привет")
         assert "✅" in result

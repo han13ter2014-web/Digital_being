@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-21 — Delamain-local: опциональный локальный LLM-планировщик
+
+* **`OllamaPlanner`** — новый stdlib-only клиент native Ollama `/api/chat`;
+  JSON-план, live-схема действий через `bind_registry()`, проверка имён
+  действий, аргументов и лимита шагов. Сеть только в `plan()`, модель не
+  запускается автоматически.
+* **`FallbackPlanner`** — при ошибке транспорта, таймауте, невалидном JSON
+  или неизвестном действии вызывает `HeuristicPlanner`; `last_used` и
+  `last_error` видны в `/delamain status`. Если fallback тоже упал,
+  возвращается комбинированная ошибка.
+* **LLM выключена по умолчанию** — `DELAMAIN_LLM_ENABLED=False`; ядро
+  работает без модели и без сети. Некорректная конфигурация откатывается
+  на эвристики, а не роняет подсистему.
+* **Конфигурация** — `DELAMAIN_LLM_BASE_URL`, `DELAMAIN_LLM_MODEL`,
+  `DELAMAIN_LLM_TIMEOUT`, `DELAMAIN_LLM_MAX_STEPS`,
+  `DELAMAIN_LLM_TEMPERATURE`; пример модели — Apache-2.0
+  `qwen2.5:7b-instruct`, веса в проект не входят.
+* **CLI** — `python -m src.delamain --llm` и параметры модели/URL/таймаута.
+* **`/delamain status`** — режим планировщика, модель, URL и последняя
+  LLM-ошибка.
+* **11 новых тестов** для LLM-планировщика, fallback, runtime-привязки
+  registry и статуса подсистемы; все используют fake requester, без
+  реальной сети.
+* **Полный прогон:** `484 passed, 2 skipped` (28:07), регрессий нет.
+* **Документация** — `docs/STAGE10_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-21 — Delamain-local: навыки и повторные попытки
 
 * **Память → действие** — успешный нормализованный план сохраняется в

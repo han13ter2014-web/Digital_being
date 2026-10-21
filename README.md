@@ -60,6 +60,7 @@ python main.py
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
+| **[docs/STAGE10_REPORT.md](docs/STAGE10_REPORT.md)** | 🧑‍💻 Разработчик | Опциональный локальный LLM-планировщик и fallback |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -68,7 +69,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–9
+### 🧭 Ревизия 2026-10: этапы 0–10
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -92,6 +93,10 @@ python main.py
   переиспользуются для той же команды; `DELAMAIN_MAX_ATTEMPTS` включает
   повторы, `/delamain skills` показывает накопленный опыт. Подробно —
   **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)**.
+* **Опциональный локальный LLM** — `OllamaPlanner` через `/api/chat`,
+  JSON-схема действий и обязательный fallback на эвристики; выключен по
+  умолчанию, модель не входит в проект. Подробно —
+  **[docs/STAGE10_REPORT.md](docs/STAGE10_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 
@@ -229,10 +234,10 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 473 теста проходит (после этапов 1–9, октябрь 2026)
+### ✅ 484 теста проходит (после этапов 1–10, октябрь 2026)
 ```bash
 $ python -m pytest tests/ -q
-473 passed, 2 skipped in 513.52s (0:08:33, включая benchmarks)
+484 passed, 2 skipped in 1687.81s (0:28:07, включая benchmarks)
 ```
 
 Этап 5: прогресс целей накапливается по уникальным темам, цели
@@ -315,7 +320,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (473 теста) + бенчмарки в `tests/benchmarks/`
+- **Тесты**: pytest (484 теста) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---
@@ -367,6 +372,7 @@ digital_being/
 │   │   ├── energy_policy.py # Политика энергии без смерти
 │   │   ├── agent_runner.py  # Фоновый оркестратор жизни
 │   │   └── subsystems/      # 25+ подсистем (воля, душа, память...)
+│   ├── delamain/            # локальное ядро действий, памяти и планировщиков
 │   ├── ui/                  # UI для трей-режима
 │   │   ├── tray.py          # TrayIcon (pystray)
 │   │   ├── chat_window.py   # ChatWindow (Tkinter)
@@ -402,7 +408,7 @@ digital_being/
     ├── EVOLUTION.md
     ├── BUILD.md / INSTALLER.md
     ├── BASELINE.md          # точка отсчёта и метрики
-    ├── STAGE1_REPORT.md … STAGE9_REPORT.md
+    ├── STAGE1_REPORT.md … STAGE10_REPORT.md
     ├── README_DIGITAL_LIFE.md
     ├── digital_life_anatomy.md
     └── AUDIT_REPORT.md      # исторический аудит (июнь 2026)

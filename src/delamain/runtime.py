@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 from .actions import ActionRegistry
 from .memory import MemoryStore
 from .models import ActionResult, ActionRequest, TaskResult
-from .planner import HeuristicPlanner, PlannerError
+from .planner import HeuristicPlanner, Planner, PlannerError
 from .sandbox import Sandbox
 
 
@@ -17,8 +17,8 @@ class DelamainRuntime:
     """Execute plans in a sandbox and persist every observation.
 
     The runtime is intentionally synchronous. It is a small deterministic
-    kernel; an LLM can later be plugged in as a planner, but it is not needed
-    for the loop to function.
+    kernel; an LLM can be plugged in as a planner, but it is not needed for
+    the loop to function.
     """
 
     def __init__(
@@ -29,7 +29,7 @@ class DelamainRuntime:
         sandbox: Optional[Sandbox] = None,
         memory: Optional[MemoryStore] = None,
         registry: Optional[ActionRegistry] = None,
-        planner: Optional[HeuristicPlanner] = None,
+        planner: Optional[Planner] = None,
     ) -> None:
         if memory is None and db_path is None:
             raise ValueError("db_path is required when memory is not provided")
@@ -39,6 +39,12 @@ class DelamainRuntime:
         self._owns_memory = memory is None
         self.registry = registry or ActionRegistry.default(self.sandbox, self.memory)
         self.planner = planner or HeuristicPlanner()
+        # A model-backed planner needs the live action schema, which only
+        # exists after the registry has been built. Binding is optional so
+        # simple custom planners do not need to implement it.
+        bind_registry = getattr(self.planner, "bind_registry", None)
+        if callable(bind_registry):
+            bind_registry(self.registry)
 
     # ------------------------------------------------------------------
     # Single steps

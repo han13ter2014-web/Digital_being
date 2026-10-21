@@ -6,9 +6,11 @@ Examples (from the project root)::
     python -m src.delamain --root workspace --task "запиши в notes/a.txt: привет"
     python -m src.delamain --root workspace --task "проверь notes/a.txt на привет"
     python -m src.delamain --root workspace --task demo --plan-file plan.json
+    python -m src.delamain --root workspace --task "список файлов" --llm
 
-The CLI is intentionally model-free. It is useful for smoke tests, manual
-inspection of the memory database and for demonstrating the loop offline.
+The default CLI is model-free. ``--llm`` opts into a local Ollama planner
+with a heuristic fallback; it is useful for smoke tests, manual inspection of
+the memory database and for demonstrating the loop offline.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .llm_planner import OllamaPlanner
+from .planner import FallbackPlanner
 from .runtime import DelamainRuntime
 
 
@@ -38,6 +42,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="SQLite memory path (default: data/delamain/delamain.sqlite3)",
     )
     parser.add_argument("--task", required=True, help="task text to plan and run")
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="use an optional local Ollama planner with heuristic fallback",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        default="http://127.0.0.1:11434",
+        help="Ollama base URL (default: http://127.0.0.1:11434)",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default="qwen2.5:7b-instruct",
+        help="Ollama model name (default: qwen2.5:7b-instruct)",
+    )
+    parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=20.0,
+        help="LLM HTTP timeout in seconds (default: 20)",
+    )
+    parser.add_argument(
+        "--llm-max-steps",
+        type=int,
+        default=12,
+        help="maximum plan steps from the LLM (default: 12)",
+    )
     plan_group = parser.add_mutually_exclusive_group()
     plan_group.add_argument(
         "--plan",
@@ -69,7 +100,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"invalid plan JSON: {exc}", file=sys.stderr)
             return 2
 
-    with DelamainRuntime(args.root, args.db) as runtime:
+    planner = None
+    if args.llm:
+        planner = FallbackPlanner(
+            OllamaPlanner(
+                base_url=args.llm_base_url,
+                model=args.llm_model,
+                timeout=args.llm_timeout,
+                max_steps=args.llm_max_steps,
+            )
+        )
+
+    with DelamainRuntime(args.root, args.db, planner=planner) as runtime:
         result = runtime.run_task(args.task, plan=plan)
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return 0 if result.ok else 1
