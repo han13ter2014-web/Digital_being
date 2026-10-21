@@ -127,3 +127,4 @@ _Файл создан на этапе 0. Обновлять при каждом
 * [Этап 7 — отчёт](STAGE7_REPORT.md): Delamain-local — sandbox, действия, SQLite-память, runtime.
 * [Этап 8 — отчёт](STAGE8_REPORT.md): интеграция Delamain-local с агентом и цикл исполняемых целей.
 * [Этап 9 — отчёт](STAGE9_REPORT.md): переиспользование навыков, повторные попытки и `/delamain skills`.
+* [Этап 10 — отчёт](STAGE10_REPORT.md): опциональный локальный LLM-планировщик (Ollama) с fallback на эвристики.

@@ -336,7 +336,7 @@ class LongRunningConfig:
     WEB_SEARCH_FALLBACK_TO_EN = True       # если RU пуст — пробуем EN
     WEB_SEARCH_USER_AGENT = "DigitalBeing/2.5"
 
-    # === DELAMAIN-LOCAL (этапы 7–9) ===
+    # === DELAMAIN-LOCAL (этапы 7–10) ===
     # Опциональный детерминированный слой действий. По умолчанию выключен:
     # без явного включения он не открывает SQLite и не трогает файлы.
     # Включается через DELAMAIN_ENABLED=1 или командой /delamain on.
@@ -347,6 +347,16 @@ class LongRunningConfig:
     DELAMAIN_MAX_FILE_BYTES = 1_000_000    # лимит файла в песочнице
     DELAMAIN_WORKSPACE = ""                 # пусто => data/delamain/workspace
     DELAMAIN_DB = ""                        # пусто => data/delamain/delamain.sqlite3
+
+    # Опциональный LLM-планировщик (Ollama /api/chat). Модель не входит в
+    # проект и не запускается автоматически; при ошибке используется
+    # эвристический fallback.
+    DELAMAIN_LLM_ENABLED = False
+    DELAMAIN_LLM_BASE_URL = "http://127.0.0.1:11434"
+    DELAMAIN_LLM_MODEL = "qwen2.5:7b-instruct"  # Apache-2.0, пример
+    DELAMAIN_LLM_TIMEOUT = 20.0             # секунд на HTTP-запрос
+    DELAMAIN_LLM_MAX_STEPS = 12             # максимум шагов в плане
+    DELAMAIN_LLM_TEMPERATURE = 0.0          # 0 = максимально детерминированно
 
 
 # Глобальная конфигурация

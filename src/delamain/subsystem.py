@@ -11,9 +11,11 @@ Enable it in one of three ways:
 * set ``DELAMAIN_LOCAL_ENABLED = True`` in ``config/simulation_config.py``;
 * run ``/delamain on`` in the tray chat.
 
-The runtime itself is still model-free. A goal is either a simple command that
-the deterministic planner understands, or an explicit list of action requests
-stored in the goal metadata.
+The runtime works without a model. A goal is either a simple command that the
+deterministic planner understands, an explicit list of action requests stored
+in the goal metadata, or (optionally) a plan from a local Ollama model with a
+heuristic fallback. The LLM is disabled by default by
+``DELAMAIN_LLM_ENABLED``.
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from src.core.subsystem_base import Subsystem
 
+from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
+from .planner import FallbackPlanner, HeuristicPlanner, Planner
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox
 
@@ -92,6 +96,12 @@ class DelamainSubsystem(Subsystem):
         max_goals_per_tick: Optional[int] = None,
         max_attempts: Optional[int] = None,
         max_file_bytes: Optional[int] = None,
+        llm_enabled: Optional[bool] = None,
+        llm_base_url: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        llm_timeout: Optional[float] = None,
+        llm_max_steps: Optional[int] = None,
+        llm_temperature: Optional[float] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -147,6 +157,45 @@ class DelamainSubsystem(Subsystem):
         # failed) is preserved unless the user opts into retries.
         self.max_attempts = max(1, int(attempts_value))
 
+        if llm_enabled is None:
+            llm_env = os.environ.get("DELAMAIN_LLM_ENABLED")
+            if llm_env is None:
+                llm_enabled = bool(_cfg("DELAMAIN_LLM_ENABLED", False))
+            else:
+                llm_enabled = _parse_bool(llm_env)
+        self.llm_enabled = bool(llm_enabled)
+        self.llm_base_url = str(
+            llm_base_url
+            or os.environ.get("DELAMAIN_LLM_BASE_URL")
+            or _cfg("DELAMAIN_LLM_BASE_URL", "http://127.0.0.1:11434")
+        ).strip()
+        self.llm_model = str(
+            llm_model
+            or os.environ.get("DELAMAIN_LLM_MODEL")
+            or _cfg("DELAMAIN_LLM_MODEL", "qwen2.5:7b-instruct")
+        ).strip()
+        timeout_value = (
+            llm_timeout
+            if llm_timeout is not None
+            else os.environ.get("DELAMAIN_LLM_TIMEOUT")
+            or _cfg("DELAMAIN_LLM_TIMEOUT", 20.0)
+        )
+        self.llm_timeout = max(1.0, float(timeout_value))
+        steps_value = (
+            llm_max_steps
+            if llm_max_steps is not None
+            else os.environ.get("DELAMAIN_LLM_MAX_STEPS")
+            or _cfg("DELAMAIN_LLM_MAX_STEPS", 12)
+        )
+        self.llm_max_steps = max(1, int(steps_value))
+        temperature_value = (
+            llm_temperature
+            if llm_temperature is not None
+            else os.environ.get("DELAMAIN_LLM_TEMPERATURE")
+            or _cfg("DELAMAIN_LLM_TEMPERATURE", 0.0)
+        )
+        self.llm_temperature = max(0.0, min(2.0, float(temperature_value)))
+
         bytes_value = (
             max_file_bytes
             if max_file_bytes is not None
@@ -159,6 +208,8 @@ class DelamainSubsystem(Subsystem):
         self._agent: Any = None
         self._last_result: Optional[Dict[str, Any]] = None
         self._last_tick_cycle: Optional[int] = None
+        self._planner_mode = "heuristic"
+        self._planner_error: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -211,6 +262,30 @@ class DelamainSubsystem(Subsystem):
     # Runtime and goals
     # ------------------------------------------------------------------
 
+    def _build_planner(self) -> Optional[Planner]:
+        """Build the optional planner stack without touching the network."""
+
+        self._planner_error = None
+        if not self.llm_enabled:
+            self._planner_mode = "heuristic"
+            return None
+        try:
+            primary = OllamaPlanner(
+                base_url=self.llm_base_url,
+                model=self.llm_model,
+                timeout=self.llm_timeout,
+                max_steps=self.llm_max_steps,
+                temperature=self.llm_temperature,
+            )
+            self._planner_mode = f"ollama:{self.llm_model}+fallback"
+            return FallbackPlanner(primary, HeuristicPlanner())
+        except Exception as exc:
+            # A bad model name or URL must not prevent the agent from
+            # starting. The deterministic planner remains available.
+            self._planner_error = f"{type(exc).__name__}: {exc}"
+            self._planner_mode = "heuristic (LLM setup failed)"
+            return None
+
     def _ensure_runtime(self) -> DelamainRuntime:
         if self.runtime is None:
             self.workspace.mkdir(parents=True, exist_ok=True)
@@ -220,6 +295,7 @@ class DelamainSubsystem(Subsystem):
                 self.workspace,
                 self.db_path,
                 sandbox=sandbox,
+                planner=self._build_planner(),
             )
         return self.runtime
 
@@ -535,6 +611,30 @@ class DelamainSubsystem(Subsystem):
             return None
         return {"events": [{"name": "delamain_goal", "data": summary}]}
 
+    def _planner_info(self) -> Dict[str, Any]:
+        info: Dict[str, Any] = {
+            "enabled": self.llm_enabled,
+            "mode": self._planner_mode,
+            "base_url": self.llm_base_url,
+            "model": self.llm_model,
+            "timeout": self.llm_timeout,
+            "max_steps": self.llm_max_steps,
+            "error": self._planner_error,
+            "last_used": None,
+            "last_error": None,
+        }
+        if self.runtime is not None:
+            status = getattr(self.runtime.planner, "status", None)
+            if callable(status):
+                try:
+                    extra = status()
+                except Exception as exc:  # pragma: no cover - defensive
+                    info["status_error"] = f"{type(exc).__name__}: {exc}"
+                else:
+                    if isinstance(extra, Mapping):
+                        info.update(dict(extra))
+        return info
+
     def status(self) -> Dict[str, Any]:
         base = super().status()
         counts = {"pending": 0, "done": 0, "failed": 0}
@@ -565,6 +665,7 @@ class DelamainSubsystem(Subsystem):
                 "max_attempts": self.max_attempts,
                 "goals": counts,
                 "skills": skill_count,
+                "planner": self._planner_info(),
                 "last_result": self._last_result,
             }
         )

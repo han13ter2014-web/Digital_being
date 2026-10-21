@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–9)
+## 🧪 Слой действия Delamain-local (этапы 7–10)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -82,7 +82,11 @@
 * `ActionRegistry` — именованные действия с наблюдаемыми результатами;
 * `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки;
 * `DelamainRuntime` — выполнение плана и остановка на первой ошибке;
-* `HeuristicPlanner` — fallback без LLM;
+* `HeuristicPlanner` — детерминированный планировщик без LLM;
+* `OllamaPlanner` — опциональный локальный LLM-планировщик через
+  `/api/chat`, только stdlib;
+* `FallbackPlanner` — primary-планировщик с обязательным откатом на
+  эвристики;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей и `tick()`.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
@@ -98,9 +102,18 @@
 по умолчанию `1`, чтобы сохранить поведение этапа 8. `/delamain skills`
 показывает накопленные навыки.
 
-Слой можно запускать и отдельно: `python -m src.delamain`. Подробности и
-ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md), итоги этапа —
-в [STAGE9_REPORT.md](STAGE9_REPORT.md).
+С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
+live-схему действий через `bind_registry()`, требует JSON-план, проверяет
+имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
+планирования вызывает `HeuristicPlanner`; LLM не исполняет действия
+напрямую. Слой LLM выключен по умолчанию (`DELAMAIN_LLM_ENABLED=0`), не
+запускает Ollama и не делает сетевых запросов при создании. Approval для
+опасных действий пока не реализован.
+
+Слой можно запускать и отдельно: `python -m src.delamain` (с `--llm` —
+через локальную Ollama). Подробности и ограничения — в
+[DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md), итоги этапа —
+в [STAGE10_REPORT.md](STAGE10_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

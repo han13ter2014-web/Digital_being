@@ -856,17 +856,26 @@ class AgentRunner:
     def _format_delamain_status(self, sub) -> str:
         status = sub.status()
         goals = status.get("goals") or {}
+        planner = status.get("planner") or {}
         lines = [
             "🧪 Delamain-local",
             f"  Включён: {'да' if status.get('enabled') else 'нет'}",
             f"  Runtime: {'готов' if status.get('runtime_ready') else 'не создан'}",
             f"  Workspace: {status.get('workspace')}",
+            f"  Планировщик: {planner.get('mode') or 'heuristic'}",
             f"  Цели: pending={goals.get('pending', 0)}, "
             f"done={goals.get('done', 0)}, failed={goals.get('failed', 0)}",
             f"  Навыки: {status.get('skills', 0)}; "
             f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
         ]
+        if planner.get("enabled"):
+            lines.append(
+                f"  LLM: {planner.get('model')} @ {planner.get('base_url')}"
+            )
+        planner_error = planner.get("error") or planner.get("last_error")
+        if planner_error:
+            lines.append(f"  LLM-ошибка: {planner_error}")
         last = status.get("last_result")
         if last:
             mark = "✅" if last.get("ok") else "⚠️"

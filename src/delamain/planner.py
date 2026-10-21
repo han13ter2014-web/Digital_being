@@ -5,19 +5,33 @@ commands and turns them into action requests. It exists so the runtime is
 useful even when no model is installed, and so tests can exercise the whole
 loop without network access or model downloads.
 
-A model-backed planner can later produce the same ``ActionRequest`` objects.
+A model-backed planner can produce the same ``ActionRequest`` objects;
+``FallbackPlanner`` keeps this deterministic implementation as the safety
+net for unavailable or malformed model output.
 """
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import List
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from .models import ActionRequest
 
 
+logger = logging.getLogger(__name__)
+
+
 class PlannerError(Exception):
     """Raised when a task cannot be converted into a plan."""
+
+
+@runtime_checkable
+class Planner(Protocol):
+    """Minimal interface shared by heuristic, LLM and fallback planners."""
+
+    def plan(self, task: str) -> List[ActionRequest]:
+        ...
 
 
 def _clean(value: str) -> str:
@@ -149,3 +163,65 @@ class HeuristicPlanner:
 
         examples = "; ".join(self.examples)
         raise PlannerError(f"cannot parse task into actions; examples: {examples}")
+
+
+class FallbackPlanner:
+    """Try a primary planner, then a deterministic fallback.
+
+    A model-backed planner may be unavailable, return malformed JSON or time
+    out. The agent loop must still work, so the fallback is mandatory by
+    design. The last primary error is kept for ``/delamain status`` and logs.
+    """
+
+    def __init__(
+        self,
+        primary: Planner,
+        fallback: Optional[Planner] = None,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback or HeuristicPlanner()
+        self.last_error: Optional[str] = None
+        self.last_used = "none"
+
+    def bind_registry(self, registry: Any) -> None:
+        """Pass the live action registry to planners that can use it."""
+
+        for planner in (self.primary, self.fallback):
+            bind = getattr(planner, "bind_registry", None)
+            if callable(bind):
+                bind(registry)
+
+    def plan(self, task: str) -> List[ActionRequest]:
+        try:
+            plan = self.primary.plan(task)
+            if not plan:
+                raise PlannerError("primary planner returned an empty plan")
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            self.last_used = "fallback"
+            logger.warning(
+                "primary planner failed; using deterministic fallback: %s",
+                self.last_error,
+            )
+            try:
+                return self.fallback.plan(task)
+            except Exception as fallback_exc:
+                combined = (
+                    "primary planner failed "
+                    f"({self.last_error}); fallback also failed: {fallback_exc}"
+                )
+                self.last_error = combined
+                raise PlannerError(combined) from fallback_exc
+
+        self.last_error = None
+        self.last_used = "primary"
+        return plan
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "type": type(self).__name__,
+            "primary": type(self.primary).__name__,
+            "fallback": type(self.fallback).__name__,
+            "last_used": self.last_used,
+            "last_error": self.last_error,
+        }

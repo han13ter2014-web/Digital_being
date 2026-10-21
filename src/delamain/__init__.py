@@ -7,10 +7,12 @@ first working vertical slice of the new architecture:
 * typed actions with observable results;
 * SQLite episodic/semantic memory;
 * a runtime that executes a plan and records every step;
-* an optional, disabled-by-default subsystem adapter for Digital Being.
+* an optional, disabled-by-default subsystem adapter for Digital Being;
+* an optional local LLM planner with a deterministic fallback.
 
-The LLM layer is deliberately optional and not imported here. The core must
-work without any model at all.
+The LLM layer is never required: constructing the core does not start Ollama
+or make network requests, and every planning failure falls back to the
+heuristic planner.
 """
 
 from .actions import Action, ActionError, ActionRegistry
@@ -22,7 +24,8 @@ from .models import (
     TaskResult,
     utc_now_iso,
 )
-from .planner import HeuristicPlanner, PlannerError
+from .llm_planner import OllamaPlanner
+from .planner import FallbackPlanner, HeuristicPlanner, Planner, PlannerError
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox, SandboxError
 from .subsystem import DelamainSubsystem
@@ -36,8 +39,11 @@ __all__ = [
     "ActionSpec",
     "DelamainRuntime",
     "DelamainSubsystem",
+    "FallbackPlanner",
     "HeuristicPlanner",
     "MemoryStore",
+    "OllamaPlanner",
+    "Planner",
     "PlannerError",
     "Sandbox",
     "SandboxError",
