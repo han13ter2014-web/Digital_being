@@ -90,7 +90,11 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "saved_at": datetime.now().isoformat(),
         # Цели и самоконтроль
         "_goal_progress": {
-            k: list(v.get("matched_concepts", []))
+            k: {
+                "matched_concepts": list(v.get("matched_concepts", [])),
+                "percentage": int(v.get("percentage", 0)),
+                "last_update_cycle": int(v.get("last_update_cycle", 0)),
+            }
             for k, v in agent._goal_progress.items()
         },
         "_learned_facts": list(agent._learned_facts),
@@ -208,11 +212,29 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     gp_data = state.get("_goal_progress", {})
     for k, v in gp_data.items():
         goal_id = int(k) if isinstance(k, str) else k
+        if isinstance(v, dict):
+            matched = v.get("matched_concepts", [])
+            percentage = int(v.get("percentage", 0))
+            last_cycle = int(v.get("last_update_cycle", agent.cycle_count))
+        else:
+            # Старый формат: только список совпавших тем.
+            matched = v
+            percentage = 0
+            last_cycle = agent.cycle_count
         agent._goal_progress[goal_id] = {
-            "matched_concepts": set(v),
-            "percentage": 0,
-            "last_update_cycle": agent.cycle_count,
+            "matched_concepts": set(matched or []),
+            "percentage": percentage,
+            "last_update_cycle": last_cycle,
         }
+
+    # GoalSubsystem хранит те же цели/прогресс. После загрузки чекпоинта
+    # списки могли разъехаться — синхронизируем, иначе complete_goal()
+    # будет менять старый список и счётчик.
+    if hasattr(agent, "goal_subsystem"):
+        agent.goal_subsystem.goals = agent.goals
+        agent.goal_subsystem.active_goal = agent.active_goal
+        agent.goal_subsystem.completed_goals = agent.completed_goals
+        agent.goal_subsystem._goal_progress = agent._goal_progress
 
     agent._learned_facts = set(state.get("_learned_facts", []))
     agent._known_definitions.update(state.get("_known_definitions", {}))

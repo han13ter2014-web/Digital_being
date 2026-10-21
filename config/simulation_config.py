@@ -198,6 +198,7 @@ class LongRunningConfig:
             ],
             "matches_needed": 5,
             "bonus_energy": 20,
+            "requires_answer": True,
         },
         {
             "name": "facts_collection",
@@ -208,13 +209,19 @@ class LongRunningConfig:
             ],
             "matches_needed": 10,
             "bonus_energy": 15,
+            "requires_answer": True,
         },
         {
             "name": "self_understanding",
-            "match_title": ["себя", "self", "понимание"],
+            "match_title": ["себя", "self", "понимание", "кто я"],
             "match_topic_keywords": [
                 "я", "моё", "мой", "моя", "идентичность", "сознание",
-                "эмоция", "рефлексия", "метакогниция",
+                "эмоция", "рефлексия", "метакогниция", "мышление",
+                # Экзистенциальные темы из пула: без них цель «Понять, кто я»
+                # требовала 8 совпадений, а в пуле было всего 2 подходящих.
+                "любовь", "страх", "радость", "счастье", "свобода",
+                "существование", "смысл жизни", "воображение",
+                "интуиция", "память", "философия", "истина",
             ],
             "matches_needed": 8,
             "bonus_energy": 25,

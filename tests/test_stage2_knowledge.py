@@ -262,7 +262,7 @@ class _FakeAgent:
     def _save_knowledge_base(self):
         pass
 
-    def _check_goal_progress(self, concept):
+    def _check_goal_progress(self, concept, answered=False):
         pass
 
 
