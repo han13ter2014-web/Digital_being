@@ -58,6 +58,8 @@ data/evolution/
 data/cooperation/
 data/architecture_proposals/
 data/test_out/
+data/delamain/
+workspace/
 
 # Тестовые артефакты
 .pytest_cache/

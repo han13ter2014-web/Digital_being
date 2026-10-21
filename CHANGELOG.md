@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-21 — Delamain-local: первый замкнутый контур
+
+* **Новый пакет `src/delamain/`** — локальное детерминированное ядро
+  действия и памяти, не требующее LLM, сети или новых зависимостей.
+* **`Sandbox`** — path-политика workspace: запрет абсолютных путей, `..`,
+  drive-relative путей и симлинков за пределы корня; лимит размера файла,
+  атомарная запись, отказ от бинарного чтения.
+* **`ActionRegistry`** — типизированные действия `list_files`, `read_file`,
+  `write_file`, `search_files`, `verify_file`, `remember_fact`,
+  `recall_facts`, `set_self_model`, `get_self_model`, `save_goal`,
+  `list_goals`; ошибки возвращаются как наблюдаемый `ActionResult`.
+* **`MemoryStore`** — SQLite-память: эпизоды, факты с FTS5 (fallback на
+  `LIKE`), self-model, цели и навыки; пары `task.start`/`task.finish`.
+* **`DelamainRuntime`** — выполняет план, останавливается на первой ошибке,
+  записывает каждый шаг и итог задачи.
+* **`HeuristicPlanner`** — детерминированный fallback для простых русских и
+  английских команд; модель остаётся опциональной.
+* **CLI** `python -m src.delamain` — демонстрация полного контура без модели.
+* **21 новый тест** для sandbox, памяти, planner и runtime.
+* **Полный прогон:** `456 passed, 2 skipped` (14:00), регрессий нет.
+* **Документация** — `docs/DELAMAIN_LOCAL.md` и `docs/STAGE7_REPORT.md`;
+  обновлены `docs/INDEX.md` и README.
+
 ### 2026-10 — ревизия этапов 0–6
 
 Краткая сводка большой ревизии; подробности — в `docs/STAGE1_REPORT.md` …
