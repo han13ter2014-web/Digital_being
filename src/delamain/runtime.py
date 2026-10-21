@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .actions import ActionRegistry
+from .approval import ApprovalPolicy
 from .memory import MemoryStore
 from .models import ActionResult, ActionRequest, TaskResult
 from .planner import HeuristicPlanner, Planner, PlannerError
@@ -19,6 +20,10 @@ class DelamainRuntime:
     The runtime is intentionally synchronous. It is a small deterministic
     kernel; an LLM can be plugged in as a planner, but it is not needed for
     the loop to function.
+
+    Approval is a preflight gate for the *whole* plan: if any step is marked
+    dangerous (or if mode is ``all``), no step runs until the user approves
+    the stored plan. The approved plan is consumed exactly once.
     """
 
     def __init__(
@@ -30,6 +35,8 @@ class DelamainRuntime:
         memory: Optional[MemoryStore] = None,
         registry: Optional[ActionRegistry] = None,
         planner: Optional[Planner] = None,
+        approval_mode: str = "off",
+        approval_policy: Optional[ApprovalPolicy] = None,
     ) -> None:
         if memory is None and db_path is None:
             raise ValueError("db_path is required when memory is not provided")
@@ -39,6 +46,8 @@ class DelamainRuntime:
         self._owns_memory = memory is None
         self.registry = registry or ActionRegistry.default(self.sandbox, self.memory)
         self.planner = planner or HeuristicPlanner()
+        self.approval_policy = approval_policy or ApprovalPolicy(approval_mode)
+        self.approval_policy.bind_registry(self.registry)
         # A model-backed planner needs the live action schema, which only
         # exists after the registry has been built. Binding is optional so
         # simple custom planners do not need to implement it.
@@ -71,7 +80,7 @@ class DelamainRuntime:
             return ActionRequest(str(action), dict(request_args))
         raise TypeError(f"unsupported action request: {type(request).__name__}")
 
-    def execute(
+    def _execute_step(
         self,
         request: ActionRequest | Mapping[str, Any] | str,
         args: Optional[Mapping[str, Any]] = None,
@@ -79,7 +88,7 @@ class DelamainRuntime:
         task_id: str = "manual",
         task: str = "",
     ) -> ActionResult:
-        """Execute one action and append an episode to memory."""
+        """Execute one normalized action and append an episode to memory."""
 
         req = self._normalize_request(request, args)
         result = self.registry.execute(req.action, req.args)
@@ -97,65 +106,49 @@ class DelamainRuntime:
         )
         return result
 
+    def execute(
+        self,
+        request: ActionRequest | Mapping[str, Any] | str,
+        args: Optional[Mapping[str, Any]] = None,
+        *,
+        task_id: str = "manual",
+        task: str = "",
+    ) -> ActionResult:
+        """Execute one action without the task-level approval preflight.
+
+        This is the low-level primitive used by callers that already own the
+        approval decision. Agent/planner execution goes through
+        :meth:`run_task`, where the whole plan is checked before any step.
+        """
+
+        return self._execute_step(request, args, task_id=task_id, task=task)
+
     # ------------------------------------------------------------------
     # Tasks
     # ------------------------------------------------------------------
 
-    def run_task(
+    @staticmethod
+    def _plan_dicts(requests: Iterable[ActionRequest]) -> List[Dict[str, Any]]:
+        return [request.to_dict() for request in requests]
+
+    def _prepare_plan(
         self,
         task: str,
-        plan: Optional[Iterable[ActionRequest | Mapping[str, Any] | str]] = None,
-        *,
-        task_id: Optional[str] = None,
-    ) -> TaskResult:
-        """Execute a plan, stopping at the first failed step.
-
-        Every attempted step is written to episodic memory. A task-level
-        ``task.start`` / ``task.finish`` pair makes the history easy to read.
-        """
-
-        task = str(task)
-        task_id = str(task_id or uuid.uuid4().hex)
-        self.memory.record_episode(
-            task_id=task_id,
-            task=task,
-            action="task.start",
-            args={},
-            ok=True,
-            output={"task": task},
-        )
+        plan: Optional[Iterable[ActionRequest | Mapping[str, Any] | str]],
+    ) -> Tuple[Optional[List[ActionRequest]], Optional[str], List[Dict[str, Any]]]:
+        """Resolve and normalize a plan before any task is recorded or run."""
 
         if plan is None:
             try:
                 plan = self.planner.plan(task)
             except PlannerError as exc:
-                self.memory.record_episode(
-                    task_id=task_id,
-                    task=task,
-                    action="task.finish",
-                    args={},
-                    ok=False,
-                    error=str(exc),
-                    output={"steps": 0},
+                return None, str(exc), []
+            except Exception as exc:  # planner bugs must not kill the loop
+                return (
+                    None,
+                    f"planner failed: {type(exc).__name__}: {exc}",
+                    [],
                 )
-                return TaskResult(
-                    task_id=task_id,
-                    task=task,
-                    ok=False,
-                    error=str(exc),
-                )
-            except Exception as exc:  # defensive: planner bugs must not kill the loop
-                error = f"planner failed: {type(exc).__name__}: {exc}"
-                self.memory.record_episode(
-                    task_id=task_id,
-                    task=task,
-                    action="task.finish",
-                    args={},
-                    ok=False,
-                    error=error,
-                    output={"steps": 0},
-                )
-                return TaskResult(task_id=task_id, task=task, ok=False, error=error)
 
         if isinstance(plan, (ActionRequest, str, Mapping)):
             raw_plan: List[Any] = [plan]
@@ -163,48 +156,201 @@ class DelamainRuntime:
             raw_plan = list(plan)
 
         if not raw_plan:
-            error = "plan is empty"
-            self.memory.record_episode(
-                task_id=task_id,
-                task=task,
-                action="task.finish",
-                args={},
-                ok=False,
-                error=error,
-                output={"steps": 0},
-            )
-            return TaskResult(task_id=task_id, task=task, ok=False, error=error)
+            return None, "plan is empty", []
 
-        steps: List[ActionResult] = []
-        planned_actions: List[Dict[str, Any]] = []
+        requests: List[ActionRequest] = []
         for raw_step in raw_plan:
             try:
                 request = self._normalize_request(raw_step)
             except (TypeError, ValueError) as exc:
-                error = f"invalid plan step: {type(exc).__name__}: {exc}"
-                self.memory.record_episode(
-                    task_id=task_id,
-                    task=task,
-                    action="task.finish",
-                    args={},
-                    ok=False,
-                    error=error,
-                    output={
-                        "steps": len(steps),
-                        "planned_actions": list(planned_actions),
-                    },
+                return (
+                    None,
+                    f"invalid plan step: {type(exc).__name__}: {exc}",
+                    self._plan_dicts(requests),
                 )
-                return TaskResult(
-                    task_id=task_id,
-                    task=task,
-                    ok=False,
-                    steps=steps,
-                    error=error,
-                    planned_actions=planned_actions,
-                )
+            requests.append(request)
+        return requests, None, self._plan_dicts(requests)
 
-            planned_actions.append(request.to_dict())
-            result = self.execute(request, task_id=task_id, task=task)
+    def _request_approval(
+        self,
+        *,
+        task: str,
+        task_id: str,
+        requests: List[ActionRequest],
+        dangerous_actions: List[str],
+    ) -> TaskResult:
+        planned_actions = self._plan_dicts(requests)
+        approval = self.memory.create_approval(
+            task_id=task_id,
+            task=task,
+            plan=planned_actions,
+            dangerous_actions=dangerous_actions,
+        )
+        self.memory.record_episode(
+            task_id=task_id,
+            task=task,
+            action="approval.requested",
+            args={},
+            ok=True,
+            output={
+                "approval_id": approval["id"],
+                "dangerous_actions": list(dangerous_actions),
+                "plan": planned_actions,
+            },
+            metadata={"approval_id": approval["id"]},
+        )
+        detail = ", ".join(dangerous_actions) if dangerous_actions else "all actions"
+        return TaskResult(
+            task_id=task_id,
+            task=task,
+            ok=False,
+            error=f"approval required: {detail}",
+            planned_actions=planned_actions,
+            pending_approval=approval,
+        )
+
+    def run_task(
+        self,
+        task: str,
+        plan: Optional[Iterable[ActionRequest | Mapping[str, Any] | str]] = None,
+        *,
+        task_id: Optional[str] = None,
+        approval_id: Optional[str] = None,
+    ) -> TaskResult:
+        """Execute a plan, stopping at the first failed step.
+
+        Planning and normalization happen before ``task.start``. If the
+        approval policy requires a decision, the runtime stores the complete
+        plan and returns a ``TaskResult`` with ``pending_approval`` set; no
+        action and no ``task.start`` episode are written. Calling this method
+        with ``approval_id`` executes that stored, already-approved plan.
+        """
+
+        if approval_id:
+            return self.run_approved(approval_id)
+
+        task = str(task)
+        task_id = str(task_id or uuid.uuid4().hex)
+        requests, error, planned_actions = self._prepare_plan(task, plan)
+        if error is not None or requests is None:
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error=error or "invalid plan",
+                planned_actions=planned_actions,
+            )
+
+        requires_approval, dangerous_actions = self.approval_policy.evaluate(requests)
+        if requires_approval:
+            return self._request_approval(
+                task=task,
+                task_id=task_id,
+                requests=requests,
+                dangerous_actions=dangerous_actions,
+            )
+
+        return self._execute_plan(
+            task=task,
+            task_id=task_id,
+            requests=requests,
+        )
+
+    def run_approved(self, approval_id: str) -> TaskResult:
+        """Execute an approved plan exactly once.
+
+        The approval is consumed before the first step. That makes a repeated
+        approve/run command harmless even if the caller retries after a crash.
+        """
+
+        approval = self.memory.get_approval(approval_id)
+        if approval is None:
+            return TaskResult(
+                task_id="",
+                task="",
+                ok=False,
+                error=f"approval not found: {approval_id}",
+            )
+
+        task_id = str(approval.get("task_id") or "")
+        task = str(approval.get("task") or "")
+        if approval.get("status") != "approved":
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error=(
+                    f"approval {approval_id} is {approval.get('status')}; "
+                    "expected approved"
+                ),
+                planned_actions=list(approval.get("plan") or []),
+            )
+
+        requests: List[ActionRequest] = []
+        try:
+            for raw_step in approval.get("plan") or []:
+                requests.append(self._normalize_request(raw_step))
+        except (TypeError, ValueError) as exc:
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error=f"stored approval plan is invalid: {exc}",
+                planned_actions=list(approval.get("plan") or []),
+            )
+        if not requests:
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error="stored approval plan is empty",
+            )
+
+        if not self.memory.consume_approval(approval_id):
+            current = self.memory.get_approval(approval_id)
+            state = current.get("status") if current else "missing"
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error=f"approval {approval_id} is not reusable (status={state})",
+                planned_actions=list(approval.get("plan") or []),
+            )
+
+        return self._execute_plan(
+            task=task,
+            task_id=task_id,
+            requests=requests,
+            approval_id=approval_id,
+        )
+
+    def _execute_plan(
+        self,
+        *,
+        task: str,
+        task_id: str,
+        requests: List[ActionRequest],
+        approval_id: Optional[str] = None,
+    ) -> TaskResult:
+        planned_actions = self._plan_dicts(requests)
+        start_metadata: Dict[str, Any] = {}
+        if approval_id:
+            start_metadata["approval_id"] = approval_id
+        self.memory.record_episode(
+            task_id=task_id,
+            task=task,
+            action="task.start",
+            args={},
+            ok=True,
+            output={"task": task},
+            metadata=start_metadata,
+        )
+
+        steps: List[ActionResult] = []
+        attempted: List[Dict[str, Any]] = []
+        for request in requests:
+            attempted.append(request.to_dict())
+            result = self._execute_step(request, task_id=task_id, task=task)
             steps.append(result)
             if not result.ok:
                 self.memory.record_episode(
@@ -216,8 +362,9 @@ class DelamainRuntime:
                     error=result.error,
                     output={
                         "steps": len(steps),
-                        "planned_actions": list(planned_actions),
+                        "planned_actions": list(attempted),
                     },
+                    metadata=start_metadata,
                 )
                 return TaskResult(
                     task_id=task_id,
@@ -226,7 +373,8 @@ class DelamainRuntime:
                     steps=steps,
                     final_output=result.output,
                     error=result.error,
-                    planned_actions=planned_actions,
+                    planned_actions=attempted,
+                    approval_id=approval_id,
                 )
 
         final_output = steps[-1].output if steps else None
@@ -238,8 +386,9 @@ class DelamainRuntime:
             ok=True,
             output={
                 "steps": len(steps),
-                "planned_actions": list(planned_actions),
+                "planned_actions": list(attempted),
             },
+            metadata=start_metadata,
         )
         return TaskResult(
             task_id=task_id,
@@ -247,7 +396,8 @@ class DelamainRuntime:
             ok=True,
             steps=steps,
             final_output=final_output,
-            planned_actions=planned_actions,
+            planned_actions=attempted,
+            approval_id=approval_id,
         )
 
     # ------------------------------------------------------------------

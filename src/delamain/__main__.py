@@ -7,10 +7,12 @@ Examples (from the project root)::
     python -m src.delamain --root workspace --task "проверь notes/a.txt на привет"
     python -m src.delamain --root workspace --task demo --plan-file plan.json
     python -m src.delamain --root workspace --task "список файлов" --llm
+    python -m src.delamain --root workspace --task "запиши в a.txt: x" --approval-mode dangerous
 
-The default CLI is model-free. ``--llm`` opts into a local Ollama planner
-with a heuristic fallback; it is useful for smoke tests, manual inspection of
-the memory database and for demonstrating the loop offline.
+The default CLI is model-free and does not gate dangerous actions. ``--llm``
+opts into a local Ollama planner with a heuristic fallback;
+``--approval-mode`` stores a pending approval instead of executing a
+dangerous plan. Use the tray ``/delamain approve`` command to run it.
 """
 
 from __future__ import annotations
@@ -69,6 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=12,
         help="maximum plan steps from the LLM (default: 12)",
     )
+    parser.add_argument(
+        "--approval-mode",
+        choices=("off", "dangerous", "all"),
+        default="off",
+        help=(
+            "require approval before running dangerous actions: off, "
+            "dangerous or all (default: off)"
+        ),
+    )
     plan_group = parser.add_mutually_exclusive_group()
     plan_group.add_argument(
         "--plan",
@@ -111,7 +122,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         )
 
-    with DelamainRuntime(args.root, args.db, planner=planner) as runtime:
+    with DelamainRuntime(
+        args.root,
+        args.db,
+        planner=planner,
+        approval_mode=args.approval_mode,
+    ) as runtime:
         result = runtime.run_task(args.task, plan=plan)
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return 0 if result.ok else 1

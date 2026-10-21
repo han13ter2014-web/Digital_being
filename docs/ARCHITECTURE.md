@@ -73,15 +73,17 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–10)
+## 🧪 Слой действия Delamain-local (этапы 7–11)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
 
 * `Sandbox` — файловые операции только внутри workspace;
 * `ActionRegistry` — именованные действия с наблюдаемыми результатами;
-* `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки;
+* `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки,
+  approvals;
 * `DelamainRuntime` — выполнение плана и остановка на первой ошибке;
+* `ApprovalPolicy` — preflight-политика для опасных действий;
 * `HeuristicPlanner` — детерминированный планировщик без LLM;
 * `OllamaPlanner` — опциональный локальный LLM-планировщик через
   `/api/chat`, только stdlib;
@@ -107,13 +109,22 @@ live-схему действий через `bind_registry()`, требует JS
 имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
 планирования вызывает `HeuristicPlanner`; LLM не исполняет действия
 напрямую. Слой LLM выключен по умолчанию (`DELAMAIN_LLM_ENABLED=0`), не
-запускает Ollama и не делает сетевых запросов при создании. Approval для
-опасных действий пока не реализован.
+запускает Ollama и не делает сетевых запросов при создании.
+
+С этапа 11 опасные планы проходят approval-preflight **до** `task.start` и
+до первого действия. `write_file` и `set_self_model` помечены
+`dangerous=True`; режимы `off`/`dangerous`/`all` задаются
+`DELAMAIN_APPROVAL_MODE`. Pending approval хранится в SQLite, связан с
+целью (если план пришёл из неё) и исполняется ровно один раз после
+`/delamain approve`; `/delamain reject` отклоняет план и завершает цель
+как `failed`. Approval применяется к любому плану — от эвристики, явного
+`metadata.plan` или LLM.
 
 Слой можно запускать и отдельно: `python -m src.delamain` (с `--llm` —
-через локальную Ollama). Подробности и ограничения — в
-[DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md), итоги этапа —
-в [STAGE10_REPORT.md](STAGE10_REPORT.md).
+через локальную Ollama, с `--approval-mode` — с preflight-проверкой).
+Подробности и ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md),
+итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md) и
+[STAGE11_REPORT.md](STAGE11_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

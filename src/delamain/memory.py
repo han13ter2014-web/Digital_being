@@ -6,7 +6,8 @@ The store is deliberately simple and inspectable. It keeps:
 * ``facts`` — small, explicit facts, searchable with SQLite FTS5;
 * ``self_model`` — the agent's current description of itself;
 * ``goals`` — durable goals and their status;
-* ``skills`` — plans that worked or failed, for later reuse.
+* ``skills`` — plans that worked or failed, for later reuse;
+* ``approvals`` — pending/approved/rejected/consumed dangerous plans.
 
 No external services and no model are required. If FTS5 is unavailable the
 store transparently falls back to ``LIKE`` searches.
@@ -17,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -115,6 +117,27 @@ class MemoryStore:
                 failure_count INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                decided_at TEXT,
+                consumed_at TEXT,
+                task_id TEXT NOT NULL,
+                goal_id INTEGER,
+                title TEXT NOT NULL DEFAULT '',
+                task TEXT NOT NULL DEFAULT '',
+                plan_json TEXT NOT NULL,
+                dangerous_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pending',
+                reason TEXT,
+                meta_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_approvals_status
+                ON approvals(status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_approvals_goal
+                ON approvals(goal_id, status);
             """
         )
 
@@ -504,6 +527,228 @@ class MemoryStore:
             }
             for row in rows
         ]
+
+    def get_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
+        row = self._conn.execute(
+            "SELECT * FROM goals WHERE id = ?", (int(goal_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "title": row["title"],
+            "status": row["status"],
+            "success_predicate": row["success_predicate"],
+            "priority": row["priority"],
+            "metadata": _loads(row["meta_json"], {}),
+        }
+
+    # ------------------------------------------------------------------
+    # Approvals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _approval_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "decided_at": row["decided_at"],
+            "consumed_at": row["consumed_at"],
+            "task_id": row["task_id"],
+            "goal_id": row["goal_id"],
+            "title": row["title"],
+            "task": row["task"],
+            "plan": _loads(row["plan_json"], []),
+            "dangerous_actions": _loads(row["dangerous_json"], []),
+            "status": row["status"],
+            "reason": row["reason"],
+            "metadata": _loads(row["meta_json"], {}),
+        }
+
+    def create_approval(
+        self,
+        *,
+        task_id: str,
+        task: str,
+        plan: List[Dict[str, Any]],
+        dangerous_actions: Optional[List[str]] = None,
+        goal_id: Optional[int] = None,
+        title: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a pending approval for a complete, normalized plan."""
+
+        approval_id = f"appr-{uuid.uuid4().hex[:12]}"
+        now = _utc_now_iso()
+        self._conn.execute(
+            """
+            INSERT INTO approvals
+                (id, created_at, updated_at, task_id, goal_id, title, task,
+                 plan_json, dangerous_json, status, meta_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                approval_id,
+                now,
+                now,
+                str(task_id),
+                None if goal_id is None else int(goal_id),
+                str(title or ""),
+                str(task or ""),
+                _json(list(plan)),
+                _json(list(dangerous_actions or [])),
+                _json(dict(metadata or {})),
+            ),
+        )
+        self._conn.commit()
+        approval = self.get_approval(approval_id)
+        assert approval is not None
+        return approval
+
+    def get_approval(self, approval_id: str) -> Optional[Dict[str, Any]]:
+        row = self._conn.execute(
+            "SELECT * FROM approvals WHERE id = ?", (str(approval_id),)
+        ).fetchone()
+        return None if row is None else self._approval_from_row(row)
+
+    def list_approvals(
+        self,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM approvals ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE status = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (str(status), limit),
+            ).fetchall()
+        return [self._approval_from_row(row) for row in rows]
+
+    def update_approval(
+        self,
+        approval_id: str,
+        *,
+        goal_id: Optional[int] = None,
+        title: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Link an approval to a goal or merge audit metadata.
+
+        Status transitions use the dedicated methods below so an approved
+        approval cannot be silently reused or revived.
+        """
+
+        row = self._conn.execute(
+            "SELECT * FROM approvals WHERE id = ?", (str(approval_id),)
+        ).fetchone()
+        if row is None:
+            return False
+
+        current_metadata = _loads(row["meta_json"], {})
+        if not isinstance(current_metadata, dict):
+            current_metadata = {}
+        if metadata is not None:
+            current_metadata.update(dict(metadata))
+
+        new_goal_id = row["goal_id"] if goal_id is None else int(goal_id)
+        new_title = row["title"] if title is None else str(title)
+        cursor = self._conn.execute(
+            """
+            UPDATE approvals
+            SET updated_at = ?, goal_id = ?, title = ?, meta_json = ?
+            WHERE id = ?
+            """,
+            (
+                _utc_now_iso(),
+                new_goal_id,
+                new_title,
+                _json(current_metadata),
+                str(approval_id),
+            ),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def approve_approval(self, approval_id: str) -> Optional[Dict[str, Any]]:
+        """Move a pending approval to ``approved`` exactly once."""
+
+        now = _utc_now_iso()
+        cursor = self._conn.execute(
+            """
+            UPDATE approvals
+            SET status = 'approved', decided_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (now, now, str(approval_id)),
+        )
+        self._conn.commit()
+        if cursor.rowcount == 0:
+            return None
+        return self.get_approval(approval_id)
+
+    def reject_approval(
+        self,
+        approval_id: str,
+        reason: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """Reject a pending or approved (not yet consumed) approval."""
+
+        now = _utc_now_iso()
+        cursor = self._conn.execute(
+            """
+            UPDATE approvals
+            SET status = 'rejected', decided_at = ?, updated_at = ?, reason = ?
+            WHERE id = ? AND status IN ('pending', 'approved')
+            """,
+            (now, now, str(reason or ""), str(approval_id)),
+        )
+        self._conn.commit()
+        if cursor.rowcount == 0:
+            return None
+        return self.get_approval(approval_id)
+
+    def consume_approval(self, approval_id: str) -> bool:
+        """Atomically consume an approved approval before execution."""
+
+        now = _utc_now_iso()
+        cursor = self._conn.execute(
+            """
+            UPDATE approvals
+            SET status = 'consumed', consumed_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'approved'
+            """,
+            (now, now, str(approval_id)),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def count_approvals(self, *, status: Optional[str] = None) -> int:
+        if status is None:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM approvals"
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM approvals WHERE status = ?",
+                (str(status),),
+            ).fetchone()
+        return int(row["n"])
 
     # ------------------------------------------------------------------
     # Skills

@@ -89,6 +89,11 @@ class TaskResult:
     # successful plan reusable as a skill without guessing arguments back
     # from ActionResult (which intentionally does not store them).
     planned_actions: List[Dict[str, Any]] = field(default_factory=list)
+    # Set when the runtime stopped before execution and stored a pending
+    # approval. The dict is the approval row returned by MemoryStore.
+    pending_approval: Optional[Dict[str, Any]] = None
+    # Set when this task executed an already approved plan.
+    approval_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -99,4 +104,10 @@ class TaskResult:
             "final_output": self.final_output,
             "error": self.error,
             "planned_actions": [dict(step) for step in self.planned_actions],
+            "pending_approval": (
+                dict(self.pending_approval)
+                if self.pending_approval is not None
+                else None
+            ),
+            "approval_id": self.approval_id,
         }

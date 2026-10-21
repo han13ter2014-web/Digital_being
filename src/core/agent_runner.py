@@ -828,9 +828,15 @@ class AgentRunner:
                     if attempts is not None
                     else ""
                 )
+                approval_note = (
+                    f", approval={metadata.get('approval_id')}"
+                    if metadata.get("approval_id")
+                    else ""
+                )
                 lines.append(
-                    f"  [{goal.get('status')}{attempt_note}] #{goal.get('id')} "
-                    f"{goal.get('title')} (p={float(goal.get('priority', 0)):.2f})"
+                    f"  [{goal.get('status')}{attempt_note}{approval_note}] "
+                    f"#{goal.get('id')} {goal.get('title')} "
+                    f"(p={float(goal.get('priority', 0)):.2f})"
                 )
             if len(goals) > 10:
                 lines.append(f"  … ещё {len(goals) - 10}")
@@ -848,27 +854,72 @@ class AgentRunner:
             if len(skills) > 10:
                 lines.append(f"  … ещё {len(skills) - 10}")
             return "\n".join(lines)
+        if action in ("approvals", "pending"):
+            state = rest.strip().lower() or "pending"
+            if state in ("all", "*"):
+                state = None
+            try:
+                approvals = sub.list_approvals(status=state)
+            except Exception as exc:
+                return f"⚠️ Не удалось прочитать approvals: {type(exc).__name__}: {exc}"
+            if not approvals:
+                label = "ожидающих" if state == "pending" else "подходящих"
+                return f"🧪 Approvals Delamain: {label} нет."
+            title = "ожидают" if state == "pending" else f"status={state or 'all'}"
+            lines = [f"🧪 Delamain-approvals ({title}, {len(approvals)}):"]
+            for approval in approvals[:10]:
+                lines.append(self._format_delamain_approval(approval))
+            if len(approvals) > 10:
+                lines.append(f"  … ещё {len(approvals) - 10}")
+            return "\n".join(lines)
+        if action == "approve":
+            approval_id = rest.split(maxsplit=1)[0] if rest else ""
+            if not approval_id:
+                return "Использование: /delamain approve <approval_id>"
+            try:
+                result = sub.approve(approval_id)
+            except Exception as exc:
+                return f"⚠️ Не удалось подтвердить approval: {type(exc).__name__}: {exc}"
+            return self._format_delamain_result(result, prefix="Delamain approval")
+        if action == "reject":
+            parts = rest.split(maxsplit=1)
+            approval_id = parts[0] if parts else ""
+            reason = parts[1].strip() if len(parts) > 1 else ""
+            if not approval_id:
+                return "Использование: /delamain reject <approval_id> [причина]"
+            try:
+                result = sub.reject(approval_id, reason)
+            except Exception as exc:
+                return f"⚠️ Не удалось отклонить approval: {type(exc).__name__}: {exc}"
+            return self._format_delamain_result(result, prefix="Delamain approval")
         return (
             "Использование: /delamain [status|on|off|run <задача>|"
-            "goal <название> | <команда>|goals|skills]"
+            "goal <название> | <команда>|goals|skills|approvals|"
+            "approve <id>|reject <id> [причина]]"
         )
 
     def _format_delamain_status(self, sub) -> str:
         status = sub.status()
         goals = status.get("goals") or {}
         planner = status.get("planner") or {}
+        approval = status.get("approval") or {}
+        approval_counts = approval.get("counts") or {}
         lines = [
             "🧪 Delamain-local",
             f"  Включён: {'да' if status.get('enabled') else 'нет'}",
             f"  Runtime: {'готов' if status.get('runtime_ready') else 'не создан'}",
             f"  Workspace: {status.get('workspace')}",
             f"  Планировщик: {planner.get('mode') or 'heuristic'}",
+            f"  Approval: {approval.get('mode', 'off')}; "
+            f"pending={approval_counts.get('pending', 0)}",
             f"  Цели: pending={goals.get('pending', 0)}, "
             f"done={goals.get('done', 0)}, failed={goals.get('failed', 0)}",
             f"  Навыки: {status.get('skills', 0)}; "
             f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
         ]
+        if approval.get("error"):
+            lines.append(f"  Approval-ошибка: {approval['error']}")
         if planner.get("enabled"):
             lines.append(
                 f"  LLM: {planner.get('model')} @ {planner.get('base_url')}"
@@ -878,7 +929,10 @@ class AgentRunner:
             lines.append(f"  LLM-ошибка: {planner_error}")
         last = status.get("last_result")
         if last:
-            mark = "✅" if last.get("ok") else "⚠️"
+            if last.get("pending_approval"):
+                mark = "⏸"
+            else:
+                mark = "✅" if last.get("ok") else "⚠️"
             lines.append(
                 f"  Последняя: {mark} {last.get('title') or last.get('task')} "
                 f"(шагов: {last.get('steps', 0)})"
@@ -890,6 +944,17 @@ class AgentRunner:
     def _format_delamain_result(self, result: dict, prefix: str = "Delamain") -> str:
         steps = result.get("steps", 0)
         task_id = result.get("task_id", "?")
+        pending = result.get("pending_approval")
+        if pending:
+            approval_id = pending.get("id", "?")
+            dangerous = ", ".join(pending.get("dangerous_actions") or [])
+            detail = f" ({dangerous})" if dangerous else ""
+            return (
+                f"⏸ {prefix}: нужно подтверждение{detail}.\n"
+                f"  Approval: {approval_id}; task: {task_id}\n"
+                f"  /delamain approve {approval_id} — выполнить\n"
+                f"  /delamain reject {approval_id} [причина] — отклонить"
+            )
         if result.get("ok"):
             output = result.get("final_output")
             suffix = f"\n  Вывод: {output}" if output is not None else ""
@@ -897,6 +962,21 @@ class AgentRunner:
         return (
             f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
             f"  {result.get('error')}"
+        )
+
+    @staticmethod
+    def _format_delamain_approval(approval: dict) -> str:
+        dangerous = ", ".join(approval.get("dangerous_actions") or [])
+        danger_note = f"; опасные: {dangerous}" if dangerous else ""
+        goal_note = (
+            f"; goal #{approval.get('goal_id')}"
+            if approval.get("goal_id") is not None
+            else ""
+        )
+        return (
+            f"  [{approval.get('status')}] {approval.get('id')} "
+            f"«{approval.get('title') or approval.get('task') or '—'}»"
+            f"{danger_note}{goal_note}"
         )
 
     @staticmethod

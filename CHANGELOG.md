@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-21 — Delamain-local: approval для опасных действий
+
+* **`ApprovalPolicy`** — preflight-политика для всего плана: режимы `off`
+  (по умолчанию), `dangerous` и `all`; `write_file` и `set_self_model`
+  помечены `dangerous=True`. Неизвестные действия не создают approval, а
+  падают обычной ошибкой.
+* **Pending approval в SQLite** — новая таблица `approvals` хранит `id`,
+  `task_id`, `goal_id`, полный план, опасные действия, статус, причину и
+  время решения. Поддержаны `pending`/`approved`/`rejected`/`consumed`.
+* **Одноразовое исполнение** — approve атомарно переводит план в
+  `consumed` до первого шага; повторный approve не выполняет действия.
+  Reject не выполняет план и завершает связанную цель как `failed` без
+  записи skill-failure.
+* **Цели ждут, а не падают** — pending approval оставляет цель в
+  `pending`, не увеличивает `attempts` и не дублируется на каждом tick.
+* **Команды** — `/delamain approvals [status]`, `/delamain approve <id>`,
+  `/delamain reject <id> [причина]`; статус показывает режим и число
+  pending, `/delamain goals` — ожидающий approval.
+* **CLI и конфигурация** — `--approval-mode` и
+  `DELAMAIN_APPROVAL_MODE`; некорректное значение fail-closed трактуется
+  как `dangerous`.
+* **12 новых тестов**: off-совместимость, pending без side effects,
+  approve/reject, одноразовость, `all`, план planner, перезапуск, цели,
+  fail-closed и команды чата.
+* **Документация** — `docs/STAGE11_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-21 — Delamain-local: опциональный локальный LLM-планировщик
 
 * **`OllamaPlanner`** — новый stdlib-only клиент native Ollama `/api/chat`;

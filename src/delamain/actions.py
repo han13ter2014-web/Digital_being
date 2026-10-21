@@ -206,6 +206,7 @@ class WriteFileAction(Action):
             "content": "text to write",
             "overwrite": "boolean, default true",
         },
+        dangerous=True,
     )
 
     def __init__(self, sandbox: Sandbox) -> None:
@@ -336,6 +337,7 @@ class SetSelfModelAction(Action):
         name="set_self_model",
         description="Update one key of the agent's self-model.",
         parameters={"key": "self-model key", "value": "JSON-like value"},
+        dangerous=True,
     )
 
     def __init__(self, memory: MemoryStore) -> None:

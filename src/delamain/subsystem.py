@@ -15,7 +15,8 @@ The runtime works without a model. A goal is either a simple command that the
 deterministic planner understands, an explicit list of action requests stored
 in the goal metadata, or (optionally) a plan from a local Ollama model with a
 heuristic fallback. The LLM is disabled by default by
-``DELAMAIN_LLM_ENABLED``.
+``DELAMAIN_LLM_ENABLED``. Dangerous plans can wait for explicit approval;
+the gate is disabled by default by ``DELAMAIN_APPROVAL_MODE=off``.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from src.core.subsystem_base import Subsystem
 
+from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
 from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
 from .planner import FallbackPlanner, HeuristicPlanner, Planner
@@ -83,7 +85,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.3.0"
+    version = "0.4.0"
 
     def __init__(
         self,
@@ -102,6 +104,7 @@ class DelamainSubsystem(Subsystem):
         llm_timeout: Optional[float] = None,
         llm_max_steps: Optional[int] = None,
         llm_temperature: Optional[float] = None,
+        approval_mode: Optional[str] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -195,6 +198,19 @@ class DelamainSubsystem(Subsystem):
             or _cfg("DELAMAIN_LLM_TEMPERATURE", 0.0)
         )
         self.llm_temperature = max(0.0, min(2.0, float(temperature_value)))
+
+        raw_approval_mode = (
+            approval_mode
+            if approval_mode is not None
+            else os.environ.get("DELAMAIN_APPROVAL_MODE")
+            or _cfg("DELAMAIN_APPROVAL_MODE", "off")
+        )
+        # A typo in an explicit mode must fail closed: keep writes gated
+        # instead of falling back to the permissive stage-10 behaviour.
+        self.approval_mode, self._approval_mode_error = normalize_approval_mode(
+            raw_approval_mode,
+            fallback="dangerous",
+        )
 
         bytes_value = (
             max_file_bytes
@@ -296,6 +312,7 @@ class DelamainSubsystem(Subsystem):
                 self.db_path,
                 sandbox=sandbox,
                 planner=self._build_planner(),
+                approval_mode=self.approval_mode,
             )
         return self.runtime
 
@@ -359,6 +376,157 @@ class DelamainSubsystem(Subsystem):
         assert self.runtime is not None
         return self.runtime.memory.list_skills(limit=limit)
 
+    def list_approvals(
+        self,
+        status: Optional[str] = "pending",
+        *,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        if self.runtime is None:
+            if not self.enabled:
+                return []
+            self._ensure_runtime()
+        assert self.runtime is not None
+        return self.runtime.memory.list_approvals(status=status, limit=limit)
+
+    def approve(self, approval_id: str) -> Dict[str, Any]:
+        """Approve and execute a stored plan exactly once."""
+
+        approval_id = str(approval_id or "").strip()
+        if not approval_id:
+            return {"ok": False, "error": "approval id is empty", "trigger": "approval"}
+        runtime = self._ensure_runtime()
+        approval = runtime.memory.get_approval(approval_id)
+        if approval is None:
+            return {
+                "ok": False,
+                "error": f"approval not found: {approval_id}",
+                "trigger": "approval",
+            }
+        if approval.get("status") == "pending":
+            approval = runtime.memory.approve_approval(approval_id)
+            if approval is None:
+                current = runtime.memory.get_approval(approval_id)
+                state = current.get("status") if current else "missing"
+                return {
+                    "ok": False,
+                    "error": f"approval {approval_id} is not pending (status={state})",
+                    "trigger": "approval",
+                }
+        elif approval.get("status") != "approved":
+            return {
+                "ok": False,
+                "error": (
+                    f"approval {approval_id} is {approval.get('status')}; "
+                    "only pending or approved approvals can run"
+                ),
+                "trigger": "approval",
+            }
+
+        result = runtime.run_approved(approval_id)
+        goal_id = approval.get("goal_id")
+        goal = runtime.memory.get_goal(int(goal_id)) if goal_id is not None else None
+        if goal is not None:
+            metadata = goal.get("metadata") or {}
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+            previous_attempts = self._attempts(metadata)
+            summary = self._finish_goal(
+                runtime,
+                goal,
+                result,
+                trigger="approval",
+                previous_attempts=previous_attempts,
+                reused_skill=False,
+            )
+        else:
+            summary = self._summarize(
+                result,
+                trigger="approval",
+                goal_id=goal_id,
+                title=approval.get("title") or None,
+            )
+        self._last_result = summary
+        return summary
+
+    def reject(self, approval_id: str, reason: str = "") -> Dict[str, Any]:
+        """Reject a pending approval and fail its linked goal, if any."""
+
+        approval_id = str(approval_id or "").strip()
+        if not approval_id:
+            return {"ok": False, "error": "approval id is empty", "trigger": "approval"}
+        runtime = self._ensure_runtime()
+        approval = runtime.memory.get_approval(approval_id)
+        if approval is None:
+            return {
+                "ok": False,
+                "error": f"approval not found: {approval_id}",
+                "trigger": "approval",
+            }
+        if approval.get("status") not in {"pending", "approved"}:
+            return {
+                "ok": False,
+                "error": (
+                    f"approval {approval_id} is {approval.get('status')}; "
+                    "only pending or approved approvals can be rejected"
+                ),
+                "trigger": "approval",
+            }
+
+        updated = runtime.memory.reject_approval(approval_id, reason)
+        if updated is None:
+            return {
+                "ok": False,
+                "error": f"approval {approval_id} could not be rejected",
+                "trigger": "approval",
+            }
+
+        goal_id = updated.get("goal_id")
+        goal = runtime.memory.get_goal(int(goal_id)) if goal_id is not None else None
+        attempts: Optional[int] = None
+        if goal is not None:
+            metadata = goal.get("metadata") or {}
+            if not isinstance(metadata, Mapping):
+                metadata = {}
+            attempts = self._attempts(metadata)
+            new_metadata = dict(metadata)
+            new_metadata.update(
+                {
+                    "approval_id": None,
+                    "approval_status": "rejected",
+                    "approval_reason": str(reason or ""),
+                    "last_attempt_at": utc_now_iso(),
+                    "last_error": f"approval rejected: {reason or 'no reason'}",
+                    "last_ok": False,
+                    "retry_scheduled": False,
+                }
+            )
+            runtime.memory.update_goal(
+                int(goal["id"]),
+                status="failed",
+                metadata=new_metadata,
+            )
+
+        summary = {
+            "task_id": updated.get("task_id"),
+            "task": _short(updated.get("task")),
+            "ok": False,
+            "steps": 0,
+            "final_output": None,
+            "error": f"approval rejected: {reason or 'no reason'}",
+            "trigger": "approval-reject",
+            "goal_id": goal_id,
+            "title": updated.get("title") or None,
+            "attempts": attempts,
+            "retry_scheduled": False,
+            "reused_skill": False,
+            "approval_id": approval_id,
+            "approval_status": "rejected",
+            "pending_approval": None,
+        }
+        self._last_result = summary
+        return summary
+
     def run_now(
         self,
         task: str,
@@ -381,7 +549,8 @@ class DelamainSubsystem(Subsystem):
         candidates = [
             goal
             for goal in runtime.memory.list_goals(status="pending")
-            if self._goal_command(goal) or self._goal_plan(goal)
+            if (self._goal_command(goal) or self._goal_plan(goal))
+            and not self._goal_waiting_for_approval(runtime, goal)
         ]
         if not candidates:
             return None
@@ -407,11 +576,84 @@ class DelamainSubsystem(Subsystem):
         metadata = goal.get("metadata") or {}
         if not isinstance(metadata, Mapping):
             metadata = {}
-        try:
-            previous_attempts = int(metadata.get("attempts") or 0)
-        except (TypeError, ValueError):
-            previous_attempts = 0
-        attempt_number = max(0, previous_attempts) + 1
+        previous_attempts = self._attempts(metadata)
+
+        # A goal with a pending approval must not create another approval on
+        # every tick. An approved approval is executed here; this also covers
+        # a process restart after the user pressed approve.
+        approval_id = metadata.get("approval_id")
+        if approval_id:
+            approval = runtime.memory.get_approval(str(approval_id))
+            if approval is not None:
+                state = str(approval.get("status") or "")
+                if state == "pending":
+                    result = TaskResult(
+                        task_id=str(approval.get("task_id") or f"goal-{goal_id}"),
+                        task=task,
+                        ok=False,
+                        error="approval required: " + ", ".join(
+                            approval.get("dangerous_actions") or ["all actions"]
+                        ),
+                        planned_actions=list(approval.get("plan") or []),
+                        pending_approval=approval,
+                    )
+                    summary = self._summarize(
+                        result,
+                        trigger=trigger,
+                        goal_id=goal_id,
+                        title=title,
+                        attempts=previous_attempts,
+                        retry_scheduled=False,
+                        reused_skill=False,
+                    )
+                    self._last_result = summary
+                    return summary
+                if state == "approved":
+                    result = runtime.run_approved(str(approval_id))
+                    return self._finish_goal(
+                        runtime,
+                        goal,
+                        result,
+                        trigger=trigger,
+                        previous_attempts=previous_attempts,
+                        reused_skill=False,
+                    )
+                if state == "rejected":
+                    new_metadata = dict(metadata)
+                    new_metadata.update(
+                        {
+                            "approval_id": None,
+                            "approval_status": "rejected",
+                            "last_attempt_at": utc_now_iso(),
+                            "last_error": "approval rejected",
+                            "last_ok": False,
+                            "retry_scheduled": False,
+                        }
+                    )
+                    runtime.memory.update_goal(
+                        goal_id,
+                        status="failed",
+                        metadata=new_metadata,
+                    )
+                    summary = {
+                        "task_id": f"goal-{goal_id}",
+                        "task": _short(task),
+                        "ok": False,
+                        "steps": 0,
+                        "final_output": None,
+                        "error": "approval rejected",
+                        "trigger": trigger,
+                        "goal_id": goal_id,
+                        "title": title,
+                        "attempts": previous_attempts,
+                        "retry_scheduled": False,
+                        "reused_skill": False,
+                        "approval_id": str(approval_id),
+                        "approval_status": "rejected",
+                        "pending_approval": None,
+                    }
+                    self._last_result = summary
+                    return summary
 
         plan = explicit_plan
         reused_skill = False
@@ -421,10 +663,73 @@ class DelamainSubsystem(Subsystem):
 
         # Keep the stage-8 task id for the first attempt; retries get a
         # suffix so their episodes remain distinguishable.
+        attempt_number = previous_attempts + 1
         task_id = f"goal-{goal_id}"
         if attempt_number > 1:
             task_id += f"-attempt-{attempt_number}"
         result = runtime.run_task(task, plan=plan, task_id=task_id)
+
+        if result.pending_approval:
+            approval = result.pending_approval
+            approval_id = str(approval.get("id"))
+            runtime.memory.update_approval(
+                approval_id,
+                goal_id=goal_id,
+                title=title,
+                metadata={"source": "goal"},
+            )
+            new_metadata = dict(metadata)
+            new_metadata.update(
+                {
+                    "approval_id": approval_id,
+                    "approval_status": "pending",
+                    "approval_requested_at": utc_now_iso(),
+                    "last_attempt_at": utc_now_iso(),
+                    "last_error": result.error,
+                    "last_ok": False,
+                    "retry_scheduled": False,
+                }
+            )
+            runtime.memory.update_goal(
+                goal_id,
+                status="pending",
+                metadata=new_metadata,
+            )
+            summary = self._summarize(
+                result,
+                trigger=trigger,
+                goal_id=goal_id,
+                title=title,
+                attempts=previous_attempts,
+                retry_scheduled=False,
+                reused_skill=reused_skill,
+            )
+            self._last_result = summary
+            return summary
+
+        return self._finish_goal(
+            runtime,
+            goal,
+            result,
+            trigger=trigger,
+            previous_attempts=previous_attempts,
+            reused_skill=reused_skill,
+        )
+
+    def _finish_goal(
+        self,
+        runtime: DelamainRuntime,
+        goal: Dict[str, Any],
+        result: TaskResult,
+        *,
+        trigger: str,
+        previous_attempts: int,
+        reused_skill: bool,
+    ) -> Dict[str, Any]:
+        goal_id = int(goal["id"])
+        title = str(goal.get("title") or f"goal-{goal_id}")
+        command = self._goal_command(goal)
+        attempt_number = max(0, previous_attempts) + 1
 
         if result.ok:
             status = "done"
@@ -446,6 +751,9 @@ class DelamainSubsystem(Subsystem):
             # Preserve the last known good plan and only count the failure.
             runtime.memory.record_skill(title, None, success=False)
 
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
         new_metadata = dict(metadata)
         new_metadata.update(
             {
@@ -456,6 +764,13 @@ class DelamainSubsystem(Subsystem):
                 "retry_scheduled": retry_scheduled,
             }
         )
+        prior_approval_id = new_metadata.get("approval_id")
+        if result.approval_id or prior_approval_id:
+            new_metadata["last_approval_id"] = result.approval_id or prior_approval_id
+            new_metadata["approval_id"] = None
+            new_metadata["approval_status"] = (
+                "consumed" if result.approval_id else "failed"
+            )
         runtime.memory.update_goal(
             goal_id,
             status=status,
@@ -473,6 +788,27 @@ class DelamainSubsystem(Subsystem):
         )
         self._last_result = summary
         return summary
+
+    @staticmethod
+    def _attempts(metadata: Mapping[str, Any]) -> int:
+        try:
+            return max(0, int(metadata.get("attempts") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _goal_waiting_for_approval(
+        runtime: DelamainRuntime,
+        goal: Mapping[str, Any],
+    ) -> bool:
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            return False
+        approval_id = metadata.get("approval_id")
+        if not approval_id:
+            return False
+        approval = runtime.memory.get_approval(str(approval_id))
+        return approval is not None and approval.get("status") == "pending"
 
     @staticmethod
     def _skill_plan_for(
@@ -563,6 +899,18 @@ class DelamainSubsystem(Subsystem):
         retry_scheduled: bool = False,
         reused_skill: bool = False,
     ) -> Dict[str, Any]:
+        pending = result.pending_approval
+        pending_summary = None
+        if pending is not None:
+            pending_summary = {
+                "id": pending.get("id"),
+                "task_id": pending.get("task_id"),
+                "title": pending.get("title"),
+                "task": _short(pending.get("task")),
+                "status": pending.get("status"),
+                "dangerous_actions": list(pending.get("dangerous_actions") or []),
+                "plan": list(pending.get("plan") or []),
+            }
         return {
             "task_id": result.task_id,
             "task": _short(result.task),
@@ -576,6 +924,14 @@ class DelamainSubsystem(Subsystem):
             "attempts": attempts,
             "retry_scheduled": bool(retry_scheduled),
             "reused_skill": bool(reused_skill),
+            "approval_id": result.approval_id
+            or (pending_summary.get("id") if pending_summary else None),
+            "approval_status": (
+                "consumed"
+                if result.approval_id
+                else ("pending" if pending_summary else None)
+            ),
+            "pending_approval": pending_summary,
         }
 
     # ------------------------------------------------------------------
@@ -655,6 +1011,21 @@ class DelamainSubsystem(Subsystem):
             except Exception as exc:  # pragma: no cover - defensive
                 base["skill_count_error"] = str(exc)
 
+        approval_counts = {
+            "pending": 0,
+            "approved": 0,
+            "rejected": 0,
+            "consumed": 0,
+        }
+        if self.runtime is not None:
+            try:
+                for state in approval_counts:
+                    approval_counts[state] = self.runtime.memory.count_approvals(
+                        status=state
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                base["approval_count_error"] = str(exc)
+
         base.update(
             {
                 "workspace": str(self.workspace),
@@ -665,6 +1036,12 @@ class DelamainSubsystem(Subsystem):
                 "max_attempts": self.max_attempts,
                 "goals": counts,
                 "skills": skill_count,
+                "approval": {
+                    "mode": self.approval_mode,
+                    "valid_modes": list(VALID_APPROVAL_MODES),
+                    "error": self._approval_mode_error,
+                    "counts": approval_counts,
+                },
                 "planner": self._planner_info(),
                 "last_result": self._last_result,
             }
