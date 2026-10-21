@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-21 — Delamain-local: интеграция и цикл исполняемых целей
+
+* **`DelamainSubsystem`** — нативная подсистема (`Subsystem`, priority 200)
+  с ленивым runtime; выключена по умолчанию, не открывает SQLite и не
+  трогает файлы без явного включения.
+* **Цикл целей** — раз в `DELAMAIN_TICK_INTERVAL` автономных циклов
+  выполняется одна `pending`-цель с `metadata.command` или
+  `metadata.plan`; успех → `done`, ошибка → `failed`; результат пишется
+  в `skills`.
+* **Интеграция с `DigitalBeing`** — подсистема зарегистрирована напрямую,
+  доступна через `PluginRegistry` и `status_all()`.
+* **Команды `/delamain`** в трей-чате: `status`, `on`, `off`, `run`,
+  `goal`, `goals`; задача сохраняет регистр из `cmd_raw`.
+* **Конфигурация** — `DELAMAIN_LOCAL_ENABLED`, `DELAMAIN_TICK_INTERVAL`,
+  `DELAMAIN_MAX_GOALS_PER_TICK`, `DELAMAIN_MAX_FILE_BYTES`,
+  `DELAMAIN_WORKSPACE`, `DELAMAIN_DB`; env имеет приоритет.
+* **12 новых тестов** для подсистемы, очереди целей, tick, ошибок,
+  `run_now`, teardown, регистрации в агенте и команд чата.
+* **Полный прогон:** `468 passed, 2 skipped` (7:52), регрессий нет.
+* **Документация** — `docs/STAGE8_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md` и README.
+
 ### 2026-10-21 — Delamain-local: первый замкнутый контур
 
 * **Новый пакет `src/delamain/`** — локальное детерминированное ядро

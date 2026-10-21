@@ -58,6 +58,7 @@ python main.py
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
 | **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
+| **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -66,7 +67,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–7
+### 🧭 Ревизия 2026-10: этапы 0–8
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -82,6 +83,10 @@ python main.py
 * **Первый замкнутый контур** — `src/delamain/`: sandbox, файловые действия,
   SQLite-память, проверка результата и runtime без обязательной LLM.
   Подробно — **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)**.
+* **Интеграция с агентом** — `DelamainSubsystem` выключена по умолчанию,
+  включается через `/delamain on` или `DELAMAIN_ENABLED=1`; очередь целей
+  выполняется раз в N автономных циклов, результат пишется в SQLite и
+  `skills`. Подробно — **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 
@@ -219,10 +224,10 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 435 тестов проходит (после этапов 1–5, октябрь 2026)
+### ✅ 468 тестов проходит (после этапов 1–8, октябрь 2026)
 ```bash
 $ python -m pytest tests/ -q
-435 passed, 2 skipped in ~8,5 мин (включая benchmarks)
+468 passed, 2 skipped in 472.44s (0:07:52, включая benchmarks)
 ```
 
 Этап 5: прогресс целей накапливается по уникальным темам, цели
@@ -305,7 +310,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (435 тестов) + бенчмарки в `tests/benchmarks/`
+- **Тесты**: pytest (468 тестов) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---
@@ -392,7 +397,7 @@ digital_being/
     ├── EVOLUTION.md
     ├── BUILD.md / INSTALLER.md
     ├── BASELINE.md          # точка отсчёта и метрики
-    ├── STAGE1_REPORT.md … STAGE6_REPORT.md
+    ├── STAGE1_REPORT.md … STAGE8_REPORT.md
     ├── README_DIGITAL_LIFE.md
     ├── digital_life_anatomy.md
     └── AUDIT_REPORT.md      # исторический аудит (июнь 2026)

@@ -336,6 +336,17 @@ class LongRunningConfig:
     WEB_SEARCH_FALLBACK_TO_EN = True       # если RU пуст — пробуем EN
     WEB_SEARCH_USER_AGENT = "DigitalBeing/2.5"
 
+    # === DELAMAIN-LOCAL (этап 8) ===
+    # Опциональный детерминированный слой действий. По умолчанию выключен:
+    # без явного включения он не открывает SQLite и не трогает файлы.
+    # Включается через DELAMAIN_ENABLED=1 или командой /delamain on.
+    DELAMAIN_LOCAL_ENABLED = False
+    DELAMAIN_TICK_INTERVAL = 20            # раз в N автономных циклов
+    DELAMAIN_MAX_GOALS_PER_TICK = 1        # не запускать пачку задач за раз
+    DELAMAIN_MAX_FILE_BYTES = 1_000_000    # лимит файла в песочнице
+    DELAMAIN_WORKSPACE = ""                 # пусто => data/delamain/workspace
+    DELAMAIN_DB = ""                        # пусто => data/delamain/delamain.sqlite3
+
 
 # Глобальная конфигурация
 SIM_CONFIG = SimulationConfig()
