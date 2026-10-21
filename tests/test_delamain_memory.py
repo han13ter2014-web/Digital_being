@@ -80,3 +80,46 @@ def test_self_model_goals_and_skills(tmp_path: Path) -> None:
         assert skill["failure_count"] == 1
     finally:
         store.close()
+
+
+def test_update_goal_merges_metadata_and_priority(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        goal_id = store.save_goal(
+            "retry me",
+            metadata={"command": "read_file", "attempts": 1},
+            priority=0.2,
+        )
+
+        assert store.update_goal(
+            goal_id,
+            status="pending",
+            metadata={"last_error": "temporary", "attempts": 2},
+            priority=0.8,
+        )
+        goal = store.list_goals()[0]
+        assert goal["status"] == "pending"
+        assert goal["priority"] == 0.8
+        assert goal["metadata"]["command"] == "read_file"
+        assert goal["metadata"]["attempts"] == 2
+        assert goal["metadata"]["last_error"] == "temporary"
+        assert store.update_goal(999, status="done") is False
+    finally:
+        store.close()
+
+
+def test_failed_skill_keeps_last_successful_plan(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        plan = [{"action": "write_file", "args": {"path": "a.txt"}}]
+        store.record_skill("keep-plan", plan, success=True)
+        store.record_skill("keep-plan", None, success=False)
+
+        skill = store.get_skill("keep-plan")
+        assert skill is not None
+        assert skill["success_count"] == 1
+        assert skill["failure_count"] == 1
+        assert skill["plan"] == plan
+        assert store.list_skills()[0]["name"] == "keep-plan"
+    finally:
+        store.close()

@@ -821,16 +821,36 @@ class AgentRunner:
                 return "🧪 Исполняемых целей Delamain нет."
             lines = [f"🧪 Delamain-цели ({len(goals)}):"]
             for goal in goals[:10]:
+                metadata = goal.get("metadata") or {}
+                attempts = metadata.get("attempts")
+                attempt_note = (
+                    f", attempts={attempts}/{sub.max_attempts}"
+                    if attempts is not None
+                    else ""
+                )
                 lines.append(
-                    f"  [{goal.get('status')}] #{goal.get('id')} "
+                    f"  [{goal.get('status')}{attempt_note}] #{goal.get('id')} "
                     f"{goal.get('title')} (p={float(goal.get('priority', 0)):.2f})"
                 )
             if len(goals) > 10:
                 lines.append(f"  … ещё {len(goals) - 10}")
             return "\n".join(lines)
+        if action in ("skills", "skill"):
+            try:
+                skills = sub.list_skills()
+            except Exception as exc:
+                return f"⚠️ Не удалось прочитать навыки: {type(exc).__name__}: {exc}"
+            if not skills:
+                return "🧪 Навыков Delamain пока нет."
+            lines = [f"🧪 Delamain-навыки ({len(skills)}):"]
+            for skill in skills[:10]:
+                lines.append(self._format_delamain_skill(skill))
+            if len(skills) > 10:
+                lines.append(f"  … ещё {len(skills) - 10}")
+            return "\n".join(lines)
         return (
             "Использование: /delamain [status|on|off|run <задача>|"
-            "goal <название> | <команда>|goals]"
+            "goal <название> | <команда>|goals|skills]"
         )
 
     def _format_delamain_status(self, sub) -> str:
@@ -843,6 +863,8 @@ class AgentRunner:
             f"  Workspace: {status.get('workspace')}",
             f"  Цели: pending={goals.get('pending', 0)}, "
             f"done={goals.get('done', 0)}, failed={goals.get('failed', 0)}",
+            f"  Навыки: {status.get('skills', 0)}; "
+            f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
         ]
         last = status.get("last_result")
@@ -866,6 +888,37 @@ class AgentRunner:
         return (
             f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
             f"  {result.get('error')}"
+        )
+
+    @staticmethod
+    def _format_delamain_skill(skill: dict) -> str:
+        plan = skill.get("plan")
+        if (
+            isinstance(plan, dict)
+            and plan.get("version") == 1
+            and isinstance(plan.get("steps"), list)
+        ):
+            steps = plan["steps"]
+            command = plan.get("command")
+        elif isinstance(plan, list):
+            steps = plan
+            command = None
+        else:
+            steps = []
+            command = None
+        actions = [
+            str(step.get("action"))
+            for step in steps
+            if isinstance(step, dict) and step.get("action")
+        ]
+        plan_note = " → ".join(actions[:4]) if actions else "план не сохранён"
+        if len(actions) > 4:
+            plan_note += " → …"
+        command_note = f"; команда: {command}" if command else ""
+        return (
+            f"  [{skill.get('success_count', 0)}✓/"
+            f"{skill.get('failure_count', 0)}✗] {skill.get('name')}: "
+            f"{plan_note}{command_note}"
         )
 
     def _format_open_questions(self) -> str:
@@ -937,6 +990,7 @@ class AgentRunner:
             "  /delamain run <задача> — выполнить задачу сразу\n"
             "  /delamain goal <название> | <команда> — цель в очередь\n"
             "  /delamain goals — исполняемые цели\n"
+            "  /delamain skills — навыки и счётчики успехов/ошибок\n"
             "  /quit      — завершить (с сохранением)\n"
             "  /help      — эта справка"
         )
@@ -992,10 +1046,16 @@ class AgentRunner:
                     continue
                 data = event.get("data") or {}
                 mark = "✅" if data.get("ok") else "⚠️"
+                attempt_note = ""
+                if data.get("attempts") is not None:
+                    attempt_note = f", попытка {data.get('attempts')}"
+                    if data.get("retry_scheduled"):
+                        attempt_note += ", будет повтор"
                 logger.info(
                     f"[{self.name}] {mark} Delamain goal (цикл {cycle}): "
                     f"{data.get('title') or data.get('task')} "
-                    f"(шагов: {data.get('steps', 0)}, task={data.get('task_id')})"
+                    f"(шагов: {data.get('steps', 0)}{attempt_note}, "
+                    f"task={data.get('task_id')})"
                 )
 
     # ============================================================

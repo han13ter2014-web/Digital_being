@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–8)
+## 🧪 Слой действия Delamain-local (этапы 7–9)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -91,9 +91,16 @@
 Исполняемые цели Delamain пока отделены от когнитивных целей
 `GoalSubsystem`.
 
+С этапа 9 цикл стал память-зависимым: успешный `planned_actions` сохраняется
+в `skills` вместе с командой, а следующая цель с тем же названием и той же
+командой может выполнить этот план без planner. Ошибка при
+`DELAMAIN_MAX_ATTEMPTS > 1` оставляет цель в `pending` до исчерпания попыток;
+по умолчанию `1`, чтобы сохранить поведение этапа 8. `/delamain skills`
+показывает накопленные навыки.
+
 Слой можно запускать и отдельно: `python -m src.delamain`. Подробности и
 ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md), итоги этапа —
-в [STAGE8_REPORT.md](STAGE8_REPORT.md).
+в [STAGE9_REPORT.md](STAGE9_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 
