@@ -85,6 +85,10 @@ class TaskResult:
     steps: List[ActionResult] = field(default_factory=list)
     final_output: Any = None
     error: Optional[str] = None
+    # Normalized requests that were actually attempted. This makes a
+    # successful plan reusable as a skill without guessing arguments back
+    # from ActionResult (which intentionally does not store them).
+    planned_actions: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -94,4 +98,5 @@ class TaskResult:
             "steps": [step.to_dict() for step in self.steps],
             "final_output": self.final_output,
             "error": self.error,
+            "planned_actions": [dict(step) for step in self.planned_actions],
         }

@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from src.core.subsystem_base import Subsystem
 
-from .models import ActionRequest, TaskResult
+from .models import ActionRequest, TaskResult, utc_now_iso
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox
 
@@ -79,7 +79,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.2.0"
+    version = "0.3.0"
 
     def __init__(
         self,
@@ -90,6 +90,7 @@ class DelamainSubsystem(Subsystem):
         enabled: Optional[bool] = None,
         tick_interval: Optional[int] = None,
         max_goals_per_tick: Optional[int] = None,
+        max_attempts: Optional[int] = None,
         max_file_bytes: Optional[int] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
@@ -135,6 +136,16 @@ class DelamainSubsystem(Subsystem):
             or _cfg("DELAMAIN_MAX_GOALS_PER_TICK", 1)
         )
         self.max_goals_per_tick = max(1, int(goals_value))
+
+        attempts_value = (
+            max_attempts
+            if max_attempts is not None
+            else os.environ.get("DELAMAIN_MAX_ATTEMPTS")
+            or _cfg("DELAMAIN_MAX_ATTEMPTS", 1)
+        )
+        # The default is intentionally 1: stage 8 behaviour (one failure ->
+        # failed) is preserved unless the user opts into retries.
+        self.max_attempts = max(1, int(attempts_value))
 
         bytes_value = (
             max_file_bytes
@@ -264,6 +275,14 @@ class DelamainSubsystem(Subsystem):
         assert self.runtime is not None
         return self.runtime.memory.list_goals(status=status)
 
+    def list_skills(self, *, limit: int = 20) -> List[Dict[str, Any]]:
+        if self.runtime is None:
+            if not self.enabled:
+                return []
+            self._ensure_runtime()
+        assert self.runtime is not None
+        return self.runtime.memory.list_skills(limit=limit)
+
     def run_now(
         self,
         task: str,
@@ -306,20 +325,65 @@ class DelamainSubsystem(Subsystem):
         goal_id = int(goal["id"])
         title = str(goal.get("title") or f"goal-{goal_id}")
         command = self._goal_command(goal)
-        plan = self._goal_plan(goal)
+        explicit_plan = self._goal_plan(goal)
         task = command or title
 
-        result = runtime.run_task(
-            task,
-            plan=plan,
-            task_id=f"goal-{goal_id}",
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        try:
+            previous_attempts = int(metadata.get("attempts") or 0)
+        except (TypeError, ValueError):
+            previous_attempts = 0
+        attempt_number = max(0, previous_attempts) + 1
+
+        plan = explicit_plan
+        reused_skill = False
+        if plan is None:
+            plan = self._skill_plan_for(runtime, title, command)
+            reused_skill = plan is not None
+
+        # Keep the stage-8 task id for the first attempt; retries get a
+        # suffix so their episodes remain distinguishable.
+        task_id = f"goal-{goal_id}"
+        if attempt_number > 1:
+            task_id += f"-attempt-{attempt_number}"
+        result = runtime.run_task(task, plan=plan, task_id=task_id)
+
+        if result.ok:
+            status = "done"
+            retry_scheduled = False
+            # Store the actual normalized plan, not the command text. This is
+            # what makes a later identical goal executable without a planner.
+            runtime.memory.record_skill(
+                title,
+                {
+                    "version": 1,
+                    "command": command,
+                    "steps": list(result.planned_actions),
+                },
+                success=True,
+            )
+        else:
+            retry_scheduled = attempt_number < self.max_attempts
+            status = "pending" if retry_scheduled else "failed"
+            # Preserve the last known good plan and only count the failure.
+            runtime.memory.record_skill(title, None, success=False)
+
+        new_metadata = dict(metadata)
+        new_metadata.update(
+            {
+                "attempts": attempt_number,
+                "last_attempt_at": utc_now_iso(),
+                "last_error": result.error,
+                "last_ok": bool(result.ok),
+                "retry_scheduled": retry_scheduled,
+            }
         )
-        status = "done" if result.ok else "failed"
-        runtime.memory.update_goal_status(goal_id, status)
-        runtime.memory.record_skill(
-            title,
-            plan if plan is not None else command or task,
-            success=result.ok,
+        runtime.memory.update_goal(
+            goal_id,
+            status=status,
+            metadata=new_metadata,
         )
 
         summary = self._summarize(
@@ -327,9 +391,54 @@ class DelamainSubsystem(Subsystem):
             trigger=trigger,
             goal_id=goal_id,
             title=title,
+            attempts=attempt_number,
+            retry_scheduled=retry_scheduled,
+            reused_skill=reused_skill,
         )
         self._last_result = summary
         return summary
+
+    @staticmethod
+    def _skill_plan_for(
+        runtime: DelamainRuntime,
+        title: str,
+        command: Optional[str],
+    ) -> Optional[List[Any]]:
+        """Return a stored plan only when it matches the same command.
+
+        Skills are keyed by title, but a title alone is not enough to justify
+        replaying a plan: the command must match exactly. A plan must have at
+        least one success and must not have more failures than successes.
+        Legacy stage-8 skills store a command string or a raw list, so they
+        are simply not reused.
+        """
+
+        skill = runtime.memory.get_skill(title)
+        if skill is None:
+            return None
+        try:
+            successes = int(skill.get("success_count") or 0)
+            failures = int(skill.get("failure_count") or 0)
+        except (TypeError, ValueError):
+            return None
+        # Require at least one success, and do not keep replaying a plan that
+        # is failing more often than it works. Equal counts are allowed so a
+        # goal that failed once and then succeeded on retry can still be
+        # reused; one more failure will make it ineligible.
+        if successes == 0 or successes < failures:
+            return None
+
+        payload = skill.get("plan")
+        if not isinstance(payload, Mapping):
+            return None
+        if payload.get("version") != 1:
+            return None
+        if payload.get("command") != command:
+            return None
+        steps = payload.get("steps")
+        if not isinstance(steps, (list, tuple)) or not steps:
+            return None
+        return list(steps)
 
     @staticmethod
     def _normalize_plan(
@@ -374,6 +483,9 @@ class DelamainSubsystem(Subsystem):
         trigger: str,
         goal_id: Optional[int] = None,
         title: Optional[str] = None,
+        attempts: Optional[int] = None,
+        retry_scheduled: bool = False,
+        reused_skill: bool = False,
     ) -> Dict[str, Any]:
         return {
             "task_id": result.task_id,
@@ -385,6 +497,9 @@ class DelamainSubsystem(Subsystem):
             "trigger": str(trigger),
             "goal_id": goal_id,
             "title": title,
+            "attempts": attempts,
+            "retry_scheduled": bool(retry_scheduled),
+            "reused_skill": bool(reused_skill),
         }
 
     # ------------------------------------------------------------------
@@ -433,6 +548,13 @@ class DelamainSubsystem(Subsystem):
             except Exception as exc:  # pragma: no cover - defensive
                 base["goal_count_error"] = str(exc)
 
+        skill_count = 0
+        if self.runtime is not None:
+            try:
+                skill_count = len(self.runtime.memory.list_skills(limit=1000))
+            except Exception as exc:  # pragma: no cover - defensive
+                base["skill_count_error"] = str(exc)
+
         base.update(
             {
                 "workspace": str(self.workspace),
@@ -440,7 +562,9 @@ class DelamainSubsystem(Subsystem):
                 "runtime_ready": self.runtime is not None,
                 "tick_interval": self.tick_interval,
                 "max_goals_per_tick": self.max_goals_per_tick,
+                "max_attempts": self.max_attempts,
                 "goals": counts,
+                "skills": skill_count,
                 "last_result": self._last_result,
             }
         )

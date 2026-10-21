@@ -3,7 +3,13 @@ from pathlib import Path
 import pytest
 
 from src.delamain.models import ActionRequest
+from src.delamain.planner import PlannerError
 from src.delamain.subsystem import DelamainSubsystem
+
+
+class FailingPlanner:
+    def plan(self, task: str):
+        raise PlannerError(f"planner must not be called for {task!r}")
 
 
 def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
@@ -90,13 +96,101 @@ def test_failed_goal_marks_goal_failed_and_records_failure(tmp_path: Path) -> No
     data = event["events"][0]["data"]
     assert data["ok"] is False
     assert data["goal_id"] == goal["id"]
+    assert data["attempts"] == 1
+    assert data["retry_scheduled"] is False
     assert "file not found" in (data["error"] or "")
 
     goals = sub.list_goals()
     assert goals[0]["status"] == "failed"
+    assert goals[0]["metadata"]["attempts"] == 1
     skill = sub.runtime.memory.get_skill("read missing")
     assert skill["success_count"] == 0
     assert skill["failure_count"] == 1
+
+
+def test_goal_retries_until_success(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, max_attempts=2)
+    goal = sub.queue_goal("read later", "прочитай later.txt")
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["attempts"] == 1
+    assert first["retry_scheduled"] is True
+    assert first["task_id"] == f"goal-{goal['id']}"
+    assert sub.list_goals()[0]["status"] == "pending"
+
+    (tmp_path / "workspace" / "later.txt").write_text("ready", encoding="utf-8")
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["goal_id"] == goal["id"]
+    assert second["attempts"] == 2
+    assert second["retry_scheduled"] is False
+    assert second["task_id"] == f"goal-{goal['id']}-attempt-2"
+
+    stored = sub.list_goals()[0]
+    assert stored["status"] == "done"
+    assert stored["metadata"]["attempts"] == 2
+    skill = sub.runtime.memory.get_skill("read later")
+    assert skill["success_count"] == 1
+    assert skill["failure_count"] == 1
+
+    # A success after a retry is still reusable. If this plan were not
+    # reused, the failing planner would make the next goal fail.
+    sub.runtime.planner = FailingPlanner()
+    sub.queue_goal("read later", "прочитай later.txt")
+    third = sub.tick(3, {})["events"][0]["data"]
+    assert third["ok"] is True
+    assert third["reused_skill"] is True
+
+
+def test_goal_stops_after_max_attempts(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, max_attempts=2)
+    sub.queue_goal("always missing", "прочитай missing.txt")
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["retry_scheduled"] is True
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is False
+    assert second["attempts"] == 2
+    assert second["retry_scheduled"] is False
+
+    stored = sub.list_goals()[0]
+    assert stored["status"] == "failed"
+    assert stored["metadata"]["attempts"] == 2
+    skill = sub.runtime.memory.get_skill("always missing")
+    assert skill["success_count"] == 0
+    assert skill["failure_count"] == 2
+
+
+def test_successful_skill_is_reused_only_for_same_command(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path)
+    command = "запиши в reused.txt: one"
+    sub.queue_goal("repeat write", command)
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is True
+
+    # If the skill is not reused, the failing planner makes the goal fail.
+    sub.runtime.planner = FailingPlanner()
+    (tmp_path / "workspace" / "reused.txt").unlink()
+
+    sub.queue_goal("repeat write", command)
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["reused_skill"] is True
+    assert (tmp_path / "workspace" / "reused.txt").read_text(
+        encoding="utf-8"
+    ) == "one"
+    skill = sub.runtime.memory.get_skill("repeat write")
+    assert skill["success_count"] == 2
+
+    sub.queue_goal("repeat write", "запиши в other.txt: two")
+    third = sub.tick(3, {})["events"][0]["data"]
+    assert third["ok"] is False
+    assert third["reused_skill"] is False
+    assert "planner must not be called" in (third["error"] or "")
+    assert not (tmp_path / "workspace" / "other.txt").exists()
 
 
 def test_explicit_plan_goal_runs_without_planner(tmp_path: Path) -> None:
@@ -199,8 +293,14 @@ def test_agent_runner_delamain_commands(tmp_path: Path) -> None:
 
         queued = await runner.handle_command("/delamain goal Note | запиши в goal.txt: ok")
         assert "поставлена в очередь" in queued
+        assert sub.tick(1, {}) is not None
         goals = await runner.handle_command("/delamain goals")
         assert "Note" in goals
+        assert "attempts=1" in goals
+
+        skills = await runner.handle_command("/delamain skills")
+        assert "Note" in skills
+        assert "1✓/0✗" in skills
 
         off = await runner.handle_command("/delamain off")
         assert "выключен" in off

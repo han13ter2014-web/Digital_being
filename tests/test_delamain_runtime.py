@@ -21,6 +21,21 @@ def test_runtime_executes_plan_and_records_episodes(tmp_path: Path) -> None:
         assert len(result.steps) == 4
         assert (root / "notes" / "a.txt").read_text(encoding="utf-8") == "привет"
         assert result.final_output["facts"][0]["value"] == "привет"
+        assert result.planned_actions == [
+            {
+                "action": "write_file",
+                "args": {"path": "notes/a.txt", "content": "привет"},
+            },
+            {
+                "action": "verify_file",
+                "args": {"path": "notes/a.txt", "contains": "привет"},
+            },
+            {
+                "action": "remember_fact",
+                "args": {"key": "note", "value": "привет", "source": "test"},
+            },
+            {"action": "recall_facts", "args": {"query": "note"}},
+        ]
 
         history = runtime.history(task_id=result.task_id)
         actions = [item["action"] for item in history]
@@ -33,6 +48,7 @@ def test_runtime_executes_plan_and_records_episodes(tmp_path: Path) -> None:
             "task.finish",
         ]
         assert history[-1]["ok"] is True
+        assert history[-1]["output"]["planned_actions"] == result.planned_actions
 
 
 def test_runtime_stops_on_first_failure(tmp_path: Path) -> None:

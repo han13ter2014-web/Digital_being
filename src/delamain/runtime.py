@@ -170,6 +170,7 @@ class DelamainRuntime:
             return TaskResult(task_id=task_id, task=task, ok=False, error=error)
 
         steps: List[ActionResult] = []
+        planned_actions: List[Dict[str, Any]] = []
         for raw_step in raw_plan:
             try:
                 request = self._normalize_request(raw_step)
@@ -182,7 +183,10 @@ class DelamainRuntime:
                     args={},
                     ok=False,
                     error=error,
-                    output={"steps": len(steps)},
+                    output={
+                        "steps": len(steps),
+                        "planned_actions": list(planned_actions),
+                    },
                 )
                 return TaskResult(
                     task_id=task_id,
@@ -190,8 +194,10 @@ class DelamainRuntime:
                     ok=False,
                     steps=steps,
                     error=error,
+                    planned_actions=planned_actions,
                 )
 
+            planned_actions.append(request.to_dict())
             result = self.execute(request, task_id=task_id, task=task)
             steps.append(result)
             if not result.ok:
@@ -202,7 +208,10 @@ class DelamainRuntime:
                     args={},
                     ok=False,
                     error=result.error,
-                    output={"steps": len(steps)},
+                    output={
+                        "steps": len(steps),
+                        "planned_actions": list(planned_actions),
+                    },
                 )
                 return TaskResult(
                     task_id=task_id,
@@ -211,6 +220,7 @@ class DelamainRuntime:
                     steps=steps,
                     final_output=result.output,
                     error=result.error,
+                    planned_actions=planned_actions,
                 )
 
         final_output = steps[-1].output if steps else None
@@ -220,7 +230,10 @@ class DelamainRuntime:
             action="task.finish",
             args={},
             ok=True,
-            output={"steps": len(steps)},
+            output={
+                "steps": len(steps),
+                "planned_actions": list(planned_actions),
+            },
         )
         return TaskResult(
             task_id=task_id,
@@ -228,6 +241,7 @@ class DelamainRuntime:
             ok=True,
             steps=steps,
             final_output=final_output,
+            planned_actions=planned_actions,
         )
 
     # ------------------------------------------------------------------

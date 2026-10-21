@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-21 — Delamain-local: навыки и повторные попытки
+
+* **Память → действие** — успешный нормализованный план сохраняется в
+  `skills` вместе с командой; следующая цель с тем же названием и той же
+  командой выполняет его без `HeuristicPlanner`.
+* **Повторы** — `DELAMAIN_MAX_ATTEMPTS` (по умолчанию `1`, чтобы сохранить
+  поведение этапа 8) оставляет упавшую цель в `pending` до исчерпания
+  попыток; в metadata пишутся `attempts`, `last_error`, `retry_scheduled`.
+* **`TaskResult.planned_actions`** — runtime возвращает и сохраняет в
+  `task.finish` фактически выполненные шаги, не восстанавливая аргументы из
+  `ActionResult`.
+* **`MemoryStore`** — `update_goal()` с merge metadata, `list_skills()` и
+  сохранение последнего успешного плана при неудаче.
+* **`/delamain skills`** — просмотр навыков и счётчиков; `/delamain goals`
+  показывает число попыток, `/delamain status` — лимит попыток и навыки.
+* **5 новых тестов** для retry, reuse, metadata и `planned_actions`.
+* **Полный прогон:** `473 passed, 2 skipped` (8:33), регрессий нет.
+* **Документация** — `docs/STAGE9_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-21 — Delamain-local: интеграция и цикл исполняемых целей
 
 * **`DelamainSubsystem`** — нативная подсистема (`Subsystem`, priority 200)
