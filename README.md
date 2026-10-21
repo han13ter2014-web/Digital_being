@@ -48,17 +48,37 @@ python main.py
 
 | Документ | Для кого | О чём |
 |---|---|---|
+| **[docs/INDEX.md](docs/INDEX.md)** | Все | Карта всей документации: актуальное и историческое |
 | **[README.md](README.md)** | Все | Этот файл |
 | **[docs/USAGE.md](docs/USAGE.md)** | 👤 Пользователь | Как запустить, команды, настройки |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | 🧑‍💻 Разработчик / 🤖 Агент | Из чего сделан, как устроен |
 | **[docs/WILL.md](docs/WILL.md)** | 🤖 Агент / 👤 Пользователь | Свобода воли, права, этика |
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
+| **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
+| **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
+| **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
+| **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
-| **[docs/final_evaluation_partnership_report.md](docs/final_evaluation_partnership_report.md)** | Все | Архитектура совести |
 
 ---
 
 ## ✨ Что нового (недавние улучшения)
+
+### 🧭 Ревизия 2026-10: этапы 0–6
+
+Коротко, что изменилось по итогам ревизии:
+
+* **Безопасность и данные** — исходный лог 420 МБ заархивирован, добавлена
+  ротация, `data/` больше не растёт бесконечно.
+* **Изоляция тестов** — `DIGITAL_BEING_DATA_DIR`; тесты не пишут в рабочую
+  `data/`.
+* **Чистота кода** — 0 мёртвых импортов, 0 `bare-except`, 0 изменяемых
+  аргументов по умолчанию (сканер `tools/hygiene_scan.py`).
+* **Смысл и метрики** — цели накапливают прогресс и завершаются ровно один
+  раз; типы действий измеряются; декомпозиция не повторяет один и тот же
+  запрос. Подробно — **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)**.
+* **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
+  проверены ссылки, исторические отчёты помечены.
 
 ### 🫥 Трей-режим (июнь 2026) — новое
 
@@ -359,23 +379,25 @@ digital_being/
 │   ├── test_tray_foundation.py      # EventBus + EnergyPolicy
 │   └── test_tray_smoke.py           # main_tray.py headless
 ├── examples/                # Примеры использования
-└── docs/                    # Документация
-    ├── README_DIGITAL_LIFE.md
+└── docs/                    # Документация (карта — docs/INDEX.md)
+    ├── INDEX.md             # что читать: актуальное vs историческое
     ├── USAGE.md
     ├── ARCHITECTURE.md
     ├── WILL.md
     ├── EVOLUTION.md
-    ├── anatomy_evaluation.md
+    ├── BUILD.md / INSTALLER.md
+    ├── BASELINE.md          # точка отсчёта и метрики
+    ├── STAGE1_REPORT.md … STAGE6_REPORT.md
+    ├── README_DIGITAL_LIFE.md
     ├── digital_life_anatomy.md
-    ├── evaluation_self_developing_life_report.md
-    └── final_evaluation_partnership_report.md
+    └── AUDIT_REPORT.md      # исторический аудит (июнь 2026)
 ```
 
 ---
 
 ## 📜 Лицензия
 
-См. LICENSE (если есть) или обратитесь к авторам.
+См. [LICENSE](LICENSE) — MIT License, Copyright (c) 2026 Digital Being Team.
 
 ---
 
