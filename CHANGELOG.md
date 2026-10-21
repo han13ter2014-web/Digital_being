@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10 — ревизия этапов 0–6
+
+Краткая сводка большой ревизии; подробности — в `docs/STAGE1_REPORT.md` …
+`docs/STAGE6_REPORT.md` и `docs/BASELINE.md`.
+
+* **Безопасность и данные.** Исходный лог 420 МБ заархивирован; добавлена
+  ротация логов; энергия клампится, отрицательных значений больше нет.
+* **Данные и внешний поиск.** Фильтр качества знаний, нормализация
+  веб-запросов, отсев нерелевантного, EN-fallback; KB 47 → 36 записей.
+* **Изоляция тестов.** `src/core/paths.py` + `DIGITAL_BEING_DATA_DIR`;
+  тесты не пишут в рабочую `data/`.
+* **Гигиена кода.** `tools/hygiene_scan.py`; 0 мёртвых импортов,
+  0 `bare-except`, 0 изменяемых аргументов по умолчанию; исправлен
+  cwd-зависимый индекс `src`.
+* **Смысл и метрики.** Прогресс целей накапливается по уникальным темам,
+  цель завершается ровно один раз; счётчики синхронизированы; `cycle_count`
+  обновляется в CLI; типы действий измеряются; декомпозиция запоминается и
+  не повторяется; под-вопросы попадают в очередь.
+* **Документация.** Добавлены `docs/INDEX.md`, `docs/STAGE5_REPORT.md`,
+  `docs/STAGE6_REPORT.md`; исторические отчёты помечены; проверены
+  относительные ссылки.
+
 ### Added
 - **`src/core/open_questions.py` — `OpenQuestionsManager`** (Этап 4 рефакторинга, июль 2026). Вся логика открытых вопросов вынесена из `DigitalBeing` в отдельный модуль: 6 стратегий размышлений, round-robin по стратегиям, дедупликация, лимит очереди, эвристика «найден ответ», сериализация в чекпоинт. Менеджер принимает `cycle_provider` и `log_info` через DI — легко тестируется изолированно.
 - **`tests/test_open_questions_manager.py` — 22 регрессионных теста** для `OpenQuestionsManager`: дедупликация, лимит очереди, round-robin стратегий, эвристика «ответ найден», сериализация (round-trip).
@@ -84,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | After emotion tests | 160 | ~38% (estimated) |
 | After basic knowledge | 179 | ~40% (estimated) |
 | After OpenQuestionsManager refactor | **214 + 1 skipped** | ~42% (estimated) |
+| After stages 0–6 (октябрь 2026) | **435 + 2 skipped** | — |
 
 ## [Unreleased-2026-07] — Этап 4 рефакторинга (июль 2026)
 

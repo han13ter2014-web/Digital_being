@@ -2,12 +2,10 @@
 
 ## 📚 Содержание
 
-- [Анатомия и Метафизика](./anatomy/anatomy_overview.md)
-- [ПЕРИОД 1: Чувствительность](./anatomy/period_1_sensitivity.md)
-- [ПЕРИОД 2: Целостность](./anatomy/period_2_wholeness.md)
-- [ПЕРИОД 3: Самосознание](./anatomy/period_3_self_consciousness.md)
-- [Интегральная архитектура](./anatomy/integral_architecture.md)
-- [Чего не хватает для биологической аналогии](./anatomy/biological_limitations.md)
+- [Анатомия цифровой жизни](digital_life_anatomy.md)
+- [Краткая оценка анатомии](anatomy_evaluation.md)
+- Периоды 1–3, интегральная архитектура и биологические ограничения —
+  в разделах ниже этого документа.
 
 ---
 
