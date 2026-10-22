@@ -157,6 +157,71 @@ def test_fallback_planner_uses_heuristic_and_combines_errors() -> None:
     assert "fallback also failed" in str(exc.value)
 
 
+def test_fallback_planner_passes_context_to_primary_replan() -> None:
+    calls: Dict[str, Any] = {}
+
+    class RepairPlanner:
+        def plan(self, task: str):
+            raise PlannerError("plan must not be used for a repair")
+
+        def replan(self, task: str, failure_context):
+            calls["task"] = task
+            calls["context"] = dict(failure_context)
+            return [ActionRequest("read_file", {"path": "a.txt"})]
+
+    planner = FallbackPlanner(RepairPlanner(), HeuristicPlanner())
+    plan = planner.replan(
+        "repair",
+        {"stage": "action", "failed_step": 2, "action": "read_file"},
+    )
+
+    assert plan == [ActionRequest("read_file", {"path": "a.txt"})]
+    assert calls["task"] == "repair"
+    assert calls["context"]["failed_step"] == 2
+    assert planner.status()["last_context"] is True
+    assert planner.status()["last_used"] == "primary"
+
+
+def test_ollama_planner_replan_includes_failure_context() -> None:
+    calls: Dict[str, Any] = {}
+
+    def requester(url: str, payload: Dict[str, Any], timeout: float):
+        calls["payload"] = payload
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "plan": [
+                            {
+                                "action": "read_file",
+                                "args": {"path": "recovered.txt"},
+                            }
+                        ]
+                    }
+                )
+            }
+        }
+
+    planner = make_planner(requester)
+    plan = planner.replan(
+        "repair the previous plan",
+        {
+            "stage": "action",
+            "failed_step": 2,
+            "action": "read_file",
+            "args": {"path": "missing.txt"},
+            "error": "file not found: missing.txt",
+        },
+    )
+
+    assert plan == [ActionRequest("read_file", {"path": "recovered.txt"})]
+    user_message = calls["payload"]["messages"][1]["content"]
+    assert "Repair context" in user_message
+    assert "untrusted data" in user_message
+    assert "missing.txt" in user_message
+    assert "file not found" in user_message
+
+
 def test_runtime_binds_registry_and_runs_llm_plan(tmp_path: Path) -> None:
     def requester(url: str, payload: Dict[str, Any], timeout: float):
         return {

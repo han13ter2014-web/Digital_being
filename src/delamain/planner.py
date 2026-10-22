@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Mapping, Optional, Protocol, runtime_checkable
 
 from .models import ActionRequest
 
@@ -164,6 +164,20 @@ class HeuristicPlanner:
         examples = "; ".join(self.examples)
         raise PlannerError(f"cannot parse task into actions; examples: {examples}")
 
+    def replan(
+        self,
+        task: str,
+        failure_context: Mapping[str, Any],
+    ) -> List[ActionRequest]:
+        """Repair by parsing the task again; deterministic planner has no state.
+
+        The heuristic planner cannot infer a different plan from a failed
+        result. Keeping this method explicit makes the capability visible to
+        ``FallbackPlanner`` while preserving deterministic behaviour.
+        """
+
+        return self.plan(task)
+
 
 class FallbackPlanner:
     """Try a primary planner, then a deterministic fallback.
@@ -182,6 +196,7 @@ class FallbackPlanner:
         self.fallback = fallback or HeuristicPlanner()
         self.last_error: Optional[str] = None
         self.last_used = "none"
+        self.last_context = False
 
     def bind_registry(self, registry: Any) -> None:
         """Pass the live action registry to planners that can use it."""
@@ -191,9 +206,38 @@ class FallbackPlanner:
             if callable(bind):
                 bind(registry)
 
+    @staticmethod
+    def _call(
+        planner: Planner,
+        task: str,
+        failure_context: Optional[Mapping[str, Any]],
+    ) -> List[ActionRequest]:
+        if failure_context is not None:
+            replan = getattr(planner, "replan", None)
+            if callable(replan):
+                return replan(task, failure_context)
+        return planner.plan(task)
+
     def plan(self, task: str) -> List[ActionRequest]:
+        return self._plan(task, None)
+
+    def replan(
+        self,
+        task: str,
+        failure_context: Mapping[str, Any],
+    ) -> List[ActionRequest]:
+        """Build a repair plan with the failed step context when supported."""
+
+        return self._plan(task, failure_context)
+
+    def _plan(
+        self,
+        task: str,
+        failure_context: Optional[Mapping[str, Any]],
+    ) -> List[ActionRequest]:
+        self.last_context = failure_context is not None
         try:
-            plan = self.primary.plan(task)
+            plan = self._call(self.primary, task, failure_context)
             if not plan:
                 raise PlannerError("primary planner returned an empty plan")
         except Exception as exc:
@@ -204,7 +248,7 @@ class FallbackPlanner:
                 self.last_error,
             )
             try:
-                return self.fallback.plan(task)
+                return self._call(self.fallback, task, failure_context)
             except Exception as fallback_exc:
                 combined = (
                     "primary planner failed "
@@ -223,5 +267,6 @@ class FallbackPlanner:
             "primary": type(self.primary).__name__,
             "fallback": type(self.fallback).__name__,
             "last_used": self.last_used,
+            "last_context": self.last_context,
             "last_error": self.last_error,
         }

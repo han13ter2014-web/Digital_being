@@ -366,17 +366,23 @@ $env:DELAMAIN_MAX_ATTEMPTS = "3"
 $env:DELAMAIN_RETRY_BACKOFF_SEC = "60"
 $env:DELAMAIN_RETRY_BACKOFF_MAX_SEC = "300"
 $env:DELAMAIN_REPLAN_ON_FAILURE = "1"
+$env:DELAMAIN_REPLAN_WITH_CONTEXT = "1"
 python main_tray.py
 ```
 
 Пауза растёт экспоненциально и ограничена cap: 60, 120, 240, 300… Время
 следующей попытки хранится в metadata цели и переживает перезапуск. При
 `DELAMAIN_REPLAN_ON_FAILURE=1` следующий запуск игнорирует сохранённый
-explicit/skill-план и вызывает planner заново. Обе опции по умолчанию
-выключены: `backoff=0`, `replan=off`. `/delamain goals` показывает
-`retry_at=...` и `replan=next`, `/delamain status` — текущие backoff/cap.
-Pending approval не считается ошибкой и не запускает retry. Подробности —
-в [docs/STAGE14_REPORT.md](STAGE14_REPORT.md).
+explicit/skill-план и вызывает planner заново. При
+`DELAMAIN_REPLAN_WITH_CONTEXT=1` planner получает компактный результат
+упавшего шага: действие, аргументы, ошибку, вывод и выполненные шаги.
+Контекст сохраняется в metadata, переживает перезапуск и очищается после
+успеха. Все опции по умолчанию выключены: `backoff=0`, `replan=off`,
+`context=off`. `/delamain goals` показывает `retry_at=...`,
+`replan=next` и `replan=next(context)`, `/delamain status` — текущие
+backoff/cap/replan/context. Pending approval не считается ошибкой и не
+запускает retry. Подробности — в
+[docs/STAGE15_REPORT.md](STAGE15_REPORT.md).
 
 ### Поведение иконки трея
 

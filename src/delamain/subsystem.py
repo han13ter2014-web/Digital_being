@@ -88,12 +88,37 @@ def _short(value: Any, limit: int = 500) -> Any:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _compact(value: Any, *, limit: int = 500, depth: int = 0) -> Any:
+    """Bound nested values before they are stored in goal metadata.
+
+    Failure context can contain a whole file, a long error or a list of facts.
+    The planner only needs a readable summary, so strings are truncated and
+    containers are capped. JSON-safe scalar values are preserved.
+    """
+
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "…"
+    if depth >= 3:
+        return _short(value, limit * 2)
+    if isinstance(value, Mapping):
+        return {
+            str(key): _compact(item, limit=limit, depth=depth + 1)
+            for key, item in list(value.items())[:20]
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _compact(item, limit=limit, depth=depth + 1)
+            for item in list(value)[:20]
+        ]
+    return value
+
+
 class DelamainSubsystem(Subsystem):
     """Expose the deterministic Delamain loop as an optional subsystem."""
 
     name = "delamain"
     priority = 200
-    version = "0.6.0"
+    version = "0.7.0"
 
     def __init__(
         self,
@@ -108,6 +133,7 @@ class DelamainSubsystem(Subsystem):
         retry_backoff_sec: Optional[float] = None,
         retry_backoff_max_sec: Optional[float] = None,
         replan_on_failure: Optional[bool] = None,
+        replan_with_context: Optional[bool] = None,
         max_file_bytes: Optional[int] = None,
         llm_enabled: Optional[bool] = None,
         llm_base_url: Optional[str] = None,
@@ -206,6 +232,18 @@ class DelamainSubsystem(Subsystem):
         # Replanning is opt-in: the default retries the same explicit/skill
         # plan exactly as stage 9 did.
         self.replan_on_failure = bool(replan_on_failure)
+
+        if replan_with_context is None:
+            context_env = os.environ.get("DELAMAIN_REPLAN_WITH_CONTEXT")
+            if context_env is None:
+                replan_with_context = bool(
+                    _cfg("DELAMAIN_REPLAN_WITH_CONTEXT", False)
+                )
+            else:
+                replan_with_context = _parse_bool(context_env)
+        # Passing the failed step's result to the planner changes the prompt
+        # and therefore remains an explicit opt-in on top of replanning.
+        self.replan_with_context = bool(replan_with_context)
 
         if llm_enabled is None:
             llm_env = os.environ.get("DELAMAIN_LLM_ENABLED")
@@ -656,6 +694,8 @@ class DelamainSubsystem(Subsystem):
                     "last_attempt_replanned": False,
                 }
             )
+            if self.replan_with_context:
+                new_metadata["last_failure_context"] = None
             runtime.memory.update_goal(
                 int(goal["id"]),
                 status="failed",
@@ -738,6 +778,11 @@ class DelamainSubsystem(Subsystem):
         # and the cached skill plan, then let the active planner try again.
         replan_requested = bool(metadata.get("replan_on_next_attempt"))
         replan_requested = replan_requested and self.replan_on_failure
+        failure_context = None
+        if replan_requested and self.replan_with_context:
+            raw_context = metadata.get("last_failure_context")
+            if isinstance(raw_context, Mapping):
+                failure_context = dict(raw_context)
 
         # A goal with a pending approval must not create another approval on
         # every tick. An approved approval is executed here; this also covers
@@ -796,6 +841,8 @@ class DelamainSubsystem(Subsystem):
                             "last_attempt_replanned": False,
                         }
                     )
+                    if self.replan_with_context:
+                        new_metadata["last_failure_context"] = None
                     runtime.memory.update_goal(
                         goal_id,
                         status="failed",
@@ -833,7 +880,12 @@ class DelamainSubsystem(Subsystem):
         task_id = f"goal-{goal_id}"
         if attempt_number > 1:
             task_id += f"-attempt-{attempt_number}"
-        result = runtime.run_task(task, plan=plan, task_id=task_id)
+        result = runtime.run_task(
+            task,
+            plan=plan,
+            task_id=task_id,
+            failure_context=failure_context,
+        )
 
         if result.pending_approval:
             approval = result.pending_approval
@@ -912,6 +964,10 @@ class DelamainSubsystem(Subsystem):
             previous_replans = 0
         replan_count = previous_replans + (1 if replanned else 0)
 
+        failure_context = None
+        if not result.ok and self.replan_with_context:
+            failure_context = self._failure_context(result, attempt_number)
+
         if result.ok:
             status = "done"
             retry_scheduled = False
@@ -959,6 +1015,11 @@ class DelamainSubsystem(Subsystem):
                 "replan_count": replan_count,
             }
         )
+        # MemoryStore merges metadata, so clearing means storing null rather
+        # than deleting the key from a temporary dict. When the feature is
+        # off, metadata stays exactly as it was in stage 14.
+        if self.replan_with_context:
+            new_metadata["last_failure_context"] = failure_context
         prior_approval_id = new_metadata.get("approval_id")
         if result.approval_id or prior_approval_id:
             new_metadata["last_approval_id"] = result.approval_id or prior_approval_id
@@ -985,6 +1046,7 @@ class DelamainSubsystem(Subsystem):
             replanned=replanned,
             replan_count=replan_count,
             replan_on_next_attempt=replan_next,
+            failure_context=failure_context,
         )
         self._last_result = summary
         return summary
@@ -995,6 +1057,71 @@ class DelamainSubsystem(Subsystem):
             return max(0, int(metadata.get("attempts") or 0))
         except (TypeError, ValueError):
             return 0
+
+    @staticmethod
+    def _failure_context(result: TaskResult, attempt_number: int) -> Dict[str, Any]:
+        """Build a compact, durable description of one failed attempt.
+
+        The planner receives the failed step and the steps that already
+        succeeded, not the whole database or an unbounded file body. Planning
+        and normalization failures have no failed action; ``stage`` makes
+        that distinction explicit.
+        """
+
+        planned = list(result.planned_actions)
+        steps = list(result.steps)
+        stage = "planning"
+        failed_index: Optional[int] = None
+        failed_result = None
+        if planned and steps:
+            stage = "action"
+            for index, step_result in enumerate(steps):
+                if not step_result.ok:
+                    failed_index = index
+                    failed_result = step_result
+                    break
+            if failed_index is None:  # defensive: task failed after all steps
+                failed_index = len(steps) - 1
+                failed_result = steps[-1]
+        elif planned:
+            stage = "normalization"
+
+        failed_action = None
+        if failed_index is not None and failed_index < len(planned):
+            candidate = planned[failed_index]
+            if isinstance(candidate, Mapping):
+                failed_action = candidate
+
+        completed = planned[:failed_index] if failed_index else []
+        context: Dict[str, Any] = {
+            "stage": stage,
+            "attempt": max(1, int(attempt_number)),
+            "failed_step": (
+                failed_index + 1 if failed_index is not None else None
+            ),
+            "action": (
+                str(failed_action.get("action"))
+                if failed_action and failed_action.get("action")
+                else None
+            ),
+            "args": (
+                _compact(failed_action.get("args") or {})
+                if failed_action
+                else {}
+            ),
+            "error": _short(result.error, 1000),
+            "output": (
+                _compact(failed_result.output, limit=1000)
+                if failed_result is not None
+                else None
+            ),
+            "completed_steps": _compact(completed),
+        }
+        return {
+            key: value
+            for key, value in context.items()
+            if value is not None
+        }
 
     def _retry_delay(self, attempt_number: int) -> float:
         """Return a bounded exponential delay for the next failed attempt."""
@@ -1152,6 +1279,7 @@ class DelamainSubsystem(Subsystem):
         replanned: bool = False,
         replan_count: int = 0,
         replan_on_next_attempt: bool = False,
+        failure_context: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         pending = result.pending_approval
         pending_summary = None
@@ -1182,6 +1310,17 @@ class DelamainSubsystem(Subsystem):
             "replan_on_next_attempt": bool(replan_on_next_attempt),
             "replanned": bool(replanned),
             "replan_count": int(replan_count),
+            "replan_context": failure_context is not None,
+            "failure_step": (
+                failure_context.get("failed_step")
+                if failure_context is not None
+                else None
+            ),
+            "failure_action": (
+                failure_context.get("action")
+                if failure_context is not None
+                else None
+            ),
             "reused_skill": bool(reused_skill),
             "approval_id": result.approval_id
             or (pending_summary.get("id") if pending_summary else None),
@@ -1316,6 +1455,7 @@ class DelamainSubsystem(Subsystem):
                     "backoff_sec": self.retry_backoff_sec,
                     "backoff_max_sec": self.retry_backoff_max_sec,
                     "replan_on_failure": self.replan_on_failure,
+                    "replan_with_context": self.replan_with_context,
                 },
                 "goals": counts,
                 "skills": skill_count,

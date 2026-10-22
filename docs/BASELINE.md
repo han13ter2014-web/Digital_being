@@ -132,3 +132,4 @@ _Файл создан на этапе 0. Обновлять при каждом
 * [Этап 12 — отчёт](STAGE12_REPORT.md): мост активной когнитивной цели `GoalSubsystem` и одной исполняемой цели Delamain.
 * [Этап 13 — отчёт](STAGE13_REPORT.md): безопасный authoring payload — `/goals exec`, proposal, accept/reject и decision в metadata.
 * [Этап 14 — отчёт](STAGE14_REPORT.md): bounded backoff и перепланирование после ошибки действия.
+* [Этап 15 — отчёт](STAGE15_REPORT.md): перепланирование с контекстом упавшего шага.
