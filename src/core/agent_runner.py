@@ -632,7 +632,9 @@ class AgentRunner:
 
         if cmd in ("status", "s"):
             return self._format_status()
-        if cmd in ("goals", "g"):
+        if cmd == "goals" or cmd.startswith("goals "):
+            return self._handle_goals_command(cmd_raw)
+        if cmd in ("g",):
             return self._format_goals()
         if cmd in ("concepts", "c"):
             return self._format_concepts()
@@ -913,6 +915,7 @@ class AgentRunner:
         approval_counts = approval.get("counts") or {}
         bridge = status.get("bridge") or {}
         bridge_counts = bridge.get("counts") or {}
+        authoring = status.get("authoring") or {}
         lines = [
             "🧪 Delamain-local",
             f"  Включён: {'да' if status.get('enabled') else 'нет'}",
@@ -926,6 +929,8 @@ class AgentRunner:
             f"  Навыки: {status.get('skills', 0)}; "
             f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
+            f"  Authoring: {'on' if authoring.get('enabled') else 'off'}, "
+            f"proposals={'on' if authoring.get('proposal_enabled') else 'off'}",
         ]
         if bridge.get("enabled"):
             lines.append(
@@ -1068,6 +1073,312 @@ class AgentRunner:
             )
         return "\n".join(lines)
 
+    def _handle_goals_command(self, cmd_raw: str) -> str:
+        """Обработать /goals и подкоманды Stage 13."""
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else ""
+        rest = parts[2].strip() if len(parts) > 2 else ""
+        agent = self.agent
+        goal_subsystem = getattr(agent, "goal_subsystem", None)
+
+        if not action:
+            return self._format_goals()
+        if action in ("list", "ls"):
+            return self._format_goals_list(goal_subsystem)
+        if action in ("show", "info"):
+            goal_id = self._parse_goal_id(rest)
+            if goal_id is None:
+                return "Использование: /goals show <id>"
+            goal = self._find_cognitive_goal(goal_subsystem, goal_id)
+            if goal is None:
+                return f"⚠️ Когнитивная цель #{goal_id} не найдена."
+            return self._format_goal_details(goal)
+
+        sub = getattr(agent, "delamain", None)
+        if sub is None:
+            return "⚠️ Delamain-local не подключён; authoring недоступен."
+
+        if action in ("exec", "attach"):
+            raw_id, sep, payload = rest.partition("|")
+            if not sep:
+                return "Использование: /goals exec <id> | <команда>"
+            goal_id = self._parse_goal_id(raw_id)
+            if goal_id is None:
+                return "Использование: /goals exec <id> | <команда>"
+            command, predicate_sep, predicate = payload.partition("|")
+            command = command.strip()
+            predicate = predicate.strip() if predicate_sep else ""
+            if not command:
+                return "Использование: /goals exec <id> | <команда>"
+            try:
+                result = sub.attach_goal_execution(
+                    goal_id,
+                    command,
+                    success_predicate=predicate,
+                    agent=agent,
+                )
+            except Exception as exc:
+                return f"⚠️ Не удалось привязать payload: {type(exc).__name__}: {exc}"
+            return self._format_goals_authoring_result(result, action="exec")
+
+        if action in ("propose", "plan"):
+            raw_id, sep, task = rest.partition("|")
+            goal_id = self._parse_goal_id(raw_id)
+            if goal_id is None:
+                return "Использование: /goals propose <id> [| <задача>]"
+            task = task.strip() if sep else None
+            try:
+                result = sub.propose_goal_execution(
+                    goal_id,
+                    task=task,
+                    agent=agent,
+                )
+            except Exception as exc:
+                return f"⚠️ Не удалось предложить план: {type(exc).__name__}: {exc}"
+            return self._format_goals_authoring_result(result, action="propose")
+
+        if action in ("accept", "approve"):
+            goal_id = self._parse_goal_id(rest)
+            if goal_id is None:
+                return "Использование: /goals accept <id>"
+            try:
+                result = sub.accept_goal_execution(goal_id, agent=agent)
+            except Exception as exc:
+                return f"⚠️ Не удалось принять proposal: {type(exc).__name__}: {exc}"
+            return self._format_goals_authoring_result(result, action="accept")
+
+        if action in ("reject", "decline"):
+            raw_id, _, reason = rest.partition(" ")
+            goal_id = self._parse_goal_id(raw_id)
+            if goal_id is None:
+                return "Использование: /goals reject <id> [причина]"
+            try:
+                result = sub.reject_goal_execution(
+                    goal_id,
+                    reason=reason.strip(),
+                    agent=agent,
+                )
+            except Exception as exc:
+                return f"⚠️ Не удалось отклонить proposal: {type(exc).__name__}: {exc}"
+            return self._format_goals_authoring_result(result, action="reject")
+
+        return (
+            "Использование: /goals [list|show <id>|exec <id> | <команда>|"
+            "propose <id> [| <задача>]|accept <id>|reject <id> [причина]]"
+        )
+
+    @staticmethod
+    def _parse_goal_id(value: str) -> Optional[int]:
+        raw = str(value or "").strip().lstrip("#")
+        if not raw:
+            return None
+        try:
+            goal_id = int(raw.split()[0])
+        except (TypeError, ValueError):
+            return None
+        return goal_id if goal_id > 0 else None
+
+    @staticmethod
+    def _find_cognitive_goal(goal_subsystem, goal_id: int):
+        if goal_subsystem is None:
+            return None
+        getter = getattr(goal_subsystem, "get_goal", None)
+        if callable(getter):
+            return getter(goal_id)
+        return next(
+            (
+                goal
+                for goal in list(getattr(goal_subsystem, "goals", []) or [])
+                if goal.get("id") == goal_id
+            ),
+            None,
+        )
+
+    def _format_goals_list(self, goal_subsystem) -> str:
+        if goal_subsystem is None:
+            return "⚠️ GoalSubsystem не подключена."
+        goals = list(getattr(goal_subsystem, "goals", []) or [])
+        if not goals:
+            return "📋 Когнитивных целей нет."
+        lines = [f"📋 Когнитивные цели ({len(goals)}):"]
+        for goal in goals[:20]:
+            marks = []
+            if isinstance(goal.get("execution"), dict):
+                marks.append("exec")
+            proposal = goal.get("execution_proposal")
+            if isinstance(proposal, dict):
+                marks.append(f"proposal={proposal.get('status', '?')}")
+            link = goal.get("delamain_bridge")
+            if isinstance(link, dict):
+                marks.append(
+                    f"delamain=#{link.get('goal_id')}/{link.get('status', '?')}"
+                )
+            note = f" ({', '.join(marks)})" if marks else ""
+            lines.append(
+                f"  [{goal.get('status', '?')}] #{goal.get('id')} "
+                f"{goal.get('title') or '—'}{note}"
+            )
+        if len(goals) > 20:
+            lines.append(f"  … ещё {len(goals) - 20}")
+        return "\n".join(lines)
+
+    def _format_goal_details(self, goal: dict) -> str:
+        lines = [
+            f"📋 Цель #{goal.get('id')} «{goal.get('title') or '—'}»",
+            f"  Статус: {goal.get('status')}",
+            f"  Сложность: {goal.get('difficulty', 1)}",
+            f"  Источник: {goal.get('source') or '—'}",
+        ]
+        if goal.get("created_at"):
+            lines.append(f"  Создана: {goal['created_at']}")
+        if goal.get("failure_reason"):
+            lines.append(f"  Причина провала: {goal['failure_reason']}")
+
+        execution = goal.get("execution")
+        if isinstance(execution, dict):
+            lines.append("  Executable: да")
+            if execution.get("command"):
+                lines.append(f"    Команда: {execution['command']}")
+            if execution.get("plan"):
+                lines.append(
+                    f"    План: {self._format_goal_plan(execution['plan'])}"
+                )
+            if execution.get("success_predicate"):
+                lines.append(
+                    f"    Predicate: {execution['success_predicate']}"
+                )
+        else:
+            lines.append("  Executable: нет")
+
+        proposal = goal.get("execution_proposal")
+        if isinstance(proposal, dict):
+            lines.append(
+                f"  Proposal: {proposal.get('status', '?')} "
+                f"(source={proposal.get('source', '?')})"
+            )
+            if proposal.get("summary"):
+                lines.append(f"    План: {proposal['summary']}")
+            files = proposal.get("files") or []
+            if files:
+                lines.append(f"    Файлы: {', '.join(str(f) for f in files)}")
+            dangerous = proposal.get("dangerous_actions") or []
+            if dangerous:
+                lines.append(
+                    f"    Опасные действия: {', '.join(str(a) for a in dangerous)}"
+                )
+            lines.append(
+                f"    Approval: {'нужен' if proposal.get('requires_approval') else 'не нужен'}"
+                f" (mode={proposal.get('approval_mode', 'off')})"
+            )
+            if proposal.get("error"):
+                lines.append(f"    Ошибка: {proposal['error']}")
+            if proposal.get("reason"):
+                lines.append(f"    Причина: {proposal['reason']}")
+        else:
+            lines.append("  Proposal: нет")
+
+        link = goal.get("delamain_bridge")
+        if isinstance(link, dict):
+            lines.append(
+                f"  Delamain: goal #{link.get('goal_id')} "
+                f"[{link.get('status', '?')}]"
+            )
+            if link.get("message"):
+                lines.append(f"    {link['message']}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_goal_plan(plan) -> str:
+        if not isinstance(plan, list):
+            return "—"
+        parts = []
+        for step in plan[:8]:
+            if not isinstance(step, dict):
+                continue
+            action = str(step.get("action") or "?")
+            args = step.get("args")
+            path = args.get("path") if isinstance(args, dict) else None
+            parts.append(f"{action}:{path}" if path else action)
+        if len(plan) > 8:
+            parts.append("…")
+        return " → ".join(parts) if parts else "—"
+
+    def _format_goals_authoring_result(self, result: dict, *, action: str) -> str:
+        goal = result.get("goal") if isinstance(result.get("goal"), dict) else {}
+        proposal = (
+            result.get("proposal")
+            if isinstance(result.get("proposal"), dict)
+            else {}
+        )
+        if not result.get("ok"):
+            lines = [f"⚠️ /goals {action}: {result.get('error') or 'ошибка'}"]
+            if proposal.get("summary"):
+                lines.append(f"  План: {proposal['summary']}")
+            if proposal.get("error"):
+                lines.append(f"  Ошибка proposal: {proposal['error']}")
+            return "\n".join(lines)
+
+        goal_id = result.get("goal_id") or goal.get("id")
+        title = goal.get("title") or "—"
+        if action == "exec":
+            lines = [f"✅ Payload привязан к цели #{goal_id} «{title}»."]
+        elif action == "propose":
+            lines = [f"🧠 Proposal для цели #{goal_id} «{title}» сохранён."]
+        elif action == "accept":
+            lines = [f"✅ Proposal для цели #{goal_id} «{title}» принят."]
+        else:
+            lines = [f"🚫 Proposal для цели #{goal_id} «{title}» отклонён."]
+
+        if proposal.get("summary"):
+            lines.append(f"  План: {proposal['summary']}")
+        files = proposal.get("files") or []
+        if files:
+            lines.append(f"  Файлы: {', '.join(str(f) for f in files)}")
+        dangerous = proposal.get("dangerous_actions") or []
+        if dangerous:
+            lines.append(f"  Опасные действия: {', '.join(str(a) for a in dangerous)}")
+        if action != "reject":
+            if proposal.get("requires_approval"):
+                lines.append(
+                    f"  ⏸ При выполнении потребуется approval "
+                    f"(mode={proposal.get('approval_mode', 'off')})."
+                )
+            elif dangerous:
+                lines.append(
+                    "  ⚠️ Approval выключен: принятие payload означает согласие "
+                    "на опасные действия без отдельного запроса."
+                )
+        elif proposal.get("reason"):
+            lines.append(f"  Причина: {proposal['reason']}")
+        if proposal.get("planner_error"):
+            lines.append(f"  ℹ️ Preview-план: {proposal['planner_error']}")
+
+        if action == "propose":
+            lines.append(f"  /goals accept {goal_id} — принять и привязать")
+            lines.append(f"  /goals reject {goal_id} [причина] — отклонить")
+
+        if action in ("exec", "propose", "accept"):
+            sub = getattr(self.agent, "delamain", None)
+            if sub is not None and not getattr(sub, "bridge_enabled", False):
+                if action == "propose":
+                    lines.append(
+                        "  ⚠️ Мост когнитивных целей выключен: proposal "
+                        "сохранён, но после accept исполняться не будет "
+                        "(DELAMAIN_BRIDGE_ENABLED=1)."
+                    )
+                else:
+                    lines.append(
+                        "  ⚠️ Мост когнитивных целей выключен: payload "
+                        "сохранён, но не будет исполнен "
+                        "(DELAMAIN_BRIDGE_ENABLED=1)."
+                    )
+            if goal.get("status") == "pending":
+                lines.append(
+                    "  ℹ️ Цель станет активной после завершения текущей."
+                )
+        return "\n".join(lines)
+
     def _format_goals(self) -> str:
         a = self.agent
         goals_status = a.get_goals_status()
@@ -1078,6 +1389,15 @@ class AgentRunner:
         ]
         active_goal = getattr(a, "active_goal", None)
         if isinstance(active_goal, dict):
+            execution = active_goal.get("execution")
+            if isinstance(execution, dict):
+                lines.append("  Executable: да")
+            proposal = active_goal.get("execution_proposal")
+            if isinstance(proposal, dict) and proposal.get("status") == "pending":
+                lines.append(
+                    f"  Proposal: pending — /goals accept {active_goal.get('id')} "
+                    f"или /goals reject {active_goal.get('id')}"
+                )
             link = active_goal.get("delamain_bridge")
             if isinstance(link, dict):
                 lines.append(
@@ -1102,6 +1422,11 @@ class AgentRunner:
             "Доступные команды:\n"
             "  /status    — статус агента\n"
             "  /goals     — цели\n"
+            "  /goals list — все когнитивные цели\n"
+            "  /goals show <id> — payload и proposal цели\n"
+            "  /goals exec <id> | <команда> — привязать payload\n"
+            "  /goals propose <id> [| <задача>] — предложить план\n"
+            "  /goals accept|reject <id> — решение по proposal\n"
             "  /concepts  — концепции\n"
             "  /energy    — энергия (алиас status)\n"
             "  /pause     — пауза\n"

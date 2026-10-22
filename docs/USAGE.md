@@ -237,6 +237,11 @@ DIGITAL_BEING_NAME="Bob" python main.py     # в другом
 | `/help` | Список команд |
 | `/status` | Статус (энергия, циклы, интеллект, состояние) |
 | `/goals` | Текущие цели |
+| `/goals list` | Все когнитивные цели, payload и proposal |
+| `/goals show <id>` | Подробности цели, команды и proposal |
+| `/goals exec <id> \| <команда>` | Явно привязать executable-payload |
+| `/goals propose <id> [\| <задача>]` | Сохранить proposal без исполнения |
+| `/goals accept <id>` / `reject <id>` | Принять или отклонить proposal |
 | `/concepts` | Изученные концепции |
 | `/pause` | Поставить на паузу (циклы остановлены) |
 | `/resume` | Возобновить |
@@ -317,6 +322,40 @@ approval не считается провалом: цель ждёт решен�
 причиной, но не пишет skill-failure. После завершения мост активирует
 следующую цель. Подробности — в
 [docs/STAGE12_REPORT.md](STAGE12_REPORT.md).
+
+Начиная с этапа 13 payload можно привязать из чата, не редактируя код:
+
+```text
+/goals exec 2 | запиши в notes/report.txt: ready
+```
+
+Или сначала получить предложение, проверить его и только потом принять:
+
+```text
+/goals propose 2
+/goals show 2
+/goals accept 2
+```
+
+`/goals propose` использует настроенный planner (эвристику или локальную
+LLM) и сохраняет только proposal; ничего не выполняется до `accept`.
+Генерация proposal выключена по умолчанию:
+
+```powershell
+$env:DELAMAIN_ENABLED = "1"
+$env:DELAMAIN_BRIDGE_ENABLED = "1"
+$env:DELAMAIN_GOAL_PROPOSAL_ENABLED = "1"
+python main_tray.py
+```
+
+Ручной `/goals exec` работает и без `DELAMAIN_GOAL_PROPOSAL_ENABLED`, но
+при включённом Delamain: это прямое решение пользователя. Для реального
+выполнения всё равно нужны `DELAMAIN_ENABLED=1` и
+`DELAMAIN_BRIDGE_ENABLED=1`. Опасные шаги видны в
+proposal; при `DELAMAIN_APPROVAL_MODE=dangerous` или `all` выполнение ждёт
+`/delamain approve <id>`. `/goals reject <id> [причина]` отклоняет
+proposal без создания исполняемой цели. Подробности — в
+[docs/STAGE13_REPORT.md](STAGE13_REPORT.md).
 
 ### Поведение иконки трея
 

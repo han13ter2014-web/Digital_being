@@ -369,6 +369,14 @@ class LongRunningConfig:
     # не ставится в очередь. Включается через DELAMAIN_BRIDGE_ENABLED=1.
     DELAMAIN_BRIDGE_ENABLED = False
 
+    # Stage 13: генерация proposal планировщиком (эвристика или локальная
+    # LLM) для когнитивной цели. По умолчанию выключена. Ручной
+    # /goals exec <id> | <команда> не требует этого флага, но работает при
+    # включённом Delamain: это явное действие пользователя, а не
+    # автоматическое угадывание команды.
+    # Включается через DELAMAIN_GOAL_PROPOSAL_ENABLED=1.
+    DELAMAIN_GOAL_PROPOSAL_ENABLED = False
+
 
 # Глобальная конфигурация
 SIM_CONFIG = SimulationConfig()

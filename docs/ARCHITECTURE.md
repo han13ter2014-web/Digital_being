@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–12)
+## 🧪 Слой действия Delamain-local (этапы 7–13)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -91,6 +91,8 @@
   эвристики;
 * `GoalBridge` — опциональный мост активной когнитивной цели в одну
   исполняемую цель Delamain;
+* `GoalAuthoring` / `GoalExecutionProposal` — безопасное ручное или
+  planner-предложенное authoring-решение для когнитивной цели;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей и `tick()`.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
@@ -135,12 +137,25 @@ live-схему действий через `bind_registry()`, требует JS
 Мост не добавляет прав: он использует существующие sandbox, approval и
 `ActionRegistry`.
 
+С этапа 13 payload для когнитивной цели можно создать из чата через
+`GoalAuthoring`. `/goals exec` явно привязывает команду; `/goals propose`
+просит planner построить `GoalExecutionProposal`, но сохраняет только
+предложение. `/goals accept` повторно проверяет действия и привязывает
+payload, `/goals reject` его отклоняет. Proposal и решение хранятся в
+metadata когнитивной цели (`execution_proposal`, `execution_decision`).
+Генерация proposal выключена по умолчанию
+(`DELAMAIN_GOAL_PROPOSAL_ENABLED=False`); ручной `exec` не требует этого
+флага, но работает при включённом Delamain.
+Опасные шаги по-прежнему проходят существующий approval, а proposal сам
+ничего не исполняет.
+
 Слой можно запускать и отдельно: `python -m src.delamain` (с `--llm` —
 через локальную Ollama, с `--approval-mode` — с preflight-проверкой).
 Подробности и ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md),
 итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md),
-[STAGE11_REPORT.md](STAGE11_REPORT.md) и
-[STAGE12_REPORT.md](STAGE12_REPORT.md).
+[STAGE11_REPORT.md](STAGE11_REPORT.md),
+[STAGE12_REPORT.md](STAGE12_REPORT.md) и
+[STAGE13_REPORT.md](STAGE13_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

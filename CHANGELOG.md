@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: безопасный authoring payload
+
+* **`GoalExecutionProposal`** — новый модуль
+  `src/delamain/goal_authoring.py`: описание команды или плана, затронутых
+  файлов, опасных действий, текущего approval-режима и статуса
+  `pending`/`accepted`/`rejected`/`error`.
+* **`GoalAuthoring`** — ручной `/goals exec`, planner-proposal, `accept` и
+  `reject`. Proposal и решение сохраняются в metadata когнитивной цели
+  (`execution_proposal`, `execution_decision`), переживают checkpoint.
+* **Команды чата** — `/goals list`, `/goals show`, `/goals exec`,
+  `/goals propose`, `/goals accept`, `/goals reject`; `/goals` сохраняет
+  прежний краткий вывод.
+* **Безопасность** — proposal сам не исполняется, неизвестные действия
+  отклоняются до attach, повторный payload не перезаписывается, опасные
+  шаги проходят существующий approval. При `approval_mode=off` чат явно
+  предупреждает, что принятие payload означает согласие на опасные
+  действия без отдельного запроса.
+* **Конфигурация** — ручной `/goals exec` не требует отдельного флага, но
+  работает при включённом Delamain; `DELAMAIN_GOAL_PROPOSAL_ENABLED=False`
+  по умолчанию разрешает только `/goals propose`. Для исполнения
+  по-прежнему нужны `DELAMAIN_ENABLED=1` и
+  `DELAMAIN_BRIDGE_ENABLED=1`.
+* **15 новых тестов** — manual attach, pending/accept/reject, отказ от
+  дублей, выключенный Delamain без создания runtime, неизвестные действия,
+  dangerous-план через approval, отсутствие LLM, LLM-план только как
+  proposal, команды чата и predicate.
+* **Целевой прогон:** `28 passed` (15 новых + 13 Stage 12).
+* **Полный suite:** `524 passed, 2 skipped in 949.61s (0:15:49, включая
+  benchmarks)`.
+* **Документация** — `docs/STAGE13_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-22 — Delamain-local: мост когнитивных и исполняемых целей
 
 * **`GoalBridge`** — новый опциональный слой `src/delamain/goal_bridge.py`.
