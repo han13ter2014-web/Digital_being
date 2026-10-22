@@ -133,3 +133,4 @@ _Файл создан на этапе 0. Обновлять при каждом
 * [Этап 13 — отчёт](STAGE13_REPORT.md): безопасный authoring payload — `/goals exec`, proposal, accept/reject и decision в metadata.
 * [Этап 14 — отчёт](STAGE14_REPORT.md): bounded backoff и перепланирование после ошибки действия.
 * [Этап 15 — отчёт](STAGE15_REPORT.md): перепланирование с контекстом упавшего шага.
+* [Этап 16 — отчёт](STAGE16_REPORT.md): ограниченный repair оставшейся части плана внутри одной попытки и durable repair-approval.

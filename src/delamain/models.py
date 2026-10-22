@@ -89,6 +89,17 @@ class TaskResult:
     # successful plan reusable as a skill without guessing arguments back
     # from ActionResult (which intentionally does not store them).
     planned_actions: List[Dict[str, Any]] = field(default_factory=list)
+    # Actions that form the effective, successful path. For a normal success
+    # this equals planned_actions. After a repair it excludes the failed steps,
+    # which is what should be replayed as a skill. On failure it contains the
+    # successful prefix and is used to build repair context.
+    effective_actions: List[Dict[str, Any]] = field(default_factory=list)
+    # Number of actions already attempted before ``steps`` were produced. A
+    # resumed repair approval sees only its continuation steps, so this offset
+    # keeps summaries and failure context aligned with planned_actions.
+    steps_before: int = 0
+    # Number of replacement plans accepted by the runtime for this task.
+    repair_count: int = 0
     # Set when the runtime stopped before execution and stored a pending
     # approval. The dict is the approval row returned by MemoryStore.
     pending_approval: Optional[Dict[str, Any]] = None
@@ -104,6 +115,11 @@ class TaskResult:
             "final_output": self.final_output,
             "error": self.error,
             "planned_actions": [dict(step) for step in self.planned_actions],
+            "effective_actions": [
+                dict(step) for step in self.effective_actions
+            ],
+            "steps_before": int(self.steps_before),
+            "repair_count": int(self.repair_count),
             "pending_approval": (
                 dict(self.pending_approval)
                 if self.pending_approval is not None

@@ -848,6 +848,8 @@ class AgentRunner:
                         replan_note += "(context)"
                 elif metadata.get("last_attempt_replanned"):
                     replan_note = ", replanned"
+                if metadata.get("step_repairs"):
+                    replan_note += f", repairs={metadata.get('step_repairs')}"
                 bridge_note = ""
                 if metadata.get("bridge_source") == "goal_subsystem":
                     bridge_note = (
@@ -930,6 +932,7 @@ class AgentRunner:
         bridge_counts = bridge.get("counts") or {}
         authoring = status.get("authoring") or {}
         retry = status.get("retry") or {}
+        step_repair = status.get("step_repair") or {}
         backoff_sec = float(retry.get("backoff_sec") or 0.0)
         backoff_max_sec = float(retry.get("backoff_max_sec") or 0.0)
         lines = [
@@ -947,6 +950,9 @@ class AgentRunner:
             f"  Retry: backoff={backoff_sec:g}s, cap={backoff_max_sec:g}s, "
             f"replan={'on' if retry.get('replan_on_failure') else 'off'}, "
             f"context={'on' if retry.get('replan_with_context') else 'off'}",
+            f"  Repair: {'on' if step_repair.get('enabled') else 'off'}, "
+            f"max_segments={step_repair.get('max_step_repairs', 0)}, "
+            f"max_steps={step_repair.get('max_repair_steps', 0)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
             f"  Authoring: {'on' if authoring.get('enabled') else 'off'}, "
             f"proposals={'on' if authoring.get('proposal_enabled') else 'off'}",
@@ -982,6 +988,8 @@ class AgentRunner:
                     last_retry += f" after {last['next_retry_at']}"
                 if last.get("replan_on_next_attempt"):
                     last_retry += ", replan"
+            if last.get("step_repairs"):
+                last_retry += f", repair={last['step_repairs']}"
             lines.append(
                 f"  Последняя: {mark} {last.get('title') or last.get('task')} "
                 f"(шагов: {last.get('steps', 0)}{last_retry})"
@@ -998,16 +1006,28 @@ class AgentRunner:
             approval_id = pending.get("id", "?")
             dangerous = ", ".join(pending.get("dangerous_actions") or [])
             detail = f" ({dangerous})" if dangerous else ""
+            repair_note = ""
+            if pending.get("repair"):
+                repair_note = (
+                    "\n  Это repair-план: уже выполнено шагов: "
+                    f"{pending.get('prior_steps', 0)}."
+                )
             return (
                 f"⏸ {prefix}: нужно подтверждение{detail}.\n"
-                f"  Approval: {approval_id}; task: {task_id}\n"
+                f"  Approval: {approval_id}; task: {task_id}{repair_note}\n"
                 f"  /delamain approve {approval_id} — выполнить\n"
                 f"  /delamain reject {approval_id} [причина] — отклонить"
             )
+        repair_note = ""
+        if result.get("step_repairs"):
+            repair_note = f", repair={result['step_repairs']}"
         if result.get("ok"):
             output = result.get("final_output")
             suffix = f"\n  Вывод: {output}" if output is not None else ""
-            return f"✅ {prefix}: успешно, шагов: {steps} (task {task_id}).{suffix}"
+            return (
+                f"✅ {prefix}: успешно, шагов: {steps}{repair_note} "
+                f"(task {task_id}).{suffix}"
+            )
         retry_note = ""
         if result.get("retry_scheduled"):
             retry_note = " Повтор на следующем тике."
@@ -1019,7 +1039,8 @@ class AgentRunner:
                     retry_note += " и контекстом ошибки"
                 retry_note += "."
         return (
-            f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
+            f"⚠️ {prefix}: ошибка, шагов: {steps}{repair_note} "
+            f"(task {task_id}).\n"
             f"  {result.get('error')}{retry_note}"
         )
 
@@ -1032,10 +1053,17 @@ class AgentRunner:
             if approval.get("goal_id") is not None
             else ""
         )
+        metadata = approval.get("metadata") or {}
+        repair_note = (
+            "; repair-план"
+            if isinstance(metadata, dict)
+            and metadata.get("kind") == "step_repair"
+            else ""
+        )
         return (
             f"  [{approval.get('status')}] {approval.get('id')} "
             f"«{approval.get('title') or approval.get('task') or '—'}»"
-            f"{danger_note}{goal_note}"
+            f"{danger_note}{goal_note}{repair_note}"
         )
 
     @staticmethod

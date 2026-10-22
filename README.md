@@ -56,7 +56,7 @@ python main.py
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
-| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост и authoring целей |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan и bounded repair |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
@@ -66,6 +66,7 @@ python main.py
 | **[docs/STAGE13_REPORT.md](docs/STAGE13_REPORT.md)** | 🧑‍💻 Разработчик | Безопасный authoring payload: `/goals exec`, proposal, accept/reject |
 | **[docs/STAGE14_REPORT.md](docs/STAGE14_REPORT.md)** | 🧑‍💻 Разработчик | Bounded backoff и перепланирование после ошибки действия |
 | **[docs/STAGE15_REPORT.md](docs/STAGE15_REPORT.md)** | 🧑‍💻 Разработчик | Перепланирование с контекстом упавшего шага |
+| **[docs/STAGE16_REPORT.md](docs/STAGE16_REPORT.md)** | 🧑‍💻 Разработчик | Bounded repair внутри одной попытки и durable repair-approval |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -74,7 +75,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–15
+### 🧭 Ревизия 2026-10: этапы 0–16
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -130,6 +131,13 @@ python main.py
   ограничен по размеру и не даёт planner'у новых прав. По умолчанию
   выключен. Подробно —
   **[docs/STAGE15_REPORT.md](docs/STAGE15_REPORT.md)**.
+* **Repair внутри одной попытки** — при
+  `DELAMAIN_STEP_REPAIR_ENABLED=1` runtime после ошибки шага просит planner
+  заменить оставшуюся часть плана. Repair ограничен по числу сегментов и
+  шагов, не повторяет уже предпринятый `action + args`, проходит approval
+  и пишет skill по успешному пути `effective_actions`. По умолчанию
+  выключен. Подробно —
+  **[docs/STAGE16_REPORT.md](docs/STAGE16_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 

@@ -336,7 +336,7 @@ class LongRunningConfig:
     WEB_SEARCH_FALLBACK_TO_EN = True       # если RU пуст — пробуем EN
     WEB_SEARCH_USER_AGENT = "DigitalBeing/2.5"
 
-    # === DELAMAIN-LOCAL (этапы 7–12) ===
+    # === DELAMAIN-LOCAL (этапы 7–16) ===
     # Опциональный детерминированный слой действий. По умолчанию выключен:
     # без явного включения он не открывает SQLite и не трогает файлы.
     # Включается через DELAMAIN_ENABLED=1 или командой /delamain on.
@@ -348,6 +348,9 @@ class LongRunningConfig:
     DELAMAIN_RETRY_BACKOFF_MAX_SEC = 300.0 # верхняя граница экспоненциальной паузы
     DELAMAIN_REPLAN_ON_FAILURE = False     # при retry строить новый план
     DELAMAIN_REPLAN_WITH_CONTEXT = False   # передать planner'у результат упавшего шага
+    DELAMAIN_STEP_REPAIR_ENABLED = False   # Stage 16: repair внутри одной попытки
+    DELAMAIN_MAX_STEP_REPAIRS = 1           # сколько repair-сегментов разрешено
+    DELAMAIN_MAX_REPAIR_STEPS = 5           # максимум шагов в одном repair-плане
     DELAMAIN_MAX_FILE_BYTES = 1_000_000    # лимит файла в песочнице
     DELAMAIN_WORKSPACE = ""                 # пусто => data/delamain/workspace
     DELAMAIN_DB = ""                        # пусто => data/delamain/delamain.sqlite3

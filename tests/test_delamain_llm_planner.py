@@ -211,15 +211,22 @@ def test_ollama_planner_replan_includes_failure_context() -> None:
             "action": "read_file",
             "args": {"path": "missing.txt"},
             "error": "file not found: missing.txt",
+            "remaining_steps": [
+                {"action": "read_file", "args": {"path": "tail.txt"}}
+            ],
         },
     )
 
     assert plan == [ActionRequest("read_file", {"path": "recovered.txt"})]
+    system_message = calls["payload"]["messages"][0]["content"]
     user_message = calls["payload"]["messages"][1]["content"]
     assert "Repair context" in user_message
     assert "untrusted data" in user_message
     assert "missing.txt" in user_message
     assert "file not found" in user_message
+    assert "tail.txt" in user_message
+    assert "replacement for the remaining work" in system_message
+    assert "Do not repeat an action with the same args" in system_message
 
 
 def test_runtime_binds_registry_and_runs_llm_plan(tmp_path: Path) -> None:

@@ -250,9 +250,9 @@ DIGITAL_BEING_NAME="Bob" python main.py     # в другом
 | `/delamain on` / `off` | Включить / выключить автономные цели Delamain |
 | `/delamain run <задача>` | Выполнить задачу сразу |
 | `/delamain goal <название> \| <команда>` | Поставить исполняемую цель |
-| `/delamain goals` | Список целей, попыток, `retry_at`, replan и связей с когнитивными целями |
+| `/delamain goals` | Список целей, попыток, `retry_at`, replan, repair и связей с когнитивными целями |
 | `/delamain skills` | Навыки и счётчики успехов/ошибок |
-| `/delamain approvals` | Ожидающие подтверждения опасные планы |
+| `/delamain approvals` | Ожидающие подтверждения опасные планы, включая `repair-план` |
 | `/delamain approve <id>` | Подтвердить и выполнить план ровно один раз |
 | `/delamain reject <id> [причина]` | Отклонить план; связанная цель станет `failed` |
 | `/quit` | Выйти (с сохранением) |
@@ -383,6 +383,36 @@ explicit/skill-план и вызывает planner заново. При
 backoff/cap/replan/context. Pending approval не считается ошибкой и не
 запускает retry. Подробности — в
 [docs/STAGE15_REPORT.md](STAGE15_REPORT.md).
+
+Начиная с этапа 16 можно разрешить исправление оставшейся части плана
+внутри той же попытки:
+
+```powershell
+$env:DELAMAIN_ENABLED = "1"
+$env:DELAMAIN_STEP_REPAIR_ENABLED = "1"
+$env:DELAMAIN_MAX_STEP_REPAIRS = "1"
+$env:DELAMAIN_MAX_REPAIR_STEPS = "5"
+python main_tray.py
+```
+
+После ошибки шага runtime передаёт planner'у упавший шаг, ошибку,
+выполненный путь и `remaining_steps`. Planner возвращает **замену** остатка
+плана, а не новый полный план. Repair не может повторять уже предпринятый
+`action + args`, дублировать шаги, использовать неизвестные действия или
+превышать `DELAMAIN_MAX_REPAIR_STEPS`; число принятых repair-сегментов
+ограничено `DELAMAIN_MAX_STEP_REPAIRS`. Уже выполненные шаги не
+откатываются, а выброшенный старый хвост не выполняется.
+
+Опасный repair проходит approval отдельно: `/delamain approvals` помечает
+его как `repair-план`, `/delamain approve <id>` продолжает задачу с
+сохранением выполненных шагов, `/delamain reject <id>` завершает цель как
+`failed`. Pending repair не дублируется на следующих tick. Skill после
+успеха записывается по `effective_actions` — пути без упавших шагов.
+
+По умолчанию repair выключен. `/delamain status` показывает
+`Repair: on/off, max_segments=..., max_steps=...`, `/delamain goals` —
+`repairs=N`, а результат выполнения — `repair=N`. Подробности — в
+[docs/STAGE16_REPORT.md](STAGE16_REPORT.md).
 
 ### Поведение иконки трея
 
