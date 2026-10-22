@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–14)
+## 🧪 Слой действия Delamain-local (этапы 7–16)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -82,8 +82,11 @@
 * `ActionRegistry` — именованные действия с наблюдаемыми результатами;
 * `MemoryStore` — SQLite-эпизоды, факты, self-model, цели, навыки,
   approvals;
-* `DelamainRuntime` — выполнение плана и остановка на первой ошибке;
+* `DelamainRuntime` — выполнение плана, остановка на неисправленной ошибке
+  и bounded repair оставшейся части;
 * `ApprovalPolicy` — preflight-политика для опасных действий;
+* `build_failure_context` — компактный контекст упавшего шага, остатка
+  плана и успешного пути;
 * `HeuristicPlanner` — детерминированный планировщик без LLM;
 * `OllamaPlanner` — опциональный локальный LLM-планировщик через
   `/api/chat`, только stdlib;
@@ -94,7 +97,7 @@
 * `GoalAuthoring` / `GoalExecutionProposal` — безопасное ручное или
   planner-предложенное authoring-решение для когнитивной цели;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей, `tick()`,
-  bounded backoff и опциональным replan.
+  bounded backoff, опциональным replan и step repair.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
 `/delamain` в трей-чате. Она **выключена по умолчанию**: без
@@ -103,9 +106,11 @@
 но с этапа 12 активная цель `GoalSubsystem` может быть связана с одной
 исполняемой целью через `GoalBridge`.
 
-С этапа 9 цикл стал память-зависимым: успешный `planned_actions` сохраняется
-в `skills` вместе с командой, а следующая цель с тем же названием и той же
-командой может выполнить этот план без planner. Ошибка при
+С этапа 9 цикл стал память-зависимым: успешный путь сохраняется в `skills`
+вместе с командой, а следующая цель с тем же названием и той же командой
+может выполнить этот план без planner. С этапа 16 сохраняется
+`effective_actions` — путь без упавших шагов; для обычного успеха он
+совпадает с `planned_actions`. Ошибка при
 `DELAMAIN_MAX_ATTEMPTS > 1` оставляет цель в `pending` до исчерпания попыток;
 по умолчанию `1`, чтобы сохранить поведение этапа 8. `/delamain skills`
 показывает накопленные навыки.
@@ -129,6 +134,18 @@ backoff.
 prompt как недоверенные данные, `HeuristicPlanner` просто разбирает задачу
 заново. Это по-прежнему retry между попытками, а не перестройка плана после
 каждого шага. Флаг по умолчанию выключен.
+
+С этапа 16 ошибку шага можно исправить внутри той же попытки. При
+`DELAMAIN_STEP_REPAIR_ENABLED=1` runtime после ошибки передаёт planner'у
+`remaining_steps` и успешный `completed_steps`, а полученный repair-план
+**заменяет** оставшуюся очередь. Repair ограничен
+`DELAMAIN_MAX_STEP_REPAIRS` сегментами и `DELAMAIN_MAX_REPAIR_STEPS` шагами,
+не может повторять уже предпринятый `action + args`, отклоняет неизвестные
+действия и дубликаты. Опасный repair создаёт отдельный durable approval с
+`metadata.kind="step_repair"`; после approve задача продолжается с
+сохранёнными шагами, reject завершает её как `failed`. Побочные эффекты
+выполненных шагов не откатываются, а skill пишется по `effective_actions`.
+Всё выключено по умолчанию и не даёт planner'у прав на исполнение.
 
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет
@@ -177,8 +194,9 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 [STAGE11_REPORT.md](STAGE11_REPORT.md),
 [STAGE12_REPORT.md](STAGE12_REPORT.md),
 [STAGE13_REPORT.md](STAGE13_REPORT.md),
-[STAGE14_REPORT.md](STAGE14_REPORT.md) и
-[STAGE15_REPORT.md](STAGE15_REPORT.md).
+[STAGE14_REPORT.md](STAGE14_REPORT.md),
+[STAGE15_REPORT.md](STAGE15_REPORT.md) и
+[STAGE16_REPORT.md](STAGE16_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

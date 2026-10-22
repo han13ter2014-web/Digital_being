@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from src.core.subsystem_base import Subsystem
 
 from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
+from .context import build_failure_context
 from .goal_authoring import GoalAuthoring
 from .goal_bridge import GoalBridge, derive_bridge_status
 from .llm_planner import OllamaPlanner
@@ -74,6 +75,13 @@ def _default_paths() -> tuple[Path, Path]:
         )
 
 
+def _safe_int(value: Any, default: int = 0, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _short(value: Any, limit: int = 500) -> Any:
     """Keep event payloads small; the full result remains in SQLite."""
 
@@ -88,37 +96,12 @@ def _short(value: Any, limit: int = 500) -> Any:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-def _compact(value: Any, *, limit: int = 500, depth: int = 0) -> Any:
-    """Bound nested values before they are stored in goal metadata.
-
-    Failure context can contain a whole file, a long error or a list of facts.
-    The planner only needs a readable summary, so strings are truncated and
-    containers are capped. JSON-safe scalar values are preserved.
-    """
-
-    if isinstance(value, str):
-        return value if len(value) <= limit else value[:limit] + "…"
-    if depth >= 3:
-        return _short(value, limit * 2)
-    if isinstance(value, Mapping):
-        return {
-            str(key): _compact(item, limit=limit, depth=depth + 1)
-            for key, item in list(value.items())[:20]
-        }
-    if isinstance(value, (list, tuple)):
-        return [
-            _compact(item, limit=limit, depth=depth + 1)
-            for item in list(value)[:20]
-        ]
-    return value
-
-
 class DelamainSubsystem(Subsystem):
     """Expose the deterministic Delamain loop as an optional subsystem."""
 
     name = "delamain"
     priority = 200
-    version = "0.7.0"
+    version = "0.8.0"
 
     def __init__(
         self,
@@ -134,6 +117,9 @@ class DelamainSubsystem(Subsystem):
         retry_backoff_max_sec: Optional[float] = None,
         replan_on_failure: Optional[bool] = None,
         replan_with_context: Optional[bool] = None,
+        step_repair_enabled: Optional[bool] = None,
+        max_step_repairs: Optional[int] = None,
+        max_repair_steps: Optional[int] = None,
         max_file_bytes: Optional[int] = None,
         llm_enabled: Optional[bool] = None,
         llm_base_url: Optional[str] = None,
@@ -244,6 +230,36 @@ class DelamainSubsystem(Subsystem):
         # Passing the failed step's result to the planner changes the prompt
         # and therefore remains an explicit opt-in on top of replanning.
         self.replan_with_context = bool(replan_with_context)
+
+        if step_repair_enabled is None:
+            repair_env = os.environ.get("DELAMAIN_STEP_REPAIR_ENABLED")
+            if repair_env is None:
+                step_repair_enabled = bool(
+                    _cfg("DELAMAIN_STEP_REPAIR_ENABLED", False)
+                )
+            else:
+                step_repair_enabled = _parse_bool(repair_env)
+        # Stage 16 is opt-in: without this flag a failed step behaves exactly
+        # as it did in stage 15, even if a planner exposes replan().
+        self.step_repair_enabled = bool(step_repair_enabled)
+
+        repairs_value = (
+            max_step_repairs
+            if max_step_repairs is not None
+            else os.environ.get("DELAMAIN_MAX_STEP_REPAIRS")
+        )
+        if repairs_value is None:
+            repairs_value = _cfg("DELAMAIN_MAX_STEP_REPAIRS", 1)
+        self.max_step_repairs = max(0, int(repairs_value))
+
+        repair_steps_value = (
+            max_repair_steps
+            if max_repair_steps is not None
+            else os.environ.get("DELAMAIN_MAX_REPAIR_STEPS")
+        )
+        if repair_steps_value is None:
+            repair_steps_value = _cfg("DELAMAIN_MAX_REPAIR_STEPS", 5)
+        self.max_repair_steps = max(1, int(repair_steps_value))
 
         if llm_enabled is None:
             llm_env = os.environ.get("DELAMAIN_LLM_ENABLED")
@@ -418,6 +434,9 @@ class DelamainSubsystem(Subsystem):
                 sandbox=sandbox,
                 planner=self._build_planner(),
                 approval_mode=self.approval_mode,
+                step_repair_enabled=self.step_repair_enabled,
+                max_step_repairs=self.max_step_repairs,
+                max_repair_steps=self.max_repair_steps,
             )
         return self.runtime
 
@@ -672,6 +691,9 @@ class DelamainSubsystem(Subsystem):
 
         goal_id = updated.get("goal_id")
         goal = runtime.memory.get_goal(int(goal_id)) if goal_id is not None else None
+        prior_steps, effective_steps, step_repairs = self._approval_progress(
+            updated
+        )
         attempts: Optional[int] = None
         if goal is not None:
             metadata = goal.get("metadata") or {}
@@ -696,6 +718,8 @@ class DelamainSubsystem(Subsystem):
             )
             if self.replan_with_context:
                 new_metadata["last_failure_context"] = None
+            if self.step_repair_enabled:
+                new_metadata["step_repairs"] = step_repairs
             runtime.memory.update_goal(
                 int(goal["id"]),
                 status="failed",
@@ -706,7 +730,9 @@ class DelamainSubsystem(Subsystem):
             "task_id": updated.get("task_id"),
             "task": _short(updated.get("task")),
             "ok": False,
-            "steps": 0,
+            "steps": prior_steps,
+            "effective_steps": effective_steps,
+            "step_repairs": step_repairs,
             "final_output": None,
             "error": f"approval rejected: {reason or 'no reason'}",
             "trigger": "approval-reject",
@@ -793,6 +819,9 @@ class DelamainSubsystem(Subsystem):
             if approval is not None:
                 state = str(approval.get("status") or "")
                 if state == "pending":
+                    approval_metadata = approval.get("metadata") or {}
+                    if not isinstance(approval_metadata, Mapping):
+                        approval_metadata = {}
                     result = TaskResult(
                         task_id=str(approval.get("task_id") or f"goal-{goal_id}"),
                         task=task,
@@ -801,6 +830,16 @@ class DelamainSubsystem(Subsystem):
                             approval.get("dangerous_actions") or ["all actions"]
                         ),
                         planned_actions=list(approval.get("plan") or []),
+                        effective_actions=list(
+                            approval_metadata.get("prior_effective_actions")
+                            or []
+                        ),
+                        steps_before=_safe_int(
+                            approval_metadata.get("prior_steps")
+                        ),
+                        repair_count=_safe_int(
+                            approval_metadata.get("repair_count")
+                        ),
                         pending_approval=approval,
                     )
                     summary = self._summarize(
@@ -826,6 +865,9 @@ class DelamainSubsystem(Subsystem):
                         replanned=replan_requested,
                     )
                 if state == "rejected":
+                    prior_steps, effective_steps, step_repairs = (
+                        self._approval_progress(approval)
+                    )
                     new_metadata = dict(metadata)
                     new_metadata.update(
                         {
@@ -843,6 +885,8 @@ class DelamainSubsystem(Subsystem):
                     )
                     if self.replan_with_context:
                         new_metadata["last_failure_context"] = None
+                    if self.step_repair_enabled:
+                        new_metadata["step_repairs"] = step_repairs
                     runtime.memory.update_goal(
                         goal_id,
                         status="failed",
@@ -852,7 +896,9 @@ class DelamainSubsystem(Subsystem):
                         "task_id": f"goal-{goal_id}",
                         "task": _short(task),
                         "ok": False,
-                        "steps": 0,
+                        "steps": prior_steps,
+                        "effective_steps": effective_steps,
+                        "step_repairs": step_repairs,
                         "final_output": None,
                         "error": "approval rejected",
                         "trigger": trigger,
@@ -887,48 +933,6 @@ class DelamainSubsystem(Subsystem):
             failure_context=failure_context,
         )
 
-        if result.pending_approval:
-            approval = result.pending_approval
-            approval_id = str(approval.get("id"))
-            runtime.memory.update_approval(
-                approval_id,
-                goal_id=goal_id,
-                title=title,
-                metadata={"source": "goal"},
-            )
-            new_metadata = dict(metadata)
-            new_metadata.update(
-                {
-                    "approval_id": approval_id,
-                    "approval_status": "pending",
-                    "approval_requested_at": utc_now_iso(),
-                    "last_attempt_at": utc_now_iso(),
-                    "last_error": result.error,
-                    "last_ok": False,
-                    "retry_scheduled": False,
-                    "retry_delay_sec": 0.0,
-                    "next_retry_at": None,
-                    "replan_on_next_attempt": False,
-                    "last_attempt_replanned": bool(replan_requested),
-                }
-            )
-            runtime.memory.update_goal(
-                goal_id,
-                status="pending",
-                metadata=new_metadata,
-            )
-            summary = self._summarize(
-                result,
-                trigger=trigger,
-                goal_id=goal_id,
-                title=title,
-                attempts=previous_attempts,
-                retry_scheduled=False,
-                reused_skill=reused_skill,
-            )
-            self._last_result = summary
-            return summary
-
         return self._finish_goal(
             runtime,
             goal,
@@ -958,6 +962,19 @@ class DelamainSubsystem(Subsystem):
         metadata = goal.get("metadata") or {}
         if not isinstance(metadata, Mapping):
             metadata = {}
+        # A repair plan can itself be dangerous.  This happens both during a
+        # normal attempt and when an already approved plan is resumed, so the
+        # pending branch lives here instead of in only one caller.
+        if result.pending_approval:
+            return self._finish_pending_goal(
+                runtime,
+                goal,
+                result,
+                trigger=trigger,
+                previous_attempts=previous_attempts,
+                reused_skill=reused_skill,
+                replanned=replanned,
+            )
         try:
             previous_replans = max(0, int(metadata.get("replan_count") or 0))
         except (TypeError, ValueError):
@@ -974,14 +991,19 @@ class DelamainSubsystem(Subsystem):
             retry_delay_sec = 0.0
             next_retry_at = None
             replan_next = False
-            # Store the actual normalized plan, not the command text. This is
-            # what makes a later identical goal executable without a planner.
+            # Store the effective successful path, not every attempted step.
+            # After a repair the failed step is deliberately excluded; a
+            # replay should use the sequence that actually worked. The
+            # fallback keeps old TaskResult producers/backward compatibility.
+            skill_actions = list(result.effective_actions) or list(
+                result.planned_actions
+            )
             runtime.memory.record_skill(
                 title,
                 {
                     "version": 1,
                     "command": command,
-                    "steps": list(result.planned_actions),
+                    "steps": skill_actions,
                 },
                 success=True,
             )
@@ -1015,9 +1037,11 @@ class DelamainSubsystem(Subsystem):
                 "replan_count": replan_count,
             }
         )
+        if self.step_repair_enabled:
+            new_metadata["step_repairs"] = int(result.repair_count)
         # MemoryStore merges metadata, so clearing means storing null rather
         # than deleting the key from a temporary dict. When the feature is
-        # off, metadata stays exactly as it was in stage 14.
+        # off, metadata stays exactly as it was in stage 15.
         if self.replan_with_context:
             new_metadata["last_failure_context"] = failure_context
         prior_approval_id = new_metadata.get("approval_id")
@@ -1051,6 +1075,107 @@ class DelamainSubsystem(Subsystem):
         self._last_result = summary
         return summary
 
+    def _finish_pending_goal(
+        self,
+        runtime: DelamainRuntime,
+        goal: Dict[str, Any],
+        result: TaskResult,
+        *,
+        trigger: str,
+        previous_attempts: int,
+        reused_skill: bool,
+        replanned: bool,
+    ) -> Dict[str, Any]:
+        """Link a new pending approval to its goal without finishing it."""
+
+        goal_id = int(goal["id"])
+        title = str(goal.get("title") or f"goal-{goal_id}")
+        approval = result.pending_approval
+        if approval is None:  # defensive; callers check this
+            return self._summarize(
+                result,
+                trigger=trigger,
+                goal_id=goal_id,
+                title=title,
+                attempts=previous_attempts,
+                reused_skill=reused_skill,
+                replanned=replanned,
+            )
+        approval_id = str(approval.get("id") or "")
+        if not approval_id:
+            return self._summarize(
+                result,
+                trigger=trigger,
+                goal_id=goal_id,
+                title=title,
+                attempts=previous_attempts,
+                reused_skill=reused_skill,
+                replanned=replanned,
+            )
+        runtime.memory.update_approval(
+            approval_id,
+            goal_id=goal_id,
+            title=title,
+            metadata={"source": "goal"},
+        )
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        new_metadata = dict(metadata)
+        new_metadata.update(
+            {
+                "approval_id": approval_id,
+                "approval_status": "pending",
+                "approval_requested_at": utc_now_iso(),
+                "last_attempt_at": utc_now_iso(),
+                "last_error": result.error,
+                "last_ok": False,
+                "retry_scheduled": False,
+                "retry_delay_sec": 0.0,
+                "next_retry_at": None,
+                "replan_on_next_attempt": False,
+                "last_attempt_replanned": bool(replanned),
+            }
+        )
+        if self.step_repair_enabled:
+            new_metadata["step_repairs"] = int(result.repair_count)
+        runtime.memory.update_goal(
+            goal_id,
+            status="pending",
+            metadata=new_metadata,
+        )
+        summary = self._summarize(
+            result,
+            trigger=trigger,
+            goal_id=goal_id,
+            title=title,
+            attempts=previous_attempts,
+            retry_scheduled=False,
+            reused_skill=reused_skill,
+            replanned=replanned,
+        )
+        self._last_result = summary
+        return summary
+
+    @staticmethod
+    def _approval_progress(
+        approval: Mapping[str, Any],
+    ) -> tuple[int, int, int]:
+        """Return prior attempted/effective steps and repair count."""
+
+        metadata = approval.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        effective = metadata.get("prior_effective_actions")
+        effective_steps = (
+            len(effective) if isinstance(effective, (list, tuple)) else 0
+        )
+        return (
+            _safe_int(metadata.get("prior_steps")),
+            effective_steps,
+            _safe_int(metadata.get("repair_count")),
+        )
+
     @staticmethod
     def _attempts(metadata: Mapping[str, Any]) -> int:
         try:
@@ -1062,66 +1187,15 @@ class DelamainSubsystem(Subsystem):
     def _failure_context(result: TaskResult, attempt_number: int) -> Dict[str, Any]:
         """Build a compact, durable description of one failed attempt.
 
-        The planner receives the failed step and the steps that already
-        succeeded, not the whole database or an unbounded file body. Planning
-        and normalization failures have no failed action; ``stage`` makes
-        that distinction explicit.
+        The builder lives in ``context.py`` because Stage 16 also uses it
+        inside one runtime call. ``effective_actions`` records the successful
+        path, so a repaired task does not present a failed step as completed.
         """
 
-        planned = list(result.planned_actions)
-        steps = list(result.steps)
-        stage = "planning"
-        failed_index: Optional[int] = None
-        failed_result = None
-        if planned and steps:
-            stage = "action"
-            for index, step_result in enumerate(steps):
-                if not step_result.ok:
-                    failed_index = index
-                    failed_result = step_result
-                    break
-            if failed_index is None:  # defensive: task failed after all steps
-                failed_index = len(steps) - 1
-                failed_result = steps[-1]
-        elif planned:
-            stage = "normalization"
-
-        failed_action = None
-        if failed_index is not None and failed_index < len(planned):
-            candidate = planned[failed_index]
-            if isinstance(candidate, Mapping):
-                failed_action = candidate
-
-        completed = planned[:failed_index] if failed_index else []
-        context: Dict[str, Any] = {
-            "stage": stage,
-            "attempt": max(1, int(attempt_number)),
-            "failed_step": (
-                failed_index + 1 if failed_index is not None else None
-            ),
-            "action": (
-                str(failed_action.get("action"))
-                if failed_action and failed_action.get("action")
-                else None
-            ),
-            "args": (
-                _compact(failed_action.get("args") or {})
-                if failed_action
-                else {}
-            ),
-            "error": _short(result.error, 1000),
-            "output": (
-                _compact(failed_result.output, limit=1000)
-                if failed_result is not None
-                else None
-            ),
-            "completed_steps": _compact(completed),
-        }
-        return {
-            key: value
-            for key, value in context.items()
-            if value is not None
-        }
+        return build_failure_context(
+            result,
+            attempt=attempt_number,
+        )
 
     def _retry_delay(self, attempt_number: int) -> float:
         """Return a bounded exponential delay for the next failed attempt."""
@@ -1284,6 +1358,9 @@ class DelamainSubsystem(Subsystem):
         pending = result.pending_approval
         pending_summary = None
         if pending is not None:
+            pending_metadata = pending.get("metadata") or {}
+            if not isinstance(pending_metadata, Mapping):
+                pending_metadata = {}
             pending_summary = {
                 "id": pending.get("id"),
                 "task_id": pending.get("task_id"),
@@ -1292,12 +1369,16 @@ class DelamainSubsystem(Subsystem):
                 "status": pending.get("status"),
                 "dangerous_actions": list(pending.get("dangerous_actions") or []),
                 "plan": list(pending.get("plan") or []),
+                "repair": pending_metadata.get("kind") == "step_repair",
+                "prior_steps": _safe_int(pending_metadata.get("prior_steps")),
             }
         return {
             "task_id": result.task_id,
             "task": _short(result.task),
             "ok": bool(result.ok),
-            "steps": len(result.steps),
+            "steps": int(result.steps_before) + len(result.steps),
+            "effective_steps": len(result.effective_actions),
+            "step_repairs": int(result.repair_count),
             "final_output": _short(result.final_output),
             "error": _short(result.error),
             "trigger": str(trigger),
@@ -1456,6 +1537,11 @@ class DelamainSubsystem(Subsystem):
                     "backoff_max_sec": self.retry_backoff_max_sec,
                     "replan_on_failure": self.replan_on_failure,
                     "replan_with_context": self.replan_with_context,
+                },
+                "step_repair": {
+                    "enabled": self.step_repair_enabled,
+                    "max_step_repairs": self.max_step_repairs,
+                    "max_repair_steps": self.max_repair_steps,
                 },
                 "goals": counts,
                 "skills": skill_count,

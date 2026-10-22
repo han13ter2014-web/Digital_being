@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: bounded repair внутри одной попытки
+
+* **Новые флаги** — `DELAMAIN_STEP_REPAIR_ENABLED=False`,
+  `DELAMAIN_MAX_STEP_REPAIRS=1`, `DELAMAIN_MAX_REPAIR_STEPS=5`. По
+  умолчанию поведение этапов 9–15 не меняется.
+* **Replacement-семантика** — после ошибки шага planner получает
+  `remaining_steps` и возвращает замену оставшейся части плана, а не
+  вставку перед старым хвостом. Выброшенный хвост не выполняется.
+* **Ограничения** — repair-план не может повторять уже предпринятый
+  `action + args`, содержать дубликаты, неизвестные действия или больше
+  `DELAMAIN_MAX_REPAIR_STEPS` шагов. Число принятых repair-сегментов
+  ограничено `DELAMAIN_MAX_STEP_REPAIRS`; отклонённый план бюджет не
+  расходует, но задача сразу завершается ошибкой исходного шага.
+* **Контекст** — новый `src/delamain/context.py` собирает компактный
+  failure-context: `stage`, `failed_step`, `action`, `args`, `error`,
+  `output`, `completed_steps`, `remaining_steps`, `repair_count`. Контекст
+  ограничен по размеру и общий для durable replan и repair.
+* **Durable repair-approval** — опасный repair проходит тот же
+  approval-preflight и создаёт approval с `metadata.kind="step_repair"` и
+  сохранёнными `prior_actions`, `prior_effective_actions`, `prior_steps`,
+  `repair_count`, `failed_step`. После approve задача продолжается с
+  выполненными шагами; reject завершает цель как `failed`. Pending repair
+  переживает перезапуск и не дублируется на следующих tick.
+* **Результат** — `TaskResult` различает `planned_actions` (всё
+  попробованное), `effective_actions` (успешный путь), `steps_before` и
+  `repair_count`. Skill после repair пишется по `effective_actions`, без
+  упавших шагов.
+* **LLM prompt** — `OllamaPlanner.replan()` передаёт
+  `remaining_steps` как недоверенные данные, просит вернуть замену остатка
+  и не повторять `action + args` из `completed_steps` или упавшего шага;
+  контекст ограничен 6000 символами.
+* **Наблюдаемость** — `/delamain status` показывает
+  `Repair: on/off, max_segments=..., max_steps=...`;
+  `/delamain goals` — `repairs=N`; `/delamain approvals` помечает
+  `repair-план`; pending-сообщение говорит, сколько шагов уже выполнено;
+  результат выполнения содержит `repair=N`.
+* **Безопасность** — planner не получает прав на исполнение; repair идёт
+  через тот же `ActionRegistry`, sandbox и approval. Побочные эффекты уже
+  выполненных шагов не откатываются, и это явно задокументировано.
+* **17 новых тестов** — default-off и env-флаги, replacement, запрет
+  повтора, неизвестное действие и внутренний дубликат, лимит размера,
+  бюджет, два последовательных сегмента, отсутствие упавших шагов в
+  `completed_steps`, durable approval с перезапуском runtime и подсистемы,
+  approval во время resume, reject с прогрессом, skill по effective-path,
+  pending без дублей и отображение в `/delamain`.
+* **Проверка** — `535 passed, 2 skipped` без benchmarks и `16 passed`
+  benchmarks; суммарно `551 passed, 2 skipped`.
+* **Документация** — `docs/STAGE16_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-22 — Delamain-local: replan с контекстом упавшего шага
 
 * **Новый флаг** — `DELAMAIN_REPLAN_WITH_CONTEXT=False`. Работает только

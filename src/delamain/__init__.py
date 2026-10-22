@@ -14,7 +14,8 @@ first working vertical slice of the new architecture:
   default;
 * an optional authoring layer for explicit or planner-proposed executable
   payloads (proposals never execute themselves);
-* optional retry backoff and failure-aware replanning, disabled by default.
+* optional retry backoff and failure-aware replanning, disabled by default;
+* optional bounded step repair inside one attempt, disabled by default.
 
 The LLM layer is never required: constructing the core does not start Ollama
 or make network requests, and every planning failure falls back to the
