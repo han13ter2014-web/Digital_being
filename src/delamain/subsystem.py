@@ -17,6 +17,11 @@ in the goal metadata, or (optionally) a plan from a local Ollama model with a
 heuristic fallback. The LLM is disabled by default by
 ``DELAMAIN_LLM_ENABLED``. Dangerous plans can wait for explicit approval;
 the gate is disabled by default by ``DELAMAIN_APPROVAL_MODE=off``.
+
+An optional bridge (``DELAMAIN_BRIDGE_ENABLED=1``) links the active cognitive
+goal from ``GoalSubsystem`` to at most one durable Delamain goal when the
+cognitive goal carries an explicit ``execution`` payload. The bridge is also
+disabled by default and never guesses a command from a title.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from src.core.subsystem_base import Subsystem
 
 from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
+from .goal_bridge import GoalBridge, derive_bridge_status
 from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
 from .planner import FallbackPlanner, HeuristicPlanner, Planner
@@ -85,7 +91,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.4.0"
+    version = "0.5.0"
 
     def __init__(
         self,
@@ -105,6 +111,7 @@ class DelamainSubsystem(Subsystem):
         llm_max_steps: Optional[int] = None,
         llm_temperature: Optional[float] = None,
         approval_mode: Optional[str] = None,
+        bridge_enabled: Optional[bool] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -211,6 +218,15 @@ class DelamainSubsystem(Subsystem):
             raw_approval_mode,
             fallback="dangerous",
         )
+
+        if bridge_enabled is None:
+            bridge_env = os.environ.get("DELAMAIN_BRIDGE_ENABLED")
+            if bridge_env is None:
+                bridge_enabled = bool(_cfg("DELAMAIN_BRIDGE_ENABLED", False))
+            else:
+                bridge_enabled = _parse_bool(bridge_env)
+        self.bridge_enabled = bool(bridge_enabled)
+        self.bridge = GoalBridge(self)
 
         bytes_value = (
             max_file_bytes
@@ -324,11 +340,14 @@ class DelamainSubsystem(Subsystem):
         plan: Optional[List[ActionRequest | Mapping[str, Any] | str]] = None,
         priority: float = 0.5,
         success_predicate: str = "",
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a durable execution goal.
 
         At least one of ``command`` or ``plan`` is required; a goal without an
         executable representation would only sit in the table forever.
+        ``metadata`` is merged into the stored goal metadata and is used by
+        the optional cognitive-goal bridge.
         """
 
         title = str(title).strip()
@@ -338,11 +357,11 @@ class DelamainSubsystem(Subsystem):
         if not command and not plan:
             raise ValueError("goal needs a command or an explicit plan")
 
-        metadata: Dict[str, Any] = {}
+        goal_metadata: Dict[str, Any] = dict(metadata or {})
         if command:
-            metadata["command"] = command
+            goal_metadata["command"] = command
         if plan:
-            metadata["plan"] = self._normalize_plan(plan)
+            goal_metadata["plan"] = self._normalize_plan(plan)
 
         runtime = self._ensure_runtime()
         goal_id = runtime.memory.save_goal(
@@ -350,14 +369,14 @@ class DelamainSubsystem(Subsystem):
             status="pending",
             success_predicate=success_predicate,
             priority=priority,
-            metadata=metadata,
+            metadata=goal_metadata,
         )
         return {
             "id": goal_id,
             "title": title,
             "status": "pending",
             "priority": max(0.0, min(1.0, float(priority))),
-            "metadata": metadata,
+            "metadata": goal_metadata,
         }
 
     def list_goals(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -366,7 +385,37 @@ class DelamainSubsystem(Subsystem):
                 return []
             self._ensure_runtime()
         assert self.runtime is not None
-        return self.runtime.memory.list_goals(status=status)
+        goals = self.runtime.memory.list_goals(status=status)
+        memory = self.runtime.memory
+        for goal in goals:
+            metadata = goal.get("metadata") or {}
+            if not isinstance(metadata, Mapping):
+                continue
+            if metadata.get("bridge_source") != "goal_subsystem":
+                continue
+            goal["bridge_status"] = derive_bridge_status(goal, memory)
+            goal["cognitive_goal_id"] = metadata.get("cognitive_goal_id")
+            goal["cognitive_goal_title"] = metadata.get("cognitive_goal_title")
+        return goals
+
+    def get_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
+        """Return one goal with the optional bridge status attached."""
+
+        if self.runtime is None:
+            if not self.enabled:
+                return None
+            self._ensure_runtime()
+        assert self.runtime is not None
+        runtime = self.runtime
+        goal = runtime.memory.get_goal(int(goal_id))
+        if goal is None:
+            return None
+        metadata = goal.get("metadata") or {}
+        if isinstance(metadata, Mapping) and metadata.get("bridge_source") == "goal_subsystem":
+            goal["bridge_status"] = derive_bridge_status(goal, runtime.memory)
+            goal["cognitive_goal_id"] = metadata.get("cognitive_goal_id")
+            goal["cognitive_goal_title"] = metadata.get("cognitive_goal_title")
+        return goal
 
     def list_skills(self, *, limit: int = 20) -> List[Dict[str, Any]]:
         if self.runtime is None:
@@ -447,6 +496,7 @@ class DelamainSubsystem(Subsystem):
                 title=approval.get("title") or None,
             )
         self._last_result = summary
+        self._sync_bridge()
         return summary
 
     def reject(self, approval_id: str, reason: str = "") -> Dict[str, Any]:
@@ -525,6 +575,7 @@ class DelamainSubsystem(Subsystem):
             "pending_approval": None,
         }
         self._last_result = summary
+        self._sync_bridge()
         return summary
 
     def run_now(
@@ -953,19 +1004,38 @@ class DelamainSubsystem(Subsystem):
             return None
         self._last_tick_cycle = cycle
 
+        agent = (context or {}).get("agent") or self._agent
+        bridge_events = self._sync_bridge(agent)
+
         if self.tick_interval > 1 and int(cycle) % self.tick_interval != 0:
-            return None
+            return {"events": bridge_events} if bridge_events else None
 
         try:
             summary = self.run_pending_goal(trigger="tick")
         except Exception as exc:
             # A broken optional layer must not break the agent loop.
             self._record_error(exc)
-            return None
+            return {"events": bridge_events} if bridge_events else None
 
-        if summary is None:
-            return None
-        return {"events": [{"name": "delamain_goal", "data": summary}]}
+        # Reconcile after execution: this is where a successful goal completes
+        # its cognitive counterpart and a failed/rejected one closes it.
+        bridge_events.extend(self._sync_bridge(agent))
+
+        events = list(bridge_events)
+        if summary is not None:
+            events.append({"name": "delamain_goal", "data": summary})
+        return {"events": events} if events else None
+
+    def _sync_bridge(self, agent: Any = None) -> List[Dict[str, Any]]:
+        """Run the optional cognitive-goal bridge; never break the tick."""
+
+        if not self.bridge_enabled:
+            return []
+        try:
+            return self.bridge.sync(agent or self._agent)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._record_error(exc)
+            return []
 
     def _planner_info(self) -> Dict[str, Any]:
         info: Dict[str, Any] = {
@@ -1042,6 +1112,7 @@ class DelamainSubsystem(Subsystem):
                     "error": self._approval_mode_error,
                     "counts": approval_counts,
                 },
+                "bridge": self.bridge.status(),
                 "planner": self._planner_info(),
                 "last_result": self._last_result,
             }

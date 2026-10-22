@@ -336,7 +336,7 @@ class LongRunningConfig:
     WEB_SEARCH_FALLBACK_TO_EN = True       # если RU пуст — пробуем EN
     WEB_SEARCH_USER_AGENT = "DigitalBeing/2.5"
 
-    # === DELAMAIN-LOCAL (этапы 7–11) ===
+    # === DELAMAIN-LOCAL (этапы 7–12) ===
     # Опциональный детерминированный слой действий. По умолчанию выключен:
     # без явного включения он не открывает SQLite и не трогает файлы.
     # Включается через DELAMAIN_ENABLED=1 или командой /delamain on.
@@ -363,6 +363,11 @@ class LongRunningConfig:
     # для любого известного действия. При ошибке в значении включается
     # fail-closed режим dangerous.
     DELAMAIN_APPROVAL_MODE = "off"          # off | dangerous | all
+
+    # Мост «когнитивная цель GoalSubsystem → исполняемая цель Delamain».
+    # По умолчанию выключен: без явного payload у когнитивной цели ничего
+    # не ставится в очередь. Включается через DELAMAIN_BRIDGE_ENABLED=1.
+    DELAMAIN_BRIDGE_ENABLED = False
 
 
 # Глобальная конфигурация

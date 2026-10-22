@@ -9,7 +9,9 @@ first working vertical slice of the new architecture:
 * a runtime that executes a plan and records every step;
 * an optional, disabled-by-default subsystem adapter for Digital Being;
 * an optional local LLM planner with a deterministic fallback;
-* an optional approval gate for dangerous actions, disabled by default.
+* an optional approval gate for dangerous actions, disabled by default;
+* an optional bridge from cognitive goals to executable goals, disabled by
+  default.
 
 The LLM layer is never required: constructing the core does not start Ollama
 or make network requests, and every planning failure falls back to the
@@ -18,6 +20,13 @@ heuristic planner.
 
 from .actions import Action, ActionError, ActionRegistry
 from .approval import ApprovalPolicy, VALID_APPROVAL_MODES, normalize_approval_mode
+from .goal_bridge import (
+    BRIDGE_STATUSES,
+    GoalBridge,
+    bridge_summary,
+    derive_bridge_status,
+    evaluate_success_predicate,
+)
 from .memory import MemoryStore
 from .models import (
     ActionResult,
@@ -40,9 +49,11 @@ __all__ = [
     "ActionResult",
     "ActionRequest",
     "ActionSpec",
+    "BRIDGE_STATUSES",
     "DelamainRuntime",
     "DelamainSubsystem",
     "FallbackPlanner",
+    "GoalBridge",
     "HeuristicPlanner",
     "MemoryStore",
     "OllamaPlanner",
@@ -52,6 +63,9 @@ __all__ = [
     "SandboxError",
     "TaskResult",
     "VALID_APPROVAL_MODES",
+    "bridge_summary",
+    "derive_bridge_status",
+    "evaluate_success_predicate",
     "normalize_approval_mode",
     "utc_now_iso",
 ]

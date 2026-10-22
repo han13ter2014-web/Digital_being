@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–11)
+## 🧪 Слой действия Delamain-local (этапы 7–12)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -89,13 +89,16 @@
   `/api/chat`, только stdlib;
 * `FallbackPlanner` — primary-планировщик с обязательным откатом на
   эвристики;
+* `GoalBridge` — опциональный мост активной когнитивной цели в одну
+  исполняемую цель Delamain;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей и `tick()`.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
 `/delamain` в трей-чате. Она **выключена по умолчанию**: без
 `DELAMAIN_ENABLED=1`, config-флага или `/delamain on` runtime не создаётся.
-Исполняемые цели Delamain пока отделены от когнитивных целей
-`GoalSubsystem`.
+Исполняемые цели Delamain остаются отдельной таблицей `goals` в SQLite,
+но с этапа 12 активная цель `GoalSubsystem` может быть связана с одной
+исполняемой целью через `GoalBridge`.
 
 С этапа 9 цикл стал память-зависимым: успешный `planned_actions` сохраняется
 в `skills` вместе с командой, а следующая цель с тем же названием и той же
@@ -120,11 +123,24 @@ live-схему действий через `bind_registry()`, требует JS
 как `failed`. Approval применяется к любому плану — от эвристики, явного
 `metadata.plan` или LLM.
 
+С этапа 12 `GoalBridge` связывает активную когнитивную цель с одной
+исполняемой целью Delamain. Мост выключен по умолчанию
+(`DELAMAIN_BRIDGE_ENABLED=False`), не угадывает команду из названия и
+работает только с явным `goal["execution"]`. Он различает
+`pending`/`in_progress`/`waiting_approval`/`done`/`failed`, переживает
+потерю in-memory ссылки за счёт metadata в SQLite, а после выполнения
+проверяет безопасный success predicate (`ok`, `file_exists`,
+`file_contains`). Успех завершает когнитивную цель, reject/ошибка/
+невыполненный predicate переводят её в `failed` и активируют следующую.
+Мост не добавляет прав: он использует существующие sandbox, approval и
+`ActionRegistry`.
+
 Слой можно запускать и отдельно: `python -m src.delamain` (с `--llm` —
 через локальную Ollama, с `--approval-mode` — с preflight-проверкой).
 Подробности и ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md),
-итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md) и
-[STAGE11_REPORT.md](STAGE11_REPORT.md).
+итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md),
+[STAGE11_REPORT.md](STAGE11_REPORT.md) и
+[STAGE12_REPORT.md](STAGE12_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

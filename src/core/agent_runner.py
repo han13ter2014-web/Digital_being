@@ -833,8 +833,15 @@ class AgentRunner:
                     if metadata.get("approval_id")
                     else ""
                 )
+                bridge_note = ""
+                if metadata.get("bridge_source") == "goal_subsystem":
+                    bridge_note = (
+                        f", cognitive=#{metadata.get('cognitive_goal_id')}"
+                        f"/{goal.get('bridge_status', '?')}"
+                    )
                 lines.append(
-                    f"  [{goal.get('status')}{attempt_note}{approval_note}] "
+                    f"  [{goal.get('status')}{attempt_note}{approval_note}"
+                    f"{bridge_note}] "
                     f"#{goal.get('id')} {goal.get('title')} "
                     f"(p={float(goal.get('priority', 0)):.2f})"
                 )
@@ -904,6 +911,8 @@ class AgentRunner:
         planner = status.get("planner") or {}
         approval = status.get("approval") or {}
         approval_counts = approval.get("counts") or {}
+        bridge = status.get("bridge") or {}
+        bridge_counts = bridge.get("counts") or {}
         lines = [
             "🧪 Delamain-local",
             f"  Включён: {'да' if status.get('enabled') else 'нет'}",
@@ -918,6 +927,15 @@ class AgentRunner:
             f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
         ]
+        if bridge.get("enabled"):
+            lines.append(
+                f"  Когнитивные цели: linked={bridge.get('linked', 0)}, "
+                f"waiting={bridge_counts.get('waiting_approval', 0)}, "
+                f"done={bridge_counts.get('done', 0)}, "
+                f"failed={bridge_counts.get('failed', 0)}"
+            )
+        if bridge.get("last_error"):
+            lines.append(f"  Ошибка моста целей: {bridge['last_error']}")
         if approval.get("error"):
             lines.append(f"  Approval-ошибка: {approval['error']}")
         if planner.get("enabled"):
@@ -1029,25 +1047,45 @@ class AgentRunner:
     def _format_status(self) -> str:
         a = self.agent
         es = self.energy_policy.get_status()
-        return (
-            f"🤖 {a.name}\n"
-            f"  Цикл: {a.cycle_count} | Тик Runner: {self._tick_count}\n"
+        lines = [
+            f"🤖 {a.name}",
+            f"  Цикл: {a.cycle_count} | Тик Runner: {self._tick_count}",
             f"  Энергия: {es['energy']:.0f}/{es['max_energy']:.0f} "
-            f"({es['percent']:.0f}%, {es['level']})\n"
-            f"  Интеллект: {a.intelligence}\n"
-            f"  Концепций: {len(a.mental_models.concepts)}\n"
-            f"  Интервал тика: {es['tick_interval_sec']:.0f}с\n"
-            f"  На паузе: {'да' if self._paused else 'нет'}"
-        )
+            f"({es['percent']:.0f}%, {es['level']})",
+            f"  Интеллект: {a.intelligence}",
+            f"  Концепций: {len(a.mental_models.concepts)}",
+            f"  Интервал тика: {es['tick_interval_sec']:.0f}с",
+            f"  На паузе: {'да' if self._paused else 'нет'}",
+        ]
+        delamain = getattr(a, "delamain", None)
+        if delamain is not None and getattr(delamain, "bridge_enabled", False):
+            bridge = delamain.status().get("bridge") or {}
+            counts = bridge.get("counts") or {}
+            lines.append(
+                f"  Delamain-цели: linked={bridge.get('linked', 0)}, "
+                f"waiting={counts.get('waiting_approval', 0)}, "
+                f"done={counts.get('done', 0)}, failed={counts.get('failed', 0)}"
+            )
+        return "\n".join(lines)
 
     def _format_goals(self) -> str:
         a = self.agent
         goals_status = a.get_goals_status()
         active = goals_status.get('active', '')
-        return (
-            f"📋 Цели: {goals_status['completed']}/{goals_status['total']}\n"
-            f"  Активная: {active or '—'}"
-        )
+        lines = [
+            f"📋 Цели: {goals_status['completed']}/{goals_status['total']}",
+            f"  Активная: {active or '—'}",
+        ]
+        active_goal = getattr(a, "active_goal", None)
+        if isinstance(active_goal, dict):
+            link = active_goal.get("delamain_bridge")
+            if isinstance(link, dict):
+                lines.append(
+                    f"  Delamain: goal #{link.get('goal_id')} "
+                    f"[{link.get('status')}]"
+                    + (f" — {link.get('message')}" if link.get("message") else "")
+                )
+        return "\n".join(lines)
 
     def _format_concepts(self) -> str:
         a = self.agent
@@ -1131,7 +1169,26 @@ class AgentRunner:
         delamain = results.get("delamain") if isinstance(results, dict) else None
         if isinstance(delamain, dict):
             for event in delamain.get("events") or []:
-                if not isinstance(event, dict) or event.get("name") != "delamain_goal":
+                if not isinstance(event, dict):
+                    continue
+                if event.get("name") == "delamain_bridge":
+                    data = event.get("data") or {}
+                    status = data.get("status")
+                    mark = {
+                        "done": "✅",
+                        "failed": "⚠️",
+                        "waiting_approval": "⏸",
+                    }.get(status, "•")
+                    message = data.get("message")
+                    message_note = f" — {message}" if message else ""
+                    logger.info(
+                        f"[{self.name}] {mark} Delamain bridge (цикл {cycle}): "
+                        f"cognitive #{data.get('cognitive_goal_id')} "
+                        f"→ goal #{data.get('delamain_goal_id')} "
+                        f"[{status}]{message_note}"
+                    )
+                    continue
+                if event.get("name") != "delamain_goal":
                     continue
                 data = event.get("data") or {}
                 mark = "✅" if data.get("ok") else "⚠️"

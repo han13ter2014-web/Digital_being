@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: мост когнитивных и исполняемых целей
+
+* **`GoalBridge`** — новый опциональный слой `src/delamain/goal_bridge.py`.
+  Активная цель `GoalSubsystem` с явным `goal["execution"]` получает ровно
+  одну связанную цель Delamain; без payload мост ничего не делает.
+* **Один к одному без дублей** — повторные `tick` не создают новых целей,
+  а потерянная in-memory ссылка восстанавливается по metadata SQLite
+  (`bridge_source`, `cognitive_goal_id`, `cognitive_agent`).
+* **Статусы моста** — `pending`/`in_progress`/`waiting_approval`/`done`/
+  `failed`; ожидание approval не считается провалом когнитивной цели.
+* **Approval и reject** — approve выполняет план и завершает когнитивную
+  цель; reject переводит её в `failed` с понятной причиной, но не пишет
+  skill-failure, потому что действия не выполнялись.
+* **Success predicate** — безопасные проверки `ok`, `file_exists:<path>` и
+  `file_contains:<path>:<text>`; неизвестный predicate fail-closed, без
+  `eval`. Невыполненный predicate оставляет Delamain-действие успешным, но
+  помечает bridge и когнитивную цель как `failed`.
+* **Прогресс и следующая цель** — мост обновляет `_goal_progress` и после
+  успеха активирует следующую цель; для провала добавлен
+  `GoalSubsystem.fail_goal()`.
+* **Интерфейс** — `/delamain goals` показывает `cognitive=#<id>/<status>`,
+  `/delamain status` — сводку `linked/waiting/done/failed`, `/goals` и
+  `/status` — связь активной цели.
+* **Конфигурация** — `DELAMAIN_BRIDGE_ENABLED=False` по умолчанию; без
+  одновременного включения Delamain и моста поведение этапов 7–11 не
+  меняется.
+* **13 новых тестов** — дедупликация, approval/reject, predicate,
+  потерянная ссылка, следующая цель, статусы и команды чата.
+* **Полный прогон:** `509 passed, 2 skipped in 1193.76s` (включая benchmarks).
+* **Документация** — `docs/STAGE12_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-21 — Delamain-local: approval для опасных действий
 
 * **`ApprovalPolicy`** — preflight-политика для всего плана: режимы `off`
