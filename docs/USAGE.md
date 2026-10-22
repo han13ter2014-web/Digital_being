@@ -250,7 +250,7 @@ DIGITAL_BEING_NAME="Bob" python main.py     # в другом
 | `/delamain on` / `off` | Включить / выключить автономные цели Delamain |
 | `/delamain run <задача>` | Выполнить задачу сразу |
 | `/delamain goal <название> \| <команда>` | Поставить исполняемую цель |
-| `/delamain goals` | Список исполняемых целей, попыток и связей с когнитивными целями |
+| `/delamain goals` | Список целей, попыток, `retry_at`, replan и связей с когнитивными целями |
 | `/delamain skills` | Навыки и счётчики успехов/ошибок |
 | `/delamain approvals` | Ожидающие подтверждения опасные планы |
 | `/delamain approve <id>` | Подтвердить и выполнить план ровно один раз |
@@ -356,6 +356,27 @@ proposal; при `DELAMAIN_APPROVAL_MODE=dangerous` или `all` выполне�
 `/delamain approve <id>`. `/goals reject <id> [причина]` отклоняет
 proposal без создания исполняемой цели. Подробности — в
 [docs/STAGE13_REPORT.md](STAGE13_REPORT.md).
+
+Начиная с этапа 14 неудачные действия можно повторять с паузой и, по
+желанию, с новым планом:
+
+```powershell
+$env:DELAMAIN_ENABLED = "1"
+$env:DELAMAIN_MAX_ATTEMPTS = "3"
+$env:DELAMAIN_RETRY_BACKOFF_SEC = "60"
+$env:DELAMAIN_RETRY_BACKOFF_MAX_SEC = "300"
+$env:DELAMAIN_REPLAN_ON_FAILURE = "1"
+python main_tray.py
+```
+
+Пауза растёт экспоненциально и ограничена cap: 60, 120, 240, 300… Время
+следующей попытки хранится в metadata цели и переживает перезапуск. При
+`DELAMAIN_REPLAN_ON_FAILURE=1` следующий запуск игнорирует сохранённый
+explicit/skill-план и вызывает planner заново. Обе опции по умолчанию
+выключены: `backoff=0`, `replan=off`. `/delamain goals` показывает
+`retry_at=...` и `replan=next`, `/delamain status` — текущие backoff/cap.
+Pending approval не считается ошибкой и не запускает retry. Подробности —
+в [docs/STAGE14_REPORT.md](STAGE14_REPORT.md).
 
 ### Поведение иконки трея
 

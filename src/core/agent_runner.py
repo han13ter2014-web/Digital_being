@@ -835,6 +835,17 @@ class AgentRunner:
                     if metadata.get("approval_id")
                     else ""
                 )
+                retry_note = ""
+                if (
+                    goal.get("status") == "pending"
+                    and metadata.get("next_retry_at")
+                ):
+                    retry_note = f", retry_at={metadata.get('next_retry_at')}"
+                replan_note = ""
+                if metadata.get("replan_on_next_attempt"):
+                    replan_note = ", replan=next"
+                elif metadata.get("last_attempt_replanned"):
+                    replan_note = ", replanned"
                 bridge_note = ""
                 if metadata.get("bridge_source") == "goal_subsystem":
                     bridge_note = (
@@ -843,7 +854,7 @@ class AgentRunner:
                     )
                 lines.append(
                     f"  [{goal.get('status')}{attempt_note}{approval_note}"
-                    f"{bridge_note}] "
+                    f"{retry_note}{replan_note}{bridge_note}] "
                     f"#{goal.get('id')} {goal.get('title')} "
                     f"(p={float(goal.get('priority', 0)):.2f})"
                 )
@@ -916,6 +927,9 @@ class AgentRunner:
         bridge = status.get("bridge") or {}
         bridge_counts = bridge.get("counts") or {}
         authoring = status.get("authoring") or {}
+        retry = status.get("retry") or {}
+        backoff_sec = float(retry.get("backoff_sec") or 0.0)
+        backoff_max_sec = float(retry.get("backoff_max_sec") or 0.0)
         lines = [
             "🧪 Delamain-local",
             f"  Включён: {'да' if status.get('enabled') else 'нет'}",
@@ -928,6 +942,8 @@ class AgentRunner:
             f"done={goals.get('done', 0)}, failed={goals.get('failed', 0)}",
             f"  Навыки: {status.get('skills', 0)}; "
             f"попыток на цель: {status.get('max_attempts', 1)}",
+            f"  Retry: backoff={backoff_sec:g}s, cap={backoff_max_sec:g}s, "
+            f"replan={'on' if retry.get('replan_on_failure') else 'off'}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
             f"  Authoring: {'on' if authoring.get('enabled') else 'off'}, "
             f"proposals={'on' if authoring.get('proposal_enabled') else 'off'}",
@@ -956,9 +972,16 @@ class AgentRunner:
                 mark = "⏸"
             else:
                 mark = "✅" if last.get("ok") else "⚠️"
+            last_retry = ""
+            if last.get("retry_scheduled"):
+                last_retry = ", retry"
+                if last.get("next_retry_at"):
+                    last_retry += f" after {last['next_retry_at']}"
+                if last.get("replan_on_next_attempt"):
+                    last_retry += ", replan"
             lines.append(
                 f"  Последняя: {mark} {last.get('title') or last.get('task')} "
-                f"(шагов: {last.get('steps', 0)})"
+                f"(шагов: {last.get('steps', 0)}{last_retry})"
             )
         if status.get("last_error"):
             lines.append(f"  Ошибка: {status['last_error']}")
@@ -982,9 +1005,16 @@ class AgentRunner:
             output = result.get("final_output")
             suffix = f"\n  Вывод: {output}" if output is not None else ""
             return f"✅ {prefix}: успешно, шагов: {steps} (task {task_id}).{suffix}"
+        retry_note = ""
+        if result.get("retry_scheduled"):
+            retry_note = " Повтор на следующем тике."
+            if result.get("next_retry_at"):
+                retry_note = f" Повтор после {result['next_retry_at']}."
+            if result.get("replan_on_next_attempt"):
+                retry_note += " С перепланированием."
         return (
             f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
-            f"  {result.get('error')}"
+            f"  {result.get('error')}{retry_note}"
         )
 
     @staticmethod

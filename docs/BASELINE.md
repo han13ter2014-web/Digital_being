@@ -131,3 +131,4 @@ _Файл создан на этапе 0. Обновлять при каждом
 * [Этап 11 — отчёт](STAGE11_REPORT.md): approval-политика для опасных действий и планов LLM.
 * [Этап 12 — отчёт](STAGE12_REPORT.md): мост активной когнитивной цели `GoalSubsystem` и одной исполняемой цели Delamain.
 * [Этап 13 — отчёт](STAGE13_REPORT.md): безопасный authoring payload — `/goals exec`, proposal, accept/reject и decision в metadata.
+* [Этап 14 — отчёт](STAGE14_REPORT.md): bounded backoff и перепланирование после ошибки действия.

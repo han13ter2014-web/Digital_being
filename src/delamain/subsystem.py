@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -92,7 +93,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.5.0"
+    version = "0.6.0"
 
     def __init__(
         self,
@@ -104,6 +105,9 @@ class DelamainSubsystem(Subsystem):
         tick_interval: Optional[int] = None,
         max_goals_per_tick: Optional[int] = None,
         max_attempts: Optional[int] = None,
+        retry_backoff_sec: Optional[float] = None,
+        retry_backoff_max_sec: Optional[float] = None,
+        replan_on_failure: Optional[bool] = None,
         max_file_bytes: Optional[int] = None,
         llm_enabled: Optional[bool] = None,
         llm_base_url: Optional[str] = None,
@@ -168,6 +172,40 @@ class DelamainSubsystem(Subsystem):
         # The default is intentionally 1: stage 8 behaviour (one failure ->
         # failed) is preserved unless the user opts into retries.
         self.max_attempts = max(1, int(attempts_value))
+
+        backoff_value = (
+            retry_backoff_sec
+            if retry_backoff_sec is not None
+            else os.environ.get("DELAMAIN_RETRY_BACKOFF_SEC")
+            or _cfg("DELAMAIN_RETRY_BACKOFF_SEC", 0.0)
+        )
+        # 0 keeps stage-9 behaviour: a retry is eligible on the next tick.
+        self.retry_backoff_sec = max(0.0, float(backoff_value))
+
+        backoff_max_value = (
+            retry_backoff_max_sec
+            if retry_backoff_max_sec is not None
+            else os.environ.get("DELAMAIN_RETRY_BACKOFF_MAX_SEC")
+            or _cfg("DELAMAIN_RETRY_BACKOFF_MAX_SEC", 300.0)
+        )
+        # The cap can never be lower than the base delay; this keeps every
+        # configured backoff finite even if the user writes max=0.
+        self.retry_backoff_max_sec = max(
+            self.retry_backoff_sec,
+            max(0.0, float(backoff_max_value)),
+        )
+
+        if replan_on_failure is None:
+            replan_env = os.environ.get("DELAMAIN_REPLAN_ON_FAILURE")
+            if replan_env is None:
+                replan_on_failure = bool(
+                    _cfg("DELAMAIN_REPLAN_ON_FAILURE", False)
+                )
+            else:
+                replan_on_failure = _parse_bool(replan_env)
+        # Replanning is opt-in: the default retries the same explicit/skill
+        # plan exactly as stage 9 did.
+        self.replan_on_failure = bool(replan_on_failure)
 
         if llm_enabled is None:
             llm_env = os.environ.get("DELAMAIN_LLM_ENABLED")
@@ -549,6 +587,7 @@ class DelamainSubsystem(Subsystem):
                 trigger="approval",
                 previous_attempts=previous_attempts,
                 reused_skill=False,
+                replanned=bool(metadata.get("last_attempt_replanned")),
             )
         else:
             summary = self._summarize(
@@ -611,6 +650,10 @@ class DelamainSubsystem(Subsystem):
                     "last_error": f"approval rejected: {reason or 'no reason'}",
                     "last_ok": False,
                     "retry_scheduled": False,
+                    "retry_delay_sec": 0.0,
+                    "next_retry_at": None,
+                    "replan_on_next_attempt": False,
+                    "last_attempt_replanned": False,
                 }
             )
             runtime.memory.update_goal(
@@ -664,6 +707,7 @@ class DelamainSubsystem(Subsystem):
             for goal in runtime.memory.list_goals(status="pending")
             if (self._goal_command(goal) or self._goal_plan(goal))
             and not self._goal_waiting_for_approval(runtime, goal)
+            and self._retry_ready(goal)
         ]
         if not candidates:
             return None
@@ -690,6 +734,10 @@ class DelamainSubsystem(Subsystem):
         if not isinstance(metadata, Mapping):
             metadata = {}
         previous_attempts = self._attempts(metadata)
+        # Stage 14: a retry may deliberately discard the stored explicit plan
+        # and the cached skill plan, then let the active planner try again.
+        replan_requested = bool(metadata.get("replan_on_next_attempt"))
+        replan_requested = replan_requested and self.replan_on_failure
 
         # A goal with a pending approval must not create another approval on
         # every tick. An approved approval is executed here; this also covers
@@ -730,6 +778,7 @@ class DelamainSubsystem(Subsystem):
                         trigger=trigger,
                         previous_attempts=previous_attempts,
                         reused_skill=False,
+                        replanned=replan_requested,
                     )
                 if state == "rejected":
                     new_metadata = dict(metadata)
@@ -741,6 +790,10 @@ class DelamainSubsystem(Subsystem):
                             "last_error": "approval rejected",
                             "last_ok": False,
                             "retry_scheduled": False,
+                            "retry_delay_sec": 0.0,
+                            "next_retry_at": None,
+                            "replan_on_next_attempt": False,
+                            "last_attempt_replanned": False,
                         }
                     )
                     runtime.memory.update_goal(
@@ -768,9 +821,9 @@ class DelamainSubsystem(Subsystem):
                     self._last_result = summary
                     return summary
 
-        plan = explicit_plan
+        plan = None if replan_requested else explicit_plan
         reused_skill = False
-        if plan is None:
+        if plan is None and not replan_requested:
             plan = self._skill_plan_for(runtime, title, command)
             reused_skill = plan is not None
 
@@ -801,6 +854,10 @@ class DelamainSubsystem(Subsystem):
                     "last_error": result.error,
                     "last_ok": False,
                     "retry_scheduled": False,
+                    "retry_delay_sec": 0.0,
+                    "next_retry_at": None,
+                    "replan_on_next_attempt": False,
+                    "last_attempt_replanned": bool(replan_requested),
                 }
             )
             runtime.memory.update_goal(
@@ -827,6 +884,7 @@ class DelamainSubsystem(Subsystem):
             trigger=trigger,
             previous_attempts=previous_attempts,
             reused_skill=reused_skill,
+            replanned=replan_requested,
         )
 
     def _finish_goal(
@@ -838,15 +896,28 @@ class DelamainSubsystem(Subsystem):
         trigger: str,
         previous_attempts: int,
         reused_skill: bool,
+        replanned: bool = False,
     ) -> Dict[str, Any]:
         goal_id = int(goal["id"])
         title = str(goal.get("title") or f"goal-{goal_id}")
         command = self._goal_command(goal)
         attempt_number = max(0, previous_attempts) + 1
 
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        try:
+            previous_replans = max(0, int(metadata.get("replan_count") or 0))
+        except (TypeError, ValueError):
+            previous_replans = 0
+        replan_count = previous_replans + (1 if replanned else 0)
+
         if result.ok:
             status = "done"
             retry_scheduled = False
+            retry_delay_sec = 0.0
+            next_retry_at = None
+            replan_next = False
             # Store the actual normalized plan, not the command text. This is
             # what makes a later identical goal executable without a planner.
             runtime.memory.record_skill(
@@ -861,12 +932,18 @@ class DelamainSubsystem(Subsystem):
         else:
             retry_scheduled = attempt_number < self.max_attempts
             status = "pending" if retry_scheduled else "failed"
+            retry_delay_sec = (
+                self._retry_delay(attempt_number) if retry_scheduled else 0.0
+            )
+            next_retry_at = (
+                self._retry_at(retry_delay_sec)
+                if retry_scheduled and retry_delay_sec > 0
+                else None
+            )
+            replan_next = bool(retry_scheduled and self.replan_on_failure)
             # Preserve the last known good plan and only count the failure.
             runtime.memory.record_skill(title, None, success=False)
 
-        metadata = goal.get("metadata") or {}
-        if not isinstance(metadata, Mapping):
-            metadata = {}
         new_metadata = dict(metadata)
         new_metadata.update(
             {
@@ -875,6 +952,11 @@ class DelamainSubsystem(Subsystem):
                 "last_error": result.error,
                 "last_ok": bool(result.ok),
                 "retry_scheduled": retry_scheduled,
+                "retry_delay_sec": retry_delay_sec,
+                "next_retry_at": next_retry_at,
+                "replan_on_next_attempt": replan_next,
+                "last_attempt_replanned": bool(replanned),
+                "replan_count": replan_count,
             }
         )
         prior_approval_id = new_metadata.get("approval_id")
@@ -898,6 +980,11 @@ class DelamainSubsystem(Subsystem):
             attempts=attempt_number,
             retry_scheduled=retry_scheduled,
             reused_skill=reused_skill,
+            next_retry_at=next_retry_at,
+            retry_delay_sec=retry_delay_sec,
+            replanned=replanned,
+            replan_count=replan_count,
+            replan_on_next_attempt=replan_next,
         )
         self._last_result = summary
         return summary
@@ -908,6 +995,55 @@ class DelamainSubsystem(Subsystem):
             return max(0, int(metadata.get("attempts") or 0))
         except (TypeError, ValueError):
             return 0
+
+    def _retry_delay(self, attempt_number: int) -> float:
+        """Return a bounded exponential delay for the next failed attempt."""
+
+        if self.retry_backoff_sec <= 0:
+            return 0.0
+        exponent = min(1024, max(0, int(attempt_number) - 1))
+        try:
+            delay = self.retry_backoff_sec * (2 ** exponent)
+        except OverflowError:  # pragma: no cover - absurdly large config
+            delay = float("inf")
+        if self.retry_backoff_max_sec > 0:
+            delay = min(delay, self.retry_backoff_max_sec)
+        return float(delay)
+
+    @staticmethod
+    def _retry_at(delay_sec: float) -> str:
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=float(delay_sec))
+        return retry_at.isoformat(timespec="seconds")
+
+    @staticmethod
+    def _retry_ready(
+        goal: Mapping[str, Any],
+        *,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """Whether a pending goal is allowed to run now.
+
+        A malformed timestamp fails open so a damaged metadata field can never
+        strand a goal forever. Backoff itself is stored in the goal metadata,
+        which makes the schedule durable across restarts.
+        """
+
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            return True
+        raw = metadata.get("next_retry_at")
+        if not raw:
+            return True
+        try:
+            retry_at = datetime.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            return True
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return current >= retry_at
 
     @staticmethod
     def _goal_waiting_for_approval(
@@ -1011,6 +1147,11 @@ class DelamainSubsystem(Subsystem):
         attempts: Optional[int] = None,
         retry_scheduled: bool = False,
         reused_skill: bool = False,
+        next_retry_at: Optional[str] = None,
+        retry_delay_sec: float = 0.0,
+        replanned: bool = False,
+        replan_count: int = 0,
+        replan_on_next_attempt: bool = False,
     ) -> Dict[str, Any]:
         pending = result.pending_approval
         pending_summary = None
@@ -1036,6 +1177,11 @@ class DelamainSubsystem(Subsystem):
             "title": title,
             "attempts": attempts,
             "retry_scheduled": bool(retry_scheduled),
+            "next_retry_at": next_retry_at,
+            "retry_delay_sec": float(retry_delay_sec),
+            "replan_on_next_attempt": bool(replan_on_next_attempt),
+            "replanned": bool(replanned),
+            "replan_count": int(replan_count),
             "reused_skill": bool(reused_skill),
             "approval_id": result.approval_id
             or (pending_summary.get("id") if pending_summary else None),
@@ -1166,6 +1312,11 @@ class DelamainSubsystem(Subsystem):
                 "tick_interval": self.tick_interval,
                 "max_goals_per_tick": self.max_goals_per_tick,
                 "max_attempts": self.max_attempts,
+                "retry": {
+                    "backoff_sec": self.retry_backoff_sec,
+                    "backoff_max_sec": self.retry_backoff_max_sec,
+                    "replan_on_failure": self.replan_on_failure,
+                },
                 "goals": counts,
                 "skills": skill_count,
                 "approval": {

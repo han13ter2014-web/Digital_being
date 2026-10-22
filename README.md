@@ -64,6 +64,7 @@ python main.py
 | **[docs/STAGE11_REPORT.md](docs/STAGE11_REPORT.md)** | 🧑‍💻 Разработчик | Approval для опасных действий и планов LLM |
 | **[docs/STAGE12_REPORT.md](docs/STAGE12_REPORT.md)** | 🧑‍💻 Разработчик | Мост когнитивных целей и исполняемых целей Delamain |
 | **[docs/STAGE13_REPORT.md](docs/STAGE13_REPORT.md)** | 🧑‍💻 Разработчик | Безопасный authoring payload: `/goals exec`, proposal, accept/reject |
+| **[docs/STAGE14_REPORT.md](docs/STAGE14_REPORT.md)** | 🧑‍💻 Разработчик | Bounded backoff и перепланирование после ошибки действия |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -72,7 +73,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–13
+### 🧭 Ревизия 2026-10: этапы 0–14
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -117,6 +118,11 @@ python main.py
   `/goals accept`/`reject` фиксируют решение в metadata. Генерация
   proposal выключена по умолчанию; опасные шаги проходят approval.
   Подробно — **[docs/STAGE13_REPORT.md](docs/STAGE13_REPORT.md)**.
+* **Повтор с backoff и replan** — `DELAMAIN_RETRY_BACKOFF_SEC` задаёт
+  ограниченную экспоненциальную паузу, `next_retry_at` переживает
+  перезапуск, а `DELAMAIN_REPLAN_ON_FAILURE` разрешает построить новый
+  план на повторе вместо сохранённого. Обе опции по умолчанию выключены.
+  Подробно — **[docs/STAGE14_REPORT.md](docs/STAGE14_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 
@@ -254,11 +260,16 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 524 теста проходит (после этапов 1–13, октябрь 2026)
+### ✅ 529 тестов проходит (после этапов 1–14, октябрь 2026)
 ```bash
-$ python -m pytest tests/ -q
-524 passed, 2 skipped in 949.61s (0:15:49, включая benchmarks)
+$ python -m pytest -q --ignore=tests/benchmarks
+513 passed, 2 skipped in 256.73s (0:04:16)
+
+$ python -m pytest tests/benchmarks -q
+16 passed in 426.55s (0:07:06)
 ```
+
+Суммарно: **529 passed, 2 skipped** (513 unit/integration + 16 benchmarks).
 
 Этап 5: прогресс целей накапливается по уникальным темам, цели
 завершаются ровно один раз, типы действий измеряются
@@ -340,7 +351,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (524 теста) + бенчмарки в `tests/benchmarks/`
+- **Тесты**: pytest (529 тестов) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---
