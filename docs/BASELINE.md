@@ -130,3 +130,4 @@ _Файл создан на этапе 0. Обновлять при каждом
 * [Этап 10 — отчёт](STAGE10_REPORT.md): опциональный локальный LLM-планировщик (Ollama) с fallback на эвристики.
 * [Этап 11 — отчёт](STAGE11_REPORT.md): approval-политика для опасных действий и планов LLM.
 * [Этап 12 — отчёт](STAGE12_REPORT.md): мост активной когнитивной цели `GoalSubsystem` и одной исполняемой цели Delamain.
+* [Этап 13 — отчёт](STAGE13_REPORT.md): безопасный authoring payload — `/goals exec`, proposal, accept/reject и decision в metadata.

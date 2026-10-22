@@ -1,19 +1,23 @@
 # Delamain-local: локальное ядро действия и памяти
 
-> **Статус:** этап 12 — мост когнитивных и исполняемых целей, 2026-10-22.
+> **Статус:** этап 13 — безопасный authoring payload для когнитивных целей,
+> 2026-10-22.
 > Это не «сильный ИИ» и не доказательство сознания. Это детерминированное
 > ядро, которое умеет выполнить задачу, проверить результат, записать опыт
 > в локальную память, повторить/переиспользовать успешный план, — при
 > желании — получить план от локальной модели, остановить опасный план до
-> явного подтверждения пользователя и связать активную когнитивную цель с
-> одной исполняемой целью. Модель не обязательна: ядро полностью работает
-> без неё.
+> явного подтверждения пользователя, связать активную когнитивную цель с
+> одной исполняемой целью и безопасно привязать к ней команду из чата.
+> Модель не обязательна: ядро полностью работает без неё.
 >
 > Слой **выключен по умолчанию**. Без явного включения он не открывает
 > SQLite и не трогает файлы. LLM-планировщик тоже выключен по умолчанию.
 > Approval выключен по умолчанию (`DELAMAIN_APPROVAL_MODE=off`), мост
-> когнитивных целей — тоже (`DELAMAIN_BRIDGE_ENABLED=False`). Оба
-> включаются явно.
+> когнитивных целей — тоже (`DELAMAIN_BRIDGE_ENABLED=False`), а генерация
+> proposal планировщиком — `DELAMAIN_GOAL_PROPOSAL_ENABLED=False`. Все
+> возможности включаются явно; ручной `/goals exec` не требует отдельного
+> флага proposal, но работает при включённом Delamain и является прямым
+> решением пользователя.
 
 ## 1. Зачем этот слой
 
@@ -76,6 +80,7 @@ DelamainRuntime
 | `src/delamain/llm_planner.py` | опциональный `OllamaPlanner`: HTTP, JSON-схема, валидация плана |
 | `src/delamain/runtime.py` | preflight approval, выполнение плана, остановка на ошибке, запись эпизодов |
 | `src/delamain/subsystem.py` | опциональная `DelamainSubsystem`: lazy runtime, очередь целей, tick |
+| `src/delamain/goal_authoring.py` | `GoalExecutionProposal` и `GoalAuthoring`: manual/propose/accept/reject для когнитивных целей |
 | `src/delamain/__main__.py` | CLI-демо; по умолчанию без модели, с `--llm` — Ollama |
 
 ### 3.1. Sandbox
@@ -428,12 +433,67 @@ Success predicate проверяется только после успешно�
 * `/delamain goals` — `cognitive=#<id>/<bridge_status>`;
 * `/delamain status` — `linked`, `waiting`, `done`, `failed`;
 * `/goals` — Delamain-цель активной когнитивной цели;
+* `/goals list` и `/goals show <id>` — payload, proposal и решение;
 * `/status` — сводка моста, если он включён.
 
 Мост не является новым планировщиком и не добавляет прав: он вызывает
 существующие `queue_goal()`, approval и `ActionRegistry`. Проваленная
 когнитивная цель не перезапускается автоматически; для повтора нужна
 новая цель или явное действие пользователя.
+
+### 3.10. Authoring payload из чата (этап 13)
+
+До этапа 13 payload приходилось добавлять из кода. Теперь его можно
+привязать из чата явно:
+
+```text
+/goals exec 2 | запиши в notes/report.txt: ready
+```
+
+Или попросить planner построить **предложение**, а не выполнить его:
+
+```text
+/goals propose 2
+/goals show 2
+/goals accept 2
+```
+
+`GoalAuthoring` хранит в когнитивной цели два metadata-поля:
+
+* `execution_proposal` — план, источник, файлы, опасные действия,
+  `requires_approval`, `planner_error` и статус
+  `pending`/`accepted`/`rejected`/`error`;
+* `execution_decision` — кто и когда принял решение, какие опасные
+  действия были видны и требовался ли approval.
+
+Proposal **не исполняется** сам. До `accept` в SQLite Delamain не
+создаётся ни одной цели. `accept` заново проверяет имена действий по
+живому `ActionRegistry` и привязывает payload через
+`GoalSubsystem.attach_execution()`. При наличии pending proposal ручной
+`exec` просит сначала принять или отклонить его, а повторный `exec` не
+перезаписывает существующий payload.
+
+Ручной preview использует только `HeuristicPlanner`, чтобы `/goals exec`
+не вызывал LLM неожиданно. Генерация proposal планировщиком выключена по
+умолчанию:
+
+```powershell
+$env:DELAMAIN_GOAL_PROPOSAL_ENABLED = "1"
+```
+
+При выключенном флаге `/goals propose` возвращает ошибку; `/goals exec`
+продолжает работать при включённом Delamain, потому что это явное действие
+пользователя. Если preview построил план с неизвестным действием, payload
+не привязывается.
+Если эвристика вообще не поняла команду, payload привязывается с
+`planner_error`: runtime planner попробует разобрать её при выполнении.
+
+Опасные шаги, найденные в preview, видны в proposal даже при
+`approval_mode=off`. Если preview не удался, proposal содержит
+`planner_error`, а опасность будет проверена при выполнении. Если режим
+`dangerous` или `all`, выполнение по-прежнему ждёт
+`/delamain approve <id>`. При `off` чат явно предупреждает, что принятие
+payload означает согласие на опасные действия без отдельного запроса.
 
 ## 4. Как запустить
 
@@ -530,6 +590,13 @@ python -m src.delamain `
 | `/delamain approvals [status]` | показать approvals; по умолчанию `pending` |
 | `/delamain approve <id>` | подтвердить и выполнить сохранённый план один раз |
 | `/delamain reject <id> [причина]` | отклонить план и завершить его цель как `failed` |
+| `/goals list` | все когнитивные цели, payload и proposal |
+| `/goals show <id>` | подробности цели, команды, плана и proposal |
+| `/goals exec <id> \| <команда>` | явно привязать payload к когнитивной цели |
+| `/goals exec <id> \| <команда> \| <predicate>` | то же с success predicate |
+| `/goals propose <id> [\| <задача>]` | сохранить proposal без исполнения |
+| `/goals accept <id>` | принять proposal и привязать payload |
+| `/goals reject <id> [причина]` | отклонить proposal |
 
 Примеры:
 
@@ -540,6 +607,9 @@ python -m src.delamain `
 /delamain approvals
 /delamain approve appr-0123456789ab
 /delamain reject appr-0123456789ab не сейчас
+/goals exec 2 | запиши в notes/report.txt: ready | file_contains:notes/report.txt:ready
+/goals propose 2
+/goals accept 2
 ```
 
 ### 4.2. Включение через окружение и config
@@ -568,6 +638,8 @@ python main_tray.py
 | `DELAMAIN_LLM_MAX_STEPS` | `12` | максимум шагов в плане модели |
 | `DELAMAIN_LLM_TEMPERATURE` | `0.0` | температура генерации |
 | `DELAMAIN_APPROVAL_MODE` | `off` | approval: `off`, `dangerous` или `all` |
+| `DELAMAIN_BRIDGE_ENABLED` | `0` | мост активной когнитивной цели в Delamain |
+| `DELAMAIN_GOAL_PROPOSAL_ENABLED` | `0` | разрешить `/goals propose`; ручной `exec` работает без этого флага при включённом Delamain |
 
 Те же значения есть в `config/simulation_config.py` как `DELAMAIN_*`.
 Env имеет приоритет над config.
@@ -607,6 +679,8 @@ python -m pytest `
   tests/test_delamain_runtime.py `
   tests/test_delamain_llm_planner.py `
   tests/test_delamain_approval.py `
+  tests/test_delamain_goal_bridge.py `
+  tests/test_delamain_goal_authoring.py `
   tests/test_delamain_subsystem.py -q
 ```
 
@@ -640,7 +714,13 @@ python -m pytest `
 * `all`-режим, план от planner, переживание approval после перезапуска;
 * ожидающая approval цель не считается failed и не дублирует approval;
 * fail-closed при некорректном `DELAMAIN_APPROVAL_MODE`;
-* команды `/delamain approvals`, `approve`, `reject` и статус approval.
+* команды `/delamain approvals`, `approve`, `reject` и статус approval;
+* мост Stage 12: дедупликация, approval/reject, predicate, следующая цель;
+* ручной `/goals exec`, pending/accept/reject proposal и decision в metadata;
+* proposal выключен по умолчанию, неизвестные actions отклоняются до attach;
+* опасный proposal проходит существующий approval, а LLM-план не
+  исполняется без `accept`;
+* команды `/goals list`, `show`, `exec`, `propose`, `accept`, `reject`.
 
 ## 6. Что пока не сделано
 
@@ -655,7 +735,10 @@ python -m pytest `
   сбое планирования, а не при ошибке действия.
 * **Автономия ограничена очередью.** Подсистема сама выбирает только уже
   поставленные цели с явной командой или планом. Она не придумывает новые
-  цели и не связывает их с когнитивным `GoalSubsystem`.
+  цели; связь с когнитивной целью появляется только при явном payload или
+  после `/goals accept`.
+* **Proposal не автоматический.** `/goals propose` вызывается вручную и по
+  умолчанию выключен. Нет фонового «предложи план для каждой новой цели».
 * **Approval — не полноценная песочница.** По умолчанию он выключен;
   включение `dangerous`/`all` защищает от случайной перезаписи и
   self-model изменений, но не изолирует процесс ОС. `Sandbox` остаётся
@@ -676,14 +759,14 @@ python -m pytest `
 
 ## 7. Следующие шаги
 
-1. Связать когнитивные цели `GoalSubsystem` с исполняемыми целями Delamain
-   или явно разделить их в UI и метриках.
-2. Добавить backoff и перепланирование после ошибки действия, а не только
+1. Добавить backoff и перепланирование после ошибки действия, а не только
    повтор того же плана.
-3. Расширить сопоставление навыков: команда + аргументы, а не только
+2. Расширить сопоставление навыков: команда + аргументы, а не только
    точное название и текст команды.
-4. Поддержать OpenAI-совместимый endpoint (llama.cpp/LM Studio) как
+3. Поддержать OpenAI-совместимый endpoint (llama.cpp/LM Studio) как
    альтернативу Ollama, сохранив fallback и валидацию.
-5. Добавить удаление файлов и запуск кода только вместе с отдельной
+4. Добавить удаление файлов и запуск кода только вместе с отдельной
    политикой sandbox/approval и тестами.
-6. Прогнать полный набор тестов проекта и зафиксировать этап 11.
+5. Дать возможность редактировать отдельные шаги proposal, а не только
+   принимать его целиком.
+6. Прогнать полный набор тестов проекта и зафиксировать этап 13.

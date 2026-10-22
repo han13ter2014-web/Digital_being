@@ -11,7 +11,9 @@ first working vertical slice of the new architecture:
 * an optional local LLM planner with a deterministic fallback;
 * an optional approval gate for dangerous actions, disabled by default;
 * an optional bridge from cognitive goals to executable goals, disabled by
-  default.
+  default;
+* an optional authoring layer for explicit or planner-proposed executable
+  payloads (proposals never execute themselves).
 
 The LLM layer is never required: constructing the core does not start Ollama
 or make network requests, and every planning failure falls back to the
@@ -20,6 +22,12 @@ heuristic planner.
 
 from .actions import Action, ActionError, ActionRegistry
 from .approval import ApprovalPolicy, VALID_APPROVAL_MODES, normalize_approval_mode
+from .goal_authoring import (
+    AUTHORABLE_GOAL_STATUSES,
+    PROPOSAL_STATUSES,
+    GoalAuthoring,
+    GoalExecutionProposal,
+)
 from .goal_bridge import (
     BRIDGE_STATUSES,
     GoalBridge,
@@ -49,14 +57,18 @@ __all__ = [
     "ActionResult",
     "ActionRequest",
     "ActionSpec",
+    "AUTHORABLE_GOAL_STATUSES",
     "BRIDGE_STATUSES",
     "DelamainRuntime",
     "DelamainSubsystem",
     "FallbackPlanner",
+    "GoalAuthoring",
     "GoalBridge",
+    "GoalExecutionProposal",
     "HeuristicPlanner",
     "MemoryStore",
     "OllamaPlanner",
+    "PROPOSAL_STATUSES",
     "Planner",
     "PlannerError",
     "Sandbox",

@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from src.core.subsystem_base import Subsystem
 
 from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
+from .goal_authoring import GoalAuthoring
 from .goal_bridge import GoalBridge, derive_bridge_status
 from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
@@ -112,6 +113,7 @@ class DelamainSubsystem(Subsystem):
         llm_temperature: Optional[float] = None,
         approval_mode: Optional[str] = None,
         bridge_enabled: Optional[bool] = None,
+        goal_proposal_enabled: Optional[bool] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -227,6 +229,17 @@ class DelamainSubsystem(Subsystem):
                 bridge_enabled = _parse_bool(bridge_env)
         self.bridge_enabled = bool(bridge_enabled)
         self.bridge = GoalBridge(self)
+
+        if goal_proposal_enabled is None:
+            proposal_env = os.environ.get("DELAMAIN_GOAL_PROPOSAL_ENABLED")
+            if proposal_env is None:
+                goal_proposal_enabled = bool(
+                    _cfg("DELAMAIN_GOAL_PROPOSAL_ENABLED", False)
+                )
+            else:
+                goal_proposal_enabled = _parse_bool(proposal_env)
+        self.goal_proposal_enabled = bool(goal_proposal_enabled)
+        self.authoring = GoalAuthoring(self)
 
         bytes_value = (
             max_file_bytes
@@ -416,6 +429,55 @@ class DelamainSubsystem(Subsystem):
             goal["cognitive_goal_id"] = metadata.get("cognitive_goal_id")
             goal["cognitive_goal_title"] = metadata.get("cognitive_goal_title")
         return goal
+
+    def attach_goal_execution(
+        self,
+        goal_id: int,
+        command: str,
+        *,
+        success_predicate: str = "",
+        agent: Any = None,
+    ) -> Dict[str, Any]:
+        """Attach an explicit executable command to a cognitive goal."""
+
+        return self.authoring.build_manual(
+            goal_id,
+            command,
+            success_predicate=success_predicate,
+            agent=agent,
+        )
+
+    def propose_goal_execution(
+        self,
+        goal_id: int,
+        *,
+        task: Optional[str] = None,
+        agent: Any = None,
+    ) -> Dict[str, Any]:
+        """Generate and store a reviewable executable proposal."""
+
+        return self.authoring.propose(goal_id, task=task, agent=agent)
+
+    def accept_goal_execution(
+        self,
+        goal_id: int,
+        *,
+        agent: Any = None,
+    ) -> Dict[str, Any]:
+        """Accept a pending proposal and attach its payload."""
+
+        return self.authoring.accept(goal_id, agent=agent)
+
+    def reject_goal_execution(
+        self,
+        goal_id: int,
+        *,
+        reason: str = "",
+        agent: Any = None,
+    ) -> Dict[str, Any]:
+        """Reject a pending proposal without executing it."""
+
+        return self.authoring.reject(goal_id, reason=reason, agent=agent)
 
     def list_skills(self, *, limit: int = 20) -> List[Dict[str, Any]]:
         if self.runtime is None:
@@ -1113,6 +1175,7 @@ class DelamainSubsystem(Subsystem):
                     "counts": approval_counts,
                 },
                 "bridge": self.bridge.status(),
+                "authoring": self.authoring.status(),
                 "planner": self._planner_info(),
                 "last_result": self._last_result,
             }

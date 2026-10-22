@@ -153,6 +153,17 @@ class GoalSubsystem:
             self.active_goal = goal
         return goal_id
 
+    def get_goal(self, goal_id: int) -> Optional[dict]:
+        """Возвращает цель по id или ``None``."""
+        try:
+            target_id = int(goal_id)
+        except (TypeError, ValueError):
+            return None
+        return next(
+            (goal for goal in self.goals if goal.get("id") == target_id),
+            None,
+        )
+
     def attach_execution(
         self,
         goal_id: int,
@@ -165,12 +176,13 @@ class GoalSubsystem:
         """Добавляет executable-payload к уже существующей цели.
 
         По умолчанию не перезаписывает уже заданный payload: случайный
-        повторный вызов не должен незаметно менять команду цели.
+        повторный вызов не должен незаметно менять команду цели. Проверяются
+        и legacy-поля, которые понимает мост Stage 12.
         """
-        goal = next((g for g in self.goals if g.get("id") == goal_id), None)
+        goal = self.get_goal(goal_id)
         if goal is None:
             return False
-        if goal.get("execution") and not replace:
+        if self._has_execution_payload(goal) and not replace:
             return False
         execution = self._build_execution(
             command=command,
@@ -180,6 +192,42 @@ class GoalSubsystem:
         if execution is None:
             return False
         goal["execution"] = execution
+        return True
+
+    @staticmethod
+    def _has_execution_payload(goal: dict) -> bool:
+        """True if the goal already has a payload understood by the bridge."""
+        for key in ("execution", "delamain_execution", "delamain"):
+            if goal.get(key):
+                return True
+        if goal.get("delamain_command") or goal.get("command"):
+            return True
+        if goal.get("delamain_plan") or goal.get("plan"):
+            return True
+        return False
+
+    def set_execution_proposal(self, goal_id: int, proposal: Dict[str, Any]) -> bool:
+        """Сохраняет proposal Stage 13 в metadata когнитивной цели."""
+        goal = self.get_goal(goal_id)
+        if goal is None or not isinstance(proposal, dict):
+            return False
+        goal["execution_proposal"] = dict(proposal)
+        return True
+
+    def get_execution_proposal(self, goal_id: int) -> Optional[Dict[str, Any]]:
+        """Возвращает сохранённый proposal или ``None``."""
+        goal = self.get_goal(goal_id)
+        if goal is None:
+            return None
+        proposal = goal.get("execution_proposal")
+        return dict(proposal) if isinstance(proposal, dict) else None
+
+    def set_execution_decision(self, goal_id: int, decision: Dict[str, Any]) -> bool:
+        """Сохраняет решение пользователя по proposal."""
+        goal = self.get_goal(goal_id)
+        if goal is None or not isinstance(decision, dict):
+            return False
+        goal["execution_decision"] = dict(decision)
         return True
 
     @staticmethod
