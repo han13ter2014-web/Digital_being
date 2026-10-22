@@ -116,8 +116,22 @@ class GoalSubsystem:
     # ============================================================
     # Управление целями
     # ============================================================
-    def set_goal(self, title: str, difficulty: int = 1) -> int:
-        """Устанавливает новую цель и возвращает её id."""
+    def set_goal(
+        self,
+        title: str,
+        difficulty: int = 1,
+        *,
+        command: Optional[str] = None,
+        plan: Optional[List[Any]] = None,
+        success_predicate: str = "",
+    ) -> int:
+        """Устанавливает новую цель и возвращает её id.
+
+        ``command``/``plan``/``success_predicate`` — необязательный
+        executable-payload для моста GoalSubsystem ↔ Delamain (этап 12).
+        Без него цель остаётся чисто когнитивной и не попадает в очередь
+        исполняемых целей.
+        """
         goal_id = len(self.goals) + 1
         goal = {
             "id": goal_id,
@@ -127,10 +141,69 @@ class GoalSubsystem:
             "created_at": datetime.now().isoformat(),
             "source": "manual",
         }
+        execution = self._build_execution(
+            command=command,
+            plan=plan,
+            success_predicate=success_predicate,
+        )
+        if execution is not None:
+            goal["execution"] = execution
         self.goals.append(goal)
         if not self.active_goal:
             self.active_goal = goal
         return goal_id
+
+    def attach_execution(
+        self,
+        goal_id: int,
+        *,
+        command: Optional[str] = None,
+        plan: Optional[List[Any]] = None,
+        success_predicate: str = "",
+        replace: bool = False,
+    ) -> bool:
+        """Добавляет executable-payload к уже существующей цели.
+
+        По умолчанию не перезаписывает уже заданный payload: случайный
+        повторный вызов не должен незаметно менять команду цели.
+        """
+        goal = next((g for g in self.goals if g.get("id") == goal_id), None)
+        if goal is None:
+            return False
+        if goal.get("execution") and not replace:
+            return False
+        execution = self._build_execution(
+            command=command,
+            plan=plan,
+            success_predicate=success_predicate,
+        )
+        if execution is None:
+            return False
+        goal["execution"] = execution
+        return True
+
+    @staticmethod
+    def _build_execution(
+        *,
+        command: Optional[str],
+        plan: Optional[List[Any]],
+        success_predicate: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Normalize an optional executable payload.
+
+        Returns ``None`` when the goal has no executable representation.
+        """
+        execution: Dict[str, Any] = {}
+        if command is not None:
+            value = str(command).strip()
+            if value:
+                execution["command"] = value
+        if plan:
+            execution["plan"] = list(plan)
+        predicate = str(success_predicate or "").strip()
+        if predicate:
+            execution["success_predicate"] = predicate
+        return execution or None
 
     def complete_goal(self, goal_id: Optional[int] = None) -> int:
         """Завершает активную цель (или по id). Возвращает награду.
@@ -163,6 +236,31 @@ class GoalSubsystem:
                     self._set_next_goal()
                 break
         return reward
+
+    def fail_goal(self, goal_id: Optional[int] = None, reason: str = "") -> bool:
+        """Помечает цель проваленной и активирует следующую pending-цель.
+
+        Используется мостом Delamain, когда исполняемая цель не была
+        выполнена (reject, ошибка действия или невыполненный success
+        predicate). В отличие от ``complete_goal`` счётчик завершённых целей
+        не меняется.
+        """
+        target_id = goal_id or (self.active_goal["id"] if self.active_goal else None)
+        if target_id is None:
+            return False
+        for goal in self.goals:
+            if goal.get("id") != target_id:
+                continue
+            if goal.get("status") in ("completed", "failed"):
+                return False
+            goal["status"] = "failed"
+            goal["failed_at"] = datetime.now().isoformat()
+            goal["failure_reason"] = str(reason or "")
+            if goal == self.active_goal:
+                self.active_goal = None
+                self._set_next_goal()
+            return True
+        return False
 
     def _set_next_goal(self) -> None:
         """Активирует следующую pending-цель."""
@@ -229,6 +327,7 @@ class GoalSubsystem:
             "completed": self.completed_goals,
             "active": self.active_goal["title"] if self.active_goal else "Нет активных целей",
             "pending": sum(1 for g in self.goals if g["status"] == "pending"),
+            "failed": sum(1 for g in self.goals if g["status"] == "failed"),
         }
         if self.active_goal:
             progress = self._goal_progress.get(self.active_goal["id"], {})

@@ -1113,13 +1113,16 @@ class DigitalBeing:
         
         get_logger().flush_immediate(f"Агент {self.name} инициализирован, целей: {len(self.goals)}")
 
-    def set_goal(self, title, difficulty=1, activate=False):
+    def set_goal(self, title, difficulty=1, activate=False, *,
+                 command=None, plan=None, success_predicate=""):
         """Устанавливает новую цель.
 
         Args:
             activate: если True — сделать цель активной сразу, а прежнюю
                 активную вернуть в ``pending``. Нужно внутренней мотивации:
                 срочная потребность не должна создавать «цель без id».
+            command/plan/success_predicate: необязательный executable-payload
+                для опционального моста в Delamain (этап 12).
         """
         goal_id = len(self.goals) + 1
         goal = {
@@ -1129,6 +1132,15 @@ class DigitalBeing:
             "difficulty": difficulty,
             "created_at": datetime.now().isoformat()
         }
+        execution = None
+        if hasattr(self, "goal_subsystem"):
+            execution = self.goal_subsystem._build_execution(
+                command=command,
+                plan=plan,
+                success_predicate=success_predicate,
+            )
+        if execution is not None:
+            goal["execution"] = execution
         self.goals.append(goal)
         self._goal_progress.setdefault(goal_id, {
             "matched_concepts": set(),

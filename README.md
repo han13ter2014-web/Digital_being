@@ -56,12 +56,13 @@ python main.py
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
-| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост целей |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
 | **[docs/STAGE10_REPORT.md](docs/STAGE10_REPORT.md)** | 🧑‍💻 Разработчик | Опциональный локальный LLM-планировщик и fallback |
 | **[docs/STAGE11_REPORT.md](docs/STAGE11_REPORT.md)** | 🧑‍💻 Разработчик | Approval для опасных действий и планов LLM |
+| **[docs/STAGE12_REPORT.md](docs/STAGE12_REPORT.md)** | 🧑‍💻 Разработчик | Мост когнитивных целей и исполняемых целей Delamain |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -70,7 +71,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–11
+### 🧭 Ревизия 2026-10: этапы 0–12
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -103,6 +104,13 @@ python main.py
   `/delamain approve`, pending хранится в SQLite, approve одноразовый.
   По умолчанию режим `off`. Подробно —
   **[docs/STAGE11_REPORT.md](docs/STAGE11_REPORT.md)**.
+* **Мост когнитивных и исполняемых целей** — при
+  `DELAMAIN_BRIDGE_ENABLED=1` активная цель `GoalSubsystem` с явным
+  payload получает ровно одну Delamain-цель; мост различает
+  `pending`/`in_progress`/`waiting_approval`/`done`/`failed`, проверяет
+  безопасный success predicate и после успеха активирует следующую цель.
+  По умолчанию выключен. Подробно —
+  **[docs/STAGE12_REPORT.md](docs/STAGE12_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 
@@ -240,10 +248,10 @@ report = registry.tick_all(cycle=1, {"agent": agent})
 
 Все темы **перезаписываемы** — агент может формировать собственное понимание мира через `knowledge_subsystem.add_definition()`. Доступна метрика покрытия `knowledge_subsystem.basic_coverage()` для дашборда: `{total_topics, known_topics, ratio, by_category, missing}`.
 
-### ✅ 496 тестов проходит (после этапов 1–11, октябрь 2026)
+### ✅ 509 тестов проходит (после этапов 1–12, октябрь 2026)
 ```bash
 $ python -m pytest tests/ -q
-496 passed, 2 skipped in 496.94s (0:08:16, включая benchmarks)
+509 passed, 2 skipped in 1193.76s (0:19:53, включая benchmarks)
 ```
 
 Этап 5: прогресс целей накапливается по уникальным темам, цели
@@ -326,7 +334,7 @@ python build_installer.py --rebuild  # → installer_output/DigitalBeing_Setup_v
 
 - **Язык**: Python 3.10+ (только stdlib + опционально `psutil`, `numpy`, `pystray`, `plyer`, `Pillow`, `aiohttp`)
 - **Хранилище**: JSON-файлы в `data/`
-- **Тесты**: pytest (496 тестов) + бенчмарки в `tests/benchmarks/`
+- **Тесты**: pytest (509 тестов) + бенчмарки в `tests/benchmarks/`
 - **CI**: GitHub Actions — lint, тесты на Python 3.10/3.12 × Ubuntu/Windows, security-scan, coverage
 
 ---
@@ -414,7 +422,7 @@ digital_being/
     ├── EVOLUTION.md
     ├── BUILD.md / INSTALLER.md
     ├── BASELINE.md          # точка отсчёта и метрики
-    ├── STAGE1_REPORT.md … STAGE11_REPORT.md
+    ├── STAGE1_REPORT.md … STAGE12_REPORT.md
     ├── README_DIGITAL_LIFE.md
     ├── digital_life_anatomy.md
     └── AUDIT_REPORT.md      # исторический аудит (июнь 2026)

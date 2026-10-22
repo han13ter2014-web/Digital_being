@@ -245,7 +245,7 @@ DIGITAL_BEING_NAME="Bob" python main.py     # в другом
 | `/delamain on` / `off` | Включить / выключить автономные цели Delamain |
 | `/delamain run <задача>` | Выполнить задачу сразу |
 | `/delamain goal <название> \| <команда>` | Поставить исполняемую цель |
-| `/delamain goals` | Список исполняемых целей и попыток |
+| `/delamain goals` | Список исполняемых целей, попыток и связей с когнитивными целями |
 | `/delamain skills` | Навыки и счётчики успехов/ошибок |
 | `/delamain approvals` | Ожидающие подтверждения опасные планы |
 | `/delamain approve <id>` | Подтвердить и выполнить план ровно один раз |
@@ -287,6 +287,36 @@ python main_tray.py
 `/delamain approve <id>`; `/delamain approvals` показывает очередь.
 Approval действует и на планы, предложенные локальной LLM. По умолчанию
 режим `off`, чтобы сохранить поведение этапов 7–10.
+
+Начиная с этапа 12 можно связать когнитивную цель с исполняемой целью
+Delamain:
+
+```powershell
+$env:DELAMAIN_ENABLED = "1"
+$env:DELAMAIN_BRIDGE_ENABLED = "1"
+python main_tray.py
+```
+
+Мост выключен по умолчанию; флаг читается при старте, а `/delamain on`
+включает только runtime. Мост берёт только активную цель `GoalSubsystem`
+и только при явном payload:
+
+```python
+agent.set_goal(
+    "Написать отчёт",
+    command="запиши в notes/report.txt: ready",
+    success_predicate="file_contains:notes/report.txt:ready",
+)
+```
+
+Если команды нет, цель остаётся когнитивной и в очередь не попадает.
+`/delamain goals` показывает `cognitive=#<id>/<status>`;
+`/delamain status` — `linked`, `waiting`, `done`, `failed`. Ожидание
+approval не считается провалом: цель ждёт решения. Approve выполняет
+план и завершает когнитивную цель; reject завершает её как `failed` с
+причиной, но не пишет skill-failure. После завершения мост активирует
+следующую цель. Подробности — в
+[docs/STAGE12_REPORT.md](STAGE12_REPORT.md).
 
 ### Поведение иконки трея
 
