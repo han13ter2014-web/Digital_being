@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: bounded backoff и replan после ошибки
+
+* **Backoff** — `DELAMAIN_RETRY_BACKOFF_SEC` задаёт базовую паузу,
+  `DELAMAIN_RETRY_BACKOFF_MAX_SEC` — верхнюю границу. Задержка растёт
+  экспоненциально (`base * 2^(attempt-1)`) и хранится в metadata цели как
+  `next_retry_at`, поэтому переживает перезапуск.
+* **Durable-расписание** — `run_pending_goal()` пропускает pending-цель до
+  наступления `next_retry_at`; другие готовые цели не блокируются. При
+  `base=0` поведение этапа 9 сохраняется.
+* **Replan** — `DELAMAIN_REPLAN_ON_FAILURE=1` заставляет следующую попытку
+  игнорировать explicit `metadata.plan` и skill-план и заново вызывать
+  активный planner. Число попыток по-прежнему ограничено
+  `DELAMAIN_MAX_ATTEMPTS`.
+* **Наблюдаемость** — в metadata добавляются `retry_delay_sec`,
+  `next_retry_at`, `replan_on_next_attempt`, `last_attempt_replanned`,
+  `replan_count`. `/delamain goals` показывает `retry_at`/`replan`,
+  `/delamain status` — backoff/cap/replan, результат ошибки сообщает о
+  следующей попытке.
+* **Безопасность** — pending approval не запускает retry/backoff, reject
+  завершает цель без повтора, `run_now()` не использует backoff. Опасные
+  планы по-прежнему проходят существующий approval.
+* **Совместимость** — новые флаги выключены по умолчанию; схема SQLite не
+  менялась.
+* **5 новых тестов** — deferred retry по `next_retry_at`, cap backoff,
+  replan с новым планом, обход explicit и skill-плана, default-off и
+  отображение в чате.
+* **Целевой прогон:** `23 passed`; совместно со Stage 12/13 — `35 passed`.
+* **Полный suite:** `513 passed, 2 skipped` без benchmarks +
+  `16 passed` benchmarks; суммарно `529 passed, 2 skipped`.
+* **Документация** — `docs/STAGE14_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-22 — Delamain-local: безопасный authoring payload
 
 * **`GoalExecutionProposal`** — новый модуль

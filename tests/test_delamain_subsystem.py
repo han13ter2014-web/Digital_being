@@ -12,6 +12,22 @@ class FailingPlanner:
         raise PlannerError(f"planner must not be called for {task!r}")
 
 
+class WritePlanner:
+    def __init__(self, path: str, content: str = "ok") -> None:
+        self.path = path
+        self.content = content
+        self.calls = 0
+
+    def plan(self, task: str):
+        self.calls += 1
+        return [
+            ActionRequest(
+                "write_file",
+                {"path": self.path, "content": self.content},
+            )
+        ]
+
+
 def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
     params = {
         "agent_name": "DelamainTest",
@@ -162,6 +178,180 @@ def test_goal_stops_after_max_attempts(tmp_path: Path) -> None:
     skill = sub.runtime.memory.get_skill("always missing")
     assert skill["success_count"] == 0
     assert skill["failure_count"] == 2
+
+
+def test_retry_backoff_defers_goal_until_due(tmp_path: Path) -> None:
+    sub = make_sub(
+        tmp_path,
+        max_attempts=3,
+        retry_backoff_sec=60,
+        retry_backoff_max_sec=90,
+    )
+    goal = sub.queue_goal("backoff missing", "прочитай missing.txt")
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["retry_scheduled"] is True
+    assert first["retry_delay_sec"] == 60.0
+    assert first["next_retry_at"]
+
+    stored = sub.list_goals()[0]
+    assert stored["status"] == "pending"
+    assert stored["metadata"]["next_retry_at"] == first["next_retry_at"]
+
+    # A restart must not lose the schedule: the timestamp lives in SQLite.
+    sub.teardown()
+    sub = make_sub(
+        tmp_path,
+        max_attempts=3,
+        retry_backoff_sec=60,
+        retry_backoff_max_sec=90,
+    )
+    assert sub.tick(1, {}) is None
+    assert sub.list_goals()[0]["metadata"]["attempts"] == 1
+
+    metadata = dict(stored["metadata"])
+    metadata["next_retry_at"] = "2000-01-01T00:00:00+00:00"
+    assert sub.runtime.memory.update_goal(goal["id"], metadata=metadata)
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is False
+    assert second["attempts"] == 2
+    assert second["retry_scheduled"] is True
+    # 60 * 2^(2-1) = 120, capped at 90.
+    assert second["retry_delay_sec"] == 90.0
+
+
+def test_replan_on_failure_builds_a_new_plan(tmp_path: Path) -> None:
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        replan_on_failure=True,
+    )
+    goal = sub.queue_goal(
+        "replan write",
+        plan=[{"action": "read_file", "args": {"path": "missing.txt"}}],
+    )
+    planner = WritePlanner("replanned.txt")
+    sub.runtime.planner = planner
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["replanned"] is False
+    assert first["retry_scheduled"] is True
+    stored = sub.list_goals()[0]
+    assert stored["metadata"]["replan_on_next_attempt"] is True
+    assert stored["metadata"]["replan_count"] == 0
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["replanned"] is True
+    assert second["replan_count"] == 1
+    assert second["reused_skill"] is False
+    assert planner.calls == 1
+    assert (tmp_path / "workspace" / "replanned.txt").read_text(
+        encoding="utf-8"
+    ) == "ok"
+
+    stored = sub.list_goals()[0]
+    assert stored["id"] == goal["id"]
+    assert stored["status"] == "done"
+    assert stored["metadata"]["attempts"] == 2
+    assert stored["metadata"]["last_attempt_replanned"] is True
+    assert stored["metadata"]["replan_on_next_attempt"] is False
+    assert stored["metadata"]["next_retry_at"] is None
+    assert stored["metadata"]["replan_count"] == 1
+
+
+def test_replan_is_off_by_default_and_reuses_explicit_plan(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, max_attempts=2)
+    sub.queue_goal(
+        "keep explicit",
+        plan=[{"action": "read_file", "args": {"path": "missing.txt"}}],
+    )
+    sub.runtime.planner = FailingPlanner()
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["retry_scheduled"] is True
+    assert first["replanned"] is False
+    assert sub.list_goals()[0]["metadata"]["replan_on_next_attempt"] is False
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is False
+    assert second["attempts"] == 2
+    assert second["retry_scheduled"] is False
+    assert second["replanned"] is False
+    assert "file not found" in (second["error"] or "")
+    assert sub.status()["retry"]["replan_on_failure"] is False
+
+
+def test_replan_bypasses_cached_skill_plan(tmp_path: Path) -> None:
+    sub = make_sub(tmp_path, max_attempts=2, replan_on_failure=True)
+    command = "запиши в skill.txt: ok"
+    sub.queue_goal("skill replan", command)
+    assert sub.tick(1, {})["events"][0]["data"]["ok"] is True
+
+    # Break the cached path without changing the skill itself: the first
+    # attempt will reuse the old plan, fail, and the retry must replan.
+    target = tmp_path / "workspace" / "skill.txt"
+    target.unlink()
+    target.mkdir()
+    planner = WritePlanner("skill-replanned.txt")
+    sub.runtime.planner = planner
+    sub.queue_goal("skill replan", command)
+
+    first = sub.tick(2, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["reused_skill"] is True
+    assert first["retry_scheduled"] is True
+    assert sub.list_goals()[0]["metadata"]["replan_on_next_attempt"] is True
+
+    second = sub.tick(3, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["replanned"] is True
+    assert second["reused_skill"] is False
+    assert planner.calls == 1
+    assert (tmp_path / "workspace" / "skill-replanned.txt").read_text(
+        encoding="utf-8"
+    ) == "ok"
+
+
+def test_retry_state_is_visible_in_chat_commands(tmp_path: Path) -> None:
+    import asyncio
+
+    from src.core.agent_runner import AgentRunner
+    from src.core.event_bus import EventBus
+
+    class FakeAgent:
+        name = "FakeRetryAgent"
+
+        def __init__(self, delamain: DelamainSubsystem) -> None:
+            self.energy = 100.0
+            self.cycle_count = 0
+            self.delamain = delamain
+
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        retry_backoff_sec=60,
+        retry_backoff_max_sec=60,
+        replan_on_failure=True,
+    )
+    sub.queue_goal("retry visible", "прочитай missing.txt")
+    sub.tick(1, {})
+    runner = AgentRunner(FakeAgent(sub), EventBus(), watchdog=object())
+
+    async def scenario() -> None:
+        goals = await runner.handle_command("/delamain goals")
+        assert "retry_at=" in goals
+        assert "replan=next" in goals
+
+        status = await runner.handle_command("/delamain status")
+        assert "Retry: backoff=60s, cap=60s, replan=on" in status
+        assert "retry after" in status
+        assert "replan" in status
+
+    asyncio.run(scenario())
 
 
 def test_successful_skill_is_reused_only_for_same_command(tmp_path: Path) -> None:

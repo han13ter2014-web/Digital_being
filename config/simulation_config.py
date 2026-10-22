@@ -344,6 +344,9 @@ class LongRunningConfig:
     DELAMAIN_TICK_INTERVAL = 20            # раз в N автономных циклов
     DELAMAIN_MAX_GOALS_PER_TICK = 1        # не запускать пачку задач за раз
     DELAMAIN_MAX_ATTEMPTS = 1              # 1 = поведение этапа 8; 2+ = retry
+    DELAMAIN_RETRY_BACKOFF_SEC = 0.0       # 0 = повтор на следующем тике
+    DELAMAIN_RETRY_BACKOFF_MAX_SEC = 300.0 # верхняя граница экспоненциальной паузы
+    DELAMAIN_REPLAN_ON_FAILURE = False     # при retry строить новый план
     DELAMAIN_MAX_FILE_BYTES = 1_000_000    # лимит файла в песочнице
     DELAMAIN_WORKSPACE = ""                 # пусто => data/delamain/workspace
     DELAMAIN_DB = ""                        # пусто => data/delamain/delamain.sqlite3

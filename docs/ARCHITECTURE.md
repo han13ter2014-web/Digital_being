@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–13)
+## 🧪 Слой действия Delamain-local (этапы 7–14)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -93,7 +93,8 @@
   исполняемую цель Delamain;
 * `GoalAuthoring` / `GoalExecutionProposal` — безопасное ручное или
   planner-предложенное authoring-решение для когнитивной цели;
-* `DelamainSubsystem` — опциональная подсистема с очередью целей и `tick()`.
+* `DelamainSubsystem` — опциональная подсистема с очередью целей, `tick()`,
+  bounded backoff и опциональным replan.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
 `/delamain` в трей-чате. Она **выключена по умолчанию**: без
@@ -108,6 +109,16 @@
 `DELAMAIN_MAX_ATTEMPTS > 1` оставляет цель в `pending` до исчерпания попыток;
 по умолчанию `1`, чтобы сохранить поведение этапа 8. `/delamain skills`
 показывает накопленные навыки.
+
+С этапа 14 повтор может быть отложен на ограниченный экспоненциальный
+backoff (`DELAMAIN_RETRY_BACKOFF_SEC`, cap
+`DELAMAIN_RETRY_BACKOFF_MAX_SEC`). Время следующей попытки хранится в
+metadata цели (`next_retry_at`), поэтому расписание durable. При
+`DELAMAIN_REPLAN_ON_FAILURE=1` следующая попытка игнорирует сохранённый
+explicit/skill-план и вызывает активный planner заново; число попыток
+по-прежнему ограничено `DELAMAIN_MAX_ATTEMPTS`. Обе опции выключены по
+умолчанию, pending approval не запускает retry, а `run_now()` не использует
+backoff.
 
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет
@@ -154,8 +165,9 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 Подробности и ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md),
 итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md),
 [STAGE11_REPORT.md](STAGE11_REPORT.md),
-[STAGE12_REPORT.md](STAGE12_REPORT.md) и
-[STAGE13_REPORT.md](STAGE13_REPORT.md).
+[STAGE12_REPORT.md](STAGE12_REPORT.md),
+[STAGE13_REPORT.md](STAGE13_REPORT.md) и
+[STAGE14_REPORT.md](STAGE14_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 
