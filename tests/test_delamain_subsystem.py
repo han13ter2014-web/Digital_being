@@ -28,6 +28,46 @@ class WritePlanner:
         ]
 
 
+class ContextPlanner:
+    def __init__(self, path: str, content: str = "ok") -> None:
+        self.path = path
+        self.content = content
+        self.contexts = []
+
+    def plan(self, task: str):
+        raise PlannerError("repair context was not provided")
+
+    def replan(self, task: str, failure_context):
+        self.contexts.append(dict(failure_context))
+        return [
+            ActionRequest(
+                "write_file",
+                {"path": self.path, "content": self.content},
+            )
+        ]
+
+
+class PlanOnlyPlanner:
+    def __init__(self, path: str, content: str = "ok") -> None:
+        self.path = path
+        self.content = content
+        self.plan_calls = 0
+        self.replan_calls = 0
+
+    def plan(self, task: str):
+        self.plan_calls += 1
+        return [
+            ActionRequest(
+                "write_file",
+                {"path": self.path, "content": self.content},
+            )
+        ]
+
+    def replan(self, task: str, failure_context):
+        self.replan_calls += 1
+        raise PlannerError("replan must stay disabled by default")
+
+
 def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
     params = {
         "agent_name": "DelamainTest",
@@ -316,6 +356,127 @@ def test_replan_bypasses_cached_skill_plan(tmp_path: Path) -> None:
     ) == "ok"
 
 
+def test_replan_uses_failed_step_context_after_restart(tmp_path: Path) -> None:
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        replan_on_failure=True,
+        replan_with_context=True,
+    )
+    goal = sub.queue_goal(
+        "repair with context",
+        plan=[
+            {
+                "action": "write_file",
+                "args": {"path": "completed.txt", "content": "done"},
+            },
+            {"action": "read_file", "args": {"path": "missing.txt"}},
+        ],
+    )
+    planner = ContextPlanner("recovered.txt")
+    sub.runtime.planner = planner
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["retry_scheduled"] is True
+    assert first["replan_context"] is True
+    assert first["failure_step"] == 2
+    assert first["failure_action"] == "read_file"
+
+    stored = sub.list_goals()[0]
+    context = stored["metadata"]["last_failure_context"]
+    assert context["stage"] == "action"
+    assert context["attempt"] == 1
+    assert context["failed_step"] == 2
+    assert context["action"] == "read_file"
+    assert context["args"] == {"path": "missing.txt"}
+    assert "file not found" in context["error"]
+    assert context["completed_steps"] == [
+        {
+            "action": "write_file",
+            "args": {"path": "completed.txt", "content": "done"},
+        }
+    ]
+    assert (tmp_path / "workspace" / "completed.txt").read_text(
+        encoding="utf-8"
+    ) == "done"
+
+    # The context is durable: a restart still gives it to the repair planner.
+    sub.teardown()
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        replan_on_failure=True,
+        replan_with_context=True,
+    )
+    sub._ensure_runtime().planner = planner
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["replanned"] is True
+    assert len(planner.contexts) == 1
+    assert planner.contexts[0]["failed_step"] == 2
+    assert planner.contexts[0]["action"] == "read_file"
+    assert planner.contexts[0]["args"] == {"path": "missing.txt"}
+    assert (tmp_path / "workspace" / "recovered.txt").read_text(
+        encoding="utf-8"
+    ) == "ok"
+
+    stored = sub.list_goals()[0]
+    assert stored["id"] == goal["id"]
+    assert stored["status"] == "done"
+    assert stored["metadata"].get("last_failure_context") is None
+    assert sub.status()["retry"]["replan_with_context"] is True
+
+
+def test_failure_context_records_planning_stage(tmp_path: Path) -> None:
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        replan_on_failure=True,
+        replan_with_context=True,
+    )
+    sub.queue_goal("unparsable goal", "сделай что-нибудь невероятное")
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["retry_scheduled"] is True
+    assert first["failure_step"] is None
+
+    context = sub.list_goals()[0]["metadata"]["last_failure_context"]
+    assert context["stage"] == "planning"
+    assert "failed_step" not in context or context["failed_step"] is None
+    assert "cannot parse" in context["error"]
+
+
+def test_replan_context_is_off_by_default(tmp_path: Path) -> None:
+    sub = make_sub(
+        tmp_path,
+        max_attempts=2,
+        replan_on_failure=True,
+    )
+    sub.queue_goal(
+        "repair without context",
+        plan=[{"action": "read_file", "args": {"path": "missing.txt"}}],
+    )
+    planner = PlanOnlyPlanner("replanned.txt")
+    sub.runtime.planner = planner
+
+    first = sub.tick(1, {})["events"][0]["data"]
+    assert first["ok"] is False
+    assert first["retry_scheduled"] is True
+    assert first["replan_context"] is False
+    assert sub.list_goals()[0]["metadata"].get("last_failure_context") is None
+    assert sub.status()["retry"]["replan_with_context"] is False
+
+    second = sub.tick(2, {})["events"][0]["data"]
+    assert second["ok"] is True
+    assert second["replanned"] is True
+    assert planner.plan_calls == 1
+    assert planner.replan_calls == 0
+    assert sub.list_goals()[0]["metadata"].get("last_failure_context") is None
+
+
 def test_retry_state_is_visible_in_chat_commands(tmp_path: Path) -> None:
     import asyncio
 
@@ -336,6 +497,7 @@ def test_retry_state_is_visible_in_chat_commands(tmp_path: Path) -> None:
         retry_backoff_sec=60,
         retry_backoff_max_sec=60,
         replan_on_failure=True,
+        replan_with_context=True,
     )
     sub.queue_goal("retry visible", "прочитай missing.txt")
     sub.tick(1, {})
@@ -345,9 +507,10 @@ def test_retry_state_is_visible_in_chat_commands(tmp_path: Path) -> None:
         goals = await runner.handle_command("/delamain goals")
         assert "retry_at=" in goals
         assert "replan=next" in goals
+        assert "replan=next(context)" in goals
 
         status = await runner.handle_command("/delamain status")
-        assert "Retry: backoff=60s, cap=60s, replan=on" in status
+        assert "Retry: backoff=60s, cap=60s, replan=on, context=on" in status
         assert "retry after" in status
         assert "replan" in status
 

@@ -131,16 +131,30 @@ class DelamainRuntime:
     def _plan_dicts(requests: Iterable[ActionRequest]) -> List[Dict[str, Any]]:
         return [request.to_dict() for request in requests]
 
+    def _plan(
+        self,
+        task: str,
+        failure_context: Optional[Mapping[str, Any]],
+    ) -> Iterable[ActionRequest]:
+        """Ask the planner for a plan, using repair context when available."""
+
+        if failure_context is not None:
+            replan = getattr(self.planner, "replan", None)
+            if callable(replan):
+                return replan(task, dict(failure_context))
+        return self.planner.plan(task)
+
     def _prepare_plan(
         self,
         task: str,
         plan: Optional[Iterable[ActionRequest | Mapping[str, Any] | str]],
+        failure_context: Optional[Mapping[str, Any]] = None,
     ) -> Tuple[Optional[List[ActionRequest]], Optional[str], List[Dict[str, Any]]]:
         """Resolve and normalize a plan before any task is recorded or run."""
 
         if plan is None:
             try:
-                plan = self.planner.plan(task)
+                plan = self._plan(task, failure_context)
             except PlannerError as exc:
                 return None, str(exc), []
             except Exception as exc:  # planner bugs must not kill the loop
@@ -216,6 +230,7 @@ class DelamainRuntime:
         *,
         task_id: Optional[str] = None,
         approval_id: Optional[str] = None,
+        failure_context: Optional[Mapping[str, Any]] = None,
     ) -> TaskResult:
         """Execute a plan, stopping at the first failed step.
 
@@ -224,6 +239,10 @@ class DelamainRuntime:
         plan and returns a ``TaskResult`` with ``pending_approval`` set; no
         action and no ``task.start`` episode are written. Calling this method
         with ``approval_id`` executes that stored, already-approved plan.
+
+        ``failure_context`` is optional and is used only when the planner has
+        to build a plan. It is passed to a planner's ``replan()`` method when
+        available, otherwise the normal ``plan()`` method is used.
         """
 
         if approval_id:
@@ -231,7 +250,11 @@ class DelamainRuntime:
 
         task = str(task)
         task_id = str(task_id or uuid.uuid4().hex)
-        requests, error, planned_actions = self._prepare_plan(task, plan)
+        requests, error, planned_actions = self._prepare_plan(
+            task,
+            plan,
+            failure_context,
+        )
         if error is not None or requests is None:
             return TaskResult(
                 task_id=task_id,

@@ -24,7 +24,7 @@
 | [STAGE4_REPORT.md](STAGE4_REPORT.md) | гигиена кода, мёртвый код, мелкие баги |
 | [STAGE5_REPORT.md](STAGE5_REPORT.md) | смысл и метрики: цели, типы действий, декомпозиция |
 | [STAGE6_REPORT.md](STAGE6_REPORT.md) | документация: индекс, ссылки, актуализация |
-| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff и replan |
+| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan и контекст ошибки |
 | [STAGE7_REPORT.md](STAGE7_REPORT.md) | первый замкнутый контур Delamain-local |
 | [STAGE8_REPORT.md](STAGE8_REPORT.md) | интеграция Delamain-local и цикл исполняемых целей |
 | [STAGE9_REPORT.md](STAGE9_REPORT.md) | навыки, повторные попытки и память-зависимый цикл |
@@ -33,6 +33,7 @@
 | [STAGE12_REPORT.md](STAGE12_REPORT.md) | мост когнитивных целей `GoalSubsystem` и исполняемых целей Delamain |
 | [STAGE13_REPORT.md](STAGE13_REPORT.md) | безопасный authoring payload: proposal, accept/reject, `/goals exec` |
 | [STAGE14_REPORT.md](STAGE14_REPORT.md) | bounded backoff и перепланирование после ошибки действия |
+| [STAGE15_REPORT.md](STAGE15_REPORT.md) | перепланирование с контекстом упавшего шага |
 | [CHANGELOG.md](../CHANGELOG.md) | история изменений |
 
 ## Эксплуатация и сборка
@@ -67,13 +68,14 @@
 
 В проекте встречаются две разные нумерации:
 
-* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE14` (безопасность и утечка,
+* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE15` (безопасность и утечка,
   данные и поиск, изоляция тестов, гигиена, смысл/метрики, документация,
   первый контур действия/памяти Delamain-local, интеграция этого контура
   с агентом, переиспользование навыков и повторы, опциональный локальный
   LLM-планировщик, approval для опасных действий, мост когнитивных и
   исполняемых целей, безопасный authoring executable-payload, bounded
-  backoff и перепланирование после ошибки).
+  backoff и перепланирование после ошибки, replan с контекстом упавшего
+  шага).
   Это текущая линия работ. Этап 0 был подготовительным (инициализация git,
   бэкап `data/`, удаление исходного лога) и отдельного отчёта не имеет —
   его результат зафиксирован в [BASELINE.md](BASELINE.md).

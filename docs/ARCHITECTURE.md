@@ -120,6 +120,16 @@ explicit/skill-план и вызывает активный planner занов�
 умолчанию, pending approval не запускает retry, а `run_now()` не использует
 backoff.
 
+С этапа 15 при `DELAMAIN_REPLAN_WITH_CONTEXT=1` (вместе с replan) неудача
+сохраняет в metadata цели `last_failure_context`: стадию, номер и имя
+упавшего шага, аргументы, ошибку, вывод и уже выполненные шаги. Контекст
+ограничен по размеру и переживает перезапуск. При следующей попытке
+`DelamainRuntime.run_task(..., failure_context=...)` вызывает
+`planner.replan()`, если он есть; `OllamaPlanner` добавляет контекст в
+prompt как недоверенные данные, `HeuristicPlanner` просто разбирает задачу
+заново. Это по-прежнему retry между попытками, а не перестройка плана после
+каждого шага. Флаг по умолчанию выключен.
+
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет
 имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
@@ -166,8 +176,9 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md),
 [STAGE11_REPORT.md](STAGE11_REPORT.md),
 [STAGE12_REPORT.md](STAGE12_REPORT.md),
-[STAGE13_REPORT.md](STAGE13_REPORT.md) и
-[STAGE14_REPORT.md](STAGE14_REPORT.md).
+[STAGE13_REPORT.md](STAGE13_REPORT.md),
+[STAGE14_REPORT.md](STAGE14_REPORT.md) и
+[STAGE15_REPORT.md](STAGE15_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

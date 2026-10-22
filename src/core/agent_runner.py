@@ -844,6 +844,8 @@ class AgentRunner:
                 replan_note = ""
                 if metadata.get("replan_on_next_attempt"):
                     replan_note = ", replan=next"
+                    if metadata.get("last_failure_context"):
+                        replan_note += "(context)"
                 elif metadata.get("last_attempt_replanned"):
                     replan_note = ", replanned"
                 bridge_note = ""
@@ -943,7 +945,8 @@ class AgentRunner:
             f"  Навыки: {status.get('skills', 0)}; "
             f"попыток на цель: {status.get('max_attempts', 1)}",
             f"  Retry: backoff={backoff_sec:g}s, cap={backoff_max_sec:g}s, "
-            f"replan={'on' if retry.get('replan_on_failure') else 'off'}",
+            f"replan={'on' if retry.get('replan_on_failure') else 'off'}, "
+            f"context={'on' if retry.get('replan_with_context') else 'off'}",
             f"  Тик: каждые {status.get('tick_interval')} циклов",
             f"  Authoring: {'on' if authoring.get('enabled') else 'off'}, "
             f"proposals={'on' if authoring.get('proposal_enabled') else 'off'}",
@@ -1011,7 +1014,10 @@ class AgentRunner:
             if result.get("next_retry_at"):
                 retry_note = f" Повтор после {result['next_retry_at']}."
             if result.get("replan_on_next_attempt"):
-                retry_note += " С перепланированием."
+                retry_note += " С перепланированием"
+                if result.get("replan_context"):
+                    retry_note += " и контекстом ошибки"
+                retry_note += "."
         return (
             f"⚠️ {prefix}: ошибка, шагов: {steps} (task {task_id}).\n"
             f"  {result.get('error')}{retry_note}"

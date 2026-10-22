@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: replan с контекстом упавшего шага
+
+* **Новый флаг** — `DELAMAIN_REPLAN_WITH_CONTEXT=False`. Работает только
+  вместе с `DELAMAIN_REPLAN_ON_FAILURE=1`; по умолчанию поведение этапов
+  9–14 не меняется.
+* **Контекст ошибки** — после неудачи в metadata цели сохраняется
+  `last_failure_context`: `stage`, `attempt`, `failed_step`, `action`,
+  `args`, `error`, `output`, `completed_steps`. Контекст ограничен по
+  размеру, переживает перезапуск и очищается после успеха.
+* **Replan API** — `DelamainRuntime.run_task(..., failure_context=...)`
+  вызывает `planner.replan(task, context)`, если метод есть. Добавлены
+  `replan()` у `HeuristicPlanner`, `FallbackPlanner` и `OllamaPlanner`.
+  `FallbackPlanner` по-прежнему откатывается на эвристику при ошибке.
+* **LLM prompt** — `OllamaPlanner.replan()` передаёт контекст как
+  недоверенные данные и просит не повторять ту же ошибку; контекст
+  ограничен 4000 символами.
+* **Наблюдаемость** — `/delamain status` показывает
+  `context=on|off`; `/delamain goals` — `replan=next(context)`; результат
+  ошибки сообщает, что повтор будет с контекстом.
+* **Безопасность** — новых действий и прав нет; replan идёт через тот же
+  `ActionRegistry`, sandbox и approval. Pending approval, reject и
+  `run_now()` контекст не используют.
+* **5 новых тестов** — контекст и его durable-переживание, ошибка
+  планирования, default-off, передача контекста в `FallbackPlanner.replan()`
+  и в prompt `OllamaPlanner.replan()`.
+* **Проверка** — `518 passed, 2 skipped` без benchmarks и `16 passed`
+  benchmarks; суммарно `534 passed, 2 skipped`.
+* **Документация** — `docs/STAGE15_REPORT.md`; обновлены
+  `docs/DELAMAIN_LOCAL.md`, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, README и CHANGELOG.
+
 ### 2026-10-22 — Delamain-local: bounded backoff и replan после ошибки
 
 * **Backoff** — `DELAMAIN_RETRY_BACKOFF_SEC` задаёт базовую паузу,
