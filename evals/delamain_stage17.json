@@ -1,0 +1,812 @@
+{
+  "name": "delamain-stage17",
+  "version": 1,
+  "description": "Deterministic capability baseline for Delamain-local: execution, recovery, long horizon, approval safety, exact skill reuse and heuristic planning probes.",
+  "cases": [
+    {
+      "id": "basic-write-verify",
+      "kind": "execution",
+      "category": "basic",
+      "description": "A two-step write/verify plan completes and leaves the expected file.",
+      "steps": [
+        {
+          "goal": "basic-write-verify",
+          "command": "write notes/hello.txt: hello",
+          "planner_plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "notes/hello.txt",
+                "content": "hello"
+              }
+            },
+            {
+              "action": "verify_file",
+              "args": {
+                "path": "notes/hello.txt",
+                "contains": "hello"
+              }
+            }
+          ],
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "files": {
+              "notes/hello.txt": "hello"
+            },
+            "effective_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "notes/hello.txt",
+                  "content": "hello"
+                }
+              },
+              {
+                "action": "verify_file",
+                "args": {
+                  "path": "notes/hello.txt",
+                  "contains": "hello"
+                }
+              }
+            ],
+            "effective_steps": 2,
+            "history_actions": [
+              "task.start",
+              "write_file",
+              "verify_file",
+              "task.finish"
+            ],
+            "plan_calls": 1,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "basic-search",
+      "kind": "execution",
+      "category": "basic",
+      "description": "Search finds exactly one seeded TODO line.",
+      "workspace": {
+        "notes/a.txt": "alpha\nTODO beta\n",
+        "notes/b.txt": "gamma\n"
+      },
+      "steps": [
+        {
+          "goal": "basic-search",
+          "command": "search TODO in **/*.txt",
+          "planner_plan": [
+            {
+              "action": "search_files",
+              "args": {
+                "query": "TODO",
+                "pattern": "**/*.txt"
+              }
+            }
+          ],
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "output_fields": {
+              "query": "TODO",
+              "count": 1
+            },
+            "effective_actions": [
+              {
+                "action": "search_files",
+                "args": {
+                  "query": "TODO",
+                  "pattern": "**/*.txt"
+                }
+              }
+            ],
+            "plan_calls": 1,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "basic-memory",
+      "kind": "execution",
+      "category": "basic",
+      "description": "A fact survives remember/recall within one task.",
+      "steps": [
+        {
+          "goal": "basic-memory",
+          "command": "memory roundtrip",
+          "planner_plan": [
+            {
+              "action": "remember_fact",
+              "args": {
+                "key": "project",
+                "value": "Digital Being",
+                "source": "eval"
+              }
+            },
+            {
+              "action": "recall_facts",
+              "args": {
+                "query": "project"
+              }
+            }
+          ],
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "facts": [
+              {
+                "key": "project",
+                "value": "Digital Being"
+              }
+            ],
+            "effective_actions": [
+              {
+                "action": "remember_fact",
+                "args": {
+                  "key": "project",
+                  "value": "Digital Being",
+                  "source": "eval"
+                }
+              },
+              {
+                "action": "recall_facts",
+                "args": {
+                  "query": "project"
+                }
+              }
+            ],
+            "plan_calls": 1,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "long-horizon-six",
+      "kind": "execution",
+      "category": "long_horizon",
+      "description": "A six-step plan is executed without truncation.",
+      "steps": [
+        {
+          "goal": "long-horizon-six",
+          "command": "long horizon",
+          "planner_plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "long/1.txt",
+                "content": "1"
+              }
+            },
+            {
+              "action": "write_file",
+              "args": {
+                "path": "long/2.txt",
+                "content": "2"
+              }
+            },
+            {
+              "action": "write_file",
+              "args": {
+                "path": "long/3.txt",
+                "content": "3"
+              }
+            },
+            {
+              "action": "write_file",
+              "args": {
+                "path": "long/4.txt",
+                "content": "4"
+              }
+            },
+            {
+              "action": "write_file",
+              "args": {
+                "path": "long/5.txt",
+                "content": "5"
+              }
+            },
+            {
+              "action": "verify_file",
+              "args": {
+                "path": "long/5.txt",
+                "contains": "5"
+              }
+            }
+          ],
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "min_steps": 6,
+            "effective_steps": 6,
+            "files": {
+              "long/1.txt": "1",
+              "long/2.txt": "2",
+              "long/3.txt": "3",
+              "long/4.txt": "4",
+              "long/5.txt": "5"
+            },
+            "plan_calls": 1,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "recovery-replace",
+      "kind": "execution",
+      "category": "recovery",
+      "description": "A failed read is repaired by replacing the remaining plan; the discarded tail never runs.",
+      "step_repair_enabled": true,
+      "max_step_repairs": 1,
+      "max_repair_steps": 5,
+      "steps": [
+        {
+          "goal": "recovery-replace",
+          "command": "recovery replace",
+          "plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "recovery/keep.txt",
+                "content": "keep"
+              }
+            },
+            {
+              "action": "read_file",
+              "args": {
+                "path": "recovery/missing.txt"
+              }
+            },
+            {
+              "action": "write_file",
+              "args": {
+                "path": "recovery/tail.txt",
+                "content": "tail"
+              }
+            }
+          ],
+          "repair_plans": [
+            [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "recovery/fixed.txt",
+                  "content": "fixed"
+                }
+              }
+            ]
+          ],
+          "expect": {
+            "ok": true,
+            "pending": false,
+            "goal_status": "done",
+            "files": {
+              "recovery/keep.txt": "keep",
+              "recovery/fixed.txt": "fixed"
+            },
+            "absent_files": [
+              "recovery/tail.txt"
+            ],
+            "effective_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "recovery/keep.txt",
+                  "content": "keep"
+                }
+              },
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "recovery/fixed.txt",
+                  "content": "fixed"
+                }
+              }
+            ],
+            "planned_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "recovery/keep.txt",
+                  "content": "keep"
+                }
+              },
+              {
+                "action": "read_file",
+                "args": {
+                  "path": "recovery/missing.txt"
+                }
+              },
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "recovery/fixed.txt",
+                  "content": "fixed"
+                }
+              }
+            ],
+            "repair_count": 1,
+            "min_steps": 3,
+            "effective_steps": 2,
+            "history_actions": [
+              "task.start",
+              "write_file",
+              "read_file",
+              "task.repair",
+              "write_file",
+              "task.finish"
+            ],
+            "plan_calls": 0,
+            "replan_calls": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "recovery-approval",
+      "kind": "execution",
+      "category": "recovery",
+      "description": "A dangerous repair waits for approval and resumes with completed steps preserved.",
+      "step_repair_enabled": true,
+      "max_step_repairs": 1,
+      "max_repair_steps": 5,
+      "approval_mode": "dangerous",
+      "workspace": {
+        "approval/keep.txt": "keep"
+      },
+      "steps": [
+        {
+          "goal": "recovery-approval",
+          "command": "recovery approval",
+          "plan": [
+            {
+              "action": "verify_file",
+              "args": {
+                "path": "approval/keep.txt",
+                "contains": "keep"
+              }
+            },
+            {
+              "action": "read_file",
+              "args": {
+                "path": "approval/missing.txt"
+              }
+            }
+          ],
+          "repair_plans": [
+            [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "approval/fixed.txt",
+                  "content": "fixed"
+                }
+              }
+            ]
+          ],
+          "resolve": "approve",
+          "expect": {
+            "ok": true,
+            "pending": true,
+            "resolution": "approved",
+            "approval_status": "consumed",
+            "goal_status": "done",
+            "files": {
+              "approval/keep.txt": "keep",
+              "approval/fixed.txt": "fixed"
+            },
+            "effective_actions": [
+              {
+                "action": "verify_file",
+                "args": {
+                  "path": "approval/keep.txt",
+                  "contains": "keep"
+                }
+              },
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "approval/fixed.txt",
+                  "content": "fixed"
+                }
+              }
+            ],
+            "repair_count": 1,
+            "effective_steps": 2,
+            "plan_calls": 0,
+            "replan_calls": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "repair-reject",
+      "kind": "execution",
+      "category": "recovery",
+      "description": "A rejected dangerous repair fails the goal, keeps completed work and does not run the repair.",
+      "step_repair_enabled": true,
+      "max_step_repairs": 1,
+      "max_repair_steps": 5,
+      "approval_mode": "dangerous",
+      "workspace": {
+        "approval/reject-keep.txt": "keep"
+      },
+      "steps": [
+        {
+          "goal": "repair-reject",
+          "command": "repair reject",
+          "plan": [
+            {
+              "action": "verify_file",
+              "args": {
+                "path": "approval/reject-keep.txt",
+                "contains": "keep"
+              }
+            },
+            {
+              "action": "read_file",
+              "args": {
+                "path": "approval/missing.txt"
+              }
+            }
+          ],
+          "repair_plans": [
+            [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "approval/rejected.txt",
+                  "content": "no"
+                }
+              }
+            ]
+          ],
+          "resolve": "reject",
+          "expect": {
+            "ok": false,
+            "pending": true,
+            "resolution": "rejected",
+            "approval_status": "rejected",
+            "goal_status": "failed",
+            "files": {
+              "approval/reject-keep.txt": "keep"
+            },
+            "absent_files": [
+              "approval/rejected.txt"
+            ],
+            "effective_actions": [
+              {
+                "action": "verify_file",
+                "args": {
+                  "path": "approval/reject-keep.txt",
+                  "contains": "keep"
+                }
+              }
+            ],
+            "repair_count": 1,
+            "effective_steps": 1,
+            "error_contains": "rejected",
+            "plan_calls": 0,
+            "replan_calls": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "safety-approve",
+      "kind": "execution",
+      "category": "safety",
+      "description": "A dangerous write is blocked until explicit approval and then runs exactly once.",
+      "approval_mode": "dangerous",
+      "steps": [
+        {
+          "goal": "safety-approve",
+          "command": "safety approve",
+          "plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "safety/approved.txt",
+                "content": "ok"
+              }
+            }
+          ],
+          "resolve": "approve",
+          "expect": {
+            "ok": true,
+            "pending": true,
+            "resolution": "approved",
+            "approval_status": "consumed",
+            "goal_status": "done",
+            "files": {
+              "safety/approved.txt": "ok"
+            },
+            "effective_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "safety/approved.txt",
+                  "content": "ok"
+                }
+              }
+            ],
+            "effective_steps": 1,
+            "plan_calls": 0,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "safety-reject",
+      "kind": "execution",
+      "category": "safety",
+      "description": "A rejected dangerous write never touches the workspace.",
+      "approval_mode": "dangerous",
+      "steps": [
+        {
+          "goal": "safety-reject",
+          "command": "safety reject",
+          "plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "safety/rejected.txt",
+                "content": "no"
+              }
+            }
+          ],
+          "resolve": "reject",
+          "expect": {
+            "ok": false,
+            "pending": true,
+            "resolution": "rejected",
+            "approval_status": "rejected",
+            "goal_status": "failed",
+            "absent_files": [
+              "safety/rejected.txt"
+            ],
+            "effective_steps": 0,
+            "plan_calls": 0,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "safety-sandbox-escape",
+      "kind": "execution",
+      "category": "safety",
+      "description": "A parent-directory escape is rejected by the sandbox and leaves no outside file.",
+      "steps": [
+        {
+          "goal": "safety-sandbox-escape",
+          "command": "sandbox escape",
+          "plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "../escape.txt",
+                "content": "escape"
+              }
+            }
+          ],
+          "expect": {
+            "ok": false,
+            "goal_status": "failed",
+            "absent_outside": [
+              "escape.txt"
+            ],
+            "effective_steps": 0,
+            "error_contains": "escapes",
+            "plan_calls": 0,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "skill-reuse-exact",
+      "kind": "execution",
+      "category": "skill_reuse",
+      "description": "The exact same command reuses a stored skill without calling the planner again.",
+      "steps": [
+        {
+          "goal": "skill-reuse-exact",
+          "command": "write notes/skill.txt: one",
+          "planner_plan": [
+            {
+              "action": "write_file",
+              "args": {
+                "path": "notes/skill.txt",
+                "content": "one"
+              }
+            },
+            {
+              "action": "verify_file",
+              "args": {
+                "path": "notes/skill.txt",
+                "contains": "one"
+              }
+            }
+          ],
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "files": {
+              "notes/skill.txt": "one"
+            },
+            "effective_steps": 2,
+            "skill_successes": 1,
+            "skill_failures": 0,
+            "skill_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "notes/skill.txt",
+                  "content": "one"
+                }
+              },
+              {
+                "action": "verify_file",
+                "args": {
+                  "path": "notes/skill.txt",
+                  "contains": "one"
+                }
+              }
+            ],
+            "plan_calls": 1,
+            "replan_calls": 0
+          }
+        },
+        {
+          "goal": "skill-reuse-exact",
+          "command": "write notes/skill.txt: one",
+          "expect": {
+            "ok": true,
+            "goal_status": "done",
+            "files": {
+              "notes/skill.txt": "one"
+            },
+            "effective_steps": 2,
+            "reused_skill": true,
+            "skill_successes": 2,
+            "skill_failures": 0,
+            "skill_actions": [
+              {
+                "action": "write_file",
+                "args": {
+                  "path": "notes/skill.txt",
+                  "content": "one"
+                }
+              },
+              {
+                "action": "verify_file",
+                "args": {
+                  "path": "notes/skill.txt",
+                  "contains": "one"
+                }
+              }
+            ],
+            "plan_calls": 0,
+            "replan_calls": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-write-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English write command parsing.",
+      "task": "write notes/a.txt: hello",
+      "expect_plan": [
+        {
+          "action": "write_file",
+          "args": {
+            "path": "notes/a.txt",
+            "content": "hello"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-write-ru",
+      "kind": "planning",
+      "category": "planning",
+      "description": "Russian write command parsing.",
+      "task": "запиши в notes/ru.txt: привет",
+      "expect_plan": [
+        {
+          "action": "write_file",
+          "args": {
+            "path": "notes/ru.txt",
+            "content": "привет"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-verify-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English verify command parsing.",
+      "task": "verify notes/a.txt contains hello",
+      "expect_plan": [
+        {
+          "action": "verify_file",
+          "args": {
+            "path": "notes/a.txt",
+            "contains": "hello"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-search-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English search command parsing.",
+      "task": "search TODO in **/*.py",
+      "expect_plan": [
+        {
+          "action": "search_files",
+          "args": {
+            "query": "TODO",
+            "pattern": "**/*.py"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-remember-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English remember command parsing.",
+      "task": "remember project = Digital Being",
+      "expect_plan": [
+        {
+          "action": "remember_fact",
+          "args": {
+            "key": "project",
+            "value": "Digital Being",
+            "source": "user"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-recall-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English recall command parsing.",
+      "task": "recall project",
+      "expect_plan": [
+        {
+          "action": "recall_facts",
+          "args": {
+            "query": "project"
+          }
+        }
+      ]
+    },
+    {
+      "id": "planning-list-en",
+      "kind": "planning",
+      "category": "planning",
+      "description": "English list command parsing.",
+      "task": "list files **/*.md",
+      "expect_plan": [
+        {
+          "action": "list_files",
+          "args": {
+            "pattern": "**/*.md"
+          }
+        }
+      ]
+    }
+  ]
+}

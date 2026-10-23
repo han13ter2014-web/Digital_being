@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-22 — Delamain-local: измеримая оценка возможностей (этап 17)
+
+* **Офлайн-suite** — `evals/delamain_stage17.json`, 18 data-only случаев:
+  базовое исполнение, длинный горизонт, восстановление после ошибки,
+  approval/sandbox, точное переиспользование навыка и planning probes.
+* **`src/delamain/evaluation.py`** — загрузчик и валидатор suite,
+  `ScriptedPlanner`, execution/planning runners, агрегация метрик и CLI.
+  Каждый execution-случай получает отдельные workspace и SQLite; ошибка
+  одного случая не обрывает остальные.
+* **Метрики** — `pass_rate`, `runtime_success_rate`, отдельный
+  `expected_success_rate` (исключает намеренные reject/escape случаи),
+  `recovery_rate`, `long_horizon_rate`, `skill_reuse_rate`, `safety_rate`,
+  `planning_accuracy`, repair/approval counters и разбивка по категориям.
+* **CLI** — `python -m src.delamain.evaluation --suite ...` с `--json`,
+  `--report`, `--case`, `--workdir`, `--keep`, `--fail-under`.
+* **Изоляция** — evaluator не импортируется runtime и не добавляет
+  действий, сети или прав исполнения. `ScriptedPlanner` проверяет runtime,
+  а planning probes — только текущую эвристику, не общее понимание языка.
+* **Результат baseline** — 18/18 случаев, `pass_rate=1.0`,
+  `runtime_successes=9/12`, `expected_success_rate=9/9`, 3 repair-запуска,
+  4 pending approval (2 approved, 2 rejected).
+* **Тесты** — новый `tests/test_delamain_evaluation.py` (29 тестов):
+  валидация suite, изоляция, repair/approval/reject, sandbox escape,
+  skill reuse, planning probes, метрики и CLI.
+* **Полный прогон** — `python -m pytest -q`: 580 passed, 2 skipped
+  (включая 16 benchmark-тестов).
+* **Версия ядра** — `0.9.0`.
+* **Документация** — `docs/STAGE17_REPORT.md`, `evals/README.md`;
+  обновлены README, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/BASELINE.md`, `docs/USAGE.md`, `docs/DELAMAIN_LOCAL.md`.
+
 ### 2026-10-22 — Delamain-local: bounded repair внутри одной попытки
 
 * **Новые флаги** — `DELAMAIN_STEP_REPAIR_ENABLED=False`,

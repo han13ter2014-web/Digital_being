@@ -40,6 +40,11 @@ pip install psutil numpy   # опционально, для мониторинг
 python main.py
 ```
 
+**🧪 Оценка возможностей (офлайн, без LLM):**
+```bash
+python -m src.delamain.evaluation --suite evals/delamain_stage17.json
+```
+
 Подробнее — **[docs/USAGE.md](docs/USAGE.md)**. Сборка .exe — **[docs/BUILD.md](docs/BUILD.md)**.
 
 ---
@@ -56,7 +61,7 @@ python main.py
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
-| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan и bounded repair |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan, bounded repair и оценка возможностей |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
@@ -67,6 +72,7 @@ python main.py
 | **[docs/STAGE14_REPORT.md](docs/STAGE14_REPORT.md)** | 🧑‍💻 Разработчик | Bounded backoff и перепланирование после ошибки действия |
 | **[docs/STAGE15_REPORT.md](docs/STAGE15_REPORT.md)** | 🧑‍💻 Разработчик | Перепланирование с контекстом упавшего шага |
 | **[docs/STAGE16_REPORT.md](docs/STAGE16_REPORT.md)** | 🧑‍💻 Разработчик | Bounded repair внутри одной попытки и durable repair-approval |
+| **[docs/STAGE17_REPORT.md](docs/STAGE17_REPORT.md)** | 🧑‍💻 Разработчик | Детерминированная оценка возможностей: 18 случаев, метрики и CLI |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -75,7 +81,7 @@ python main.py
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–16
+### 🧭 Ревизия 2026-10: этапы 0–17
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -138,6 +144,11 @@ python main.py
   и пишет skill по успешному пути `effective_actions`. По умолчанию
   выключен. Подробно —
   **[docs/STAGE16_REPORT.md](docs/STAGE16_REPORT.md)**.
+* **Измеримая оценка возможностей** — офлайн-suite из 18 случаев проверяет
+  базовое исполнение, длинный план, восстановление, approval/sandbox,
+  точное переиспользование навыка и узкий эвристический planner. Оценка
+  не импортируется runtime и не добавляет прав; отчёт машиночитаемый.
+  Подробно — **[docs/STAGE17_REPORT.md](docs/STAGE17_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 

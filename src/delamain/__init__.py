@@ -15,7 +15,8 @@ first working vertical slice of the new architecture:
 * an optional authoring layer for explicit or planner-proposed executable
   payloads (proposals never execute themselves);
 * optional retry backoff and failure-aware replanning, disabled by default;
-* optional bounded step repair inside one attempt, disabled by default.
+* optional bounded step repair inside one attempt, disabled by default;
+* an offline, deterministic capability evaluation harness.
 
 The LLM layer is never required: constructing the core does not start Ollama
 or make network requests, and every planning failure falls back to the
@@ -61,8 +62,11 @@ __all__ = [
     "ActionSpec",
     "AUTHORABLE_GOAL_STATUSES",
     "BRIDGE_STATUSES",
+    "CaseResult",
     "DelamainRuntime",
     "DelamainSubsystem",
+    "EvalSuite",
+    "EvaluationError",
     "FallbackPlanner",
     "GoalAuthoring",
     "GoalBridge",
@@ -75,11 +79,37 @@ __all__ = [
     "PlannerError",
     "Sandbox",
     "SandboxError",
+    "ScriptedPlanner",
+    "SuiteResult",
     "TaskResult",
     "VALID_APPROVAL_MODES",
     "bridge_summary",
     "derive_bridge_status",
     "evaluate_success_predicate",
+    "load_suite",
     "normalize_approval_mode",
+    "run_suite",
     "utc_now_iso",
 ]
+
+_EVALUATION_EXPORTS = {
+    "CaseResult",
+    "EvalSuite",
+    "EvaluationError",
+    "ScriptedPlanner",
+    "SuiteResult",
+    "load_suite",
+    "run_suite",
+}
+
+
+def __getattr__(name: str):
+    """Keep the evaluation harness out of normal package import paths."""
+
+    if name in _EVALUATION_EXPORTS:
+        from . import evaluation
+
+        value = getattr(evaluation, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

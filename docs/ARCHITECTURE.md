@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–16)
+## 🧪 Слой действия Delamain-local (этапы 7–17)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -97,7 +97,9 @@
 * `GoalAuthoring` / `GoalExecutionProposal` — безопасное ручное или
   planner-предложенное authoring-решение для когнитивной цели;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей, `tick()`,
-  bounded backoff, опциональным replan и step repair.
+  bounded backoff, опциональным replan и step repair;
+* `evaluation` — офлайн-загрузчик data-only suite, `ScriptedPlanner`,
+  execution/planning runners и агрегатор метрик; runtime его не импортирует.
 
 С этапа 8 подсистема зарегистрирована в `PluginRegistry` и доступна через
 `/delamain` в трей-чате. Она **выключена по умолчанию**: без
@@ -147,6 +149,17 @@ prompt как недоверенные данные, `HeuristicPlanner` прос
 выполненных шагов не откатываются, а skill пишется по `effective_actions`.
 Всё выключено по умолчанию и не даёт planner'у прав на исполнение.
 
+С этапа 17 появился измерительный контур `evaluation.py`. Он загружает
+JSON-suite, проверяет схему и запускает execution-случаи через настоящий
+`DelamainSubsystem` в изолированных workspace/SQLite; план подаётся
+`ScriptedPlanner`, а planning probes отдельно вызывают `HeuristicPlanner`.
+Результат — `SuiteResult` с `pass_rate`, runtime-успехами, отдельным
+`expected_success_rate` (без намеренных reject/escape), recovery,
+long-horizon, skill-reuse, safety, planning-метриками и разбивкой по
+категориям. Оценка не импортируется runtime, не добавляет действий,
+сети или прав исполнения и не является доказательством AGI. CLI:
+`python -m src.delamain.evaluation --suite evals/delamain_stage17.json`.
+
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет
 имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
@@ -195,8 +208,9 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 [STAGE12_REPORT.md](STAGE12_REPORT.md),
 [STAGE13_REPORT.md](STAGE13_REPORT.md),
 [STAGE14_REPORT.md](STAGE14_REPORT.md),
-[STAGE15_REPORT.md](STAGE15_REPORT.md) и
-[STAGE16_REPORT.md](STAGE16_REPORT.md).
+[STAGE15_REPORT.md](STAGE15_REPORT.md),
+[STAGE16_REPORT.md](STAGE16_REPORT.md) и
+[STAGE17_REPORT.md](STAGE17_REPORT.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 
