@@ -101,7 +101,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.8.0"
+    version = "0.9.0"
 
     def __init__(
         self,

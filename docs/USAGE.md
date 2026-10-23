@@ -414,6 +414,37 @@ python main_tray.py
 `repairs=N`, а результат выполнения — `repair=N`. Подробности — в
 [docs/STAGE16_REPORT.md](STAGE16_REPORT.md).
 
+### 🧪 Оценка возможностей (этап 17)
+
+Оценка запускается отдельно от агента, не требует LLM и не меняет
+поведение runtime:
+
+```powershell
+# краткий отчёт в консоль
+python -m src.delamain.evaluation --suite evals/delamain_stage17.json
+
+# полный JSON + файл отчёта + сохранённые артефакты
+python -m src.delamain.evaluation `
+  --suite evals/delamain_stage17.json `
+  --json `
+  --report eval_report.json `
+  --workdir eval_artifacts
+```
+
+Suite проверяет базовое исполнение, длинный план, восстановление после
+ошибки шага, approval/reject, sandbox escape, точное переиспользование
+навыка и узкие planning probes. Каждый execution-случай получает
+отдельные workspace и SQLite. По умолчанию CLI завершается с кодом 1,
+если пройдены не все случаи; `--fail-under 0.9` разрешает частичный
+результат, `--case <id>` запускает один случай, `--keep` оставляет
+временный каталог.
+
+Метрики разделяют `runtime_success_rate` и `expected_success_rate`:
+намеренные reject/escape случаи не должны выглядеть как регрессия.
+`planning_accuracy` относится только к текущим регулярным выражениям
+эвристики, а не к общему пониманию языка. Подробности и ограничения — в
+[docs/STAGE17_REPORT.md](STAGE17_REPORT.md).
+
 ### Поведение иконки трея
 
 Иконка **меняет цвет по уровню энергии**:
