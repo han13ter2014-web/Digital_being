@@ -6,11 +6,12 @@ uses ``effector_request_id`` as the idempotency key and maps the stored goal
 state back to the core contract.  It does not create goals from prose, does
 not run the goal itself and does not own approvals.
 
-Execution remains in ``DelamainSubsystem`` / ``DelamainRuntime``.  In this
-first integration slice the core and the subsystem may still be ticked by the
-existing registry; the adapter only establishes a stable boundary and a
-durable, replay-safe submission path.  Sharing one budget, one goal
-arbitration layer and one history is the next stage.
+Execution remains in ``DelamainSubsystem`` / ``DelamainRuntime``.  In
+standalone mode the subsystem tick is still the driver.  When
+``DELAMAIN_EFFECTOR_CORE_DRIVEN`` is enabled, the subsystem tick stops
+executing goals and the core calls :meth:`step` at most once per cycle.  This
+keeps one goal table, one runtime and one episode history; the core owns the
+clock, while Delamain keeps the sandbox and approval gates.
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ class DelamainEffectorAdapter:
     """Expose Delamain as an idempotent effector behind an explicit flag."""
 
     name = "delamain_effector"
-    version = "0.10.0"
+    version = "0.11.0"
 
     def __init__(
         self,
@@ -70,6 +71,8 @@ class DelamainEffectorAdapter:
         self.event_sink = event_sink
         self._emitted: set[tuple[str, str, str]] = set()
         self._last_error: Optional[str] = None
+        self._last_step_cycle: Optional[int] = None
+        self._steps = 0
 
     @staticmethod
     def _resolve_enabled(enabled: Optional[bool]) -> bool:
@@ -79,6 +82,12 @@ class DelamainEffectorAdapter:
         if raw is None:
             return bool(_cfg("DELAMAIN_EFFECTOR_ENABLED", False))
         return _parse_bool(raw)
+
+    @property
+    def core_driven(self) -> bool:
+        """Whether the core, rather than the subsystem tick, drives this port."""
+
+        return bool(getattr(self.subsystem, "core_driven", False))
 
     # ------------------------------------------------------------------
     # Contract
@@ -164,6 +173,57 @@ class DelamainEffectorAdapter:
         self._emit_once(f"effector.{result.status.value}", result)
         return result
 
+    def step(self, cycle: int) -> Optional[EffectorResult]:
+        """Advance at most one pending request for one core cycle.
+
+        The method is observational when there is nothing ready.  A disabled
+        subsystem, a pending approval, an empty queue or a non-step cycle all
+        return ``None``.  The adapter never creates a second worker and never
+        bypasses the subsystem's approval gate.
+
+        ``cycle`` is part of the call because the core owns the clock.  A
+        repeated call for the same cycle is a no-op, even if a dashboard asks
+        the subsystem to tick again.  The configured ``tick_interval`` still
+        gates how often a step executes.
+        """
+
+        cycle = int(cycle)
+        if not self.enabled or not self.subsystem.enabled:
+            return None
+        if self._last_step_cycle == cycle:
+            return None
+        self._last_step_cycle = cycle
+
+        try:
+            summary = self.subsystem.run_effector_pending(
+                trigger="core_effector",
+                limit=1,
+                cycle=cycle,
+            )
+        except Exception as exc:
+            self._last_error = f"{type(exc).__name__}: {exc}"
+            raise
+        if summary is None:
+            return None
+
+        goal_id = summary.get("goal_id")
+        if goal_id is None:
+            return None
+        goal = self.subsystem.get_goal(int(goal_id))
+        if goal is None:
+            return None
+        metadata = goal.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        request_id = str(metadata.get("effector_request_id") or "")
+        if not request_id:
+            return None
+
+        result = self._result_from_goal(request_id, goal)
+        self._steps += 1
+        self._emit_once(f"effector.{result.status.value}", result)
+        return result
+
     def status(self) -> Dict[str, Any]:
         """Return a side-effect-free snapshot for diagnostics."""
 
@@ -198,10 +258,13 @@ class DelamainEffectorAdapter:
             "name": self.name,
             "version": self.version,
             "enabled": bool(self.enabled),
+            "core_driven": self.core_driven,
             "subsystem_enabled": bool(self.subsystem.enabled),
             "runtime_ready": self.subsystem.runtime is not None,
             "requests": requests,
             "by_status": counts,
+            "steps": self._steps,
+            "last_step_cycle": self._last_step_cycle,
             "last_error": self._last_error,
         }
 

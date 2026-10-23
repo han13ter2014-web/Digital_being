@@ -445,7 +445,7 @@ Suite проверяет базовое исполнение, длинный п�
 эвристики, а не к общему пониманию языка. Подробности и ограничения — в
 [docs/STAGE17_REPORT.md](STAGE17_REPORT.md).
 
-### 🧩 Effector-контракт (этап 18A)
+### 🧩 Effector-контракт и core-driven шаг (этапы 18A–18B)
 
 `DELAMAIN_EFFECTOR_ENABLED=1` включает стабильную границу «ядро → слой
 действия»: ядро отправляет явный `EffectorRequest`, а Delamain создаёт
@@ -458,10 +458,26 @@ $env:DELAMAIN_EFFECTOR_ENABLED = "1"
 ```
 
 Идемпотентный ключ — `request_id`; повторный запрос после перезапуска не
-создаёт дубль. Approval и sandbox работают как раньше. В 18A исполнение
-всё ещё идёт через существующий `tick()` Delamain, а `cancel` пока не
-реализован. Подробности — [INTEGRATION.md](INTEGRATION.md) и
-[STAGE18_REPORT.md](STAGE18_REPORT.md).
+создаёт дубль. Approval и sandbox работают как раньше.
+
+Чтобы ядро само делало один шаг эффектора за свой цикл, включите второй
+флаг:
+
+```powershell
+$env:DELAMAIN_EFFECTOR_CORE_DRIVEN = "1"
+$env:DELAMAIN_TICK_INTERVAL = "1"  # необязательно: сохранить частый шаг
+```
+
+В этом режиме `DelamainSubsystem.tick()` только синхронизирует мост и не
+исполняет цели, а `agent.effector_driver` вызывает `step(cycle)` не более
+одного раза за цикл. `DELAMAIN_TICK_INTERVAL` продолжает ограничивать
+частоту. Шаг выбирает только pending-цели с `effector_request_id`;
+обычные legacy-цели остаются pending до единой очереди этапа 20. Если
+включить core-driven без effector, цели не исполняются — это fail-safe.
+
+`cancel`, единый бюджет и единая история пока не реализованы. Подробности —
+[INTEGRATION.md](INTEGRATION.md), [STAGE18_REPORT.md](STAGE18_REPORT.md) и
+[STAGE18B_REPORT.md](STAGE18B_REPORT.md).
 
 ### Поведение иконки трея
 

@@ -62,7 +62,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
-| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan, bounded repair, оценка возможностей и effector-контракт |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan, bounded repair, оценка возможностей, effector-контракт и core-driven шаг |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
@@ -75,6 +75,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 | **[docs/STAGE16_REPORT.md](docs/STAGE16_REPORT.md)** | 🧑‍💻 Разработчик | Bounded repair внутри одной попытки и durable repair-approval |
 | **[docs/STAGE17_REPORT.md](docs/STAGE17_REPORT.md)** | 🧑‍💻 Разработчик | Детерминированная оценка возможностей: 18 случаев, метрики и CLI |
 | **[docs/STAGE18_REPORT.md](docs/STAGE18_REPORT.md)** | 🧑‍💻 Разработчик | Core-owned effector contract: идемпотентный адаптер, restart, approval |
+| **[docs/STAGE18B_REPORT.md](docs/STAGE18B_REPORT.md)** | 🧑‍💻 Разработчик | Core-driven effector: один шаг за цикл ядра, пассивный tick, interval и границы 18B |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -83,7 +84,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–18
+### 🧭 Ревизия 2026-10: этапы 0–18B
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -154,10 +155,15 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 * **Контракт эффектора** — ядро владеет целями, временем и историей, а
   Delamain становится его слоем действия. `EffectorRequest`/`EffectorPort`
   задают явную границу, `DelamainEffectorAdapter` делает `submit()`
-  идемпотентным, а pending approval переживает перезапуск. По умолчанию
-  выключено (`DELAMAIN_EFFECTOR_ENABLED=False`), новых прав нет. Подробно —
-  **[docs/INTEGRATION.md](docs/INTEGRATION.md)** и
-  **[docs/STAGE18_REPORT.md](docs/STAGE18_REPORT.md)**.
+  идемпотентным, а pending approval переживает перезапуск. С этапа 18B
+  `DELAMAIN_EFFECTOR_CORE_DRIVEN=True` передаёт ядру один шаг эффектора
+  за цикл; `DelamainSubsystem.tick()` в этом режиме не исполняет цели,
+  поэтому второго tick-цикла нет. Обычные legacy-цели пока остаются
+  pending до единой очереди этапа 20. Оба флага выключены по умолчанию,
+  новых прав и таблиц нет. Подробно —
+  **[docs/INTEGRATION.md](docs/INTEGRATION.md)**,
+  **[docs/STAGE18_REPORT.md](docs/STAGE18_REPORT.md)** и
+  **[docs/STAGE18B_REPORT.md](docs/STAGE18B_REPORT.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 

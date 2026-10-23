@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–18)
+## 🧪 Слой действия Delamain-local (этапы 7–18B)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -99,7 +99,10 @@
 * `DelamainSubsystem` — опциональная подсистема с очередью целей, `tick()`,
   bounded backoff, опциональным replan и step repair;
 * `src/core/effector_port.py` — контракт, которым владеет ядро:
-  `EffectorRequest`, `EffectorResult`, `EffectorPort` и `EventSink`;
+  `EffectorRequest`, `EffectorResult`, `EffectorPort`, `step()` и
+  `EventSink`;
+* `src/core/effector_driver.py` — `EffectorDriver`: один шаг эффектора
+  за цикл ядра, duplicate-cycle guard и изоляция ошибок;
 * `DelamainEffectorAdapter` — идемпотентный адаптер эффектора; реализует
   контракт поверх Delamain, но не создаёт цели сам;
 * `evaluation` — офлайн-загрузчик data-only suite, `ScriptedPlanner`,
@@ -164,18 +167,27 @@ long-horizon, skill-reuse, safety, planning-метриками и разбивк
 сети или прав исполнения и не является доказательством AGI. CLI:
 `python -m src.delamain.evaluation --suite evals/delamain_stage17.json`.
 
-С этапа 18A у ядра есть собственный контракт эффектора
+С этапов 18A–18B у ядра есть собственный контракт эффектора
 (`src/core/effector_port.py`), а Delamain реализует его через
 `DelamainEffectorAdapter`. Ядро отправляет явный `EffectorRequest` с
 `request_id`; адаптер создаёт ровно одну durable цель, хранит
 идемпотентный ключ в metadata и возвращает `EffectorResult`. Повторный
 `submit()` после перезапуска не дублирует действие, а тот же id с другим
 payload даёт `EffectorConflict`. Approval и sandbox остаются прежними;
-`cancel` отложен до появления единой очереди целей. Флаг
-`DELAMAIN_EFFECTOR_ENABLED=False`: в 18A ядро ещё не вызывает эффектор
-автоматически и Delamain может тикать отдельно. В обычном агенте граница
-доступна как `agent.delamain_effector`. Переход к одному циклу, бюджету и
-истории описан в [INTEGRATION.md](INTEGRATION.md).
+`cancel` отложен до появления единой очереди целей.
+
+С этапа 18B `DELAMAIN_EFFECTOR_CORE_DRIVEN=True` делает ядро драйвером:
+`DigitalBeing.tick_subsystems()` вызывает `EffectorDriver.tick(cycle)`,
+тот делает не более одного `effector.step(cycle)`, а
+`DelamainSubsystem.tick()` в этом режиме только синхронизирует мост и не
+исполняет цели. `DELAMAIN_TICK_INTERVAL` продолжает ограничивать частоту.
+Шаг выбирает только pending-цели с `effector_request_id`; обычные
+legacy-цели остаются pending до единой очереди этапа 20. Оба флага
+(`DELAMAIN_EFFECTOR_ENABLED`, `DELAMAIN_EFFECTOR_CORE_DRIVEN`) выключены
+по умолчанию, новых таблиц, бюджета и истории нет. В обычном агенте
+граница доступна как `agent.delamain_effector`, драйвер — как
+`agent.effector_driver`. Переход к бюджету и единой истории описан в
+[INTEGRATION.md](INTEGRATION.md).
 
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет

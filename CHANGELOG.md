@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-23 — Core-driven effector (этап 18B)
+
+* **Единый драйвер** — новый `src/core/effector_driver.py`: ядро вызывает
+  `effector.step(cycle)` не более одного раза за цикл, повторный номер
+  цикла пропускается, ошибка эффектора не останавливает `tick_subsystems()`.
+* **Контракт** — `EffectorPort` получил `step(cycle)`; `submit()`, `poll()`
+  и `status()` не изменились.
+* **Адаптер** — `DelamainEffectorAdapter.step()` выполняет не более одной
+  pending-цели с `effector_request_id` и возвращает `EffectorResult`.
+* **Подсистема** — `DelamainSubsystem` получил `core_driven`,
+  `run_effector_pending()` и пассивный `tick()` в core-driven режиме;
+  `status()` показывает `execution_driver` и `core_driven_error`.
+* **Агент** — `DigitalBeing.tick_subsystems()` вызывает драйвер после
+  реестра; `agent.effector_driver` доступен для диагностики, а
+  `get_subsystems_status()` включает его снимок.
+* **Флаг** — `DELAMAIN_EFFECTOR_CORE_DRIVEN=False`. Требует
+  `DELAMAIN_EFFECTOR_ENABLED=True`; без effector цели не исполняются
+  (fail-safe). `DELAMAIN_TICK_INTERVAL` продолжает ограничивать частоту.
+* **Границы** — новых таблиц, миграций, бюджета, очереди и истории нет.
+  В core-driven режиме обычные legacy-цели Delamain остаются pending до
+  единой очереди этапа 20; это явное ограничение, а не второй драйвер.
+* **Тесты** — новый `tests/test_effector_driver.py` (4 теста); в
+  `tests/test_delamain_effector.py` добавлено 6 тестов: пассивный tick,
+  один шаг, interval, изоляция legacy-целей, restart approval, env-флаг и
+  wiring в `DigitalBeing`. Обновлён `tests/test_delamain_subsystem.py`
+  для default-off драйвера.
+* **Проверка** — `tests/test_effector_driver.py` +
+  `tests/test_delamain_effector.py`: 21 passed;
+  `tests/test_plugin_system.py` + `tests/test_delamain_subsystem.py`:
+  51 passed. Полный прогон — `601 passed, 2 skipped in 780.74s (0:13:00)`.
+* **Версия Delamain** — `0.11.0`.
+* **Документация** — `docs/STAGE18B_REPORT.md`, обновлены
+  `docs/INTEGRATION.md`, `docs/ARCHITECTURE.md`, `docs/DELAMAIN_LOCAL.md`,
+  `docs/USAGE.md`, `docs/INDEX.md` и `README.md`.
+
 ### 2026-10-23 — Core-owned effector contract (этап 18A)
 
 * **Архитектурное решение** — Delamain не включается как второй агент.

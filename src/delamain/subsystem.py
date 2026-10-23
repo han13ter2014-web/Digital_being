@@ -25,8 +25,11 @@ disabled by default and never guesses a command from a title.
 
 ``subsystem.effector`` exposes the core-owned, idempotent effector contract
 (``DELAMAIN_EFFECTOR_ENABLED``, off by default). It submits one explicit goal
-per request id and never starts execution on its own; the subsystem's normal
-``tick()`` remains the driver in stage 18A.
+per request id and never starts execution on its own. In standalone mode the
+subsystem tick remains the driver. In core-driven mode
+(``DELAMAIN_EFFECTOR_CORE_DRIVEN``, off by default) the tick no longer executes
+goals at all; the core calls ``effector.step()`` and only goals carrying an
+``effector_request_id`` are advanced.
 """
 
 from __future__ import annotations
@@ -107,7 +110,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.10.0"
+    version = "0.11.0"
 
     def __init__(
         self,
@@ -137,6 +140,7 @@ class DelamainSubsystem(Subsystem):
         bridge_enabled: Optional[bool] = None,
         goal_proposal_enabled: Optional[bool] = None,
         effector_enabled: Optional[bool] = None,
+        core_driven: Optional[bool] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -339,6 +343,21 @@ class DelamainSubsystem(Subsystem):
                 goal_proposal_enabled = _parse_bool(proposal_env)
         self.goal_proposal_enabled = bool(goal_proposal_enabled)
         self.authoring = GoalAuthoring(self)
+
+        if core_driven is None:
+            driver_env = os.environ.get("DELAMAIN_EFFECTOR_CORE_DRIVEN")
+            if driver_env is None:
+                core_driven = bool(
+                    _cfg("DELAMAIN_EFFECTOR_CORE_DRIVEN", False)
+                )
+            else:
+                core_driven = _parse_bool(driver_env)
+        # Stage 18B: core_driven selects who owns the clock. The effector flag
+        # separately controls whether actions are possible. They are kept
+        # separate so a missing effector is a visible fail-safe instead of a
+        # silent second driver. The default keeps the stage-18A tick as it was.
+        self.core_driven = bool(core_driven)
+
         # Stage 18A: a stable, core-owned action boundary. Disabled by default
         # and inert until a caller submits an explicit request.
         self.effector = DelamainEffectorAdapter(
@@ -794,6 +813,58 @@ class DelamainSubsystem(Subsystem):
 
         last: Optional[Dict[str, Any]] = None
         for goal in candidates[: self.max_goals_per_tick]:
+            last = self._run_goal(runtime, goal, trigger=trigger)
+        return last
+
+    def run_effector_pending(
+        self,
+        *,
+        trigger: str = "core_effector",
+        limit: int = 1,
+        cycle: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Run at most ``limit`` pending goals submitted through the effector.
+
+        This is the execution half of the Stage 18B boundary.  It deliberately
+        ignores goals without ``effector_request_id`` so the legacy Delamain
+        queue cannot become a second action source while the core is driving.
+        The same durable approval, sandbox, retry and skill-reuse code is used;
+        no second runtime or episode history is created.
+
+        When ``cycle`` is supplied, the configured ``tick_interval`` still
+        gates how often a step may execute.  The core owns the clock, but the
+        existing pacing setting is not silently replaced by a second schedule.
+        """
+
+        if not self.enabled:
+            return None
+        if (
+            cycle is not None
+            and self.tick_interval > 1
+            and int(cycle) % self.tick_interval != 0
+        ):
+            return None
+        runtime = self._ensure_runtime()
+        candidates: List[Dict[str, Any]] = []
+        for goal in runtime.memory.list_goals(status="pending"):
+            metadata = goal.get("metadata") or {}
+            if not isinstance(metadata, Mapping):
+                continue
+            if not metadata.get("effector_request_id"):
+                continue
+            if not (self._goal_command(goal) or self._goal_plan(goal)):
+                continue
+            if self._goal_waiting_for_approval(runtime, goal):
+                continue
+            if not self._retry_ready(goal):
+                continue
+            candidates.append(goal)
+
+        if not candidates:
+            return None
+
+        last: Optional[Dict[str, Any]] = None
+        for goal in candidates[: max(1, int(limit))]:
             last = self._run_goal(runtime, goal, trigger=trigger)
         return last
 
@@ -1449,6 +1520,15 @@ class DelamainSubsystem(Subsystem):
         agent = (context or {}).get("agent") or self._agent
         bridge_events = self._sync_bridge(agent)
 
+        if self.core_driven:
+            # Stage 18B: the core calls effector.step() after this tick. Running
+            # goals here as well would create a second execution driver. The
+            # bridge may still reconcile durable state, but it cannot execute.
+            result: Dict[str, Any] = {"core_driven": True}
+            if bridge_events:
+                result["events"] = bridge_events
+            return result
+
         if self.tick_interval > 1 and int(cycle) % self.tick_interval != 0:
             return {"events": bridge_events} if bridge_events else None
 
@@ -1543,6 +1623,13 @@ class DelamainSubsystem(Subsystem):
                 "workspace": str(self.workspace),
                 "db_path": str(self.db_path),
                 "runtime_ready": self.runtime is not None,
+                "core_driven": self.core_driven,
+                "execution_driver": "core" if self.core_driven else "subsystem",
+                "core_driven_error": (
+                    "core-driven mode requires the effector to be enabled"
+                    if self.core_driven and not self.effector.enabled
+                    else None
+                ),
                 "tick_interval": self.tick_interval,
                 "max_goals_per_tick": self.max_goals_per_tick,
                 "max_attempts": self.max_attempts,

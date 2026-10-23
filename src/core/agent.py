@@ -60,6 +60,8 @@ from src.core.subsystem_base import (
     PluginRegistry,
     attach_existing_subsystem,
 )
+# Stage 18B: the core owns the clock for pending effector requests.
+from src.core.effector_driver import EffectorDriver
 
 
 class DigitalBeing:
@@ -530,22 +532,47 @@ class DigitalBeing:
             # Stage 18A: expose the core-owned effector boundary. The adapter
             # is disabled by default and does not change the live agent loop.
             self.delamain_effector = getattr(self.delamain, "effector", None)
+            # Stage 18B: in integrated mode the core invokes step() once per
+            # cycle. Without the flag the old subsystem tick remains the sole
+            # driver, so no default behavior changes.
+            self.effector_driver = None
+            if (
+                self.delamain_effector is not None
+                and getattr(self.delamain_effector, "core_driven", False)
+            ):
+                self.effector_driver = EffectorDriver(
+                    self.delamain_effector,
+                    enabled=True,
+                )
         except Exception as exc:
             self.delamain = None
             self.delamain_effector = None
+            self.effector_driver = None
             get_logger().log(f"[{self.name}] Delamain-local не подключён: {exc}")
 
     def get_subsystems_status(self) -> Dict:
         """Снимок всех подсистем для дашборда (Этап 3.5)."""
-        return self.plugin_registry.status_all()
+        status = self.plugin_registry.status_all()
+        driver = getattr(self, "effector_driver", None)
+        if driver is not None:
+            status["effector_driver"] = driver.status()
+        return status
 
     def tick_subsystems(self, cycle: int) -> Dict:
         """Вызвать tick() всех подсистем через PluginRegistry (Этап 3.5).
 
         Не заменяет основной evolve() — это лёгкий «параллельный» путь для
         плагинов, которые хотят tick() без полного цикла эволюции.
+
+        Stage 18B: если включён core-driven режим, после реестра ядро делает
+        ровно один шаг эффектора. Сам DelamainSubsystem в этом режиме не
+        исполняет цели, поэтому второго tick-цикла не возникает.
         """
-        return self.plugin_registry.tick_all(cycle, {"agent": self})
+        report = self.plugin_registry.tick_all(cycle, {"agent": self})
+        driver = getattr(self, "effector_driver", None)
+        if driver is not None:
+            report["effector"] = driver.tick(cycle)
+        return report
 
     # === Единый источник правды для энергии ===
     # self.energy теперь читается/пишется через energy_subsystem.

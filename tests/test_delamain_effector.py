@@ -270,3 +270,183 @@ def test_event_sink_failure_does_not_break_execution(tmp_path: Path) -> None:
         assert sub.effector.status()["last_error"]
     finally:
         sub.teardown()
+
+
+def test_core_driven_tick_is_passive_and_step_executes_once(
+    tmp_path: Path,
+) -> None:
+    sub = make_sub(tmp_path, core_driven=True)
+    sub.setup({})
+    try:
+        request = write_request("core-step")
+        sub.effector.submit(request)
+        note = tmp_path / "workspace" / "notes" / "a.txt"
+
+        # The subsystem tick must not execute the goal; the core driver does.
+        event = sub.tick(1, {})
+        assert event is not None
+        assert event["core_driven"] is True
+        assert not note.exists()
+        assert sub.effector.poll(request.request_id).status is EffectorStatus.QUEUED
+
+        first = sub.effector.step(1)
+        assert first is not None
+        assert first.status is EffectorStatus.SUCCEEDED
+        assert first.detail["attempts"] == 1
+        assert note.read_text(encoding="utf-8") == "hello"
+
+        # One core cycle is one step, even if a caller asks again.
+        assert sub.effector.step(1) is None
+        final = sub.effector.poll(request.request_id)
+        assert final.status is EffectorStatus.SUCCEEDED
+        assert len(sub.list_goals()) == 1
+    finally:
+        sub.teardown()
+
+
+def test_core_driven_step_respects_existing_tick_interval(
+    tmp_path: Path,
+) -> None:
+    sub = make_sub(tmp_path, core_driven=True, tick_interval=2)
+    sub.setup({})
+    try:
+        request = write_request("interval-core")
+        sub.effector.submit(request)
+        note = tmp_path / "workspace" / "notes" / "a.txt"
+
+        assert sub.effector.step(1) is None
+        assert not note.exists()
+        result = sub.effector.step(2)
+        assert result is not None
+        assert result.status is EffectorStatus.SUCCEEDED
+        assert note.exists()
+    finally:
+        sub.teardown()
+
+
+def test_core_driven_step_ignores_legacy_delamain_goals(
+    tmp_path: Path,
+) -> None:
+    sub = make_sub(tmp_path, core_driven=True)
+    sub.setup({})
+    try:
+        legacy = sub.queue_goal("legacy goal", "запиши в legacy.txt: x")
+        request = write_request("effector-only", content="from-effector")
+        sub.effector.submit(request)
+
+        result = sub.effector.step(1)
+        assert result is not None
+        assert result.request_id == "effector-only"
+        assert sub.get_goal(legacy["id"])["status"] == "pending"
+        assert not (tmp_path / "workspace" / "legacy.txt").exists()
+        assert (
+            tmp_path / "workspace" / "notes" / "a.txt"
+        ).read_text(encoding="utf-8") == "from-effector"
+
+        # Even a later subsystem tick cannot turn the legacy queue into a
+        # second action driver while core-driven mode is active.
+        sub.tick(2, {})
+        assert sub.get_goal(legacy["id"])["status"] == "pending"
+        assert not (tmp_path / "workspace" / "legacy.txt").exists()
+    finally:
+        sub.teardown()
+
+
+def test_core_driven_pending_approval_survives_restart(
+    tmp_path: Path,
+) -> None:
+    first = make_sub(tmp_path, approval_mode="dangerous", core_driven=True)
+    first.setup({})
+    request = write_request("core-approval")
+    first.effector.submit(request)
+    waiting = first.effector.step(1)
+    assert waiting is not None
+    assert waiting.status is EffectorStatus.WAITING_APPROVAL
+    assert waiting.approval_id
+    first.teardown()
+
+    second = make_sub(tmp_path, approval_mode="dangerous", core_driven=True)
+    second.setup({})
+    try:
+        restored = second.effector.poll(request.request_id)
+        assert restored.status is EffectorStatus.WAITING_APPROVAL
+        assert restored.approval_id == waiting.approval_id
+
+        # Waiting approval is not a reason to create a second approval or a
+        # second episode; the core step simply has nothing ready to run.
+        assert second.effector.step(2) is None
+        assert len(second.list_approvals(status="pending")) == 1
+        assert len(second.list_goals()) == 1
+
+        approved = second.approve(restored.approval_id)
+        assert approved["ok"] is True
+        final = second.effector.poll(request.request_id)
+        assert final.status is EffectorStatus.SUCCEEDED
+        assert final.ok is True
+    finally:
+        second.teardown()
+
+
+def test_core_driven_flag_is_default_off_and_env_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DELAMAIN_EFFECTOR_CORE_DRIVEN", raising=False)
+    off = make_sub(tmp_path / "off")
+    assert off.core_driven is False
+    assert off.status()["execution_driver"] == "subsystem"
+    off.teardown()
+
+    monkeypatch.setenv("DELAMAIN_EFFECTOR_CORE_DRIVEN", "1")
+    on = make_sub(tmp_path / "on")
+    try:
+        assert on.core_driven is True
+        assert on.effector.core_driven is True
+        assert on.status()["execution_driver"] == "core"
+    finally:
+        on.teardown()
+
+
+def test_digital_being_wires_one_core_driver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.core.agent import DigitalBeing
+    from src.core.subsystem_base import PluginRegistry
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("DELAMAIN_ENABLED", "1")
+    monkeypatch.setenv("DELAMAIN_EFFECTOR_ENABLED", "1")
+    monkeypatch.setenv("DELAMAIN_EFFECTOR_CORE_DRIVEN", "1")
+    monkeypatch.setenv("DELAMAIN_TICK_INTERVAL", "1")
+    PluginRegistry.reset_global()
+    agent = None
+    try:
+        agent = DigitalBeing("CoreDriverIntegration")
+        assert agent.effector_driver is not None
+        assert agent.effector_driver.effector is agent.delamain_effector
+        assert agent.delamain.core_driven is True
+        assert (
+            agent.get_subsystems_status()["effector_driver"]["enabled"] is True
+        )
+
+        request = write_request("agent-core", content="agent")
+        agent.delamain_effector.submit(request)
+        report = agent.tick_subsystems(1)
+        assert report["effector"]["result"]["status"] == "succeeded"
+        assert (
+            tmp_path / "data" / "delamain" / "workspace" / "notes" / "a.txt"
+        ).read_text(encoding="utf-8") == "agent"
+
+        goals = agent.delamain.list_goals()
+        assert len(goals) == 1
+        assert goals[0]["status"] == "done"
+        assert goals[0]["metadata"]["attempts"] == 1
+
+        again = agent.tick_subsystems(1)
+        assert again["effector"]["skipped"] == "duplicate_cycle"
+        assert len(agent.delamain.list_goals()) == 1
+    finally:
+        if agent is not None:
+            agent.plugin_registry.teardown_all()
+        PluginRegistry.reset_global()

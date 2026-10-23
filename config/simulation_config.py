@@ -389,6 +389,12 @@ class LongRunningConfig:
     # DelamainEffectorAdapter; автономное исполнение при этом не запускается.
     DELAMAIN_EFFECTOR_ENABLED = False
 
+    # Stage 18B: единый драйвер. По умолчанию выключен. При включении
+    # DelamainSubsystem.tick() перестаёт исполнять цели, а ядро вызывает
+    # effector.step() не более одного раза за свой цикл. Требует
+    # DELAMAIN_EFFECTOR_ENABLED=True; без этого цели не исполняются.
+    DELAMAIN_EFFECTOR_CORE_DRIVEN = False
+
 
 # Глобальная конфигурация
 SIM_CONFIG = SimulationConfig()
