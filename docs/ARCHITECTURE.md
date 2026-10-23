@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–17)
+## 🧪 Слой действия Delamain-local (этапы 7–18)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -98,6 +98,10 @@
   planner-предложенное authoring-решение для когнитивной цели;
 * `DelamainSubsystem` — опциональная подсистема с очередью целей, `tick()`,
   bounded backoff, опциональным replan и step repair;
+* `src/core/effector_port.py` — контракт, которым владеет ядро:
+  `EffectorRequest`, `EffectorResult`, `EffectorPort` и `EventSink`;
+* `DelamainEffectorAdapter` — идемпотентный адаптер эффектора; реализует
+  контракт поверх Delamain, но не создаёт цели сам;
 * `evaluation` — офлайн-загрузчик data-only suite, `ScriptedPlanner`,
   execution/planning runners и агрегатор метрик; runtime его не импортирует.
 
@@ -160,6 +164,19 @@ long-horizon, skill-reuse, safety, planning-метриками и разбивк
 сети или прав исполнения и не является доказательством AGI. CLI:
 `python -m src.delamain.evaluation --suite evals/delamain_stage17.json`.
 
+С этапа 18A у ядра есть собственный контракт эффектора
+(`src/core/effector_port.py`), а Delamain реализует его через
+`DelamainEffectorAdapter`. Ядро отправляет явный `EffectorRequest` с
+`request_id`; адаптер создаёт ровно одну durable цель, хранит
+идемпотентный ключ в metadata и возвращает `EffectorResult`. Повторный
+`submit()` после перезапуска не дублирует действие, а тот же id с другим
+payload даёт `EffectorConflict`. Approval и sandbox остаются прежними;
+`cancel` отложен до появления единой очереди целей. Флаг
+`DELAMAIN_EFFECTOR_ENABLED=False`: в 18A ядро ещё не вызывает эффектор
+автоматически и Delamain может тикать отдельно. В обычном агенте граница
+доступна как `agent.delamain_effector`. Переход к одному циклу, бюджету и
+истории описан в [INTEGRATION.md](INTEGRATION.md).
+
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
 live-схему действий через `bind_registry()`, требует JSON-план, проверяет
 имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
@@ -209,8 +226,10 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 [STAGE13_REPORT.md](STAGE13_REPORT.md),
 [STAGE14_REPORT.md](STAGE14_REPORT.md),
 [STAGE15_REPORT.md](STAGE15_REPORT.md),
-[STAGE16_REPORT.md](STAGE16_REPORT.md) и
-[STAGE17_REPORT.md](STAGE17_REPORT.md).
+[STAGE16_REPORT.md](STAGE16_REPORT.md),
+[STAGE17_REPORT.md](STAGE17_REPORT.md) и
+[STAGE18_REPORT.md](STAGE18_REPORT.md). Дорожная карта перехода к одному
+существу — в [INTEGRATION.md](INTEGRATION.md).
 
 ## 🔌 Плагины и расширяемость (Этап 3.5)
 

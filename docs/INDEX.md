@@ -10,6 +10,7 @@
 | [README.md](../README.md) | всем | обзор, быстрый старт, текущее состояние |
 | [USAGE.md](USAGE.md) | пользователю | запуск, команды, настройки, трей-режим |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | разработчику / агенту | устройство ядра, подсистемы, цикл жизни |
+| [INTEGRATION.md](INTEGRATION.md) | разработчику / агенту | одно существо и один эффектор: контракт, границы власти, дорожная карта 18–24 |
 | [WILL.md](WILL.md) | пользователю / агенту | свобода воли, права, этика |
 | [EVOLUTION.md](EVOLUTION.md) | разработчику / агенту | как агент может меняться |
 
@@ -24,7 +25,7 @@
 | [STAGE4_REPORT.md](STAGE4_REPORT.md) | гигиена кода, мёртвый код, мелкие баги |
 | [STAGE5_REPORT.md](STAGE5_REPORT.md) | смысл и метрики: цели, типы действий, декомпозиция |
 | [STAGE6_REPORT.md](STAGE6_REPORT.md) | документация: индекс, ссылки, актуализация |
-| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan, контекст ошибки, bounded repair и оценка возможностей |
+| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan, контекст ошибки, bounded repair, оценка возможностей и effector-контракт |
 | [STAGE7_REPORT.md](STAGE7_REPORT.md) | первый замкнутый контур Delamain-local |
 | [STAGE8_REPORT.md](STAGE8_REPORT.md) | интеграция Delamain-local и цикл исполняемых целей |
 | [STAGE9_REPORT.md](STAGE9_REPORT.md) | навыки, повторные попытки и память-зависимый цикл |
@@ -36,6 +37,7 @@
 | [STAGE15_REPORT.md](STAGE15_REPORT.md) | перепланирование с контекстом упавшего шага |
 | [STAGE16_REPORT.md](STAGE16_REPORT.md) | ограниченный repair внутри одной попытки, durable repair-approval |
 | [STAGE17_REPORT.md](STAGE17_REPORT.md) | детерминированная оценка возможностей: suite, метрики, CLI и ограничения |
+| [STAGE18_REPORT.md](STAGE18_REPORT.md) | core-owned effector contract: идемпотентный адаптер, restart, approval и ограничения 18A |
 | [CHANGELOG.md](../CHANGELOG.md) | история изменений |
 
 ## Эксплуатация и сборка
@@ -70,7 +72,7 @@
 
 В проекте встречаются две разные нумерации:
 
-* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE17` (безопасность и утечка,
+* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE18` (безопасность и утечка,
   данные и поиск, изоляция тестов, гигиена, смысл/метрики, документация,
   первый контур действия/памяти Delamain-local, интеграция этого контура
   с агентом, переиспользование навыков и повторы, опциональный локальный
@@ -78,7 +80,8 @@
   исполняемых целей, безопасный authoring executable-payload, bounded
   backoff и перепланирование после ошибки, replan с контекстом упавшего
   шага, bounded repair внутри одной попытки, детерминированная оценка
-  возможностей и CLI для неё).
+  возможностей и CLI для неё, core-owned effector contract для перехода
+  от двух контуров к одному существу).
   Это текущая линия работ. Этап 0 был подготовительным (инициализация git,
   бэкап `data/`, удаление исходного лога) и отдельного отчёта не имеет —
   его результат зафиксирован в [BASELINE.md](BASELINE.md).

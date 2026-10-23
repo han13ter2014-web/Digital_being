@@ -527,8 +527,12 @@ class DigitalBeing:
                 self.plugin_registry.register(self.delamain)
             else:
                 self.delamain = existing
+            # Stage 18A: expose the core-owned effector boundary. The adapter
+            # is disabled by default and does not change the live agent loop.
+            self.delamain_effector = getattr(self.delamain, "effector", None)
         except Exception as exc:
             self.delamain = None
+            self.delamain_effector = None
             get_logger().log(f"[{self.name}] Delamain-local не подключён: {exc}")
 
     def get_subsystems_status(self) -> Dict:

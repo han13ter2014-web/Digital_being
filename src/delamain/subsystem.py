@@ -22,6 +22,11 @@ An optional bridge (``DELAMAIN_BRIDGE_ENABLED=1``) links the active cognitive
 goal from ``GoalSubsystem`` to at most one durable Delamain goal when the
 cognitive goal carries an explicit ``execution`` payload. The bridge is also
 disabled by default and never guesses a command from a title.
+
+``subsystem.effector`` exposes the core-owned, idempotent effector contract
+(``DELAMAIN_EFFECTOR_ENABLED``, off by default). It submits one explicit goal
+per request id and never starts execution on its own; the subsystem's normal
+``tick()`` remains the driver in stage 18A.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ from src.core.subsystem_base import Subsystem
 
 from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
 from .context import build_failure_context
+from .effector import DelamainEffectorAdapter
 from .goal_authoring import GoalAuthoring
 from .goal_bridge import GoalBridge, derive_bridge_status
 from .llm_planner import OllamaPlanner
@@ -101,7 +107,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.9.0"
+    version = "0.10.0"
 
     def __init__(
         self,
@@ -130,6 +136,7 @@ class DelamainSubsystem(Subsystem):
         approval_mode: Optional[str] = None,
         bridge_enabled: Optional[bool] = None,
         goal_proposal_enabled: Optional[bool] = None,
+        effector_enabled: Optional[bool] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
 
@@ -332,6 +339,12 @@ class DelamainSubsystem(Subsystem):
                 goal_proposal_enabled = _parse_bool(proposal_env)
         self.goal_proposal_enabled = bool(goal_proposal_enabled)
         self.authoring = GoalAuthoring(self)
+        # Stage 18A: a stable, core-owned action boundary. Disabled by default
+        # and inert until a caller submits an explicit request.
+        self.effector = DelamainEffectorAdapter(
+            self,
+            enabled=effector_enabled,
+        )
 
         bytes_value = (
             max_file_bytes
@@ -704,6 +717,7 @@ class DelamainSubsystem(Subsystem):
             new_metadata.update(
                 {
                     "approval_id": None,
+                    "last_approval_id": approval_id,
                     "approval_status": "rejected",
                     "approval_reason": str(reason or ""),
                     "last_attempt_at": utc_now_iso(),
@@ -1553,6 +1567,7 @@ class DelamainSubsystem(Subsystem):
                 },
                 "bridge": self.bridge.status(),
                 "authoring": self.authoring.status(),
+                "effector": self.effector.status(),
                 "planner": self._planner_info(),
                 "last_result": self._last_result,
             }

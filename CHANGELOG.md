@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-23 — Core-owned effector contract (этап 18A)
+
+* **Архитектурное решение** — Delamain не включается как второй агент.
+  Ядро владеет идентичностью, целями, временем, бюджетом и историей;
+  Delamain становится его эффектором. Дорожная карта 18B–24 —
+  `docs/INTEGRATION.md`.
+* **Контракт ядра** — новый `src/core/effector_port.py`: `EffectorRequest`,
+  `EffectorResult`, `EffectorStatus`, `EffectorPort`, `EffectorError`,
+  `EffectorDisabled`, `EffectorConflict` и `EventSink`. Контракт не
+  импортирует Delamain. `cancel` отложен до появления единой очереди.
+* **Идемпотентный адаптер** — `src/delamain/effector.py`:
+  `submit()` создаёт ровно одну durable цель, `poll()` только наблюдает,
+  `status()` отдаёт диагностику. `request_id` хранится в metadata
+  (`effector_request_id`), повторный submit после перезапуска не создаёт
+  дубль, а тот же id с другим payload даёт `EffectorConflict`.
+* **Интеграция** — `DelamainSubsystem` создаёт `subsystem.effector`,
+  принимает `effector_enabled` и публикует статус эффектора;
+  `DigitalBeing` публикует `agent.delamain_effector`. Версия Delamain —
+  `0.10.0`.
+* **Флаг** — `DELAMAIN_EFFECTOR_ENABLED=False`. При выключении `submit()`
+  выбрасывает `EffectorDisabled`, runtime/БД/workspace не создаются;
+  обычное поведение агента не меняется.
+* **Безопасность** — sandbox и approval не меняются. Опасный запрос
+  переходит в `waiting_approval` без side effects; approve выполняет его
+  один раз, reject даёт `rejected` и не создаёт файл.
+* **Тесты** — новый `tests/test_delamain_effector.py` (11 тестов):
+  валидация, default-off, идемпотентность, конфликт, approval/reject,
+  restart, sandbox escape, статусы и ошибка event sink. Все Delamain-тесты:
+  156 passed. Полный прогон — `591 passed, 2 skipped` (20:01).
+* **Ограничения** — единый цикл, бюджет, `cancel`, единая очередь и
+  machine-readable life-continuity suite ещё не реализованы. Это контракт
+  и адаптер, а не доказательство AGI.
+* **Версия ядра** — `0.10.0`.
+* **Документация** — `docs/INTEGRATION.md`, `docs/STAGE18_REPORT.md`;
+  обновлены README, `docs/INDEX.md`, `docs/ARCHITECTURE.md`,
+  `docs/DELAMAIN_LOCAL.md` и `docs/USAGE.md`.
+
 ### 2026-10-22 — Delamain-local: измеримая оценка возможностей (этап 17)
 
 * **Офлайн-suite** — `evals/delamain_stage17.json`, 18 data-only случаев:
