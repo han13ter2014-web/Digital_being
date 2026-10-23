@@ -706,6 +706,7 @@ def test_digital_being_registers_delamain_disabled(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("DELAMAIN_ENABLED", raising=False)
     monkeypatch.delenv("DELAMAIN_LOCAL_ENABLED", raising=False)
+    monkeypatch.delenv("DELAMAIN_EFFECTOR_ENABLED", raising=False)
     PluginRegistry.reset_global()
     agent = None
     try:
@@ -713,6 +714,8 @@ def test_digital_being_registers_delamain_disabled(tmp_path: Path, monkeypatch) 
         assert agent.delamain is not None
         assert agent.delamain.enabled is False
         assert agent.delamain.runtime is None
+        assert agent.delamain_effector is agent.delamain.effector
+        assert agent.delamain_effector.enabled is False
         assert agent.plugin_registry.get("delamain") is agent.delamain
     finally:
         if agent is not None:

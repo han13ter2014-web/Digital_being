@@ -384,6 +384,11 @@ class LongRunningConfig:
     # Включается через DELAMAIN_GOAL_PROPOSAL_ENABLED=1.
     DELAMAIN_GOAL_PROPOSAL_ENABLED = False
 
+    # Stage 18A: контракт «ядро -> эффектор». По умолчанию выключен. При
+    # включении ядро может отправлять явные идемпотентные запросы через
+    # DelamainEffectorAdapter; автономное исполнение при этом не запускается.
+    DELAMAIN_EFFECTOR_ENABLED = False
+
 
 # Глобальная конфигурация
 SIM_CONFIG = SimulationConfig()
