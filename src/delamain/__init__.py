@@ -17,6 +17,7 @@ first working vertical slice of the new architecture:
 * optional retry backoff and failure-aware replanning, disabled by default;
 * optional bounded step repair inside one attempt, disabled by default;
 * a core-owned, idempotent effector contract, disabled by default;
+* an optional core-driven effector step, also disabled by default;
 * an offline, deterministic capability evaluation harness.
 
 The LLM layer is never required: constructing the core does not start Ollama

@@ -9,9 +9,10 @@ lives in ``src.delamain.effector`` and is injected at the composition root, so
 the core can be tested with a fake effector and the optional action layer can
 still be imported without the rest of the project.
 
-The contract is intentionally small.  ``cancel`` is not part of it yet: a
-cancellation primitive needs one authoritative goal queue, which is the next
-integration step rather than a property of the first adapter.
+The contract is intentionally small.  ``step`` lets the core own the clock
+without learning how actions are stored or executed.  ``cancel`` is not part
+of it yet: a cancellation primitive needs one authoritative goal queue, which
+is a later integration step rather than a property of the adapter.
 """
 
 from __future__ import annotations
@@ -186,12 +187,21 @@ EventSink = Callable[[str, Mapping[str, Any]], None]
 
 @runtime_checkable
 class EffectorPort(Protocol):
-    """The only surface through which the core may request an action."""
+    """The only surface through which the core may request an action.
+
+    ``step`` is the active half of the boundary.  In core-driven mode the core
+    calls it at most once per cycle; the effector advances at most one pending
+    request and returns the observed result.  A step must not create a second
+    scheduler, budget or history.
+    """
 
     def submit(self, request: EffectorRequest) -> EffectorResult:
         ...
 
     def poll(self, request_id: str) -> EffectorResult:
+        ...
+
+    def step(self, cycle: int) -> Optional[EffectorResult]:
         ...
 
     def status(self) -> Mapping[str, Any]:

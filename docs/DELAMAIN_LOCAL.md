@@ -1,7 +1,7 @@
 # Delamain-local: локальное ядро действия и памяти
 
-> **Статус:** этап 18A — core-owned effector contract,
-> 2026-10-23.
+> **Статус:** этапы 18A–18B — core-owned effector contract и
+> core-driven шаг ядра, 2026-10-23.
 > Это не «сильный ИИ» и не доказательство сознания. Это детерминированное
 > ядро, которое умеет выполнить задачу, проверить результат, записать опыт
 > в локальную память, повторить/переиспользовать успешный план, — при
@@ -38,8 +38,11 @@
 > С этапа 18A Delamain получает core-owned effector contract:
 > `EffectorRequest`/`EffectorPort` задают границу власти, а
 > `DelamainEffectorAdapter` делает явный `submit()` идемпотентным и
-> переживающим перезапуск. Флаг `DELAMAIN_EFFECTOR_ENABLED` выключен по
-> умолчанию; единый цикл, бюджет и `cancel` ещё не реализованы.
+> переживающим перезапуск. С этапа 18B флаг
+> `DELAMAIN_EFFECTOR_CORE_DRIVEN` позволяет ядру делать один шаг
+> эффектора за цикл, а `tick()` подсистемы в этом режиме только
+> синхронизирует мост и не исполняет цели. Оба флага выключены по
+> умолчанию; бюджет, единая очередь и `cancel` ещё не реализованы.
 
 ## 1. Зачем этот слой
 
@@ -723,12 +726,12 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 `planning_accuracy`, счётчики repair/approval и разбивку по категориям.
 Это regression-baseline, а не доказательство AGI.
 
-### 3.12. Effector-контракт (этап 18A)
+### 3.12. Effector-контракт и core-driven шаг (этапы 18A–18B)
 
 `src/core/effector_port.py` задаёт границу между ядром и слоем действия:
-`EffectorRequest`, `EffectorResult`, `EffectorPort` и необязательный
-`EventSink`. Ядро владеет целями, временем и историей; эффектор только
-исполняет явный запрос.
+`EffectorRequest`, `EffectorResult`, `EffectorPort`, `step(cycle)` и
+необязательный `EventSink`. Ядро владеет целями, временем и историей;
+эффектор только исполняет явный запрос.
 
 `DelamainEffectorAdapter` (`src/delamain/effector.py`) реализует контракт
 поверх подсистемы:
@@ -740,14 +743,27 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 * тот же id с другим payload даёт `EffectorConflict`;
 * `poll()` только наблюдает и отображает `queued`, `waiting_approval`,
   `succeeded`, `failed`, `rejected`, `disabled` или `not_found`;
-* `status()` показывает флаг, готовность runtime и счётчики запросов.
+* `step(cycle)` делает не более одного шага за цикл и возвращает
+  `EffectorResult` либо `None`;
+* `status()` показывает флаг, `core_driven`, готовность runtime,
+  счётчики запросов и последний шаг.
 
 Адаптер доступен как `subsystem.effector` и `agent.delamain_effector`.
 Флаг `DELAMAIN_EFFECTOR_ENABLED` по умолчанию `False`: без него
 `submit()` выбрасывает `EffectorDisabled`, а runtime/БД/workspace не
-создаются. Approval и sandbox не меняются. `cancel` пока не реализован:
-для него нужна единая очередь целей. В 18A исполнение всё ещё идёт через
-существующий `tick()` подсистемы; переход к единому циклу описан в
+создаются. Approval и sandbox не меняются.
+
+При `DELAMAIN_EFFECTOR_CORE_DRIVEN=True` (тоже `False` по умолчанию)
+`src/core/effector_driver.py` вызывает `step()` один раз за цикл ядра из
+`DigitalBeing.tick_subsystems()`. Повторный цикл с тем же номером
+пропускается. `DelamainSubsystem.tick()` в этом режиме исполняет только
+мост и не вызывает `run_pending_goal()`. `run_effector_pending()`
+выбирает лишь цели с `effector_request_id`; обычные legacy-цели остаются
+pending до единой очереди этапа 20. `DELAMAIN_TICK_INTERVAL` продолжает
+ограничивать частоту шагов. Новых таблиц, бюджета и истории нет. Если
+core-driven включён без effector, цели не исполняются: это fail-safe,
+видимый в `status()` как `core_driven_error`. `cancel` пока не
+реализован: для него нужна единая очередь целей. Подробнее —
 [INTEGRATION.md](INTEGRATION.md).
 
 ## 4. Как запустить
@@ -902,6 +918,8 @@ python main_tray.py
 | `DELAMAIN_APPROVAL_MODE` | `off` | approval: `off`, `dangerous` или `all` |
 | `DELAMAIN_BRIDGE_ENABLED` | `0` | мост активной когнитивной цели в Delamain |
 | `DELAMAIN_GOAL_PROPOSAL_ENABLED` | `0` | разрешить `/goals propose`; ручной `exec` работает без этого флага при включённом Delamain |
+| `DELAMAIN_EFFECTOR_ENABLED` | `0` | включить core-owned effector adapter; без него `submit()` даёт `EffectorDisabled` |
+| `DELAMAIN_EFFECTOR_CORE_DRIVEN` | `0` | ядро делает один шаг эффектора за цикл; требует `DELAMAIN_EFFECTOR_ENABLED=1` |
 
 Те же значения есть в `config/simulation_config.py` как `DELAMAIN_*`.
 Env имеет приоритет над config.
@@ -958,6 +976,8 @@ python -m pytest `
   tests/test_delamain_goal_bridge.py `
   tests/test_delamain_goal_authoring.py `
   tests/test_delamain_step_repair.py `
+  tests/test_delamain_effector.py `
+  tests/test_effector_driver.py `
   tests/test_delamain_subsystem.py `
   tests/test_delamain_evaluation.py -q
 ```
@@ -1018,6 +1038,9 @@ python -m pytest `
 * команды `/delamain approvals`, `approve`, `reject` и статус approval;
 * effector Stage 18A: default-off, идемпотентный submit, конфликт payload,
   restart pending approval, reject и sandbox escape;
+* core-driven Stage 18B: пассивный tick, один шаг за цикл, duplicate
+  cycle, interval, изоляция legacy-целей, fail-safe без effector и
+  wiring драйвера в `DigitalBeing`;
 * мост Stage 12: дедупликация, approval/reject, predicate, следующая цель;
 * ручной `/goals exec`, pending/accept/reject proposal и decision в metadata;
 * proposal выключен по умолчанию, неизвестные actions отклоняются до attach;
@@ -1066,9 +1089,10 @@ python -m pytest `
   значимый бенчмарк. Execution-планы заданы данными, planning probes
   покрывают только регулярные выражения эвристики; общий язык, сеть и
   внешние API не оцениваются.
-* **Эффектор — пока только граница.** С этапа 18A `submit()` идемпотентен
-  и переживает перезапуск, но ядро ещё не является единственным драйвером
-  очереди. Нет `cancel`, единого бюджета и единой истории; идемпотентность
+* **Эффектор — первый единый драйвер, но не вся очередь.** С этапа 18B
+  ядро делает один шаг effector-цели за цикл, а tick подсистемы в этом
+  режиме пассивен. Однако обычные legacy-цели остаются pending до этапа
+  20; нет `cancel`, единого бюджета и единой истории; идемпотентность
   ищет `request_id` сканированием metadata, без индекса.
 * **Самоизменение кода не реализовано.** Approval и sandbox для этого уже
   есть, но нужны отдельные тесты и откат; менять исходники агента
@@ -1076,9 +1100,9 @@ python -m pytest `
 
 ## 7. Следующие шаги
 
-1. Этап 18B: ядро становится единственным драйвером pending-запросов
-   эффектора; проверить отсутствие второго tick-цикла, дублей и потери
-   pending approval.
+1. Этап 18B завершён: ядро делает один шаг effector-цели за цикл, без
+   второго tick-цикла, дублей и потери pending approval. Ограничение —
+   legacy-цели ждут единой очереди.
 2. Этап 19: единый бюджет и энергия на действие.
 3. Этап 20: единая очередь когнитивных и исполняемых целей и `cancel`.
 4. Этап 21: единая история: связать эпизоды действий с идентичностью,
