@@ -69,3 +69,21 @@ class WillRegistry:
 
     def get_recent(self, n: int = 10) -> List[Dict]:
         return self.entries[-n:]
+
+    def to_dict(self) -> Dict:
+        """Сериализует журнал воли для чекпоинта / снапшота."""
+        return {
+            "agent_name": self.agent_name,
+            "entries": list(self.entries),
+            "counters": dict(self._counters),
+            "last_value_change_cycle": self._last_value_change_cycle,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "WillRegistry":
+        """Восстанавливает журнал воли из сериализованного состояния."""
+        registry = cls(agent_name=data.get("agent_name") or "agent")
+        registry.entries = [dict(e) for e in (data.get("entries") or [])]
+        registry._counters = dict(data.get("counters") or {})
+        registry._last_value_change_cycle = int(data.get("last_value_change_cycle") or 0)
+        return registry

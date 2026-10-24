@@ -12,10 +12,12 @@ test_checkpoint_serializer.py — тесты для src.core.checkpoint_serializ
 import json
 import os
 import tempfile
+import pytest
 
 from src.core.checkpoint_serializer import (
     DEFAULT_CHECKPOINT_DIR,
     CheckpointSerializer,
+    CheckpointCorruptedError,
     apply_state_to_agent,
     build_state_from_agent,
 )
@@ -344,14 +346,15 @@ def test_load_nonexistent_returns_none():
         assert ser.load(os.path.join(tmp, "nope.json")) is None
 
 
-def test_load_corrupted_returns_none():
-    """load() на битом JSON → None (не падает)."""
+def test_load_corrupted_raises_error():
+    """load() на битом JSON → поднимает CheckpointCorruptedError."""
     with tempfile.TemporaryDirectory() as tmp:
         ser = CheckpointSerializer(checkpoint_dir=tmp, max_checkpoints=20)
         path = os.path.join(tmp, "Test_cycle_1.json")
         with open(path, "w", encoding="utf-8") as f:
             f.write("not a json {{{")
-        assert ser.load(path) is None
+        with pytest.raises(CheckpointCorruptedError):
+            ser.load(path)
 
 
 # ============================================================
@@ -491,12 +494,28 @@ def test_gzip_reduces_size_on_repetitive_data():
 
 def test_gzip_and_plain_files_coexist():
     """Старые .json и новые .json.gz файлы могут сосуществовать и читаются."""
+    from src.core.checkpoint_migrations import SCHEMA_VERSION
     with tempfile.TemporaryDirectory() as tmp:
         ser_plain = CheckpointSerializer(checkpoint_dir=tmp, compress=False)
         ser_gzip = CheckpointSerializer(checkpoint_dir=tmp, compress=True)
 
-        state1 = {"x": 1, "name": "Plain"}
-        state2 = {"x": 2, "name": "Gzip"}
+        # Include required fields for file integrity verification
+        state1 = {
+            "schema_version": SCHEMA_VERSION,
+            "name": "Agent",
+            "cycle_count": 10,
+            "energy": 100.0,
+            "x": 1,
+            "name": "Plain"
+        }
+        state2 = {
+            "schema_version": SCHEMA_VERSION,
+            "name": "Agent",
+            "cycle_count": 20,
+            "energy": 100.0,
+            "x": 2,
+            "name": "Gzip"
+        }
 
         path_plain = ser_plain.save(state1, "Agent", 10)
         path_gzip = ser_gzip.save(state2, "Agent", 20)
@@ -523,17 +542,16 @@ def test_gzip_and_plain_files_coexist():
         assert loaded_gzip["x"] == 2
 
 
-def test_gzip_load_corrupted_returns_none():
-    """Повреждённый gzip-файл load() возвращает None, не падает."""
+def test_gzip_load_corrupted_raises_error():
+    """Повреждённый gzip-файл load() поднимает CheckpointCorruptedError."""
     with tempfile.TemporaryDirectory() as tmp:
         ser = CheckpointSerializer(checkpoint_dir=tmp, compress=True)
         # Создаём битый gzip-файл
         path = os.path.join(tmp, "Test_cycle_1.json.gz")
         with open(path, "wb") as f:
             f.write(b"\x1f\x8b not really gzip data")  # магические байты есть, но дальше мусор
-        # load не должен бросать исключение
-        result = ser.load(path)
-        assert result is None
+        with pytest.raises(CheckpointCorruptedError):
+            ser.load(path)
 
 
 def test_gzip_compress_level_clamped():

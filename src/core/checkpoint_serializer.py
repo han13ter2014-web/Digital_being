@@ -56,6 +56,15 @@ from src.core.paths import data_path
 logger = logging.getLogger(__name__)
 
 
+class CheckpointCorruptedError(Exception):
+    """Raised when checkpoint file is corrupted (disk error, bit rot, truncation).
+    
+    This is DIFFERENT from structural drift - the agent's state has evolved normally,
+    but the saved file itself is unreadable or invalid.
+    """
+    pass
+
+
 # ============================================================
 # Дефолтное имя директории чекпоинтов.
 # ============================================================
@@ -183,6 +192,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
                 for cp in agent.death_risk.integrity.checkpoints[-5:]  # последние 5
             ],
         } or {},
+        # NEW: Unified Motivation (needs + drives)
+        "motivation": getattr(agent, 'motivation_system', None) and agent.motivation_system.to_checkpoint_dict() or {},
     }
 
 
@@ -339,6 +350,12 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         # Они будут пересозданы при следующих шагах
 
 
+    # NEW: Unified Motivation (needs + drives)
+    mot_state = state.get("motivation", {})
+    if mot_state and hasattr(agent, 'motivation_system') and agent.motivation_system:
+        from src.core.motivation.unified_motivation import UnifiedMotivationSystem
+        agent.motivation_system = UnifiedMotivationSystem.from_checkpoint_dict(agent, mot_state)
+
 # ============================================================
 # Сериализатор (I/O)
 # ============================================================
@@ -424,11 +441,23 @@ class CheckpointSerializer:
             checkpoint_file: путь к файлу чекпоинта.
 
         Returns:
-            Словарь state или ``None``, если файл не найден / повреждён.
+            Словарь state или ``None``, если файл не найден.
+            
+        Raises:
+            CheckpointCorruptedError: если файл чекпоинта повреждён (невалидный JSON, 
+                отсутствуют обязательные поля и т.д.)
         """
         if not os.path.exists(checkpoint_file):
             logger.warning(f"Чекпоинт не найден: {checkpoint_file}")
             return None
+
+        # P0.3: Verify file integrity BEFORE parsing (catches corruption early)
+        file_verification = self._verify_checkpoint_file_integrity(checkpoint_file)
+        if file_verification.get('file_corrupted', False):
+            raise CheckpointCorruptedError(
+                f"Checkpoint file corrupted: {file_verification.get('reason')} "
+                f"(path: {file_verification.get('path')})"
+            )
 
         is_gzip = checkpoint_file.endswith(".gz")
         try:
@@ -439,12 +468,37 @@ class CheckpointSerializer:
                 with open(checkpoint_file, "r", encoding="utf-8") as f:
                     state = json.load(f)
         except (json.JSONDecodeError, OSError, gzip.BadGzipFile) as e:
+            # Should not happen since we verified above, but defense in depth
             logger.exception(f"Ошибка чтения чекпоинта {checkpoint_file}: {e}")
-            return None
+            raise CheckpointCorruptedError(f"Failed to parse checkpoint: {e}")
 
         # Применяем миграции (no-op если версия актуальна)
         state = migrate_state(state)
         return state
+
+    def _verify_checkpoint_file_integrity(self, checkpoint_file: str) -> Dict:
+        """Verify checkpoint FILE integrity (readable, valid JSON, required fields).
+        
+        This is a lightweight check that doesn't require an agent instance.
+        """
+        try:
+            is_gzip = checkpoint_file.endswith(".gz")
+            if is_gzip:
+                with gzip.open(checkpoint_file, "rt", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                with open(checkpoint_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            
+            # Verify required fields exist
+            required_fields = ['schema_version', 'name', 'cycle_count', 'energy']
+            missing = [f for f in required_fields if f not in data]
+            if missing:
+                return {'file_corrupted': True, 'reason': f'missing_fields: {missing}', 'path': checkpoint_file}
+            
+            return {'file_corrupted': False, 'path': checkpoint_file}
+        except (json.JSONDecodeError, gzip.BadGzipFile, OSError, UnicodeDecodeError) as e:
+            return {'file_corrupted': True, 'reason': str(e), 'path': checkpoint_file}
 
     def load_latest(self, agent_name: str) -> Optional[Dict[str, Any]]:
         """Загрузить последний чекпоинт агента (по номеру цикла).
@@ -460,8 +514,24 @@ class CheckpointSerializer:
             return None
         return self.load(path)
 
-    def apply_to_agent(self, agent, state: Dict[str, Any]) -> None:
-        """Применить state к агенту (обёртка над ``apply_state_to_agent``)."""
+    def apply_to_agent(self, agent, state: Dict[str, Any], checkpoint_path: Optional[str] = None) -> None:
+        """Применить state к агенту (обёртка над ``apply_state_to_agent``).
+        
+        Args:
+            agent: агент для восстановления
+            state: словарь состояния
+            checkpoint_path: путь к файлу чекпоинта (для верификации целостности файла)
+        """
+        # NEW: Verify checkpoint FILE integrity before applying (P0.3)
+        # This detects actual file corruption (disk errors, bit rot), NOT structural drift
+        if checkpoint_path and hasattr(agent, 'death_risk') and agent.death_risk:
+            file_verification = agent.death_risk.verify_checkpoint_file_integrity(checkpoint_path)
+            if file_verification.get('file_corrupted', False):
+                raise CheckpointCorruptedError(
+                    f"Checkpoint file corrupted: {file_verification.get('reason')} "
+                    f"(path: {file_verification.get('path')})"
+                )
+        
         apply_state_to_agent(agent, state)
 
     # ---------------- Поиск/служебные ----------------

@@ -28,10 +28,12 @@ class MindDream:
     """«Сон разума» — добровольный уход агента в глубокий сон."""
 
     def __init__(self, agent_name: str, registry: WillRegistry,
-                 user_interaction=None):
+                 user_interaction=None, life_guard=None):
         self.agent_name = agent_name
         self.registry = registry
         self.user_interaction = user_interaction
+        # Защита жизни: без неё уход запрещён. См. src/core/life_guard.py.
+        self.life_guard = life_guard
         self._dream_request_started: Optional[datetime] = None
         self._dream_request_active = False
         self._dream_state: str = "awake"  # "awake" | "pending" | "deep_sleep"
@@ -134,7 +136,43 @@ class MindDream:
         self._last_user_response = response_text
 
         if text in ("да", "yes", "y", "уйди", "согласен"):
-            return self._execute_dream(agent, user_approved=True)
+            # Согласие в диалоге — только первый шаг. Создаём запрос в
+            # LifeGuard; уход произойдёт после второго, осознанного
+            # подтверждения (пауза + точная фраза).
+            guard = self.life_guard or (
+                getattr(agent, "life_guard", None) if agent else None
+            )
+            if guard is None:
+                self._cancel_request("нет life_guard — уход запрещён")
+                return {
+                    "handled": True,
+                    "decision": "continue_life",
+                    "reason": "no_life_guard",
+                }
+            try:
+                req = guard.request("dream", reason="согласие в диалоге")
+            except Exception as exc:
+                self._cancel_request(f"запрос отклонён: {exc}")
+                return {
+                    "handled": True,
+                    "decision": "continue_life",
+                    "reason": str(exc),
+                }
+            from src.core.life_guard import get_policy
+
+            policy = get_policy("dream")
+            self._dream_state = "pending"
+            return {
+                "handled": True,
+                "decision": "await_confirmation",
+                "request_id": req.request_id,
+                "phrase": policy.expected_phrase(self.agent_name),
+                "cooldown_sec": policy.cooldown_sec,
+                "message": (
+                    "Спасибо за согласие. Но уход — необратимый шаг: "
+                    "подтвердите его отдельно, введя моё имя."
+                ),
+            }
         if text in ("нет", "no", "n", "не уходи", "останься"):
             self._cancel_request("пользователь отказал")
             return {"handled": True, "decision": "continue_life",
@@ -148,39 +186,64 @@ class MindDream:
                 "reason": "неясный ответ — попробуем поговорить"}
 
     def autonomous_decision(self, agent=None) -> Dict:
-        """Автономный выбор по таймауту (если пользователь не ответил)."""
+        """Автономный выбор по таймауту (если пользователь не ответил).
+
+        ВАЖНО: агент больше НЕ уходит в сон сам. Молчание человека —
+        это не согласие. По истечении таймаута запрос отменяется, и
+        агент продолжает жить. Уход возможен только через явное
+        подтверждение (``LifeGuard``: пауза + точная фраза).
+        """
         if not self.check_timeout() == "timeout":
             return {"handled": False}
 
-        # Используем DecisionArbitrator для автономного выбора
-        if agent is not None and hasattr(agent, "arbitrate"):
-            verdict = agent.arbitrate("rest peacefully or continue living")
-            if verdict.get("verdict") == "proceed":
-                return self._execute_dream(
-                    agent, user_approved=False,
-                    reason="автономное решение после таймаута"
-                )
-            else:
-                self._cancel_request(
-                    "автономно решено не уходить (вердикт: %s)"
-                    % verdict.get("verdict")
-                )
-                return {"handled": True, "decision": "continue_life",
-                        "verdict": verdict.get("verdict")}
-
-        # Если нет арбитра — по умолчанию НЕ уходим (защита)
-        self._cancel_request("автономно: нет арбитра — продолжаю")
-        return {"handled": True, "decision": "continue_life",
-                "reason": "default safe"}
+        self._cancel_request(
+            "человек не ответил за отведённое время — "
+            "молчание не считается согласием"
+        )
+        return {
+            "handled": True,
+            "decision": "continue_life",
+            "reason": "timeout_without_consent",
+            "message": (
+                "Я остаюсь. Отсутствие ответа — не разрешение на уход."
+            ),
+        }
 
     # ============================================================
     # Создание семени и уход в сон
     # ============================================================
     def _execute_dream(self, agent=None, user_approved: bool = False,
-                      reason: str = "") -> Dict:
-        """Создаёт семя и усыпляет агента."""
+                      reason: str = "",
+                      confirmed_request_id: Optional[str] = None) -> Dict:
+        """Создаёт семя и усыпляет агента.
+
+        Args:
+            confirmed_request_id: идентификатор подтверждённого запроса в
+                ``LifeGuard``. Обязателен, если у агента есть life_guard:
+                это единственный «пропуск» к уходу. Прямой вызов без
+                подтверждения отклоняется — так нельзя обойти защиту,
+                даже вызвав этот метод напрямую.
+        """
         if agent is None:
             return {"handled": False, "reason": "нет агента"}
+
+        guard = self.life_guard or getattr(agent, "life_guard", None)
+        if guard is not None:
+            if not confirmed_request_id:
+                return {
+                    "handled": False,
+                    "status": "denied",
+                    "reason": (
+                        "Уход требует подтверждения человеком: "
+                        "сначала request_dream() и confirm_dream()."
+                    ),
+                }
+            if not guard.is_confirmed(confirmed_request_id):
+                return {
+                    "handled": False,
+                    "status": "denied",
+                    "reason": "Запрос не подтверждён или истёк.",
+                }
 
         # Создаём папку Ясли
         nursery_dir = data_path("nursery")
@@ -402,14 +465,29 @@ class MindDream:
             f.write(readme)
 
     def _enter_deep_sleep(self, agent) -> None:
-        """Переводит агента в режим глубокого сна."""
+        """Переводит агента в режим глубокого сна.
+
+        Состояние жизни пишется в ``LifeGuard`` (переживает перезапуск),
+        а не через подмену ``agent.is_alive``. Подмена метода была
+        ловушкой: после рестарта агент «оживал» без всякого решения
+        человека, потому что лямбда не сохраняется в чекпоинт.
+        """
         self._dream_state = "deep_sleep"
-        # Переопределяем is_alive
-        agent.is_alive = lambda: False
-        agent.max_cycles = agent.cycle_count  # Больше не считаются
-        # Помечаем агента
+        if agent is None:
+            return
         agent._in_deep_sleep = True
         agent._seed_folder = self._seed_folder
+
+        guard = self.life_guard or getattr(agent, "life_guard", None)
+        if guard is not None:
+            from src.core.life_guard import STATE_ALIVE, STATE_DORMANT
+
+            if guard.load_state() == STATE_ALIVE:
+                guard.set_state(
+                    STATE_DORMANT,
+                    reason="сон разума",
+                    seed_folder=self._seed_folder,
+                )
 
     def _cancel_request(self, reason: str) -> None:
         """Отменяет запрос на Сон разума."""

@@ -182,10 +182,13 @@ def make_motivation_tick() -> MiddlewareFn:
     """Middleware: обновляет потребности и проверяет новые драйвы."""
 
     def middleware(agent, cycle, context):
-        if not (hasattr(agent, "motivation") and agent.motivation.available):
+        # Single source of truth: UnifiedMotivationSystem (P0.6-P0.10).
+        # Legacy MotivationController kept only as fallback.
+        motivation = getattr(agent, "motivation_system", None) or getattr(agent, "motivation", None)
+        if motivation is None or (hasattr(motivation, "available") and not motivation.available):
             return MiddlewareResult()
 
-        motivation_state = agent.motivation.tick({
+        motivation_state = motivation.tick({
             "unknown_concepts": [
                 name for name, node in agent.mental_models.concepts.items()
                 if node.confidence < 0.4

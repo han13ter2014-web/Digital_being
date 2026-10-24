@@ -15,7 +15,7 @@ DecisionArbitrator — единая точка принятия решений.
 эмоции, память, этику и интуицию в одно решение.
 """
 
-from typing import Dict
+from typing import Dict, List, Any
 
 
 class DecisionArbitrator:
@@ -244,6 +244,102 @@ class DecisionArbitrator:
             "voices": opinions,
             "reasoning": " | ".join(reasons) if reasons else "Все системы согласны",
             "emoji": emoji,
+        }
+
+    # ============================================================
+    # НОВЫЙ МЕТОД P1.1: Выбор действия из кандидатов
+    # ============================================================
+    def choose_action(self, candidates: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Выбирает лучшее действие из списка кандидатов.
+        
+        Args:
+            candidates: Список кандидатов от разных источников.
+                Пример:
+                [
+                    {"source": "active_inference", "action": "explore", "strength": 0.7, "params": {}},
+                    {"source": "motivation", "action": "ask_question", "strength": 0.9, "params": {"topic": "python"}},
+                    {"source": "embodiment", "action": "rest", "strength": 0.3, "params": {}},
+                ]
+            context: Контекст агента (energy, cycle, pressing_needs, etc.)
+        
+        Returns:
+            {
+                "action": str,           # выбранное действие
+                "source": str,           # источник кандидата
+                "verdict": "proceed|caution|stop",
+                "confidence": float,
+                "reasoning": str,
+                "voices": dict,          # голоса систем для выбранного действия
+                "all_evaluations": list  # оценки всех кандидатов
+            }
+        """
+        if not candidates:
+            return {
+                "action": "wait",
+                "source": "none",
+                "verdict": "stop",
+                "confidence": 0.0,
+                "reasoning": "Нет доступных кандидатов",
+                "voices": {},
+                "all_evaluations": []
+            }
+
+        # Оцениваем каждого кандидата через арбитраж
+        evaluations = []
+        for cand in candidates:
+            action_name = cand.get("action", "unknown")
+            source = cand.get("source", "unknown")
+            strength = cand.get("strength", 0.5)
+            
+            # Формируем топик для арбитража: источник + действие
+            topic = f"{source}:{action_name}"
+            
+            # Получаем вердикт арбитра для этого действия
+            verdict_result = self.arbitrate(topic, action_name)
+            
+            # Комбинированный скор: strength кандидата * confidence арбитра
+            # verdict score уже в verdict_result["score"] (0.0-1.0)
+            arbiter_score = verdict_result.get("score", 0.5)
+            combined_score = strength * 0.4 + arbiter_score * 0.6
+            
+            evaluations.append({
+                "candidate": cand,
+                "verdict": verdict_result,
+                "combined_score": combined_score,
+                "arbiter_score": arbiter_score,
+            })
+
+        # Сортируем по комбинированному скору (убывание)
+        evaluations.sort(key=lambda e: e["combined_score"], reverse=True)
+        
+        best = evaluations[0]
+        best_candidate = best["candidate"]
+        best_verdict = best["verdict"]
+        
+        # Если лучший вердикт stop — всё равно возвращаем, но с предупреждением
+        if best_verdict["verdict"] == "stop":
+            reasoning = f"Арбитр блокирует: {best_verdict['reasoning']}. Выбрано наименее плохое: {best_candidate['action']}"
+        else:
+            reasoning = f"Выбрано: {best_candidate['action']} (источник: {best_candidate['source']}, score: {best['combined_score']:.2f}). {best_verdict['reasoning']}"
+
+        return {
+            "action": best_candidate["action"],
+            "source": best_candidate["source"],
+            "params": best_candidate.get("params", {}),
+            "verdict": best_verdict["verdict"],
+            "confidence": best_verdict["confidence"],
+            "reasoning": reasoning,
+            "voices": best_verdict["voices"],
+            "all_evaluations": [
+                {
+                    "action": e["candidate"]["action"],
+                    "source": e["candidate"]["source"],
+                    "combined_score": round(e["combined_score"], 3),
+                    "verdict": e["verdict"]["verdict"],
+                }
+                for e in evaluations
+            ]
         }
 
     # ============================================================

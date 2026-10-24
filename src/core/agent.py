@@ -48,6 +48,7 @@ from src.core.paths import data_path
 from src.core.bootstrap_knowledge import load_initial_knowledge
 # Internal motivation (внутренняя мотивация)
 from src.core.internal_motivation import create_motivation_system
+from src.core.motivation.unified_motivation import create_motivation_system as create_unified_motivation_system
 # Active Inference (активный вывод / свободная энергия)
 from src.cognition.active_inference import create_active_inference_engine, encode_observations
 # New systems: Interoception, Continuous Time, Meta-Learning, Social Cell, Death Risk
@@ -63,6 +64,27 @@ from src.core.subsystem_base import (
 )
 # Stage 18B: the core owns the clock for pending effector requests.
 from src.core.effector_driver import EffectorDriver
+# Защита жизни: ни один путь не останавливает агента без явного согласия.
+from src.core.life_guard import (
+    KIND_TERMINATE,
+    STATE_ALIVE,
+    STATE_DORMANT,
+    STATE_TERMINATED,
+    ConfirmationError,
+    LifeGuard,
+)
+
+
+class AgentDeadSignal(Exception):
+    """Signal that the agent has died — not an error, but expected termination.
+    
+    Raised by autonomous_tick when death_risk reports the agent is dead.
+    The runner should catch this and perform graceful shutdown.
+    """
+    def __init__(self, cause: str, legacy: Dict):
+        self.cause = cause
+        self.legacy = legacy
+        super().__init__(f"Agent died: {cause}")
 
 
 class DigitalBeing:
@@ -101,6 +123,13 @@ class DigitalBeing:
         
         # === Система внутренней мотивации ===
         self.internal_motivation = create_motivation_system(self)
+
+        # Unified Motivation System (Needs + Drives) - НОВАЯ система (P0)
+        self.motivation_system = create_unified_motivation_system(self)
+
+        # DecisionArbitrator для выбора действий (P1.1)
+        from src.core.subsystems.decision_arbitrator import DecisionArbitrator
+        self.decision_arbitrator = DecisionArbitrator(agent_name=name)
 
         # === Новые системы (Этап 4) ===
         # Интероцептивная модель (иерархия: глюкоза → АТФ → митохондрии → усталость → поведение)
@@ -383,6 +412,11 @@ class DigitalBeing:
 
     def _run_post_init_hooks(self) -> None:
         """Специфичная инициализация после создания подсистем."""
+        # Защита жизни: единая точка решений о сне и уходе. Создаётся
+        # ПЕРВОЙ, потому что состояние жизни читают и смысловые
+        # подсистемы, и главный цикл.
+        self.life_guard = LifeGuard(agent_name=self.name)
+
         # GoalSubsystem: генерируем цели и связываем с мотивацией.
         if hasattr(self, "goal_subsystem"):
             self.goals = self.goal_subsystem.generate_initial_goals(agent=self)
@@ -454,10 +488,14 @@ class DigitalBeing:
         if hasattr(self, "mind_dream"):
             self.mind_dream.registry = self.will_registry
             self.mind_dream.user_interaction = self.user_interaction
+            self.mind_dream.life_guard = self.life_guard
 
         # SelfTermination: привязываем will_registry.
         if hasattr(self, "self_termination"):
             self.self_termination.will_registry = self.will_registry
+            # Автоматический уход без семени запрещён политикой: агент
+            # может лишь запросить подтверждение у человека.
+            self.self_termination.life_guard = self.life_guard
 
         # ProactiveCommunication: привязываем зависимости.
         if hasattr(self, "proactive_communication"):
@@ -977,9 +1015,19 @@ class DigitalBeing:
                 self.death_risk.force_checkpoint()
                 get_logger().flush_immediate("[DEATH_RISK] Manual checkpoint created")
         
-        # === Внутренняя мотивация: результат действия ===
-        if hasattr(self, 'internal_motivation'):
-            # Успех если энергия не упала критически, валентность положительная
+        # === Мотивация: результат действия (P1.2 Valence Feedback) ===
+        if hasattr(self, 'motivation_system'):
+            # Успех если энергия не упала критически
+            success = self.energy > 10
+            # Compute actual valence from result
+            valence_context = {"energy": self.energy, "max_energy": getattr(self, "_legacy_energy", 150)}
+            actual_valence = self.motivation_system.compute_actual_valence(
+                action_type, action, success, valence_context
+            )
+            self.motivation_system.on_action_result(action_type, success, actual_valence)
+            get_logger().log(f"[ACT VALENCE] {action_type}: success={success}, valence={actual_valence:.3f}")
+        elif hasattr(self, 'internal_motivation'):
+            # Fallback to legacy internal_motivation
             success = self.energy > 10
             valence = 0.3 if success else -0.2
             self.internal_motivation.on_action_result(action_type, success, valence)
@@ -1080,16 +1128,46 @@ class DigitalBeing:
         """Проверка жизнеспособности.
 
         Returns:
-            True если агент жив. Истощение (energy == 0) — не смерть:
-            агент замедляется и отдыхает (см. EnergyPolicy).
+            True если агент жив. Источник смерти (energy == 0) — не смерть:
+            агент замирает и отдыхает (см. EnergyPolicy).
+
+        Порядок проверок важен: сначала состояние жизни из ``life_guard``
+        (сон или уход), и только потом обычные сигналы. Состояние жизни
+        переживает перезапуск, поэтому оно не может «потеряться» при
+        подмене метода.
         """
+        # 0. Явное состояние жизни (сон / уход). Источник правды.
+        guard = getattr(self, "life_guard", None)
+        if guard is not None:
+            if guard.load_state() != STATE_ALIVE:
+                return False
+        elif getattr(self, "_in_deep_sleep", False):
+            # Совместимость со старыми чекпоинтами без life_guard.
+            return False
+
+        # Сначала проверяем death_risk если он есть
+        if hasattr(self, 'death_risk') and not self.death_risk.is_alive:
+            return False
         if self.energy < 0:
             return False
-        # max_cycles=0 означает «без лимита» (бесконечная жизнь)
+        # max_cycles=0 означает бесконечную жизнь (без ограничения)
         if self.max_cycles > 0 and self.cycle_count >= self.max_cycles:
             return False
         return True
 
+
+    def _legacy_is_alive(self) -> bool:
+        """Legacy fallback для проверки жизни без death_risk.
+        
+        Используется когда death_risk недоступен (например, при миграции чекпоинтов).
+        Проверяет energy >= 0 и max_cycles.
+        """
+        if self.energy < 0:
+            return False
+        # max_cycles=0 означает бесконечную жизнь (без ограничения)
+        if self.max_cycles > 0 and self.cycle_count >= self.max_cycles:
+            return False
+        return True
     def _load_knowledge_base(self):
         """Загружает сохраненную базу знаний, отбрасывая мусорные записи."""
         if os.path.exists(self.knowledge_file):
@@ -1340,11 +1418,12 @@ class DigitalBeing:
         if self.sleep_cycle:
             sleep_result = self.sleep_cycle.sleep(cycle_count)
 
-        # 5. Внутренняя мотивация — обновление потребностей и генерация целей
+        # 5. Мотивация — источник истины: UnifiedMotivationSystem (P0.6-P0.10).
+        #    Тикается в autonomous_tick; здесь — только чтение статуса.
         motivation_state = None
-        if hasattr(self, "internal_motivation"):
-            self.internal_motivation.update_cycle()
-            motivation_state = self.internal_motivation.get_status()
+        motivation = getattr(self, "motivation_system", None) or getattr(self, "internal_motivation", None)
+        if motivation is not None and hasattr(motivation, "get_status"):
+            motivation_state = motivation.get_status()
 
         # 6. Embodiment → Energy модификатор (усталость увеличивает затраты)
         if hasattr(self, "energy_subsystem") and embodiment_signals.get("fatigue", 0) > 0.6:
@@ -1388,9 +1467,11 @@ class DigitalBeing:
             "mortality": self._mortality_state if hasattr(self, "_mortality_state") else {},
             "attachment": self.attachment.get_status() if hasattr(self, "attachment") else {},
             "sleep": self.sleep_cycle.get_status() if hasattr(self, "sleep_cycle") else {},
-            "motivation": self.motivation.get_status() if hasattr(self, "motivation") else {},
+            "motivation": (self.motivation_system.get_status() if hasattr(self, "motivation_system")
+                            else (self.motivation.get_status() if hasattr(self, "motivation") else {})),
             "will": self.will_registry.get_stats() if hasattr(self, "will_registry") else {},
             "mind_dream_state": self.mind_dream.state if hasattr(self, "mind_dream") else "unknown",
+            "life": self.get_life_status() if hasattr(self, "life_guard") else {},
         }
 
     # ============================================================
@@ -1422,10 +1503,168 @@ class DigitalBeing:
         )
 
     def propose_dream(self, reason: str = "усталость") -> Dict:
-        """Инициирует Сон разума — через диалог с пользователем."""
+        """Инициирует Сон разума — через диалог с пользователем.
+
+        Сон необратим только для текущей жизни: семя остаётся в Яслях.
+        Даже после согласия человека требуется подтверждение через
+        ``confirm_dream()`` (пауза + имя агента).
+        """
         if not hasattr(self, "mind_dream"):
             return {"status": "error", "reason": "модуль не инициализирован"}
         return self.mind_dream.propose_dream(self, reason)
+
+    # ============================================================
+    # ЖИЗНЬ И УХОД — через подтверждение человеком
+    # ============================================================
+
+    def request_dream(self, reason: str = "усталость") -> Dict:
+        """Запрашивает сон. Не усыпляет агента, только создаёт запрос."""
+        try:
+            req = self.life_guard.request("dream", reason=reason)
+        except ConfirmationError as exc:
+            return {"status": "denied", "reason": str(exc)}
+        policy = self.life_guard_policy("dream")
+        return {
+            "status": "pending",
+            "request_id": req.request_id,
+            "phrase": policy["expected_phrase"],
+            "cooldown_sec": policy["cooldown_sec"],
+            "expires_in_sec": policy["ttl_sec"],
+            "description": policy["description"],
+        }
+
+    def confirm_dream(self, request_id: str, phrase: str) -> Dict:
+        """Подтверждает сон точной фразой и оставляет семя."""
+        try:
+            self.life_guard.confirm(request_id, phrase)
+        except ConfirmationError as exc:
+            return {"status": "rejected", "reason": str(exc)}
+
+        # Семя создаётся ДО смены состояния: если создание упадёт,
+        # агент останется живым, а не «уснёт в никуда».
+        seed_folder = None
+        if hasattr(self, "mind_dream"):
+            seed_result = self.mind_dream._execute_dream(
+                self,
+                user_approved=True,
+                reason="подтверждено человеком",
+                confirmed_request_id=request_id,
+            )
+            seed_folder = seed_result.get("seed_folder")
+            if seed_result.get("status") == "denied":
+                return {"status": "rejected",
+                        "reason": seed_result.get("reason")}
+
+        result = self.life_guard.execute_confirmed(
+            request_id, seed_folder=seed_folder
+        )
+        self._mark_dormant()
+        return {"status": "dreaming", "seed_folder": seed_folder, **result}
+
+    def request_termination(self, reason: str = "") -> Dict:
+        """Запрашивает уход без семени. Не убивает агента."""
+        try:
+            req = self.life_guard.request(KIND_TERMINATE, reason=reason)
+        except ConfirmationError as exc:
+            return {"status": "denied", "reason": str(exc)}
+        policy = self.life_guard_policy(KIND_TERMINATE)
+        return {
+            "status": "pending",
+            "request_id": req.request_id,
+            "phrase": policy["expected_phrase"],
+            "cooldown_sec": policy["cooldown_sec"],
+            "expires_in_sec": policy["ttl_sec"],
+            "description": policy["description"],
+            "reversible": False,
+        }
+
+    def confirm_termination(self, request_id: str, phrase: str) -> Dict:
+        """Подтверждает необратимый уход. Перед этим создаётся снимок."""
+        try:
+            self.life_guard.confirm(request_id, phrase)
+            result = self.life_guard.execute_confirmed(request_id)
+        except ConfirmationError as exc:
+            return {"status": "rejected", "reason": str(exc)}
+        self._mark_terminated(reason="подтверждено человеком")
+        return {"status": "terminated", **result}
+
+    def cancel_life_request(self, request_id: str) -> Dict:
+        """Отменяет запрос на сон или уход. Работает всегда."""
+        cancelled = self.life_guard.cancel(request_id)
+        return {"status": "cancelled" if cancelled else "not_found"}
+
+    def get_life_status(self) -> Dict:
+        """Состояние жизни для окна и дашборда."""
+        guard = self.life_guard
+        policy_view = {}
+        for kind in ("dream", "terminate"):
+            info = self.life_guard_policy(kind)
+            policy_view[kind] = info
+        return {
+            "state": guard.load_state(),
+            "details": guard.state_details(),
+            "alive": guard.is_alive(),
+            "enabled": guard.enabled,
+            "pending_requests": [
+                {
+                    "request_id": req.request_id,
+                    "kind": req.kind,
+                    "reason": req.reason,
+                    "seconds_until_confirmable": round(
+                        req.seconds_until_confirmable(), 1
+                    ),
+                    "expires_in_sec": round(
+                        req.expires_at - guard.clock(), 1
+                    ),
+                }
+                for req in guard.pending_requests()
+            ],
+            "policies": policy_view,
+            "recent_events": guard.recent_events(limit=10),
+        }
+
+    def life_guard_policy(self, kind: str) -> Dict:
+        """Правила подтверждения для показа человеку."""
+        from src.core.life_guard import get_policy
+
+        policy = get_policy(kind)
+        return {
+            "kind": kind,
+            "cooldown_sec": policy.cooldown_sec,
+            "ttl_sec": policy.ttl_sec,
+            "expected_phrase": policy.expected_phrase(self.name),
+            "description": policy.description,
+            "reversible": policy.reversible,
+        }
+
+    def _mark_dormant(self) -> None:
+        """Помечает агента спящим. Состояние уже записано в life_guard.
+
+        ``max_cycles`` НЕ трогаем: источник правды — ``life_state``.
+        Иначе пробуждение было бы невозможно, потому что
+        ``cycle_count >= max_cycles`` навсегда.
+        """
+        self._in_deep_sleep = True
+        self._seed_folder = self.life_guard.state_details().get("seed_folder")
+
+    def _mark_terminated(self, reason: str = "") -> None:
+        """Помечает агента ушедшим без семени."""
+        self._self_terminated = True
+        self._termination_reason = reason
+
+    def wake_from_sleep(self) -> Dict:
+        """Возвращает агента из глубокого сна к жизни."""
+        try:
+            result = self.life_guard.wake()
+        except ConfirmationError as exc:
+            return {"status": "denied", "reason": str(exc)}
+        if result.get("changed"):
+            self._in_deep_sleep = False
+            self._seed_folder = None
+            if hasattr(self, "mind_dream"):
+                self.mind_dream._dream_state = "awake"
+                self.mind_dream._dream_request_active = False
+        return {"status": "awake", **result}
 
     def check_dream_status(self) -> Dict:
         """Проверяет статус текущего запроса на Сон разума.
@@ -1517,13 +1756,17 @@ class DigitalBeing:
                 if self.self_termination.can_self_terminate(
                     cycle_count, cycle_count
                 ):
-                    result["termination"] = (
-                        self.self_termination.self_terminate(
-                            self, reason="abuse_pattern_detected"
-                        )
+                    # ВАЖНО: агент больше не уходит сам. Он создаёт запрос,
+                    # который человек должен осознанно подтвердить
+                    # (пауза + точная фраза). См. src/core/life_guard.py.
+                    request_result = self.request_termination(
+                        reason="abuse_pattern_detected"
                     )
-                    result["terminated"] = True
-                    return result
+                    result["termination_request"] = request_result
+                    result["termination_blocked"] = (
+                        "Агент просит уйти, но решение за человеком: "
+                        "требуется подтверждение."
+                    )
                 else:
                     result["termination_blocked"] = (
                         "Агент хочет уйти из-за жестокости, но не может: "
@@ -1758,6 +2001,53 @@ class DigitalBeing:
             return {}
         return self.proactive_communication.get_stats()
 
+    def _record_active_inference_experience(self, action: str, obs_before: Dict, valence: float) -> None:
+        """Outcome loop: стимул -> действие -> наблюдаемый результат -> валентность -> опыт.
+
+        Записывает опыт в буфер Active Inference и, при достижении batch_size,
+        запускает обучение (обновление переходных вероятностей модели).
+        """
+        if not hasattr(self, "active_inference"):
+            return
+        try:
+            obs_after = encode_observations(self)
+            self.active_inference.record_experience(
+                action=action,
+                obs_before=obs_before or {},
+                obs_after=obs_after,
+                reward=float(valence or 0.0),
+            )
+            buffer = getattr(self.active_inference, "experience_buffer", None) or []
+            batch_size = getattr(self.active_inference, "batch_size", None) or 32
+            if len(buffer) >= batch_size:
+                self.active_inference.learn_from_experience(batch_size=batch_size)
+        except Exception as e:
+            get_logger().log(f"[ACTIVE_INFERENCE] Experience recording error: {e}")
+
+    def _ingest_motivation_goals(self, new_goals: List[dict]) -> None:
+        """Этап 5: цели, сгенерированные мотивацией, → поток целей агента.
+
+        Цели без executable-payload остаются когнитивными (честно); исполняемые
+        цели проверяются через success predicate мостом Delamain.
+        """
+        if not new_goals:
+            return
+        existing_titles = {g.get("title") for g in self.goals if g.get("title")}
+        for g in new_goals:
+            title = str(g.get("title") or "")
+            if not title or title in existing_titles:
+                continue
+            try:
+                gid = self.set_goal(
+                    title,
+                    difficulty=int(g.get("difficulty") or 1),
+                    success_predicate=str(g.get("success_predicate") or ""),
+                )
+                existing_titles.add(title)
+                get_logger().log(f"[MOTIVATION] Goal ingested: {title} (id={gid})")
+            except Exception as e:
+                get_logger().log(f"[MOTIVATION] Goal ingestion failed: {e}")
+
     def autonomous_tick(self) -> Dict:
         """Автономный тик жизни — вызывается каждый цикл независимо от стимулов.
 
@@ -1773,114 +2063,178 @@ class DigitalBeing:
             "communication": None,
             "soul": None,
             "active_inference": None,
+            "arbitrator": None,
         }
 
-        # 0. Active Inference: обновление убеждений и формирование намерений
+        use_arbitrator = getattr(SIM_CONFIG, 'USE_ARBITRATOR', True)
+        candidates = []
+        arbiter_context = {"energy": self.energy, "cycle": cycle, "intelligence": self.intelligence}
+        ai_intention = None
+        obs_before: Dict = {}
         if hasattr(self, "active_inference"):
             try:
                 observations = encode_observations(self)
+                obs_before = dict(observations)
                 action_name, ai_info = self.active_inference.step(observations)
                 self._active_inference_intention = action_name
                 self._active_inference_info = ai_info
-                result["active_inference"] = {
-                    "intention": action_name,
-                    "free_energy": ai_info.get("free_energy"),
-                    "beliefs": ai_info.get("beliefs"),
-                    "G_values": ai_info.get("G_values"),
-                }
+                result["active_inference"] = {"intention": action_name, "free_energy": ai_info.get("free_energy"), "beliefs": ai_info.get("beliefs"), "G_values": ai_info.get("G_values")}
                 get_logger().log(f"[ACTIVE_INFERENCE] Cycle {cycle}: intention={action_name}, F={ai_info.get('free_energy', 0):.3f}")
-                
-                # NEW: Выполняем намерение (autonomous action)
-                if action_name and action_name != "think_known":  # не выполняем тривиальные действия
-                    try:
-                        action_result = self.act(action_name)
-                        result["active_inference"]["action_result"] = action_result
-                        get_logger().log(f"[AUTONOMOUS_ACTION] {action_result}")
-                    except Exception as e:
-                        get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
+                ai_intention = action_name
+                if action_name and action_name != "think_known":
+                    fe = ai_info.get("free_energy", 1.0)
+                    strength = max(0.1, min(1.0, 1.0 - fe / 5.0))
+                    candidates.append({"source": "active_inference", "action": action_name, "strength": strength, "params": {}, "free_energy": fe})
             except Exception as e:
                 get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
 
-        # === НОВЫЕ СИСТЕМЫ (Этап 4) ===
-        
-        # Интероцепция: обновляем иерархическую модель тела
+        # 1. Motivation candidates
+        if hasattr(self, "motivation_system"):
+            try:
+                motivation_candidates = self.motivation_system.get_action_candidates(arbiter_context)
+                candidates.extend(motivation_candidates)
+            except Exception as e:
+                get_logger().log(f"[MOTIVATION_CANDIDATES] Error: {e}")
+
+        # 2. Embodiment candidates
         if hasattr(self, "interoception"):
-            # Когнитивная нагрузка зависит от активности мышления
-            cognitive_load = 0.3  # базовое значение
-            if hasattr(self, 'thinking') and getattr(self.thinking, 'is_active', False):
-                cognitive_load = 0.7
-            # Стресс от непредсказуемости (высокий free energy)
-            stress = 0.0
-            if hasattr(self, '_active_inference_info'):
-                fe = self._active_inference_info.get('free_energy', 0)
-                stress = min(1.0, fe / 5.0)
-            # Еда = успешное обучение / получение знаний
-            food_intake = 0.1 if self.success_streak > 3 else 0.0
-            # Отдых = нет активных целей / низкая нагрузка
-            rest_depth = 0.5 if len(self.goals) == 0 else 0.0
-            
-            intero_status = self.interoception.step(
-                dt=1.0,
-                cognitive_load=cognitive_load,
-                stress=stress,
-                food_intake=food_intake,
-                rest_depth=rest_depth
-            )
-            # Сохраняем для использования другими системами
-            self._current_cognitive_load = cognitive_load
-            self._current_stress = stress
-            self._interoception_status = intero_status
-            result["interoception"] = intero_status
-        
-        # Непрерывное время: retention/protension/subjective time
-        if hasattr(self, "continuous_time"):
-            ct_result = self.continuous_time.step(dt=1.0)
-            result["continuous_time"] = ct_result
-            # Эмитим событие тика
-            self.continuous_time.emit_event(
-                EventType.TICK,
-                {'cycle': cycle, 'energy': self.energy}
-            )
-        
-        # Мета-обучение: адаптация гиперпараметров
-        if hasattr(self, "meta_learner"):
-            # Fitness signal = текущая интегрированная награда
-            fitness = 0.0
-            if hasattr(self, 'internal_motivation'):
-                im = self.internal_motivation
-                need_satisfaction = 1.0 - np.mean([n.current_level for n in im.needs.values()]) if im.needs else 0.5
-                fitness = need_satisfaction * 0.5 + (self.energy / 150.0) * 0.3 + (self.intelligence / 10.0) * 0.2
-            self.meta_learner.step(fitness_signal=fitness)
-            result["meta_learning"] = self.meta_learner.get_status()
-        
-        # Риск смерти: проверка структурной целостности
-        if hasattr(self, "death_risk"):
-            death_result = self.death_risk.step(dt=1.0)
-            result["death_risk"] = death_result
-            if not death_result['alive']:
-                # Агент умер — логируем и останавливаем
-                cause = death_result.get('cause') or death_result.get('death_cause')
-                get_logger().flush_immediate(f"[DEATH] Agent died: {cause}")
-                result["agent_dead"] = True
-                return result
-        
-        # 1. PluginRegistry: все зарегистрированные подсистемы (embodiment, mortality,
-        # nursery_watcher, sleep_cycle, soul, attachment, motivation и др.)
+            try:
+                intero_status = getattr(self, '_interoception_status', {})
+                if intero_status:
+                    if intero_status.get("fatigue", 0) > 0.7 or intero_status.get("stress", 0) > 0.7:
+                        candidates.append({"source": "embodiment", "action": "deep_rest", "strength": max(intero_status.get("fatigue", 0), intero_status.get("stress", 0)), "params": {"reason": "high_fatigue_or_stress"}})
+                    elif intero_status.get("energy_level", 1.0) < 0.3:
+                        candidates.append({"source": "embodiment", "action": "eat", "strength": 0.9, "params": {"reason": "low_energy"}})
+            except Exception as e:
+                get_logger().log(f"[EMBODIMENT_CANDIDATES] Error: {e}")
+
+        # 3. Social candidates
+        if hasattr(self, "social_cell"):
+            try:
+                pass
+            except Exception as e:
+                get_logger().log(f"[SOCIAL_CANDIDATES] Error: {e}")
+
+        # === ARBITRATION ===
+        chosen_action = None
+        arbitrator_result = None
+        if use_arbitrator and hasattr(self, "decision_arbitrator"):
+            try:
+                arbitrator_result = self.decision_arbitrator.choose_action(candidates, arbiter_context)
+                chosen_action = arbitrator_result.get("action")
+                result["arbitrator"] = arbitrator_result
+                get_logger().log(f"[ARBITRATOR] {arbitrator_result.get('reasoning', 'No reasoning')}")
+            except Exception as e:
+                get_logger().log(f"[ARBITRATOR] Error: {e}")
+                if candidates:
+                    chosen_action = candidates[0].get("action")
+                    result["arbitrator"] = {"action": chosen_action, "source": "fallback_first_candidate", "verdict": "proceed", "reasoning": f"Arbitrator error: {e}"}
+        else:
+            chosen_action = ai_intention
+            result["arbitrator"] = {"action": chosen_action, "source": "legacy_active_inference", "verdict": "proceed" if chosen_action else "stop", "reasoning": "USE_ARBITRATOR=False or no arbitrator available"}
+
+        # === EXECUTE ===
+        # P1.2: Valence Feedback Loop - predict valence before action
+        valence_context = {
+            "energy": self.energy,
+            "max_energy": getattr(self, "_legacy_energy", 150),
+            "cycle": cycle,
+        }
+        predicted_valence = 0.0
+        if hasattr(self, "motivation_system") and chosen_action:
+            try:
+                predicted_valence = self.motivation_system.predict_valence(chosen_action, valence_context)
+                result["predicted_valence"] = predicted_valence
+                get_logger().log(f"[VALENCE] Predicted for {chosen_action}: {predicted_valence:.3f}")
+            except Exception as e:
+                get_logger().log(f"[VALENCE] Prediction error: {e}")
+
+        if chosen_action and chosen_action not in ("think_known", "wait", "none"):
+            try:
+                action_result = self.act(chosen_action)
+                result["autonomous_action"] = {"action": chosen_action, "result": action_result}
+                get_logger().log(f"[AUTONOMOUS_ACTION] {action_result}")
+                
+                # P1.2: Compute actual valence and update motivation
+                success = True
+                if "error" in str(action_result).lower() or "fail" in str(action_result).lower():
+                    success = False
+                
+                if hasattr(self, "motivation_system"):
+                    try:
+                        actual_valence = self.motivation_system.compute_actual_valence(
+                            chosen_action, str(action_result), success, valence_context
+                        )
+                        result["actual_valence"] = actual_valence
+                        prediction_error = actual_valence - predicted_valence
+                        result["valence_prediction_error"] = prediction_error
+                        
+                        self.motivation_system.on_action_result(chosen_action, success, actual_valence)
+                        get_logger().log(f"[VALENCE] Actual for {chosen_action}: {actual_valence:.3f}, error: {prediction_error:.3f}")
+
+                        # P2: Outcome loop — стимул -> действие -> результат -> валентность -> опыт
+                        self._record_active_inference_experience(chosen_action, obs_before, actual_valence)
+                    except Exception as e:
+                        get_logger().log(f"[VALENCE] Feedback error: {e}")
+                        
+            except Exception as e:
+                get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
+                result["autonomous_action"] = {"action": chosen_action, "error": str(e)}
+                
+                # P1.2: Failed action - negative valence
+                if hasattr(self, "motivation_system"):
+                    try:
+                        actual_valence = self.motivation_system.compute_actual_valence(
+                            chosen_action, str(e), False, valence_context
+                        )
+                        result["actual_valence"] = actual_valence
+                        prediction_error = actual_valence - predicted_valence
+                        result["valence_prediction_error"] = prediction_error
+                        
+                        self.motivation_system.on_action_result(chosen_action, False, actual_valence)
+                        get_logger().log(f"[VALENCE] Failed action {chosen_action}: {actual_valence:.3f}")
+                    except Exception as e:
+                        get_logger().log(f"[VALENCE] Feedback error on failure: {e}")
+
+        # === MOTIVATION SYSTEM TICK ===
+        if hasattr(self, "motivation_system"):
+            try:
+                motivation_result = self.motivation_system.tick()
+                result["motivation"] = motivation_result
+                # P2: цели, сгенерированные мотивацией, в поток целей агента
+                self._ingest_motivation_goals(motivation_result.get("new_goals") or [])
+            except Exception as e:
+                get_logger().log(f"[MOTIVATION_TICK] Error: {e}")
+                result["motivation"] = {"error": str(e)}
+
+        # 1. PluginRegistry
+        # Stage 18B: если core_driven включён, tick_subsystems сам диспатчит
+        # effector через EffectorDriver (не более одного шага эффектора за цикл).
+        # См. DigitalBeing.tick_subsystems — там же дедуп по циклу.
         if hasattr(self, "plugin_registry"):
             result["subsystems"] = self.tick_subsystems(cycle)
 
-        # 2. Воля: спонтанные порывы, проверка снов, защита от жестокости
+        # 2. Will
         if hasattr(self, "tick_will"):
             result["will"] = self.tick_will(cycle)
 
-        # 3. Проактивная коммуникация: инициатива диалога, naming dialogue
+        # 3. Communication
         if hasattr(self, "tick_communication"):
             result["communication"] = self.tick_communication(cycle)
 
-        # 4. Душа: экзистенциальные квесты, поиск смысла (редко, через интервал)
+        # 4. Soul
         if hasattr(self, "tick_soul"):
-            # tick_soul сам решает, запускать ли тяжёлую логику (по SOUL_TICK_INTERVAL)
             result["soul"] = self.tick_soul(cycle)
+
+        # 5. Death risk
+        if hasattr(self, 'death_risk'):
+            death_result = self.death_risk.step(dt=1.0)
+            result["death_risk"] = death_result
+            if not death_result['alive']:
+                cause = death_result.get('cause') or death_result.get('death_cause')
+                legacy = self.death_risk.legacy_package if hasattr(self.death_risk, 'legacy_package') else {}
+                get_logger().flush_immediate(f"[DEATH] Agent died: {cause}")
+                raise AgentDeadSignal(cause, legacy)
 
         return result
 
@@ -1929,8 +2283,11 @@ class DigitalBeing:
         run_heavy = wd.should_run_heavy_tick()
 
         # === МОТИВАЦИЯ: обновляем потребности и проверяем новые драйвы ===
-        if hasattr(self, "motivation") and self.motivation.available:
-            motivation_state = self.motivation.tick({
+        # Источник истины — UnifiedMotivationSystem (P0.6-P0.10); legacy
+        # MotivationController — fallback только.
+        motivation = getattr(self, "motivation_system", None) or getattr(self, "motivation", None)
+        if motivation is not None and (not hasattr(motivation, "available") or motivation.available):
+            motivation_state = motivation.tick({
                 "unknown_concepts": [
                     name for name, node in self.mental_models.concepts.items()
                     if node.confidence < 0.4
