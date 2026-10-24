@@ -1,370 +1,494 @@
-import os
+"""Digital Being — единственная точка входа.
+
+Один агент, одно время, один вход. Режим отображения выбирается флагом
+``--ui``, а темп жизни — флагом ``--interval``.
+
+    python main.py                     # окно обсерватории (Tkinter)
+    python main.py --ui tray           # иконка в трее + окно
+    python main.py --ui console        # консольный режим (как раньше)
+    python main.py --ui headless       # без UI (CI, сервер)
+
+    python main.py --interval 5        # реальное время: существо рядом
+    python main.py --interval 0.5      # ускоренно: видно развитие
+    python main.py --interval 0        # на скорости CPU: лаборатория
+    python main.py --interval step     # один цикл по кнопке «Шаг»
+
+    python main.py --seed Alpha_seed_2026-06-23T23-15-00   # прорастить семя
+    python main.py --new                                   # начать заново
+
+Почему Tk в главном потоке
+--------------------------
+Tkinter требует главного потока для mainloop (на macOS — строго).
+Поэтому UI живёт в главном потоке, а жизнь агента (asyncio: EventBus,
+AgentRunner) — в фоновом. Общение между ними идёт через EventBus и
+очередь окна, без прямого доступа к объектам агента.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import atexit
+import logging
+import signal
 import sys
-import io
+import threading
 import time
 from datetime import datetime
-from src.core.agent import DigitalBeing
-from config.simulation_config import SIM_CONFIG, LR_CONFIG
-from src.core.buffered_logger import flush_logs, get_logger
-from src.perception.user_interaction import UserPromptHandler
-from src.core.subsystems import NamingDialogue
+from typing import Any, Dict, Optional
 
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+logger = logging.getLogger("app.main")
 
-
-def get_latest_checkpoint(agent_name):
-    """Загружает последний checkpoint для агента если существует.
-
-    Делегирует в agent_runner.get_latest_checkpoint (единый источник правды).
-    Оставлено в main.py для обратной совместимости.
-    """
-    from src.core.agent_runner import get_latest_checkpoint as _glc
-    return _glc(agent_name)
+# Интервалы CLI → режимы скорости раннера.
+INTERVAL_TO_MODE = {
+    "5": "live",
+    "5.0": "live",
+    "0.5": "fast",
+    "0": "max",
+    "0.0": "max",
+    "max": "max",
+    "step": "step",
+    "live": "live",
+    "fast": "fast",
+}
 
 
-def print_status_banner(agent, cycle):
-    """Печатает статус агента (каждые N циклов)."""
-    goals_status = agent.get_goals_status()
-    mm_status = agent.get_mental_models_status()
-    ui_status = agent.user_interaction
-    
-    print(f"\n{'='*60}")
-    print(f"  🤖 [{agent.name}] Цикл {cycle} | Интеллект: {agent.intelligence} | Энергия: {agent.energy:.0f}")
-    print(f"  📚 Концепций: {mm_status['total_concepts']} | Уверенность: {mm_status['concepts_with_high_confidence']}")
-    active_title = goals_status['active'][:30] if len(goals_status['active']) > 30 else goals_status['active']
-    print(f"  📋 Цели: {goals_status['completed']}/{goals_status['total']} | Активная: {active_title}...")
-    if ui_status.pending_questions:
-        print(f"  ❓ Ожидают ответа: {len(ui_status.pending_questions)} вопрос(ов)")
-    print(f"{'='*60}")
+# ============================================================
+# Аргументы
+# ============================================================
 
 
-def prompt_user_for_answer(agent, cycle_count: int) -> bool:
-    """Запрашивает у пользователя ответ на вопрос агента или команду.
-    
-    Возвращает:
-        True - если пользователь ответил на вопрос агента
-        "__EXIT__" - если пользователь ввел exit
-        False - если нет вопросов и не введено команды
-    """
-    pending = agent.user_interaction.get_pending_question()
-    
-    # === Если есть ожидающий вопрос от агента ===
-    if pending:
-        print(f"\n{'!'*60}")
-        print(f"  ❓ ВОПРОС ОТ АГЕНТА (#{pending['id']}):")
-        print(f"     {pending['question']}")
-        if pending.get('context'):
-            ctx = pending['context']
-            print(f"     Контекст: {ctx[:60]}..." if len(ctx) > 60 else f"     Контекст: {ctx}")
-        
-        # Показываем suggested answers
-        suggestions = agent.user_interaction.generate_suggested_answers(pending['question'])
-        print(f"\n  💡 Варианты ответа:")
-        for i, sug in enumerate(suggestions, 1):
-            short_sug = sug[:50] + "..." if len(sug) > 50 else sug
-            print(f"     {i}. {short_sug}")
-        print(f"     4. Свой ответ")
-        print(f"     p = Пропустить и продолжить работу")
-        
-        try:
-            user_input = input(f"\n  >>> ").strip()
-            
-            if not user_input:
-                return False
-            
-            # Ответ на вопрос агента
-            if user_input.lower() in ['p', 'пропустить', 'skip', 'continue']:
-                return False
-            
-            if user_input.isdigit() and 1 <= int(user_input) <= len(suggestions):
-                idx = int(user_input) - 1
-                answer = suggestions[idx]
-            else:
-                answer = user_input
-            
-            if answer:
-                agent_answer_result = agent.user_interaction.submit_answer(pending['id'], answer)
-                if agent_answer_result.get('status') == 'answered':
-                    result = agent._process_user_answer(answer)
-                    print(f"  ✅ {result}")
-                    return True
-        
-        except EOFError:
-            return False
-        return False
-    
-    # === Нет вопросов от агента - показываем команды ТОЛЬКО periodically ===
-    if cycle_count % 50 == 1 or (cycle_count <= 3):
-        print(f"\n{'='*60}")
-        print(f"  💬 [{agent.name}] Введите сообщение или команду:")
-        print(f"    help/h - справка | status/s - статус | goals/g - цели")
-        print(f"    concepts/c - концепции | ask/a <вопрос> - спросить агента")
-        print(f"    clear/cl - очистить | exit/q - выйти")
-        
-        try:
-            user_input = input(f"\n  >>> ").strip()
-            
-            if not user_input:
-                return False
-            
-            handler = UserPromptHandler()
-            result = handler.process_command(user_input, agent)
-            
-            if result == "__EXIT__":
-                return "__EXIT__"
-            
-            # Если пользователь спросил что-то - ставим в очередь открытых вопросов
-            if user_input.lower().startswith(('ask ', 'a ')):
-                question = user_input[4:].strip()
-                if question:
-                    result = agent.ask_user(question)
-                    queue_size = result.get("queue_size", 0)
-                    status = result.get("status", "?")
-                    print(f"\n  📤 Вопрос поставлен в очередь мышления (status={status}).")
-                    print(f"     Текст: '{question[:60]}...'")
-                    if status == "queued":
-                        print(f"     Агент будет думать над ним в следующих {result.get('queue_size', 1)*5} циклах.")
-                    print(f"     Всего открытых вопросов: {queue_size}")
-
-            return False
-        
-        except EOFError:
-            return False
-    
-    return False
+def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Digital Being — цифровая жизнь",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--name", default=None, help="Имя агента")
+    parser.add_argument(
+        "--ui",
+        default="gui",
+        choices=("gui", "tray", "console", "headless"),
+        help="Режим отображения (по умолчанию gui)",
+    )
+    parser.add_argument(
+        "--interval",
+        default="5",
+        help="Темп жизни: 5 | 0.5 | 0 | max | step | live | fast",
+    )
+    parser.add_argument(
+        "--new", action="store_true", help="Начать новую жизнь без чекпоинта"
+    )
+    parser.add_argument(
+        "--seed", default=None, help="Имя папки семени в Яслях"
+    )
+    parser.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="Не восстанавливать из чекпоинта",
+    )
+    # Совместимость с прежним main_tray.py
+    parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-chat", action="store_true", help=argparse.SUPPRESS)
+    return parser.parse_args(argv)
 
 
-def run_long_living_agent():
-    """Запускает агента в режиме бесконечной жизни."""
-    agent = DigitalBeing("Alpha")
-
-    # Загружаем checkpoint если есть
-    latest_checkpoint = get_latest_checkpoint("Alpha")
-    if latest_checkpoint:
-        agent.load_state(latest_checkpoint)
-        print(f"\n[{agent.name}] 📂 Состояние восстановлено из {os.path.basename(latest_checkpoint)}")
-    else:
-        print(f"\n[{agent.name}] 🌅 НОВАЯ ЖИЗНЬ! Агент инициализирован.")
-
-    # Статистика жизни
-    start_time = datetime.now()
-    cycle_count = agent.cycle_count  # Начинаем с того места где остановились
-
-    # Печатаем начальный статус
-    print_status_banner(agent, cycle_count)
-
-    # === ЗАПУСК ДИАЛОГА ОБ ИМЕНИ ===
-    # Если у агента ещё не было naming-диалога (фаза NONE) — поздороваемся
-    # и попросим пользователя дать ему имя. Это происходит один раз
-    # (при новой жизни). После checkpoint — phase восстанавливается и
-    # приветствие не повторяется.
-    if agent.naming_dialogue.phase == NamingDialogue.PHASE_NONE:
-        init_result = agent.start_naming_dialogue(cycle=cycle_count)
-        status = init_result.get("status")
-        if status == "initiated":
-            # Печатаем приветствие агента из последнего сообщения.
-            pending_msgs = agent.user_interaction.get_pending_messages(
-                include_acknowledged=False
-            )
-            naming_msg = None
-            for m in pending_msgs:
-                if m.get("msg_type") == "naming":
-                    naming_msg = m
-                    break
-            if naming_msg is None and pending_msgs:
-                naming_msg = pending_msgs[-1]
-
-            print(f"\n{'='*60}")
-            print(f"  🤖 Приветствие от [{agent.name}]:")
-            print(f"{'='*60}")
-            if naming_msg is not None:
-                for line in str(naming_msg.get("content", "")).splitlines():
-                    print(f"  {line}")
-            else:
-                print(f"  {agent.name} хочет познакомиться и узнать своё имя.")
-            print(f"{'='*60}")
-
-            # Сразу предлагаем пользователю ввести имя.
-            try:
-                raw = input("\n  >>> Введите имя для агента (или Enter, чтобы оставить '"
-                            f"{agent.name}'): ").strip()
-            except EOFError:
-                raw = ""
-
-            if raw:
-                agent.propose_name(raw, cycle=cycle_count)
-                accept_msgs = agent.user_interaction.get_pending_messages(
-                    include_acknowledged=True
-                )
-                # Берём самое свежее сообщение naming/proposal/greeting.
-                last_msg = accept_msgs[-1] if accept_msgs else None
-                if last_msg is not None:
-                    print(f"\n  🤖 [{agent.name}]:")
-                    for line in str(last_msg.get("content", "")).splitlines():
-                        print(f"  {line}")
-                # Если пользователь предложил альтернативу — phase CONSIDERING,
-                # но для простого CLI-старта этого достаточно.
-                print()
-            else:
-                print(f"  ⏭️ Оставляем временное имя '{agent.name}'.\n")
-        elif status == "no_op":
-            # Защита от повторного вызова (не должно случаться при phase == NONE,
-            # но оставлено для надёжности).
-            pass
-    elif agent.naming_dialogue.phase == NamingDialogue.PHASE_AWAITING_NAME:
-        # Контекст: чекпоинт восстановлен, но диалог был начат и не завершён.
-        # Продолжаем с того же места — просто напоминаем пользователю.
-        print(f"\n  💭 [{agent.name}] ждёт, пока вы дадите ему имя. "
-              f"(Введите имя в строке `>>> name <имя>`)\n")
-    
-    # Для отслеживания энергии
-    low_energy_warned = False
-    critical_energy_handled = False
-    
+def resolve_speed(interval: str) -> str:
+    """Переводит значение ``--interval`` в режим раннера."""
+    key = str(interval).strip().lower()
+    if key in INTERVAL_TO_MODE:
+        return INTERVAL_TO_MODE[key]
     try:
-        while agent.is_alive():
-            cycle_count += 1
-            # Счётчик агента — источник правды для чекпоинтов, эволюции и
-            # метрик. Раньше CLI увеличивал только локальную переменную,
-            # и agent.cycle_count оставался нулевым.
-            agent.cycle_count = cycle_count
-            
-            # === ОБРАБОТКА ОТВЕТА ПОЛЬЗОВАТЕЛЯ ===
-            user_answered = prompt_user_for_answer(agent, cycle_count)
-            
-            if user_answered == "__EXIT__":
-                print(f"\n\n{'='*60}")
-                print(f"  😴 АГЕНТ {agent.name} ЗАСЫПАЕТ (по команде пользователя)")
-                print(f"  📅 Прожил: {(datetime.now() - start_time)}")
-                print(f"  🔄 Циклов: {cycle_count}")
-                print(f"{'='*60}")
-                agent.save_state()
-                agent.save_mental_models()
-                flush_logs()
-                print(f"\n[{agent.name}] 💤 Состояние сохранено. Живите спокойно.")
-                return
-            
-            # === ВОССТАНОВЛЕНИЕ ЭНЕРГИИ ===
-            if not LR_CONFIG.INFINITE_ENERGY:
-                if agent.energy < LR_CONFIG.ENERGY_CRITICAL_THRESHOLD and not critical_energy_handled:
-                    get_logger().flush_immediate(f"⚠️ КРИТИЧЕСКАЯ ЭНЕРГИЯ: {agent.energy:.0f}. Ждем восстановления...")
-                    print(f"\n  ⚠️ АГЕНТ УСТАЛ (энергия: {agent.energy:.0f})... Отдыхает...")
-                    time.sleep(2)
-                    agent.energy = min(LR_CONFIG.ENERGY_MAX, agent.energy + 30)
-                    critical_energy_handled = False
-                    continue
-                
-                if agent.energy < LR_CONFIG.ENERGY_LOW_THRESHOLD and not low_energy_warned:
-                    print(f"\n  ⚠️ Энергия падает: {agent.energy:.0f}")
-                    low_energy_warned = True
-            
-            if LR_CONFIG.INFINITE_ENERGY and agent.energy < LR_CONFIG.ENERGY_MAX:
-                # Этап 2.4: согласовано с tray — потолок ENERGY_MAX (200), не 100.
-                agent.energy = min(LR_CONFIG.ENERGY_MAX, agent.energy + 2)
-            
-            # === ГЕНЕРАЦИЯ СТИМУЛА С ПРИОРИТЕТИЗАЦИЕЙ ===
-            stimulus = _generate_prioritized_stimulus(agent)
-            
-            # === ОСНОВНОЙ ЦИКЛ ЖИЗНИ АГЕНТА ===
-            perceived = agent.perceive(stimulus)
-            thought = agent.think(perceived)
-            action = agent.act(thought)
-            agent.evolve()
+        seconds = float(key)
+    except ValueError:
+        raise SystemExit(
+            f"Неизвестный интервал: {interval!r}. "
+            f"Допустимо: {sorted(INTERVAL_TO_MODE)}"
+        ) from None
+    if seconds <= 0:
+        return "max"
+    if seconds < 1:
+        return "fast"
+    return "live"
 
-            # === Запись размышления над открытым вопросом ===
-            # Если текущий стимул — это exploration открытого вопроса,
-            # фиксируем результат мышления. Это позволяет агенту
-            # «думать постепенно» над одним вопросом несколько циклов.
-            if getattr(agent, "_open_questions", None) and stimulus.startswith("вопрос: "):
-                agent._record_open_question_exploration(stimulus, thought)
 
-            # Вывод мысли только если она интересная (не шаблонная)
-            if 'Ментальная модель' in str(thought) or 'Знаю ответ' not in str(thought):
-                print(f"  💭 [{cycle_count}] {str(thought)[:80]}")
-            # Если агент нашёл ответ на открытый вопрос — показываем
-            elif (getattr(agent, "_open_questions", None)
-                  and any(q.get("answered") and q.get("answer")
-                          and "только что" not in str(thought)
-                          for q in agent._open_questions)):
-                # Показываем ответы на недавно решённые вопросы
-                recently_answered = [
-                    q for q in agent._open_questions
-                    if q.get("answered") and q.get("answer")
-                    and q["last_explored_at"] == cycle_count
-                ]
-                for q in recently_answered[:2]:
-                    print(f"  ✅ Найден ответ на '{q['text'][:50]}...':")
-                    print(f"     {q['answer'][:120]}")
-            
-            # === Периодическое сохранение ментальных моделей ===
-            if cycle_count % LR_CONFIG.SAVE_MENTAL_MODELS_INTERVAL == 0:
-                agent.save_mental_models()
-                get_logger().flush_immediate(f"💾 Ментальные модели сохранены (цикл {cycle_count})")
-            
-            # === Периодический статус на экран ===
-            if cycle_count % LR_CONFIG.STATUS_PRINT_INTERVAL == 0:
-                elapsed = (datetime.now() - start_time).total_seconds()
-                mins = int(elapsed // 60)
-                secs = int(elapsed % 60)
-                print_status_banner(agent, cycle_count)
-            
-            # === Периодическая рефлексия ===
-            if cycle_count % SIM_CONFIG.REFLECTION_INTERVAL == 0:
-                reflection = agent.reflect()
-                if reflection.get('patterns'):
-                    for pattern in reflection['patterns'][:2]:
-                        print(f"  🔍 Паттерн: {pattern['description'][:50]}... (увер: {pattern['confidence']:.0%})")
-            
-            # === Умные чекпоинты (внутри save_state) ===
-            agent.save_state()
+# ============================================================
+# Жизнь агента (фоновый поток asyncio)
+# ============================================================
 
-            # === Естественная регенерация энергии (отдых между циклами) ===
-            if agent.energy < LR_CONFIG.ENERGY_MAX:
-                agent.energy = min(LR_CONFIG.ENERGY_MAX, agent.energy + LR_CONFIG.ENERGY_REGEN_PER_CYCLE)
 
-            # Периодически показываем прогресс
-            if cycle_count % 50 == 0:
-                get_logger().flush_immediate(f"=== ЖИВУ {cycle_count} ЦИКЛОВ ({agent.intelligence} интеллект) ===")
-        
-        # Агент умер (энергия кончилась или max_cycles)
-        print(f"\n\n{'='*60}")
-        print(f"  💀 АГЕНТ {agent.name} ПРЕКРАТИЛ СУЩЕСТВОВАНИЕ")
-        print(f"  📅 Прожил: {(datetime.now() - start_time)}")
-        print(f"  🔄 Циклов: {cycle_count}")
-        print(f"  🧠 Интеллект: {agent.intelligence}")
-        print(f"  📚 Концепций: {len(agent.mental_models.concepts)}")
-        print(f"{'='*60}")
-        
-        agent.save_state()
-        flush_logs()
-        
+class Runtime:
+    """Всё, что живёт в потоке asyncio."""
+
+    def __init__(self, agent, bus, runner, window=None):
+        self.agent = agent
+        self.bus = bus
+        self.runner = runner
+        self.window = window
+        self.started_at = time.time()
+        self.shutdown = asyncio.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self.finished = threading.Event()
+
+    # --- поток ---
+
+    def start(self, speed_mode: str) -> None:
+        self._thread = threading.Thread(
+            target=self._run, args=(speed_mode,), daemon=True,
+            name="agent-loop",
+        )
+        self._thread.start()
+
+    def _run(self, speed_mode: str) -> None:
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._main(speed_mode))
+        except Exception:
+            logger.exception("Цикл жизни упал")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+            self.finished.set()
+
+    async def _main(self, speed_mode: str) -> None:
+        from src.core.event_bus import Events
+
+        bus = self.bus
+
+        async def on_shutdown(event) -> None:
+            self.shutdown.set()
+
+        bus.subscribe(Events.SHUTDOWN_REQUESTED, on_shutdown)
+
+        await bus.start()
+        bus.attach_loop(asyncio.get_running_loop())
+        delivered = bus.drain_pre_start()
+        if delivered:
+            logger.info("[EventBus] Доставлено %s отложенных событий", delivered)
+
+        await self.runner.start()
+        self.runner.set_speed(speed_mode)
+
+        # Первый чекпоинт сразу после старта: если окно закроют или
+        # процесс упадёт, жизнь не исчезнет целиком.
+        self.runner.save_now()
+
+        tasks = [
+            asyncio.create_task(bus.run(), name="EventBus"),
+            asyncio.create_task(self.runner.run_forever(), name="AgentRunner"),
+        ]
+        if self.window is not None:
+            tasks.append(
+                asyncio.create_task(self._status_loop(), name="StatusLoop")
+            )
+
+        await self.shutdown.wait()
+
+        logger.info("Останавливаемся...")
+        self.runner._stop_requested = True
+        bus.stop()
+        try:
+            await asyncio.wait(tasks, timeout=2.0)
+        except Exception:
+            pass
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await self.runner.stop()
+        try:
+            from src.core.buffered_logger import flush_logs
+
+            flush_logs()
+        except Exception:
+            pass
+
+    async def _status_loop(self) -> None:
+        """Отдаёт окну снимок показателей дважды в секунду."""
+        from src.app.status import build_status_snapshot
+
+        while not self.shutdown.is_set():
+            try:
+                self.window.push_status(
+                    build_status_snapshot(
+                        self.agent, self.runner, started_at=self.started_at
+                    )
+                )
+            except Exception as exc:
+                logger.debug("status push: %s", exc)
+            await asyncio.sleep(0.5)
+
+    # --- управление из главного потока ---
+
+    def request_shutdown(self) -> None:
+        try:
+            self.bus.publish_sync("shutdown_requested", source="main")
+        except Exception:
+            pass
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self.shutdown.set)
+            except Exception:
+                pass
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        return self.finished.wait(timeout)
+
+
+# ============================================================
+# Сборка
+# ============================================================
+
+
+def build_runtime(args: argparse.Namespace, env) -> Runtime:
+    """Создаёт агента, шину, раннер, контроллер и (если нужно) окно."""
+    from src.app.bootstrap import create_agent, start_naming_dialogue
+    from src.app.life_controller import LifeController
+    from src.core.agent_runner import AgentRunner
+    from src.core.event_bus import EventBus
+
+    name = args.name or _default_name()
+    agent, report = create_agent(
+        env,
+        name,
+        new=args.new,
+        restore=not args.no_restore,
+        seed=args.seed,
+    )
+
+    bus = EventBus(max_queue_size=500, history_size=300)
+    runner = AgentRunner(agent, bus)
+    # Контроллер жизни нужен во всех режимах: он же обрабатывает
+    # команды /dream и /terminate из чата.
+    LifeController(agent, bus)
+
+    # Подсистемы должны публиковать события в шину, иначе окно их не видит.
+    user_interaction = getattr(agent, "user_interaction", None)
+    if user_interaction is not None:
+        user_interaction.attach_bus(bus)
+    for attr in ("naming_dialogue", "proactive_communication", "mind_dream"):
+        subsystem = getattr(agent, attr, None)
+        if subsystem is not None and hasattr(subsystem, "user_interaction"):
+            subsystem.user_interaction = user_interaction
+
+    window = None
+    if args.ui in ("gui", "tray"):
+        from src.ui.main_window import MainWindow
+
+        window = MainWindow(bus, agent.name)
+
+    runtime = Runtime(agent, bus, runner, window)
+    runtime.report = report  # type: ignore[attr-defined]
+
+    # Знакомство — после создания окна, чтобы приветствие было видно.
+    if window is not None:
+        start_naming_dialogue(agent, bus)
+    return runtime
+
+
+def _default_name() -> str:
+    try:
+        from config.settings import SETTINGS
+
+        return SETTINGS.DEFAULT_AGENT_NAME
+    except Exception:
+        return "Alpha"
+
+
+# ============================================================
+# Режимы
+# ============================================================
+
+
+def run_gui(runtime: Runtime, args: argparse.Namespace) -> int:
+    """Окно в главном потоке, жизнь — в фоновом."""
+    window = runtime.window
+    speed = resolve_speed(args.interval)
+    runtime.start(speed)
+
+    # Ждём, пока шина поднимется: publish_sync до start() отбрасывается.
+    for _ in range(100):
+        if runtime.bus._running:  # noqa: SLF001 - проверка готовности
+            break
+        time.sleep(0.05)
+
+    logger.info("=" * 60)
+    logger.info("🤖 %s ЖИВЁТ", runtime.agent.name)
+    logger.info("  Темп: %s", speed)
+    logger.info("  Окно: %s", args.ui)
+    logger.info("=" * 60)
+
+    window.show()
+    window.run_blocking()  # возвращается, когда окно закрыто
+
+    runtime.request_shutdown()
+    runtime.wait(timeout=10)
+    _save_and_report(runtime.agent)
+    return 0
+
+
+def run_headless(runtime: Runtime, args: argparse.Namespace) -> int:
+    """Без UI: живёт, пока не остановят (Ctrl+C или shutdown)."""
+    speed = resolve_speed(args.interval)
+    runtime.start(speed)
+
+    stop = threading.Event()
+
+    def on_signal(signum, frame) -> None:
+        logger.info("Получен сигнал %s", signum)
+        stop.set()
+
+    try:
+        signal.signal(signal.SIGINT, on_signal)
+        signal.signal(signal.SIGTERM, on_signal)
+    except (ValueError, OSError):
+        pass
+
+    logger.info("🤖 %s живёт без UI (темп: %s)", runtime.agent.name, speed)
+    while not stop.is_set() and not runtime.finished.is_set():
+        stop.wait(0.5)
+
+    runtime.request_shutdown()
+    runtime.wait(timeout=10)
+    _save_and_report(runtime.agent)
+    return 0
+
+
+def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
+    """Консольный режим: прежний main.py, но на общем раннере."""
+    from src.perception.user_interaction import UserPromptHandler
+
+    speed = resolve_speed(args.interval)
+    runtime.start(speed)
+
+    for _ in range(100):
+        if runtime.bus._running:  # noqa: SLF001
+            break
+        time.sleep(0.05)
+
+    agent = runtime.agent
+    _print_banner(agent)
+
+    handler = UserPromptHandler()
+    try:
+        while agent.is_alive() and not runtime.finished.is_set():
+            # Неблокирующий опрос: пустой Enter = «продолжай».
+            try:
+                raw = input("\n>>> ").strip()
+            except EOFError:
+                break
+            if not raw:
+                continue
+            if raw.lower() in ("exit", "q", "quit"):
+                break
+            result = handler.process_command(raw, agent)
+            if result == "__EXIT__":
+                break
     except KeyboardInterrupt:
-        # Graceful shutdown при Ctrl+C
-        print(f"\n\n{'='*60}")
-        print(f"  😴 АГЕНТ {agent.name} ЗАСЫПАЕТ (по команде пользователя)")
-        print(f"  📅 Прожил: {(datetime.now() - start_time)}")
-        print(f"  🔄 Циклов: {cycle_count}")
-        print(f"  🧠 Интеллект: {agent.intelligence}")
-        print(f"{'='*60}")
-        
-        # Сохраняем ВСЁ перед остановкой
+        pass
+
+    runtime.request_shutdown()
+    runtime.wait(timeout=10)
+    _save_and_report(agent)
+    return 0
+
+
+def _print_banner(agent) -> None:
+    try:
+        status = agent.get_goals_status()
+        print(f"\n{'=' * 60}")
+        print(
+            f"  🤖 [{agent.name}] цикл {agent.cycle_count} | "
+            f"интеллект {agent.intelligence} | энергия {agent.energy:.0f}"
+        )
+        print(
+            f"  📚 концепций: {len(agent.mental_models.concepts)} | "
+            f"цели: {status.get('completed')}/{status.get('total')}"
+        )
+        print(f"{'=' * 60}")
+    except Exception:
+        print(f"\n[{agent.name}] живёт.")
+
+
+def _save_and_report(agent) -> None:
+    try:
         agent.save_state()
         agent.save_mental_models()
-        flush_logs()
-        
-        print(f"\n[{agent.name}] 💤 Состояние сохранено. Живите спокойно.")
+    except Exception as exc:
+        logger.warning("Не удалось сохранить состояние: %s", exc)
+    print("\n" + "=" * 60)
+    print(f"  💤 {agent.name} засыпает (с сохранением)")
+    print(f"  📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
 
 
-def _generate_prioritized_stimulus(agent) -> str:
-    """Делегирует в ``src.core.stimulus_selector`` (вынесено в Этапе 4.5).
+# ============================================================
+# Точка входа
+# ============================================================
 
-    Сохранено для обратной совместимости с потенциальными внешними импортами.
-    Использует ``DEFAULT_GOAL_PRIORITY_PROB = 0.4`` (мягкая приоритезация для CLI).
-    """
-    from src.core.stimulus_selector import select_stimulus
-    return select_stimulus(agent, goal_priority_prob=0.4)
+
+def main(argv: Optional[list] = None) -> int:
+    args = parse_args(argv)
+
+    # Совместимость со старыми флагами main_tray.py
+    if args.headless:
+        args.ui = "headless"
+    elif args.no_chat and args.ui == "gui":
+        args.ui = "tray"
+
+    from src.app.paths import setup_environment
+
+    env = setup_environment()
+
+    try:
+        runtime = build_runtime(args, env)
+    except FileNotFoundError as exc:
+        # Понятное сообщение вместо трассировки: человек указал не то семя.
+        print(f"\n❌ {exc}\n", file=sys.stderr)
+        return 2
+
+    def atexit_save() -> None:
+        try:
+            if not runtime.finished.is_set():
+                runtime.agent.save_state()
+        except Exception:
+            pass
+
+    atexit.register(atexit_save)
+
+    if args.ui in ("gui", "tray"):
+        if args.ui == "tray":
+            _start_tray(runtime)
+        return run_gui(runtime, args)
+    if args.ui == "console":
+        return run_console(runtime, args)
+    return run_headless(runtime, args)
+
+
+def _start_tray(runtime: Runtime) -> None:
+    """Иконка в системном трее (необязательная зависимость)."""
+    try:
+        from src.ui.tray import TrayIcon
+    except Exception as exc:
+        logger.warning("Трей недоступен: %s", exc)
+        return
+
+    tray = TrayIcon(runtime.bus, agent_name=runtime.agent.name)
+    try:
+        tray.start()
+        runtime.tray = tray  # type: ignore[attr-defined]
+    except Exception as exc:
+        logger.warning("Не удалось запустить трей: %s", exc)
+
+
+def run_long_living_agent() -> int:
+    """Совместимость: точка входа из pyproject.toml."""
+    return main([])
 
 
 if __name__ == "__main__":
-    run_long_living_agent()
+    sys.exit(main())

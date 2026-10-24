@@ -204,9 +204,26 @@ def test_checkpoint_accepts_old_goal_progress_format(agent):
 # ============================================================
 # 4. Циклы и типы действий
 # ============================================================
-def test_cli_updates_agent_cycle_count():
-    source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
-    assert re.search(r"agent\.cycle_count\s*=\s*cycle_count", source)
+def test_agent_owns_cycle_count():
+    """Счётчик циклов принадлежит агенту, а не внешнему циклу.
+
+    Раньше консольный цикл вёл локальную переменную и писал её в агента
+    каждой итерацией; агентский счётчик при этом оставался нулевым, и
+    чекпоинты/эволюция ломались. Теперь счётчик увеличивает раннер
+    (``agent.cycle_count += 1``), а точка входа своей переменной не
+    держит — синхронизировать нечего.
+
+    Поведение (шаг = +1 цикл) проверяется в
+    ``tests/test_runner_speed.py::test_step_once_advances_exactly_one_cycle``.
+    """
+    entry_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "cycle_count = cycle_count" not in entry_source
+    assert "cycle_count += 1" not in entry_source
+
+    runner_source = (
+        PROJECT_ROOT / "src" / "core" / "agent_runner.py"
+    ).read_text(encoding="utf-8")
+    assert "self.agent.cycle_count += 1" in runner_source
 
 
 def test_action_types_are_counted(agent):
