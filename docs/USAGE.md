@@ -445,7 +445,7 @@ Suite проверяет базовое исполнение, длинный п�
 эвристики, а не к общему пониманию языка. Подробности и ограничения — в
 [docs/STAGE17_REPORT.md](STAGE17_REPORT.md).
 
-### 🧩 Effector-контракт и core-driven шаг (этапы 18A–18B)
+### 🧩 Effector-контракт, core-driven шаг и бюджет (этапы 18A–19)
 
 `DELAMAIN_EFFECTOR_ENABLED=1` включает стабильную границу «ядро → слой
 действия»: ядро отправляет явный `EffectorRequest`, а Delamain создаёт
@@ -475,9 +475,26 @@ $env:DELAMAIN_TICK_INTERVAL = "1"  # необязательно: сохрани�
 обычные legacy-цели остаются pending до единой очереди этапа 20. Если
 включить core-driven без effector, цели не исполняются — это fail-safe.
 
-`cancel`, единый бюджет и единая история пока не реализованы. Подробности —
-[INTEGRATION.md](INTEGRATION.md), [STAGE18_REPORT.md](STAGE18_REPORT.md) и
-[STAGE18B_REPORT.md](STAGE18B_REPORT.md).
+`cancel`, единая очередь и единая история пока не реализованы.
+
+Бюджет действия включается отдельно и по умолчанию выключен:
+
+```python
+# config/simulation_config.py
+ACTION_BUDGET_ENABLED = True
+ACTION_BUDGET_MIN_RESERVE = 5.0
+ACTION_BUDGET_MAX_ACTION_COST = 20.0
+ACTION_BUDGET_EFFECTOR_COST = 4.0
+```
+
+При включении `ActionBudget` принимает одно решение на попытку поверх
+существующей энергии: не опускаться ниже резерва, не превышать потолок
+стоимости и не исполнять действие при отказе. Восстановительные действия
+(`repair`, `deep_rest`, `checkpoint_now`) проходят ниже резерва. Отказ
+оставляет цель Delamain `pending` и не тратит approval. Решения и
+`action_id` живут только в памяти процесса. Подробности —
+[INTEGRATION.md](INTEGRATION.md), [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) и
+[STAGE19_REPORT.md](STAGE19_REPORT.md).
 
 ### Поведение иконки трея
 

@@ -110,7 +110,7 @@ class DelamainSubsystem(Subsystem):
 
     name = "delamain"
     priority = 200
-    version = "0.11.0"
+    version = "0.12.0"
 
     def __init__(
         self,
@@ -661,14 +661,44 @@ class DelamainSubsystem(Subsystem):
                 "trigger": "approval",
             }
 
-        result = runtime.run_approved(approval_id)
         goal_id = approval.get("goal_id")
         goal = runtime.memory.get_goal(int(goal_id)) if goal_id is not None else None
+        goal_metadata = goal.get("metadata") if goal is not None else {}
+        if not isinstance(goal_metadata, Mapping):
+            goal_metadata = {}
+        previous_attempts = (
+            self._attempts(goal_metadata) if goal is not None else 0
+        )
+        goal_title = (
+            str(goal.get("title"))
+            if goal is not None and goal.get("title")
+            else str(approval.get("title") or f"approval-{approval_id}")
+        )
+        goal_task = str(
+            approval.get("task")
+            or (goal.get("title") if goal is not None else "")
+            or goal_title
+        )
+        action_id = (
+            f"delamain-goal-{goal_id}-attempt-{previous_attempts + 1}"
+            if goal_id is not None
+            else f"delamain-approval-{approval_id}"
+        )
+        blocked = self._budget_gate(
+            task=goal_task,
+            trigger="approval",
+            goal_id=int(goal_id) if goal_id is not None else None,
+            title=goal_title,
+            attempts=previous_attempts,
+            action_id=action_id,
+        )
+        if blocked is not None:
+            # The approval stays pending/approved and is not consumed: after
+            # regeneration the same decision can be attempted again.
+            return blocked
+
+        result = runtime.run_approved(approval_id)
         if goal is not None:
-            metadata = goal.get("metadata") or {}
-            if not isinstance(metadata, Mapping):
-                metadata = {}
-            previous_attempts = self._attempts(metadata)
             summary = self._finish_goal(
                 runtime,
                 goal,
@@ -676,7 +706,7 @@ class DelamainSubsystem(Subsystem):
                 trigger="approval",
                 previous_attempts=previous_attempts,
                 reused_skill=False,
-                replanned=bool(metadata.get("last_attempt_replanned")),
+                replanned=bool(goal_metadata.get("last_attempt_replanned")),
             )
         else:
             summary = self._summarize(
@@ -791,6 +821,13 @@ class DelamainSubsystem(Subsystem):
     ) -> Dict[str, Any]:
         """Execute a task immediately, outside the goal table."""
 
+        blocked = self._budget_gate(
+            task=task,
+            trigger="manual",
+            title=task,
+        )
+        if blocked is not None:
+            return blocked
         runtime = self._ensure_runtime()
         result = runtime.run_task(task, plan=plan, task_id=task_id)
         summary = self._summarize(result, trigger="manual")
@@ -814,6 +851,10 @@ class DelamainSubsystem(Subsystem):
         last: Optional[Dict[str, Any]] = None
         for goal in candidates[: self.max_goals_per_tick]:
             last = self._run_goal(runtime, goal, trigger=trigger)
+            # The same fixed cost applies to the next goal, so a budget denial
+            # would only repeat. Stop instead of burning decisions in a loop.
+            if last is not None and last.get("budget_denied"):
+                break
         return last
 
     def run_effector_pending(
@@ -866,7 +907,86 @@ class DelamainSubsystem(Subsystem):
         last: Optional[Dict[str, Any]] = None
         for goal in candidates[: max(1, int(limit))]:
             last = self._run_goal(runtime, goal, trigger=trigger)
+            if last is not None and last.get("budget_denied"):
+                break
         return last
+
+    def _budget_gate(
+        self,
+        *,
+        task: str,
+        trigger: str,
+        goal_id: Optional[int] = None,
+        title: Optional[str] = None,
+        attempts: int = 0,
+        action_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Ask the core-owned budget before a Delamain goal attempt.
+
+        The subsystem never owns a second energy pool.  It uses the budget
+        object that already reads and writes ``DigitalBeing.energy``.  A
+        denial leaves the goal pending, records no episode and spends nothing;
+        the next tick can try again after regeneration.  With the feature flag
+        off (the default) this method is a no-op, so standalone Delamain keeps
+        its previous behaviour.
+        """
+
+        budget = (
+            getattr(self._agent, "action_budget", None)
+            if self._agent is not None
+            else None
+        )
+        if budget is None or not bool(getattr(budget, "enabled", False)):
+            return None
+
+        cost = float(_cfg("ACTION_BUDGET_EFFECTOR_COST", 4.0))
+        try:
+            decision = budget.charge(
+                "delamain_goal",
+                cost,
+                source="delamain",
+                action_id=action_id,
+            )
+            allowed = bool(decision.allowed)
+            decision_dict = decision.to_dict()
+        except Exception as exc:  # a broken ledger must fail closed, not spend
+            allowed = False
+            decision_dict = {
+                "allowed": False,
+                "action_type": "delamain_goal",
+                "cost": cost,
+                "reason": f"budget_error: {type(exc).__name__}: {exc}",
+                "source": "delamain",
+                "action_id": action_id,
+                "enabled": True,
+                "duplicate": False,
+                "capped": False,
+            }
+
+        if allowed:
+            return None
+
+        result = TaskResult(
+            task_id=(
+                f"goal-{goal_id}" if goal_id is not None else "delamain-manual"
+            ),
+            task=task,
+            ok=False,
+            error=f"budget denied: {decision_dict.get('reason')}",
+        )
+        summary = self._summarize(
+            result,
+            trigger=trigger,
+            goal_id=goal_id,
+            title=title,
+            attempts=attempts,
+            retry_scheduled=True,
+            reused_skill=False,
+        )
+        summary["budget"] = decision_dict
+        summary["budget_denied"] = True
+        self._last_result = summary
+        return summary
 
     def _run_goal(
         self,
@@ -894,6 +1014,9 @@ class DelamainSubsystem(Subsystem):
             raw_context = metadata.get("last_failure_context")
             if isinstance(raw_context, Mapping):
                 failure_context = dict(raw_context)
+
+        attempt_number = previous_attempts + 1
+        budget_action_id = f"delamain-goal-{goal_id}-attempt-{attempt_number}"
 
         # A goal with a pending approval must not create another approval on
         # every tick. An approved approval is executed here; this also covers
@@ -939,6 +1062,16 @@ class DelamainSubsystem(Subsystem):
                     self._last_result = summary
                     return summary
                 if state == "approved":
+                    blocked = self._budget_gate(
+                        task=task,
+                        trigger=trigger,
+                        goal_id=goal_id,
+                        title=title,
+                        attempts=previous_attempts,
+                        action_id=budget_action_id,
+                    )
+                    if blocked is not None:
+                        return blocked
                     result = runtime.run_approved(str(approval_id))
                     return self._finish_goal(
                         runtime,
@@ -1007,10 +1140,19 @@ class DelamainSubsystem(Subsystem):
 
         # Keep the stage-8 task id for the first attempt; retries get a
         # suffix so their episodes remain distinguishable.
-        attempt_number = previous_attempts + 1
         task_id = f"goal-{goal_id}"
         if attempt_number > 1:
             task_id += f"-attempt-{attempt_number}"
+        blocked = self._budget_gate(
+            task=task,
+            trigger=trigger,
+            goal_id=goal_id,
+            title=title,
+            attempts=previous_attempts,
+            action_id=budget_action_id,
+        )
+        if blocked is not None:
+            return blocked
         result = runtime.run_task(
             task,
             plan=plan,
@@ -1618,6 +1760,11 @@ class DelamainSubsystem(Subsystem):
             except Exception as exc:  # pragma: no cover - defensive
                 base["approval_count_error"] = str(exc)
 
+        budget = (
+            getattr(self._agent, "action_budget", None)
+            if self._agent is not None
+            else None
+        )
         base.update(
             {
                 "workspace": str(self.workspace),
@@ -1655,6 +1802,7 @@ class DelamainSubsystem(Subsystem):
                 "bridge": self.bridge.status(),
                 "authoring": self.authoring.status(),
                 "effector": self.effector.status(),
+                "budget": budget.status() if budget is not None else None,
                 "planner": self._planner_info(),
                 "last_result": self._last_result,
             }

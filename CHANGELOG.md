@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-24 — Бюджет действия (этап 19)
+
+* **Единая политика** — новый `src/core/action_budget.py`: `ActionBudget`
+  и `BudgetDecision`. Ресурсом остаётся существующая энергия агента;
+  второго запаса, таблицы, очереди или истории нет.
+* **Решение** — при включённом флаге обычное действие требует остатка
+  `ACTION_BUDGET_MIN_RESERVE` (`5.0`) после списания, стоимость попытки
+  ограничена `ACTION_BUDGET_MAX_ACTION_COST` (`20.0`), а
+  восстановительные действия (`repair`, `deep_rest`, `checkpoint_now`)
+  могут пройти ниже резерва. Отказ не списывает энергию и не выполняет
+  побочный эффект.
+* **Идемпотентность** — повторный `charge()` с тем же `action_id` в
+  пределах процесса не списывает энергию второй раз; отказы не
+  кэшируются. Нечисловая и не конечная стоимость отклоняются.
+* **Агент** — `DigitalBeing` создаёт `agent.action_budget`,
+  `act()` принимает решение до побочных эффектов, а
+  `get_subsystems_status()` публикует `action_budget`.
+* **Delamain** — `tick()`, `run_now()`, `approve()` и шаг эффектора
+  проходят через `_budget_gate()`. Отказ оставляет цель `pending`,
+  выставляет `budget_denied=True`, не пишет эпизод, не тратит approval и
+  останавливает перебор целей в тике. `detail["budget"]` и
+  `status()["budget"]` показывают решение.
+* **Флаг** — `ACTION_BUDGET_ENABLED=False`. Пока он выключен, Delamain и
+  `act()` расходуют энергию как раньше, а новые лимиты не применяются.
+* **Границы** — бюджет не durable: решения и `action_id` живут в памяти
+  процесса; списание и чекпоинт не атомарны; резерв проверяется в момент
+  решения. Новых прав, таблиц и миграций нет; sandbox и approval
+  остаются обязательными.
+* **Тесты** — новые `tests/test_action_budget.py` (11),
+  `tests/test_action_budget_agent.py` (6) и
+  `tests/test_delamain_budget.py` (5); целевой прогон — 22 passed.
+  Полный прогон — `623 passed, 2 skipped in 1014.67s (0:16:54)`.
+* **Версия Delamain** — `0.12.0`.
+* **Документация** — `docs/STAGE19_REPORT.md`; обновлены
+  `docs/INTEGRATION.md`, `docs/ARCHITECTURE.md`, `docs/DELAMAIN_LOCAL.md`,
+  `docs/USAGE.md`, `docs/INDEX.md` и `README.md`.
+
 ### 2026-10-23 — Core-driven effector (этап 18B)
 
 * **Единый драйвер** — новый `src/core/effector_driver.py`: ядро вызывает
