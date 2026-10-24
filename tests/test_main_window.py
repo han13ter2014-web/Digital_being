@@ -224,3 +224,27 @@ def test_status_tracks_life_state(window):
     win, bus = window
     win._apply_status({"life_state": "dormant"})
     assert win._last_life_state == "dormant"
+
+# ============================================================
+# Крестик: спрятать (трей) или выйти (без трея)
+# ============================================================
+
+def test_close_hides_when_tray_exists():
+    """С треем окно прячется: существо продолжает жить."""
+    from src.core.event_bus import Events as _Events
+
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha", hide_on_close=True)
+    win._on_close()
+
+    assert _Events.SHUTDOWN_REQUESTED not in bus.names()
+
+
+def test_close_shuts_down_without_tray():
+    """Без трея крестик = выход. Иначе окно не вернуть."""
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha", hide_on_close=False)
+    win._on_close()
+
+    assert bus.last(Events.SHUTDOWN_REQUESTED) == {}
+    assert win._poll_running is False

@@ -59,6 +59,7 @@ class MainWindow(ChatWindow):
         agent_name: str = "DigitalBeing",
         *,
         enabled_controls: bool = True,
+        hide_on_close: bool = False,
     ):
         """
         Args:
@@ -66,8 +67,11 @@ class MainWindow(ChatWindow):
             agent_name: имя агента.
             enabled_controls: показывать ли кнопки управления. Выключено
                 для режима «только смотреть».
+            hide_on_close: крестик прячет окно (режим трея) вместо
+                выхода. По умолчанию False: без трея спрятанное окно
+                вернуть нечем.
         """
-        super().__init__(bus, agent_name)
+        super().__init__(bus, agent_name, hide_on_close=hide_on_close)
         self._enabled_controls = bool(enabled_controls)
 
         self._status_text = None

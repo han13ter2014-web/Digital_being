@@ -69,9 +69,23 @@ class ChatWindow:
     С EventBus общается через publish_sync() и локальную очередь.
     """
 
-    def __init__(self, bus: EventBus, agent_name: str = "DigitalBeing"):
+    def __init__(
+        self,
+        bus: EventBus,
+        agent_name: str = "DigitalBeing",
+        *,
+        hide_on_close: bool = True,
+    ):
+        """
+        Args:
+            hide_on_close: True — крестик прячет окно в трей (иконка
+                остаётся). False — крестик завершает работу с
+                сохранением. В режиме без трея прятать нельзя: вернуть
+                окно будет нечем.
+        """
         self.bus = bus
         self.agent_name = agent_name
+        self._hide_on_close = bool(hide_on_close)
 
         self._root: Optional["tk.Tk"] = None
         self._thread: Optional[threading.Thread] = None
@@ -487,10 +501,29 @@ class ChatWindow:
         root.geometry(f"{w}x{h}+{x}+{y}")
 
     def _on_close(self) -> None:
-        """Клик на × — НЕ закрываем, а прячем в трей."""
+        """Клик на ×.
+
+        Если есть трей — прячем окно (существо продолжает жить).
+        Если трея нет — прятать нельзя: пользователь не смог бы вернуть
+        окно. Тогда это выход с сохранением.
+        """
+        if not self._hide_on_close:
+            try:
+                self.bus.publish_sync(
+                    Events.SHUTDOWN_REQUESTED, {}, source="chat_window"
+                )
+            except Exception:
+                pass
+            self._poll_running = False
+            try:
+                self._destroy_root()
+            except Exception:
+                pass
+            return
+
         self.hide()
         self._incoming_queue.put(
-            ("system", "Я спрятался в трей. Двойной клик по иконке или меню → Открыть чат.")
+            ("system", "Окно спрятано. Иконка в трее → «Открыть окно».")
         )
 
     # ============================================================
