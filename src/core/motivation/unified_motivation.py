@@ -3,11 +3,44 @@ UnifiedMotivationSystem — единая система мотивации с б
 и эмерджентными драйвами (drives).
 """
 import random
+import string
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
 
 logger = get_logger()
+
+
+# ============================================================
+# Подстановка в шаблоны целей
+# ============================================================
+
+def fill_template(template: str, value: str) -> str:
+    """Подставляет ``value`` во все плейсхолдеры шаблона.
+
+    Зачем не ``template.format(...)``: шаблоны целей пишутся вручную и
+    содержат разные имена (``{concept}``, ``{territory}``, ``{activity}``).
+    Если автор шаблона добавил новое имя, а вызов его не передал,
+    ``format`` бросает ``KeyError``, исключение глотается вызывающим
+    кодом, и цель молча не создаётся. Именно так пропадали цели
+    потребности «смысл» из-за ``{activity}``.
+
+    Здесь имя плейсхолдера — не контракт, а пожелание: любое имя
+    получает то же значение. Цель формулируется, а не теряется.
+    """
+    names = {
+        field_name
+        for _, field_name, _, _ in string.Formatter().parse(template)
+        if field_name
+    }
+    if not names:
+        return template
+    try:
+        return template.format(**{name: value for name in names})
+    except (KeyError, IndexError, ValueError):
+        # Экзотический шаблон (индексы, атрибуты) — не рискуем, отдаём
+        # текст как есть, чтобы цель всё равно попала в очередь.
+        return template
 
 
 # ============================================================
@@ -583,11 +616,7 @@ class UnifiedMotivationSystem:
             return None
         template = random.choice(templates)
         concept = self._pick_relevant_concept(need.related_concepts)
-        title = template["title"].format(
-            concept=concept, question=concept, skill=concept, topic=concept,
-            area=concept, target=concept, options="вариант А / вариант Б",
-            idea=concept, domain=concept, conflict="неопределено", territory=concept
-        )
+        title = fill_template(template["title"], concept)
         priority = need.urgency()
         return {
             "title": title, "type": template["type"], "need": need.name,
@@ -602,10 +631,7 @@ class UnifiedMotivationSystem:
             return None
         template = random.choice(templates)
         concept = self._pick_relevant_concept(list(drive.contributing_needs.keys()))
-        title = template["title"].format(
-            domain=concept, concepts=concept, topic=concept, skill=concept,
-            territory=concept, question=concept
-        )
+        title = fill_template(template["title"], concept)
         priority = drive.current_level * 0.8
         return {
             "title": title, "type": template["type"], "need": None,

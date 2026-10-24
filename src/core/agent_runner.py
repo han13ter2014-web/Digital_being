@@ -36,7 +36,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import Optional
+from typing import Dict, List, Optional
 
 from config.simulation_config import LR_CONFIG
 from src.core.event_bus import EventBus, Events
@@ -150,6 +150,24 @@ class AgentRunner:
         self._loop_tick = 0
         self._idle_ticks = 0
 
+        # === Скорость жизни (этап C) ===
+        # Интервал между циклами — параметр рантайма. Раньше он был
+        # захардкожен как ``max(5.0, energy_interval, 1.0)``, поэтому
+        # трей физически не мог работать быстрее одного цикла в 5 секунд,
+        # а консольный main.py успевал тысячи циклов в секунду.
+        self._speed_intervals: Dict[str, float] = dict(
+            getattr(LR_CONFIG, "RUNNER_SPEED_INTERVALS", None)
+            or {"live": 5.0, "fast": 0.5, "max": 0.0}
+        )
+        self._speed_mode: str = str(
+            getattr(LR_CONFIG, "RUNNER_DEFAULT_SPEED", "live")
+        )
+        if self._speed_mode not in self._speed_intervals:
+            self._speed_mode = "live"
+        # Сколько циклов прошло в режиме «лаборатория». Такие циклы
+        # помечаются отдельно: ускорение не должно выдавать себя за жизнь.
+        self._accelerated_cycles = 0
+
         # Энергетическая политика
         self.energy_policy = EnergyPolicy(
             get_energy=lambda: agent.energy,
@@ -178,6 +196,9 @@ class AgentRunner:
         self.bus.subscribe(Events.RESUME_REQUESTED, self._on_resume)
         self.bus.subscribe(Events.SHUTDOWN_REQUESTED, self._on_shutdown)
         self.bus.subscribe(Events.SAVE_REQUESTED, self._on_save)
+        # Скорость жизни: окно публикует событие, раннер меняет темп.
+        self.bus.subscribe(Events.SPEED_CHANGED, self._on_speed_changed)
+        self.bus.subscribe(Events.STEP_REQUESTED, self._on_step)
 
     async def _on_user_message(self, event) -> None:
         """Пользователь отправил сообщение. Обрабатываем его в следующем тике.
@@ -249,6 +270,130 @@ class AgentRunner:
     async def _on_save(self, event) -> None:
         logger.info(f"[{self.name}] SAVE_REQUESTED")
         self._save_state_safe()
+
+    async def _on_speed_changed(self, event) -> None:
+        """Окно попросило сменить темп жизни."""
+        mode = str((event.data or {}).get("mode", "")).strip()
+        try:
+            status = self.set_speed(mode)
+        except ValueError as exc:
+            logger.warning(f"[{self.name}] SPEED_CHANGED отклонён: {exc}")
+            return
+        logger.info(
+            f"[{self.name}] Скорость: {status['mode']} "
+            f"({status['interval_sec']}с между циклами)"
+        )
+
+    async def _on_step(self, event) -> None:
+        """Окно попросило ровно один цикл жизни."""
+        if await self.step_once():
+            logger.info(f"[{self.name}] Шаг выполнен вручную")
+
+    # ============================================================
+    # Скорость жизни (этап C)
+    # ============================================================
+
+    def available_speeds(self) -> List[str]:
+        """Режимы, доступные человеку. ``step`` — отдельный, не интервал."""
+        return sorted(self._speed_intervals) + ["step"]
+
+    def set_speed(self, mode: str) -> Dict:
+        """Переключает темп жизни на лету.
+
+        Args:
+            mode: ``live`` / ``fast`` / ``max`` / ``step``.
+
+        Raises:
+            ValueError: неизвестный режим. Не угадываем: опечатка в
+                названии не должна молча менять поведение.
+        """
+        mode = str(mode).strip().lower()
+        if mode != "step" and mode not in self._speed_intervals:
+            raise ValueError(
+                f"неизвестный режим скорости: {mode!r}; "
+                f"допустимо: {self.available_speeds()}"
+            )
+        self._speed_mode = mode
+        self._apply_speed_side_effects()
+        return self.get_speed_status()
+
+    def _apply_speed_side_effects(self) -> None:
+        """Побочные настройки, зависящие от темпа.
+
+        В режиме ``max`` выключаем внешний web-поиск: он синхронный, с
+        ``time.sleep`` для rate-limit и SSL-рукопожатиями. В ускоренном
+        цикле это блокирует event loop и превращает «лабораторию» в
+        ожидание сети вместо тысяч циклов. В ``live``/``fast`` поиск
+        нужен — это часть жизни, а не только вычисление.
+        """
+        searcher = getattr(self.agent, "web_searcher", None)
+        if searcher is None:
+            return
+        try:
+            if self._speed_mode == "max":
+                searcher.toggle(False)
+            else:
+                searcher.toggle(True)
+        except Exception as exc:  # WebSearcher — необязательная подсистема
+            logger.debug(f"[{self.name}] web search toggle: {exc}")
+
+    def base_interval_sec(self) -> float:
+        """Интервал, выбранный человеком (без влияния энергии)."""
+        if self._speed_mode == "step":
+            return 0.0
+        return float(self._speed_intervals.get(self._speed_mode, 5.0))
+
+    def current_interval_sec(self) -> float:
+        """Фактический интервал с учётом энергии и этичного throttle.
+
+        Правило: в ``fast``/``max`` явный выбор человека важнее усталости.
+        Иначе «ускорение» ничего не ускоряло бы: энергетическая политика
+        возвращала бы 5–120 секунд.
+        """
+        base = self.base_interval_sec()
+
+        if self._speed_mode in ("max", "step"):
+            return 0.0
+
+        if self._speed_mode == "fast":
+            interval = base
+        else:  # live
+            energy_interval = float(
+                self.energy_policy.current_tick_interval_sec()
+            )
+            interval = max(base, energy_interval, 1.0)
+
+        ethical_throttle = float(
+            getattr(LR_CONFIG, "MIN_CYCLE_INTERVAL_SEC", 0.0) or 0.0
+        )
+        return max(interval, ethical_throttle)
+
+    def get_speed_status(self) -> Dict:
+        """Состояние темпа для окна и логов."""
+        return {
+            "mode": self._speed_mode,
+            "interval_sec": self.base_interval_sec(),
+            "effective_interval_sec": self.current_interval_sec(),
+            "paused": self._paused,
+            "accelerated_cycles": self._accelerated_cycles,
+            "available_modes": self.available_speeds(),
+        }
+
+    async def step_once(self) -> bool:
+        """Выполняет ровно один цикл жизни по требованию.
+
+        Работает и на паузе: это осознанный шаг, а не поток циклов.
+        Возвращает False, если раннер не запущен.
+        """
+        if not self._running:
+            logger.warning(f"[{self.name}] step_once: раннер не запущен")
+            return False
+        started = time.time()
+        await self._tick_once(wait_for_user=False)
+        logger.debug(
+            f"[{self.name}] step_once: {time.time() - started:.3f}с"
+        )
+        return True
 
     # ============================================================
     # Цикл жизни
@@ -324,48 +469,80 @@ class AgentRunner:
             await self.stop()
 
     async def _one_iteration(self) -> None:
-        """Один «тик» жизни Runner-а.
+        """Один шаг внешнего цикла: пауза/шаг, затем тик и throttle.
 
         Логика:
-        1. Если на паузе — спим N секунд и выходим.
-        2. Ждём сообщение от пользователя ИЛИ таймаут (tick interval).
-        3. Восстанавливаем энергию за время ожидания.
-        4. Если был стимул (от пользователя или сгенерированный) — вызываем perceive→think→act→evolve.
-        5. Публикуем события и проверяем watchdog.
-        6. Автосохранение по таймеру.
+        1. На паузе или в режиме ``step`` — только ждём (жизнь стоит).
+        2. Один цикл жизни (``_tick_once``).
+        3. Досыпаем остаток интервала до выбранного темпа.
         """
-        if self._paused:
-            # На паузе просто ждём и выходим (потребляем немного CPU)
-            await asyncio.sleep(1.0)
+        if self._paused or self._speed_mode == "step":
+            # На паузе просто ждём и выходим (потребляем немного CPU).
+            await asyncio.sleep(self._pause_poll_sec())
             return
 
-        # === Рассчитать интервал ожидания ===
-        # Берём максимум из:
-        #   - TRAY_TICK_INTERVAL_SEC (минимум между циклами)
-        #   - EnergyPolicy (если устал — реже)
-        #   - Минимум 1 сек (чтобы не крутить CPU вхолостую)
-        min_interval = LR_CONFIG.TRAY_TICK_INTERVAL_SEC
-        energy_interval = self.energy_policy.current_tick_interval_sec()
-        interval = max(min_interval, energy_interval, 1.0)
+        started = time.time()
+        await self._tick_once(wait_for_user=True)
 
+        # Тик уже потратил время на ожидание сообщения, поэтому спим
+        # только остаток интервала. Иначе пауза удваивалась бы.
+        interval = self.current_interval_sec()
+        remaining = interval - (time.time() - started)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        else:
+            # Даём event loop шанс обслужить шину и UI, не задерживая цикл.
+            await asyncio.sleep(0)
+
+    def _pause_poll_sec(self) -> float:
+        """Как часто проверять, не сняли ли паузу. Компромисс CPU/отзывчивость."""
+        return 0.2
+
+    async def _tick_once(self, *, wait_for_user: bool = True) -> None:
+        """Ровно один «цикл жизни» агента.
+
+        Args:
+            wait_for_user: если True — ждём сообщение пользователя до
+                текущего интервала, иначе берём стимул сразу. ``False``
+                используется кнопкой «Шаг» и режимом ``max``.
+        """
         # === Watchdog на цикл ===
         self.watchdog.on_cycle_start()
 
-        # === Ждём либо сообщение пользователя, либо таймаут ===
         cycle_start_ts = time.time()
-        try:
-            user_message = await asyncio.wait_for(
-                self._pending_user_messages.get(),
-                timeout=interval,
-            )
-            stimulus = user_message
-            user_initiated = True
-        except asyncio.TimeoutError:
+        stimulus = None
+        user_initiated = False
+
+        # === Ждём либо сообщение пользователя, либо таймаут ===
+        if wait_for_user:
+            timeout = self.current_interval_sec()
+            try:
+                if timeout <= 0:
+                    message = self._pending_user_messages.get_nowait()
+                else:
+                    message = await asyncio.wait_for(
+                        self._pending_user_messages.get(),
+                        timeout=timeout,
+                    )
+                stimulus = message
+                user_initiated = True
+            except asyncio.TimeoutError:
+                stimulus = None
+            except asyncio.QueueEmpty:
+                stimulus = None
+            except asyncio.CancelledError:
+                self.watchdog.on_cycle_end()
+                raise
+        else:
+            try:
+                stimulus = self._pending_user_messages.get_nowait()
+                user_initiated = True
+            except asyncio.QueueEmpty:
+                stimulus = None
+
+        if stimulus is None:
             stimulus = self._next_stimulus()
             user_initiated = False
-        except asyncio.CancelledError:
-            self.watchdog.on_cycle_end()
-            raise
 
         # === Восстановить энергию за время ожидания ===
         elapsed = time.time() - cycle_start_ts
@@ -378,9 +555,14 @@ class AgentRunner:
             self._rest_tick()
         else:
             try:
-                self._do_one_agent_cycle(stimulus, user_initiated=user_initiated)
+                self._do_one_agent_cycle(
+                    stimulus, user_initiated=user_initiated
+                )
             except Exception as e:
                 logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
+
+        if self._speed_mode == "max":
+            self._accelerated_cycles += 1
 
         # === Watchdog: конец цикла ===
         self.watchdog.on_cycle_end()
@@ -394,10 +576,6 @@ class AgentRunner:
             self._save_state_safe()
             self._last_auto_save_ts = time.time()
 
-        # === Минимальная пауза для CPU (этичный throttle) ===
-        if LR_CONFIG.MIN_CYCLE_INTERVAL_SEC > 0:
-            await asyncio.sleep(LR_CONFIG.MIN_CYCLE_INTERVAL_SEC)
-
     def _next_stimulus(self) -> Optional[str]:
         """Следующий стимул с учётом кулдауна повторов.
 
@@ -405,6 +583,11 @@ class AgentRunner:
             Текст стимула или ``None``, если всё «скучно» — тогда отдых.
         """
         cooldown = int(getattr(LR_CONFIG, "STIMULUS_COOLDOWN_TICKS", 0) or 0)
+        if self._speed_mode == "max":
+            # В режиме «лаборатория» кулдаун выключен: иначе после
+            # выжигания пула агент уходил бы в бесконечный _rest_tick
+            # и ускорение превращалось бы в холостой ход.
+            cooldown = 0
         stimulus = select_novel_stimulus(
             self.agent,
             self._recent_stimuli,

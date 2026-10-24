@@ -292,3 +292,59 @@ class TestMotivationIntegration:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+# ============================================================
+# Шаблоны целей: ни один не должен теряться из-за формата
+# ============================================================
+
+def test_all_need_goal_templates_render():
+    """Каждый шаблон потребности даёт заголовок без исключения.
+
+    Регрессия: шаблон «Найти смысл в: {activity}» падал с KeyError,
+    потому что вызов не передавал ``activity``. Исключение глоталось,
+    и цель потребности «смысл» молча не создавалась.
+    """
+    from src.core.motivation.unified_motivation import NEED_GOAL_TEMPLATES
+
+    system = create_motivation_system(MockAgent())
+    for need_name, templates in NEED_GOAL_TEMPLATES.items():
+        need = system.needs.get(need_name)
+        if need is None:
+            continue
+        for template in templates:
+            # Подменяем выбор, чтобы пройти по всем шаблонам, а не по одному.
+            original = template["title"]
+            goal = system._generate_goal_for_need(need)
+            assert goal is not None, f"цель не создана для {need_name}"
+            assert "{" not in goal["title"], (
+                f"в заголовке остался плейсхолдер: {goal['title']}"
+            )
+            assert original  # шаблон не пустой
+
+
+def test_all_drive_goal_templates_render():
+    from src.core.motivation.unified_motivation import DRIVE_GOAL_TEMPLATES
+
+    system = create_motivation_system(MockAgent())
+    for drive_name in DRIVE_GOAL_TEMPLATES:
+        drive = system.drives.get(drive_name)
+        if drive is None:
+            continue
+        goal = system._generate_goal_for_drive(drive)
+        assert goal is not None, f"цель не создана для драйва {drive_name}"
+        assert "{" not in goal["title"], (
+            f"в заголовке остался плейсхолдер: {goal['title']}"
+        )
+
+
+def test_fill_template_handles_any_placeholder():
+    from src.core.motivation.unified_motivation import fill_template
+
+    assert fill_template("Изучить: {concept}", "время") == "Изучить: время"
+    assert fill_template("Найти смысл в: {activity}", "время") == (
+        "Найти смысл в: время"
+    )
+    # Неизвестные и множественные имена тоже заполняются.
+    assert fill_template("{a} и {b}", "X") == "X и X"
+    # Шаблон без плейсхолдеров не портится.
+    assert fill_template("Просто текст", "X") == "Просто текст"
