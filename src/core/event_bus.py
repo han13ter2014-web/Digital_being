@@ -415,4 +415,6 @@ class Events:
     RESUME_REQUESTED = "resume_requested"
     SHUTDOWN_REQUESTED = "shutdown_requested"
     SAVE_REQUESTED = "save_requested"
+    SPEED_CHANGED = "speed_changed"      # Смена скорости жизни: live/fast/max
+    STEP_REQUESTED = "step_requested"    # Один цикл по кнопке «Шаг»
     CHAT_FOCUS_REQUESTED = "chat_focus_requested"  # Фокус на поле ввода

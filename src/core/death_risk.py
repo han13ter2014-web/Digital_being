@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import Enum
 from src.core.buffered_logger import get_logger
+from src.core.paths import data_path
 
 logger = get_logger()
 
@@ -127,8 +128,11 @@ class StructuralIntegrity:
         # Store checkpoint file path in metadata for later file integrity verification
         current_step = getattr(self.agent, 'cycle_count', 0)
         checkpoint_filename = f"{self.agent.name}_cycle_{current_step}.json"
-        # Check both compressed and uncompressed
-        checkpoint_dir = "data/checkpoints"
+        # Путь через data_path: учитывает DIGITAL_BEING_DATA_DIR и папку
+        # пользовательских данных в собранном .exe. Раньше здесь был
+        # захардкожен относительный "data/checkpoints", из-за чего проверка
+        # целостности смотрела не туда и объявляла агента мёртвым.
+        checkpoint_dir = data_path("checkpoints")
         checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
         if not os.path.exists(checkpoint_path):
             checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename + ".gz")
@@ -194,7 +198,16 @@ class StructuralIntegrity:
             checkpoint_path = latest.metadata.get('checkpoint_file')
         
         if not checkpoint_path or not os.path.exists(checkpoint_path):
-            return {'file_corrupted': True, 'reason': 'file_not_found', 'path': checkpoint_path}
+            # Отсутствие файла — это НЕ повреждение. Файла может не быть,
+            # потому что чекпоинт ещё не записан на диск или был удалён
+            # ротацией (MAX_CHECKPOINTS). Раньше это считалось коррупцией
+            # и агент умирал мгновенно, хотя ничего не было испорчено.
+            return {
+                'file_corrupted': False,
+                'file_missing': True,
+                'reason': 'file_not_found',
+                'path': checkpoint_path,
+            }
         
         try:
             # Try to open and parse the file
@@ -306,6 +319,23 @@ class StructuralIntegrity:
         logger.log(f"[DEATH_RISK] Manual repair: {changes}")
         return changes
     
+    def has_intact_checkpoint(self, *, skip_latest: bool = True) -> bool:
+        """Есть ли хоть одна читаемая копия чекпоинта.
+
+        Args:
+            skip_latest: пропустить последний чекпоинт. Нужно, когда
+                именно он повреждён и мы ищем, куда откатиться.
+        """
+        candidates = self.checkpoints[:-1] if skip_latest else self.checkpoints
+        for checkpoint in reversed(candidates):
+            path = checkpoint.metadata.get('checkpoint_file')
+            verification = self.verify_checkpoint_file_integrity(path)
+            if not verification.get('file_corrupted', False) and not (
+                verification.get('file_missing', False)
+            ):
+                return True
+        return False
+
     def check_death(self) -> Optional[DeathCause]:
         integrity = self.compute_overall_integrity()
         if integrity < self.critical_threshold:
@@ -317,8 +347,21 @@ class StructuralIntegrity:
             checkpoint_path = latest.metadata.get('checkpoint_file')
             file_verification = self.verify_checkpoint_file_integrity(checkpoint_path)
             if file_verification.get('file_corrupted', False):
-                logger.log(f"[DEATH_RISK] CHECKPOINT FILE CORRUPTION DETECTED: {file_verification.get('reason')}")
-                return DeathCause.CHECKPOINT_FILE_CORRUPTION
+                # Один битый файл — ещё не смерть: когнитивная структура
+                # сохранена в более ранних чекпоинтах. Умираем только если
+                # целых копий не осталось, иначе откатываемся.
+                if self.has_intact_checkpoint():
+                    logger.log(
+                        "[DEATH_RISK] Повреждён последний чекпоинт "
+                        f"({file_verification.get('reason')}); "
+                        "откат к более раннему целому."
+                    )
+                else:
+                    logger.log(
+                        "[DEATH_RISK] CHECKPOINT FILE CORRUPTION DETECTED: "
+                        f"{file_verification.get('reason')} (целых копий нет)"
+                    )
+                    return DeathCause.CHECKPOINT_FILE_CORRUPTION
         
         if self.cognitive_coherence < 0.1 and self.memory_consistency < 0.1:
             return DeathCause.COGNITIVE_FRAGMENTATION
