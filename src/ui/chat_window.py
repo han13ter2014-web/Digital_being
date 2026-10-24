@@ -78,6 +78,14 @@ class ChatWindow:
         self._is_visible = False
         self._poll_running = False
 
+        # Виджеты создаются позже, в потоке Tk. До этого они None:
+        # событие может прийти раньше, чем окно построено (агент живёт
+        # сразу, а окно показывается по клику). Без этой инициализации
+        # _append() падал бы с AttributeError.
+        self._text = None
+        self._input_var = None
+        self._input_entry = None
+
         # Очередь сообщений от EventBus → UI (потокобезопасная)
         self._incoming_queue: Queue = Queue()
 
@@ -295,9 +303,41 @@ class ChatWindow:
         self._poll_running = False
         if self._root is not None:
             try:
-                self._root.after(0, self._root.destroy)
+                # Уничтожаем окно ВНУТРИ потока Tk. Если этого не сделать,
+                # Tk-объекты доживают до выхода из процесса и уничтожаются
+                # в главном потоке: «Tcl_AsyncDelete: async handler deleted
+                # by the wrong thread».
+                self._root.after(0, self._destroy_root)
             except Exception:
                 pass
+
+    def _destroy_root(self) -> None:
+        """Уничтожить окно и отпустить Tk-переменные в потоке Tk."""
+        root = self._root
+        self._root = None
+        # Переменные Tk держат ссылку на интерпретатор: обнуляем их здесь
+        # же, иначе их __del__ сработает в чужом потоке.
+        self._input_var = None
+        self._input_entry = None
+        self._text = None
+        if root is None:
+            return
+        try:
+            root.quit()
+        except Exception:
+            pass
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        # tkinter хранит ссылку на корень в модуле. Если её не отпустить
+        # здесь, при выходе из процесса Tk уничтожается в главном потоке:
+        # «Tcl_AsyncDelete: async handler deleted by the wrong thread».
+        try:
+            if getattr(tk, "_default_root", None) is root:
+                tk._default_root = None
+        except Exception:
+            pass
 
     def show(self) -> None:
         """Показать окно (если не создано — создать)."""
@@ -466,17 +506,24 @@ class ChatWindow:
             except Empty:
                 break
             processed += 1
+            self._handle_incoming(kind, data)
 
-            if kind == "__show__":
-                self._show_window()
-            elif kind == "user":
-                self._append_user(data)
-            elif kind == "agent":
-                self._append_agent(data)
-            elif kind == "system":
-                self._append_system(data)
-            elif kind == "error":
-                self._append_error(data)
+    def _handle_incoming(self, kind: str, data) -> None:
+        """Обработать одно сообщение из очереди.
+
+        Вынесено отдельным методом, чтобы наследник (``MainWindow``)
+        мог добавить свои виды сообщений, не копируя цикл опроса.
+        """
+        if kind == "__show__":
+            self._show_window()
+        elif kind == "user":
+            self._append_user(data)
+        elif kind == "agent":
+            self._append_agent(data)
+        elif kind == "system":
+            self._append_system(data)
+        elif kind == "error":
+            self._append_error(data)
 
     def _show_window(self) -> None:
         """Поднять и показать окно."""
