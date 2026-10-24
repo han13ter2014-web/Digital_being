@@ -62,7 +62,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 | **[docs/EVOLUTION.md](docs/EVOLUTION.md)** | 🤖 Агент / 👤 Пользователь | Как агент может меняться |
 | **[docs/BASELINE.md](docs/BASELINE.md)** | 🧑‍💻 Разработчик | Точка отсчёта и метрики до/после |
 | **[docs/STAGE5_REPORT.md](docs/STAGE5_REPORT.md)** | 🧑‍💻 Разработчик | Смысл и метрики: цели, действия, декомпозиция |
-| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan, bounded repair, оценка возможностей, effector-контракт и core-driven шаг |
+| **[docs/DELAMAIN_LOCAL.md](docs/DELAMAIN_LOCAL.md)** | 🧑‍💻 Разработчик | Локальное ядро действия и памяти: sandbox, actions, SQLite, runtime, мост, authoring, replan, bounded repair, оценка возможностей, effector-контракт, core-driven шаг и бюджет действия |
 | **[docs/STAGE7_REPORT.md](docs/STAGE7_REPORT.md)** | 🧑‍💻 Разработчик | Отчёт о первом замкнутом контуре Delamain-local |
 | **[docs/STAGE8_REPORT.md](docs/STAGE8_REPORT.md)** | 🧑‍💻 Разработчик | Интеграция Delamain-local и цикл исполняемых целей |
 | **[docs/STAGE9_REPORT.md](docs/STAGE9_REPORT.md)** | 🧑‍💻 Разработчик | Навыки, повторные попытки и память-зависимый цикл |
@@ -76,6 +76,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 | **[docs/STAGE17_REPORT.md](docs/STAGE17_REPORT.md)** | 🧑‍💻 Разработчик | Детерминированная оценка возможностей: 18 случаев, метрики и CLI |
 | **[docs/STAGE18_REPORT.md](docs/STAGE18_REPORT.md)** | 🧑‍💻 Разработчик | Core-owned effector contract: идемпотентный адаптер, restart, approval |
 | **[docs/STAGE18B_REPORT.md](docs/STAGE18B_REPORT.md)** | 🧑‍💻 Разработчик | Core-driven effector: один шаг за цикл ядра, пассивный tick, interval и границы 18B |
+| **[docs/STAGE19_REPORT.md](docs/STAGE19_REPORT.md)** | 🧑‍💻 Разработчик | Бюджет действия: одно решение на попытку, резерв, потолок стоимости, остановка и границы 19 |
 | **[docs/BUILD.md](docs/BUILD.md)** / **[docs/INSTALLER.md](docs/INSTALLER.md)** | 🧑‍💻 Сборка | PyInstaller и Windows-установщик |
 | **[CHANGELOG.md](CHANGELOG.md)** | Все | История изменений |
 | **[docs/README_DIGITAL_LIFE.md](docs/README_DIGITAL_LIFE.md)** | Все | Общая философия проекта |
@@ -84,7 +85,7 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
 
 ## ✨ Что нового (недавние улучшения)
 
-### 🧭 Ревизия 2026-10: этапы 0–18B
+### 🧭 Ревизия 2026-10: этапы 0–19
 
 Коротко, что изменилось по итогам ревизии:
 
@@ -164,6 +165,17 @@ python -m src.delamain.evaluation --suite evals/delamain_stage17.json
   **[docs/INTEGRATION.md](docs/INTEGRATION.md)**,
   **[docs/STAGE18_REPORT.md](docs/STAGE18_REPORT.md)** и
   **[docs/STAGE18B_REPORT.md](docs/STAGE18B_REPORT.md)**.
+* **Бюджет действия** — `ACTION_BUDGET_ENABLED=False` по умолчанию.
+  При включении `ActionBudget` принимает одно решение на попытку поверх
+  существующей энергии: не опускаться ниже резерва, не превышать потолок
+  стоимости и не выполнять действие при исчерпании. Восстановительные
+  действия (`repair`, `deep_rest`, `checkpoint_now`) проходят отдельно.
+  Один и тот же `action_id` не списывает энергию дважды в пределах
+  процесса. Бюджет применяется в `act()`, `run_now()`, `approve()`,
+  standalone-тике Delamain и шаге эффектора. Новых прав, таблиц, очереди
+  и второго запаса энергии нет. Подробно —
+  **[docs/STAGE19_REPORT.md](docs/STAGE19_REPORT.md)** и
+  **[docs/INTEGRATION.md](docs/INTEGRATION.md)**.
 * **Документация** — единая карта **[docs/INDEX.md](docs/INDEX.md)**,
   проверены ссылки, исторические отчёты помечены.
 

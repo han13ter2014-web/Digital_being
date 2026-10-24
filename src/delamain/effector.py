@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from typing import Any, Dict, List, Mapping, Optional
 
 from src.core.effector_port import (
@@ -57,7 +58,7 @@ class DelamainEffectorAdapter:
     """Expose Delamain as an idempotent effector behind an explicit flag."""
 
     name = "delamain_effector"
-    version = "0.11.0"
+    version = "0.12.0"
 
     def __init__(
         self,
@@ -220,6 +221,11 @@ class DelamainEffectorAdapter:
             return None
 
         result = self._result_from_goal(request_id, goal)
+        budget = summary.get("budget")
+        if isinstance(budget, Mapping):
+            detail = dict(result.detail)
+            detail["budget"] = dict(budget)
+            result = replace(result, detail=detail)
         self._steps += 1
         self._emit_once(f"effector.{result.status.value}", result)
         return result

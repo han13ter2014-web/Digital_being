@@ -10,7 +10,7 @@
 | [README.md](../README.md) | всем | обзор, быстрый старт, текущее состояние |
 | [USAGE.md](USAGE.md) | пользователю | запуск, команды, настройки, трей-режим |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | разработчику / агенту | устройство ядра, подсистемы, цикл жизни |
-| [INTEGRATION.md](INTEGRATION.md) | разработчику / агенту | одно существо и один эффектор: контракт, границы власти, дорожная карта 18–24 |
+| [INTEGRATION.md](INTEGRATION.md) | разработчику / агенту | одно существо и один эффектор: контракт, бюджет действия, границы власти, дорожная карта 18–24 |
 | [WILL.md](WILL.md) | пользователю / агенту | свобода воли, права, этика |
 | [EVOLUTION.md](EVOLUTION.md) | разработчику / агенту | как агент может меняться |
 
@@ -25,7 +25,7 @@
 | [STAGE4_REPORT.md](STAGE4_REPORT.md) | гигиена кода, мёртвый код, мелкие баги |
 | [STAGE5_REPORT.md](STAGE5_REPORT.md) | смысл и метрики: цели, типы действий, декомпозиция |
 | [STAGE6_REPORT.md](STAGE6_REPORT.md) | документация: индекс, ссылки, актуализация |
-| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan, контекст ошибки, bounded repair, оценка возможностей, effector-контракт и core-driven шаг |
+| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan, контекст ошибки, bounded repair, оценка возможностей, effector-контракт, core-driven шаг и бюджет действия |
 | [STAGE7_REPORT.md](STAGE7_REPORT.md) | первый замкнутый контур Delamain-local |
 | [STAGE8_REPORT.md](STAGE8_REPORT.md) | интеграция Delamain-local и цикл исполняемых целей |
 | [STAGE9_REPORT.md](STAGE9_REPORT.md) | навыки, повторные попытки и память-зависимый цикл |
@@ -39,6 +39,7 @@
 | [STAGE17_REPORT.md](STAGE17_REPORT.md) | детерминированная оценка возможностей: suite, метрики, CLI и ограничения |
 | [STAGE18_REPORT.md](STAGE18_REPORT.md) | core-owned effector contract: идемпотентный адаптер, restart, approval и ограничения 18A |
 | [STAGE18B_REPORT.md](STAGE18B_REPORT.md) | core-driven effector: один шаг за цикл ядра, пассивный tick, interval, legacy-goal isolation и ограничения 18B |
+| [STAGE19_REPORT.md](STAGE19_REPORT.md) | бюджет действия: одно решение на попытку, резерв, потолок стоимости, остановка, default-off и ограничения 19 |
 | [CHANGELOG.md](../CHANGELOG.md) | история изменений |
 
 ## Эксплуатация и сборка
@@ -73,7 +74,7 @@
 
 В проекте встречаются две разные нумерации:
 
-* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE18B` (безопасность и утечка,
+* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE19` (безопасность и утечка,
   данные и поиск, изоляция тестов, гигиена, смысл/метрики, документация,
   первый контур действия/памяти Delamain-local, интеграция этого контура
   с агентом, переиспользование навыков и повторы, опциональный локальный
@@ -81,8 +82,9 @@
   исполняемых целей, безопасный authoring executable-payload, bounded
   backoff и перепланирование после ошибки, replan с контекстом упавшего
   шага, bounded repair внутри одной попытки, детерминированная оценка
-  возможностей и CLI для неё, core-owned effector contract и core-driven
-  шаг эффектора для перехода от двух контуров к одному существу).
+  возможностей и CLI для неё, core-owned effector contract, core-driven
+  шаг эффектора для перехода от двух контуров к одному существу и единое
+  бюджетное решение поверх существующей энергии).
   Это текущая линия работ. Этап 0 был подготовительным (инициализация git,
   бэкап `data/`, удаление исходного лога) и отдельного отчёта не имеет —
   его результат зафиксирован в [BASELINE.md](BASELINE.md).

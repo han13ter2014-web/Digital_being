@@ -12,6 +12,7 @@ from src.cognition.mental_models import MentalModel
 from src.cognition.thinking_pipeline import ThinkingPipeline
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
 from src.core.buffered_logger import get_logger
+from src.core.action_budget import ActionBudget
 from src.core.subsystems import (
     GoalSubsystem,
     KnowledgeSubsystem,
@@ -395,6 +396,29 @@ class DigitalBeing:
         if hasattr(self, "energy_subsystem"):
             self.energy_subsystem.epsilon_greedy = LR_CONFIG.EPSILON_GREEDY
 
+        # Stage 19: одна бюджетная политика поверх существующей энергии.
+        # Это не второй запас энергии: getter/setter читают и пишут тот же
+        # ``self.energy`` (energy_subsystem). При выключенном флаге поведение
+        # остаётся прежним, включая отсутствие резерва и лимита стоимости.
+        self.action_budget = None
+        if hasattr(self, "energy_subsystem"):
+            self.action_budget = ActionBudget(
+                get_energy=lambda: self.energy,
+                set_energy=lambda value: setattr(self, "energy", value),
+                max_energy=float(
+                    getattr(LR_CONFIG, "ENERGY_MAX", 200.0)
+                ),
+                enabled=bool(
+                    getattr(LR_CONFIG, "ACTION_BUDGET_ENABLED", False)
+                ),
+                min_reserve=float(
+                    getattr(LR_CONFIG, "ACTION_BUDGET_MIN_RESERVE", 5.0)
+                ),
+                max_action_cost=float(
+                    getattr(LR_CONFIG, "ACTION_BUDGET_MAX_ACTION_COST", 20.0)
+                ),
+            )
+
         # KnowledgeSubsystem: синхронизируем со старой knowledge_base.
         if hasattr(self, "knowledge_subsystem"):
             self.knowledge_subsystem.knowledge_base = dict(self.knowledge_base)
@@ -556,6 +580,9 @@ class DigitalBeing:
         driver = getattr(self, "effector_driver", None)
         if driver is not None:
             status["effector_driver"] = driver.status()
+        budget = getattr(self, "action_budget", None)
+        if budget is not None:
+            status["action_budget"] = budget.status()
         return status
 
     def tick_subsystems(self, cycle: int) -> Dict:
@@ -913,7 +940,29 @@ class DigitalBeing:
                 return f"Ответ: Слишком устал для {action_type}"
         else:
             cost = base_cost
-        
+
+        # === Stage 19: одно бюджетное решение на действие ===
+        # Бюджет читает и пишет ту же энергию агента. При выключенном флаге
+        # он лишь повторяет прежнее ``self.energy -= cost``.
+        budget = getattr(self, "action_budget", None)
+        if budget is not None:
+            decision = budget.charge(
+                action_type=action_type,
+                cost=cost,
+                source="core_act",
+            )
+            if not decision.allowed:
+                get_logger().log(
+                    f"[BUDGET] denied {action_type}: {decision.reason} "
+                    f"(cost={decision.cost:.1f}, energy={decision.energy_before:.1f})"
+                )
+                return (
+                    f"Ответ: Бюджет не разрешает {action_type}: "
+                    f"{decision.reason}"
+                )
+        else:
+            self.energy -= cost
+
         # === Death Risk actions: выполняем реальную логику восстановления ===
         if action_type == "repair":
             if hasattr(self, 'death_risk') and self.death_risk:
@@ -927,8 +976,6 @@ class DigitalBeing:
             if hasattr(self, 'death_risk') and self.death_risk:
                 self.death_risk.force_checkpoint()
                 get_logger().flush_immediate("[DEATH_RISK] Manual checkpoint created")
-        
-        self.energy -= cost
         
         # === Внутренняя мотивация: результат действия ===
         if hasattr(self, 'internal_motivation'):

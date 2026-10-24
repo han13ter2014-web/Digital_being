@@ -73,7 +73,7 @@
 | `ProactiveCommunication` | Инициатива в диалоге | `proactive_communication.py` |
 | `NamingDialogue` | Диалог об имени | `naming_dialogue.py` |
 
-## 🧪 Слой действия Delamain-local (этапы 7–18B)
+## 🧪 Слой действия Delamain-local (этапы 7–19)
 
 Рядом с основным циклом работает локальное детерминированное ядро
 `src/delamain/`:
@@ -103,6 +103,9 @@
   `EventSink`;
 * `src/core/effector_driver.py` — `EffectorDriver`: один шаг эффектора
   за цикл ядра, duplicate-cycle guard и изоляция ошибок;
+* `src/core/action_budget.py` — `ActionBudget`: одно бюджетное решение на
+  попытку поверх существующей энергии, резерв, потолок стоимости и
+  остановка при исчерпании;
 * `DelamainEffectorAdapter` — идемпотентный адаптер эффектора; реализует
   контракт поверх Delamain, но не создаёт цели сам;
 * `evaluation` — офлайн-загрузчик data-only suite, `ScriptedPlanner`,
@@ -167,7 +170,7 @@ long-horizon, skill-reuse, safety, planning-метриками и разбивк
 сети или прав исполнения и не является доказательством AGI. CLI:
 `python -m src.delamain.evaluation --suite evals/delamain_stage17.json`.
 
-С этапов 18A–18B у ядра есть собственный контракт эффектора
+С этапов 18A–19 у ядра есть собственный контракт эффектора
 (`src/core/effector_port.py`), а Delamain реализует его через
 `DelamainEffectorAdapter`. Ядро отправляет явный `EffectorRequest` с
 `request_id`; адаптер создаёт ровно одну durable цель, хранит
@@ -184,9 +187,16 @@ payload даёт `EffectorConflict`. Approval и sandbox остаются пре
 Шаг выбирает только pending-цели с `effector_request_id`; обычные
 legacy-цели остаются pending до единой очереди этапа 20. Оба флага
 (`DELAMAIN_EFFECTOR_ENABLED`, `DELAMAIN_EFFECTOR_CORE_DRIVEN`) выключены
-по умолчанию, новых таблиц, бюджета и истории нет. В обычном агенте
-граница доступна как `agent.delamain_effector`, драйвер — как
-`agent.effector_driver`. Переход к бюджету и единой истории описан в
+по умолчанию, новых таблиц и истории нет. В обычном агенте граница
+доступна как `agent.delamain_effector`, драйвер — как
+`agent.effector_driver`.
+
+С этапа 19 `ActionBudget` принимает одно бюджетное решение на попытку:
+`DigitalBeing.act()`, `run_now()`, `approve()`, standalone-тик Delamain и
+шаг эффектора используют один и тот же `agent.action_budget`. Ресурсом
+остаётся `EnergySubsystem`; второго запаса, таблицы и очереди нет. При
+выключенном `ACTION_BUDGET_ENABLED` поведение прежнее. Бюджет, его
+границы и переход к единой истории описаны в
 [INTEGRATION.md](INTEGRATION.md).
 
 С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
