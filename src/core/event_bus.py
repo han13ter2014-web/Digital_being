@@ -417,4 +417,14 @@ class Events:
     SAVE_REQUESTED = "save_requested"
     SPEED_CHANGED = "speed_changed"      # Смена скорости жизни: live/fast/max
     STEP_REQUESTED = "step_requested"    # Один цикл по кнопке «Шаг»
+
+    # === Жизнь и уход (через подтверждение человеком) ===
+    # Окно только просит. Решение принимает LifeGuard: пауза + точная
+    # фраза. См. src/core/life_guard.py и src/app/life_controller.py.
+    LIFE_REQUEST = "life_request"        # Окно → ядро: «прошу сон/уход»
+    LIFE_PROMPT = "life_prompt"          # Ядро → окно: «введи фразу»
+    LIFE_CONFIRM = "life_confirm"        # Окно → ядро: «вот фраза»
+    LIFE_CANCEL = "life_cancel"          # Окно → ядро: «отменить запрос»
+    LIFE_WAKE = "life_wake"              # Окно → ядро: «разбудить»
+    LIFE_RESULT = "life_result"          # Ядро → окно: итог решения
     CHAT_FOCUS_REQUESTED = "chat_focus_requested"  # Фокус на поле ввода
