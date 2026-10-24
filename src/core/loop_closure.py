@@ -93,6 +93,11 @@ class LoopCloser:
     _effect_count: Dict[str, int] = field(default_factory=dict, repr=False)
     _history: List[ActionOutcome] = field(default_factory=list, repr=False)
     _last: Optional[ActionOutcome] = None
+    # Общие счётчики: сколько действий наблюдали и сколько дали результат.
+    # Нужны для доли результативности — она показывает, работает ли петля
+    # вообще, а не просто «крутится».
+    _total_actions: int = 0
+    _total_with_effect: int = 0
 
     # ------------------------------------------------------------------
     # Классификация действий
@@ -132,11 +137,13 @@ class LoopCloser:
         )
 
         key = str(action)
+        self._total_actions += 1
         if delta.is_empty:
             self._no_effect_streak[key] = self._no_effect_streak.get(key, 0) + 1
         else:
             self._no_effect_streak[key] = 0
             self._effect_count[key] = self._effect_count.get(key, 0) + 1
+            self._total_with_effect += 1
 
         self._last = outcome
         self._history.append(outcome)
@@ -192,6 +199,26 @@ class LoopCloser:
     def effective_actions(self) -> List[str]:
         """Действия, которые в этой жизни давали эффект."""
         return sorted(self._effect_count)
+
+    @property
+    def total_actions(self) -> int:
+        """Сколько действий наблюдали за жизнь."""
+        return int(self._total_actions)
+
+    @property
+    def total_with_effect(self) -> int:
+        """Сколько из них дали наблюдаемый результат."""
+        return int(self._total_with_effect)
+
+    def effect_ratio(self) -> float:
+        """Доля действий с наблюдаемым результатом (0..1).
+
+        Показывает, работает ли петля: агент действует и видит последствия,
+        а не просто увеличивает счётчик. При пустой истории — 0.
+        """
+        if self._total_actions <= 0:
+            return 0.0
+        return self._total_with_effect / self._total_actions
 
     def stuck_actions(self) -> List[str]:
         """Действия, которые сейчас в тупике."""
@@ -290,6 +317,8 @@ class LoopCloser:
         return {
             "no_effect_streak": dict(self._no_effect_streak),
             "effect_count": dict(self._effect_count),
+            "total_actions": self._total_actions,
+            "total_with_effect": self._total_with_effect,
         }
 
     def restore_from_checkpoint(self, state: Optional[Dict[str, Any]]) -> None:
@@ -310,6 +339,12 @@ class LoopCloser:
                 for key, value in counts.items()
                 if isinstance(value, (int, float))
             }
+        total = state.get("total_actions")
+        if isinstance(total, (int, float)):
+            self._total_actions = int(total)
+        with_effect = state.get("total_with_effect")
+        if isinstance(with_effect, (int, float)):
+            self._total_with_effect = int(with_effect)
 
     def status(self) -> Dict[str, Any]:
         """Состояние для окна и дашборда."""
@@ -319,6 +354,9 @@ class LoopCloser:
             "last_summary": self._last.delta.summary() if self._last else "",
             "stuck_actions": self.stuck_actions(),
             "effective_actions": self.effective_actions(),
+            "total_actions": self.total_actions,
+            "total_with_effect": self.total_with_effect,
+            "effect_ratio": round(self.effect_ratio(), 3),
             "max_no_effect": self.max_no_effect,
         }
 

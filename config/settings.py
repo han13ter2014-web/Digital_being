@@ -8,23 +8,77 @@ settings.py — глобальные настройки Digital Being.
 import os
 
 
-class Settings:
+def _data_dir() -> str:
+    """Папка изменяемых данных с учётом окружения.
+
+    Вычисляется при каждом обращении: ``DIGITAL_BEING_DATA_DIR`` может
+    смениться в процессе (тесты, отдельный профиль, повторный запуск).
+    """
+    override = os.environ.get("DIGITAL_BEING_DATA_DIR")
+    if override:
+        return os.path.abspath(override)
+    return os.path.join(_base_dir(), "data")
+
+
+def _base_dir() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class _SettingsMeta(type):
+    """Пути как вычисляемые свойства класса.
+
+    Раньше ``DATA_DIR`` и остальные пути вычислялись один раз при
+    импорте модуля. Из-за этого первая же смена ``DIGITAL_BEING_DATA_DIR``
+    (тест, второй профиль, повторный запуск в том же процессе) оставляла
+    ``Settings`` с устаревшим путём, и данные уходили не туда.
+    """
+
+    @property
+    def BASE_DIR(cls) -> str:
+        return _base_dir()
+
+    @property
+    def DATA_DIR(cls) -> str:
+        return _data_dir()
+
+    @property
+    def CHECKPOINT_DIR(cls) -> str:
+        return os.path.join(_data_dir(), "checkpoints")
+
+    @property
+    def LOG_DIR(cls) -> str:
+        return os.path.join(_data_dir(), "logs")
+
+    @property
+    def MENTAL_MODELS_PATH(cls) -> str:
+        return os.path.join(_data_dir(), "mind", "mental_models.json")
+
+    @property
+    def KNOWLEDGE_BASE_PATH(cls) -> str:
+        return os.path.join(_data_dir(), "knowledge_base.json")
+
+    @property
+    def NURSERY_DIR(cls) -> str:
+        return os.path.join(_data_dir(), "nursery")
+
+    @property
+    def ARCHITECTURE_PROPOSALS_DIR(cls) -> str:
+        return os.path.join(_data_dir(), "architecture_proposals")
+
+
+class Settings(metaclass=_SettingsMeta):
     """Глобальные настройки проекта."""
 
     # === Идентификация агента по умолчанию ===
     DEFAULT_AGENT_NAME = os.environ.get("DIGITAL_BEING_NAME", "Alpha")
 
-    # === Пути ===
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # DIGITAL_BEING_DATA_DIR перенаправляет изменяемые данные во временную
-    # папку (используется тестами), не меняя путь к ресурсам проекта.
-    DATA_DIR = os.environ.get("DIGITAL_BEING_DATA_DIR") or os.path.join(BASE_DIR, "data")
-    CHECKPOINT_DIR = os.path.join(DATA_DIR, "checkpoints")
-    LOG_DIR = os.path.join(DATA_DIR, "logs")
-    MENTAL_MODELS_PATH = os.path.join(DATA_DIR, "mind", "mental_models.json")
-    KNOWLEDGE_BASE_PATH = os.path.join(DATA_DIR, "knowledge_base.json")
-    NURSERY_DIR = os.path.join(DATA_DIR, "nursery")
-    ARCHITECTURE_PROPOSALS_DIR = os.path.join(DATA_DIR, "architecture_proposals")
+    # Пути — вычисляемые свойства (см. _SettingsMeta): они всегда
+    # соответствуют текущему окружению.
+    #
+    # BASE_DIR       — корень проекта (ресурсы)
+    # DATA_DIR       — изменяемые данные (учитывает DIGITAL_BEING_DATA_DIR)
+    # CHECKPOINT_DIR, LOG_DIR, MENTAL_MODELS_PATH, KNOWLEDGE_BASE_PATH,
+    # NURSERY_DIR, ARCHITECTURE_PROPOSALS_DIR — производные от DATA_DIR
 
     # === Логирование ===
     LOG_LEVEL = os.environ.get("DIGITAL_BEING_LOG_LEVEL", "INFO")

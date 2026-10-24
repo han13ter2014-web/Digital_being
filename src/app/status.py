@@ -97,6 +97,9 @@ def build_status_snapshot(
         "last_action": None,
         "last_effect": None,
         "stuck_actions": [],
+        "maturity_met": None,
+        "maturity_total": None,
+        "maturity_is_mature": None,
     }
 
     # Энергия: потолок берём из конфига, если он доступен.
@@ -174,6 +177,18 @@ def build_status_snapshot(
         except Exception:
             pass
 
+    # Зрелость: «пора ли раздавать семя». Считается дёшево, но не
+    # каждую секунду — оценка включает перебор всех концепций.
+    maturity = getattr(agent, "get_maturity", None)
+    if callable(maturity):
+        try:
+            report = maturity()
+            snapshot["maturity_met"] = report.get("met_count")
+            snapshot["maturity_total"] = report.get("total")
+            snapshot["maturity_is_mature"] = report.get("is_mature")
+        except Exception:
+            pass
+
     if started_at is not None:
         snapshot["uptime_sec"] = max(0.0, now - float(started_at))
 
@@ -239,5 +254,14 @@ def format_status_lines(snapshot: Dict[str, Any], width: int = 10) -> List[str]:
         stuck = snapshot.get("stuck_actions") or []
         if stuck:
             lines.append(f"Тупики       {', '.join(stuck[:3])}")
+
+    # Зрелость: измеряемый порог «семя стоит раздавать».
+    met = snapshot.get("maturity_met")
+    total = snapshot.get("maturity_total")
+    if met is not None and total:
+        if snapshot.get("maturity_is_mature"):
+            lines.append(f"Зрелость     {met}/{total} ✓ можно раздавать")
+        else:
+            lines.append(f"Зрелость     {met}/{total}")
 
     return lines

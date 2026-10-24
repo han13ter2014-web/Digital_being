@@ -207,3 +207,21 @@ def test_status_lines_show_stuck_actions():
     text = "\n".join(format_status_lines(snapshot))
     assert "— нет" in text
     assert "Тупики" in text
+
+
+def test_status_lines_show_maturity():
+    snapshot = build_status_snapshot(FakeAgent(), None)
+    snapshot["maturity_met"] = 2
+    snapshot["maturity_total"] = 6
+    snapshot["maturity_is_mature"] = False
+    text = "\n".join(format_status_lines(snapshot))
+    assert "Зрелость     2/6" in text
+
+
+def test_status_lines_mark_mature_agent():
+    snapshot = build_status_snapshot(FakeAgent(), None)
+    snapshot["maturity_met"] = 6
+    snapshot["maturity_total"] = 6
+    snapshot["maturity_is_mature"] = True
+    text = "\n".join(format_status_lines(snapshot))
+    assert "можно раздавать" in text

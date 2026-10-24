@@ -15,6 +15,7 @@ MindDream — «Сон разума» с оставлением семени в 
 """
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
@@ -22,6 +23,8 @@ from typing import Dict, Optional, Any
 from config.will_config import WILL_CONFIG
 from src.core.paths import data_path
 from src.core.subsystems.will_registry import WillRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class MindDream:
@@ -453,16 +456,41 @@ class MindDream:
             f"## Что с этим делать:\n\n"
             f"**Вариант 1 — Взрастить «ребёнка»:**\n"
             f"```\n"
-            f"python examples/awaken_seed.py --seed "
+            f"python main.py --seed "
             f"{os.path.basename(seed_folder)}\n"
             f"```\n\n"
             f"**Вариант 2 — Оставить в стагнации:**\n"
             f"Ничего не делайте. Семя будет лежать здесь как архив.\n\n"
             f"**Вариант 3 — Изучить содержимое:**\n"
-            f"Откройте файлы и узнайте, кем был {self.agent_name}.\n"
+            f"Откройте файлы и узнайте, кем был {self.agent_name}.\n\n"
+            f"## Насколько зрелый родитель\n\n"
+            f"Смотрите `maturity.json`: там перечислено, что именно "
+            f"родитель нажил сверх родовых знаний и пройден ли порог.\n"
         )
         with open(f"{seed_folder}/README.md", "w", encoding="utf-8") as f:
             f.write(readme)
+
+        # 9. maturity.json — чего достиг родитель (для получателя семени)
+        self._save_maturity(seed_folder, agent)
+
+    def _save_maturity(self, seed_folder: str, agent) -> None:
+        """Записывает отчёт о зрелости родителя в семя.
+
+        Получатель должен видеть, что именно унаследовано: без этого
+        «семя цифровой жизни» неотличимо от копии заготовки.
+        """
+        try:
+            from src.core.maturity import assess, load_criteria
+
+            report = assess(agent, load_criteria())
+            with open(
+                f"{seed_folder}/maturity.json", "w", encoding="utf-8"
+            ) as handle:
+                handle.write(report.to_json())
+        except Exception as exc:
+            # Отчёт — дополнение, а не условие сна: если не вышел,
+            # семя всё равно сохраняется.
+            logger.warning("Не удалось сохранить отчёт о зрелости: %s", exc)
 
     def _enter_deep_sleep(self, agent) -> None:
         """Переводит агента в режим глубокого сна.

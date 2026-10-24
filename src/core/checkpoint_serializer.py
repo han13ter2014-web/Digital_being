@@ -206,6 +206,11 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "exploration_history": list(
             getattr(agent, "_exploration_history", [])[-200:]
         ),
+        # Отметки рождения: без них после рестарта нельзя отличить
+        # нажитое от родового, и оценка зрелости станет невозможной.
+        "birth_concepts": getattr(agent, "_birth_concepts", None),
+        "birth_defined": getattr(agent, "_birth_defined", None),
+        "birth_values": list(getattr(agent, "_birth_values", []) or []),
     }
 
 
@@ -267,6 +272,18 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     saved_history = state.get("exploration_history")
     if isinstance(saved_history, list):
         agent._exploration_history = [str(item) for item in saved_history]
+
+    # Отметки рождения: восстанавливаем как есть. Если в чекпоинте их нет
+    # (старый формат), оставляем текущие — но не выдумываем нули.
+    saved_birth = state.get("birth_concepts")
+    if isinstance(saved_birth, int) and saved_birth >= 0:
+        agent._birth_concepts = saved_birth
+    saved_birth_defined = state.get("birth_defined")
+    if isinstance(saved_birth_defined, int) and saved_birth_defined >= 0:
+        agent._birth_defined = saved_birth_defined
+    saved_birth_values = state.get("birth_values")
+    if isinstance(saved_birth_values, list):
+        agent._birth_values = [str(item) for item in saved_birth_values]
 
     agent._learned_facts = set(state.get("_learned_facts", []))
     agent._known_definitions.update(state.get("_known_definitions", {}))

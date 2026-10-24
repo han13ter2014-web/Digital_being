@@ -47,6 +47,7 @@ class WorldSignature:
     answered_questions: int = 0
     web_hits: int = 0
     notes: int = 0
+    experiences: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -56,6 +57,7 @@ class WorldSignature:
             "answered_questions": self.answered_questions,
             "web_hits": self.web_hits,
             "notes": self.notes,
+            "experiences": self.experiences,
         }
 
 
@@ -74,6 +76,7 @@ class WorldDelta:
     answered_questions: int = 0
     web_hits: int = 0
     notes: int = 0
+    experiences: int = 0
 
     # ------------------------------------------------------------------
     # Свойства
@@ -90,6 +93,7 @@ class WorldDelta:
                 self.answered_questions,
                 self.web_hits,
                 self.notes,
+                self.experiences,
             )
         )
 
@@ -105,6 +109,7 @@ class WorldDelta:
                 self.answered_questions,
                 self.web_hits,
                 self.notes,
+                self.experiences,
             )
         )
 
@@ -131,6 +136,8 @@ class WorldDelta:
             parts.append(f"из сети {self.web_hits:+d}")
         if self.notes:
             parts.append(f"записей {self.notes:+d}")
+        if self.experiences:
+            parts.append(f"опыта {self.experiences:+d}")
         return ", ".join(parts)
 
     def as_dict(self) -> Dict[str, int]:
@@ -141,6 +148,7 @@ class WorldDelta:
             "answered_questions": self.answered_questions,
             "web_hits": self.web_hits,
             "notes": self.notes,
+            "experiences": self.experiences,
         }
 
 
@@ -155,6 +163,7 @@ def between(before: WorldSignature, after: WorldSignature) -> WorldDelta:
         ),
         web_hits=after.web_hits - before.web_hits,
         notes=after.notes - before.notes,
+        experiences=after.experiences - before.experiences,
     )
 
 
@@ -217,15 +226,21 @@ def capture(agent: Any) -> WorldSignature:
     if isinstance(concepts_map, dict):
         concepts = len(concepts_map)
         confidence_sum = 0.0
+        experiences = 0
         for node in concepts_map.values():
             try:
                 confidence_sum += float(getattr(node, "confidence", 0.0) or 0.0)
             except (TypeError, ValueError):
-                continue
+                pass
+            try:
+                experiences += len(getattr(node, "experiences", []) or [])
+            except TypeError:
+                pass
         confidence_milli = int(round(confidence_sum * 1000))
     else:
         concepts = 0
         confidence_milli = 0
+        experiences = 0
 
     return WorldSignature(
         knowledge_entries=knowledge_entries,
@@ -234,6 +249,7 @@ def capture(agent: Any) -> WorldSignature:
         answered_questions=_count_answered_questions(agent),
         web_hits=_count_web_hits(agent),
         notes=_count_notes(agent),
+        experiences=experiences,
     )
 
 

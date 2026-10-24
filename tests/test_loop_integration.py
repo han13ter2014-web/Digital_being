@@ -114,28 +114,21 @@ def test_real_evidence_credits_goal(agent):
 
 def test_repeated_dead_action_is_escaped(agent):
     """Действие без результата перестаёт выбираться."""
-    # Заставляем explore быть бесполезным: все концепции «уверены».
-    for node in agent.mental_models.concepts.values():
-        node.confidence = 1.0
-    agent._exploration_history = []
-    # И пустой пул стимулов, чтобы нечего было изучать.
-    from config.simulation_config import LR_CONFIG
+    # Заставляем explore быть бесполезным: исследовать нечего, и мир не
+    # меняется. Раньше для этого хватало «все концепции уверены», но
+    # теперь исследование добавляет опыт, поэтому блокируем выбор темы
+    # напрямую — проверяется механизм выхода из тупика.
+    agent._pick_exploration_target = lambda: None
 
-    original_pool = getattr(LR_CONFIG, "STIMULI_POOL", None)
-    LR_CONFIG.STIMULI_POOL = []
-    try:
-        for _ in range(4):
-            agent.act("explore")
-        assert agent.loop_closer.is_stuck("explore") is True
+    for _ in range(4):
+        agent.act("explore")
+    assert agent.loop_closer.is_stuck("explore") is True
 
-        # Тик должен переключиться на другое действие.
-        result = agent.autonomous_tick()
-        escape = result.get("loop_escape")
-        assert escape is not None, result.get("arbitrator")
-        assert escape["to"] != "explore"
-    finally:
-        if original_pool is not None:
-            LR_CONFIG.STIMULI_POOL = original_pool
+    # Тик должен переключиться на другое действие.
+    result = agent.autonomous_tick()
+    escape = result.get("loop_escape")
+    assert escape is not None, result.get("arbitrator")
+    assert escape["to"] != "explore"
 
 
 # ============================================================
@@ -191,31 +184,26 @@ def test_loop_state_survives_checkpoint(agent):
         build_state_from_agent,
     )
 
-    # Намеренно загоняем explore в тупик.
-    for node in agent.mental_models.concepts.values():
-        node.confidence = 1.0
-    agent._exploration_history = []
-    from config.simulation_config import LR_CONFIG
-    original_pool = getattr(LR_CONFIG, "STIMULI_POOL", None)
-    LR_CONFIG.STIMULI_POOL = []
-    try:
-        for _ in range(3):
-            agent.act("explore")
-        assert agent.loop_closer.is_stuck("explore") is True
+    # Намеренно загоняем explore в тупик: исследовать нечего, и мир не
+    # меняется. Раньше для этого хватало «все концепции уверены», но
+    # теперь исследование добавляет опыт, поэтому блокируем выбор темы
+    # напрямую — проверяется логика тупика, а не продуктивность explore.
+    agent._pick_exploration_target = lambda: None
+    agent._exploration_history = ["тема_1", "тема_2"]
+    for _ in range(3):
+        agent.act("explore")
+    assert agent.loop_closer.is_stuck("explore") is True
 
-        state = build_state_from_agent(agent)
+    state = build_state_from_agent(agent)
 
-        reborn = DigitalBeing(name="LoopAgent")
-        searcher = getattr(reborn, "web_searcher", None)
-        if searcher is not None:
-            searcher.toggle(False)
-        apply_state_to_agent(reborn, state)
+    reborn = DigitalBeing(name="LoopAgent")
+    searcher = getattr(reborn, "web_searcher", None)
+    if searcher is not None:
+        searcher.toggle(False)
+    apply_state_to_agent(reborn, state)
 
-        assert reborn.loop_closer.is_stuck("explore") is True
-        assert reborn._exploration_history == agent._exploration_history
-    finally:
-        if original_pool is not None:
-            LR_CONFIG.STIMULI_POOL = original_pool
+    assert reborn.loop_closer.is_stuck("explore") is True
+    assert reborn._exploration_history == agent._exploration_history
 
 
 # ============================================================

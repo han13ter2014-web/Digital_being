@@ -82,6 +82,16 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
         "--seed", default=None, help="Имя папки семени в Яслях"
     )
     parser.add_argument(
+        "--maturity",
+        action="store_true",
+        help="Показать зрелость агента и выйти (пора ли раздавать семя)",
+    )
+    parser.add_argument(
+        "--maturity-json",
+        action="store_true",
+        help="Зрелость в машиночитаемом виде (для скриптов и CI)",
+    )
+    parser.add_argument(
         "--no-restore",
         action="store_true",
         help="Не восстанавливать из чекпоинта",
@@ -276,7 +286,11 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             subsystem.user_interaction = user_interaction
 
     window = None
-    if args.ui in ("gui", "tray"):
+    # Отчёт о зрелости не нуждается в окне: не создаём Tk зря.
+    wants_report = getattr(args, "maturity", False) or getattr(
+        args, "maturity_json", False
+    )
+    if args.ui in ("gui", "tray") and not wants_report:
         from src.ui.main_window import MainWindow
 
         window = MainWindow(
@@ -334,6 +348,27 @@ def run_gui(runtime: Runtime, args: argparse.Namespace) -> int:
     runtime.wait(timeout=10)
     _save_and_report(runtime.agent)
     return 0
+
+
+def run_maturity(runtime: Runtime, args: argparse.Namespace) -> int:
+    """Печатает зрелость и выходит. Ничего не запускает и не меняет.
+
+    Это ответ на вопрос «пора ли раздавать семя?» — измеримый, а не по
+    ощущению. Код возврата: 0 — порог пройден, 1 — нет (удобно для CI).
+    """
+    from src.core.maturity import assess, load_criteria
+
+    report = assess(runtime.agent, load_criteria())
+
+    if args.maturity_json:
+        print(report.to_json())
+    else:
+        print()
+        print(report.describe())
+        print()
+        print("Подробнее о критериях: docs/MATURITY.md")
+
+    return 0 if report.is_mature else 1
 
 
 def run_headless(runtime: Runtime, args: argparse.Namespace) -> int:
@@ -447,14 +482,23 @@ def main(argv: Optional[list] = None) -> int:
 
     from src.app.paths import setup_environment
 
-    env = setup_environment()
+    # В режиме машиночитаемого отчёта stdout принадлежит JSON: логи и
+    # сообщения подсистем уводим из stdout.
+    json_output = bool(getattr(args, "maturity_json", False))
+    env = setup_environment(console=not json_output)
 
-    try:
-        runtime = build_runtime(args, env)
-    except FileNotFoundError as exc:
-        # Понятное сообщение вместо трассировки: человек указал не то семя.
-        print(f"\n❌ {exc}\n", file=sys.stderr)
-        return 2
+    if json_output:
+        import contextlib
+
+        with contextlib.redirect_stdout(sys.stderr):
+            runtime = build_runtime(args, env)
+    else:
+        try:
+            runtime = build_runtime(args, env)
+        except FileNotFoundError as exc:
+            # Понятное сообщение вместо трассировки: человек указал не то семя.
+            print(f"\n❌ {exc}\n", file=sys.stderr)
+            return 2
 
     def atexit_save() -> None:
         try:
@@ -464,6 +508,10 @@ def main(argv: Optional[list] = None) -> int:
             pass
 
     atexit.register(atexit_save)
+
+    # «Пора ли раздавать семя?» — отчёт без запуска жизни.
+    if args.maturity or args.maturity_json:
+        return run_maturity(runtime, args)
 
     if args.ui in ("gui", "tray"):
         if args.ui == "tray":
