@@ -260,7 +260,10 @@ def test_intrinsic_goal_has_id_and_is_synced(agent):
 
     # Прогресс пишется в id цели, а не в None.
     assert active["id"] in agent._goal_progress
-    assert agent._check_goal_progress("произвольная тема")["pct"] > 0
+    # Тема должна относиться к цели: с этапа «контур» посторонние темы
+    # прогресс не начисляют. Берём предмет цели из её названия.
+    topic = active["title"].split(":", 1)[-1].strip() or active["title"]
+    assert agent._check_goal_progress(topic)["pct"] > 0
 
 
 # ============================================================

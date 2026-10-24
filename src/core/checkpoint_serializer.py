@@ -194,6 +194,18 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         } or {},
         # NEW: Unified Motivation (needs + drives)
         "motivation": getattr(agent, 'motivation_system', None) and agent.motivation_system.to_checkpoint_dict() or {},
+        # Замыкание петли: тупики не должны исчезать после рестарта,
+        # иначе агент снова начнёт повторять бесполезное действие.
+        "loop_closure": (
+            agent.loop_closer.to_checkpoint_dict()
+            if getattr(agent, "loop_closer", None) is not None
+            else {}
+        ),
+        # Изученные темы: чтобы исследование продолжалось, а не начиналось
+        # с той же концепции после перезапуска.
+        "exploration_history": list(
+            getattr(agent, "_exploration_history", [])[-200:]
+        ),
     }
 
 
@@ -246,6 +258,15 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.goal_subsystem.active_goal = agent.active_goal
         agent.goal_subsystem.completed_goals = agent.completed_goals
         agent.goal_subsystem._goal_progress = agent._goal_progress
+
+    # Замыкание петли: восстанавливаем счётчики тупиков и историю
+    # исследования, чтобы после рестарта не повторять бесполезное действие
+    # и не изучать ту же тему заново.
+    if getattr(agent, "loop_closer", None) is not None:
+        agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    saved_history = state.get("exploration_history")
+    if isinstance(saved_history, list):
+        agent._exploration_history = [str(item) for item in saved_history]
 
     agent._learned_facts = set(state.get("_learned_facts", []))
     agent._known_definitions.update(state.get("_known_definitions", {}))

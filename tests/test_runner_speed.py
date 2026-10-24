@@ -32,6 +32,11 @@ def runtime():
             pass
 
     agent = DigitalBeing(name="SpeedTest")
+    # Тесты не должны ходить в сеть: исследование теперь реально думает
+    # и могло бы ждать Wikipedia по rate-limit.
+    searcher = getattr(agent, "web_searcher", None)
+    if searcher is not None:
+        searcher.toggle(False)
     bus = EventBus(max_queue_size=200, history_size=100)
     runner = AgentRunner(agent, bus, name="SpeedRunner")
     return agent, bus, runner
@@ -220,19 +225,26 @@ def test_live_mode_does_not_mark_cycles_accelerated(runtime):
 
 
 def test_tick_does_not_double_interval(runtime):
-    """Раньше ожидание сообщения и sleep складывались.
+    """Ожидание сообщения и sleep не складываются.
 
-    Тик уже тратит время на ожидание, поэтому досыпается только
-    остаток интервала.
+    Тик уже тратит время на ожидание, поэтому досыпается только остаток
+    интервала. Проверяем именно троттл: подменяем тик на заведомо
+    известную задержку, иначе тест мерил бы скорость мышления, а не паузу.
     """
     agent, bus, runner = runtime
     runner._running = True
     runner._pending_user_messages = asyncio.Queue()
     runner.set_speed("fast")
 
+    async def fake_tick(*, wait_for_user=True):
+        await asyncio.sleep(0.3)  # тик сам занимает 0.3 с
+
+    runner._tick_once = fake_tick
+
     started = time.time()
     asyncio.run(runner._one_iteration())
     elapsed = time.time() - started
 
-    # Один цикл в fast не должен занимать заметно больше интервала.
-    assert elapsed < 2.0
+    # 0.3 работы + остаток 0.2 = ~0.5 с. Если бы пауза добавлялась
+    # целиком, вышло бы ~0.8 с.
+    assert 0.4 <= elapsed < 0.75

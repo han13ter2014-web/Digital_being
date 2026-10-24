@@ -94,6 +94,9 @@ def build_status_snapshot(
         "seed_folder": None,
         "parent_name": None,
         "pending_life_request": None,
+        "last_action": None,
+        "last_effect": None,
+        "stuck_actions": [],
     }
 
     # Энергия: потолок берём из конфига, если он доступен.
@@ -157,6 +160,20 @@ def build_status_snapshot(
 
     snapshot["parent_name"] = getattr(agent, "parent_name", None)
 
+    # Контур: последнее действие и дало ли оно результат. Это главный
+    # показатель того, «живёт» ли агент или крутится на месте.
+    loop_closer = getattr(agent, "loop_closer", None)
+    if loop_closer is not None:
+        try:
+            loop_state = loop_closer.status()
+            snapshot["last_action"] = loop_state.get("last_action")
+            snapshot["last_effect"] = loop_state.get("last_effect")
+            snapshot["stuck_actions"] = list(
+                loop_state.get("stuck_actions") or []
+            )
+        except Exception:
+            pass
+
     if started_at is not None:
         snapshot["uptime_sec"] = max(0.0, now - float(started_at))
 
@@ -212,5 +229,15 @@ def format_status_lines(snapshot: Dict[str, Any], width: int = 10) -> List[str]:
     parent = snapshot.get("parent_name")
     if parent:
         lines.append(f"Родитель     {parent}")
+
+    # Контур: видно, работает ли петля «действие → результат».
+    last_action = snapshot.get("last_action")
+    if last_action:
+        effect = snapshot.get("last_effect")
+        mark = "✓ есть" if effect else "— нет"
+        lines.append(f"Действие     {last_action} ({mark})")
+        stuck = snapshot.get("stuck_actions") or []
+        if stuck:
+            lines.append(f"Тупики       {', '.join(stuck[:3])}")
 
     return lines
