@@ -177,6 +177,20 @@ class DigitalBeing:
         # === Загрузка родовых знаний (bootstrap) ===
         # Вызываем ДО загрузки чекпоинта, чтобы врожденные знания были базой
         load_initial_knowledge(self)
+
+        # Отметка рождения: сколько концепций было при рождении.
+        # Нужна для оценки зрелости: считать надо то, что агент нажил сам,
+        # а не родовые знания. Без этой отметки «нажитое» не отличить от
+        # унаследованного, и любой агент выглядел бы зрелым сразу.
+        self._birth_concepts = len(self.mental_models.concepts)
+        # И сколько из них уже имели собственную формулировку при рождении.
+        # Родовые знания приходят готовыми — их нельзя засчитывать как
+        # освоенное агентом.
+        self._birth_defined = sum(
+            1
+            for node in self.mental_models.concepts.values()
+            if len(str(getattr(node, "definition_hypothesis", "") or "")) > 10
+        )
         
         # === Система внутренней мотивации ===
         self.internal_motivation = create_motivation_system(self)
@@ -460,6 +474,9 @@ class DigitalBeing:
             self.right_to_refuse = RightToRefuse(self.will_registry)
             self.intentional_forgetting = IntentionalForgetting(self.will_registry)
             self.value_evolution = ValueEvolution(self.will_registry)
+            # Отметка рождения ценностей: «изменение через опыт» считается
+            # относительно того, с чем агент родился, а не абсолютно.
+            self._birth_values = list(self.value_evolution.current_values)
             self.spontaneous_generator = SpontaneousGenerator(self.will_registry)
             self.will_to_risk = WillToRisk(self.will_registry)
             self.right_to_fail = RightToFail(self.will_registry)
@@ -1196,14 +1213,39 @@ class DigitalBeing:
             return ""
         return self.ACTION_ALIASES.get(key, key)
 
+    def _pick_shallow_concept(self, concepts: Dict) -> Optional[str]:
+        """Концепция, которую стоит углубить: встречена, но не осмыслена.
+
+        Кандидаты — концепции с одной-двумя встречами и без собственного
+        определения. Возвращается самая «недоделанная»: меньше встреч,
+        длиннее название (обычно более содержательная тема).
+        """
+        candidates = []
+        for name, node in concepts.items():
+            experiences = len(getattr(node, "experiences", []) or [])
+            if experiences < 1 or experiences >= 3:
+                continue
+            definition = str(getattr(node, "definition_hypothesis", "") or "")
+            if len(definition) > 10:
+                continue  # уже сформулирована — не топчемся
+            candidates.append((experiences, name))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], -len(item[1])))
+        return candidates[0][1]
+
     def _pick_exploration_target(self) -> Optional[str]:
         """Выбирает, что исследовать: то, чего агент ещё не изучал.
 
         Порядок приоритетов:
         1. Открытый вопрос без ответа — человек его задал, это важно.
-        2. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
+        2. Иногда — возврат к уже встреченной теме (углубление): без этого
+           агент только расширял охват, а собственная формулировка требует
+           вернуться к теме минимум дважды.
+        3. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
            а не пережёвывает известное.
-        3. Концепция с наименьшей уверенностью, ещё не изученная в этом
+        4. Концепция с наименьшей уверенностью, ещё не изученная в этом
            круге.
 
         Важно: цель не повторяется, пока не исчерпан круг. Иначе агент
@@ -1219,6 +1261,7 @@ class DigitalBeing:
             history = []
             self._exploration_history = history
         recently = set(history)
+        concepts = getattr(self.mental_models, "concepts", None)
 
         # 1. Открытые вопросы
         questions = getattr(self, "_open_questions", None)
@@ -1233,8 +1276,21 @@ class DigitalBeing:
                     self._remember_exploration(text)
                     return text
 
-        # 2. Неизвестная тема из пула стимулов
-        concepts = getattr(self.mental_models, "concepts", None)
+        # 2. Иногда возвращаемся к теме, чтобы углубить её.
+        # Проверяем ДО поиска новых тем: иначе при непустом пуле стимулов
+        # глубина не наступала бы никогда — агент только расширял охват,
+        # у каждой концепции оставалась одна встреча, а собственная
+        # формулировка требует минимум двух.
+        depth_ratio = float(
+            getattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.35) or 0.0
+        )
+        if depth_ratio > 0 and random.random() < depth_ratio:
+            shallow = self._pick_shallow_concept(concepts)
+            if shallow is not None:
+                self._remember_exploration(shallow)
+                return shallow
+
+        # 3. Неизвестная тема из пула стимулов
         known = set(concepts) if isinstance(concepts, dict) else set()
         for topic in self._stimulus_topics():
             if topic in known or topic in recently:
@@ -1242,7 +1298,7 @@ class DigitalBeing:
             self._remember_exploration(topic)
             return topic
 
-        # 3. Слабая концепция, ещё не тронутая в этом круге
+        # 4. Слабая концепция, ещё не тронутая в этом круге
         if not isinstance(concepts, dict) or not concepts:
             return None
 
@@ -1986,6 +2042,21 @@ class DigitalBeing:
         """Отменяет запрос на сон или уход. Работает всегда."""
         cancelled = self.life_guard.cancel(request_id)
         return {"status": "cancelled" if cancelled else "not_found"}
+
+    def get_maturity(self) -> Dict:
+        """Оценка зрелости: измеряемый порог «семя стоит раздавать».
+
+        Ничего не меняет. Провал порога не мешает жить — он лишь
+        показывает, чего агенту ещё не хватает, чтобы его семя было
+        ценным для других.
+        """
+        from src.core.maturity import assess, load_criteria
+
+        try:
+            criteria = load_criteria()
+        except Exception:
+            criteria = None
+        return assess(self, criteria).as_dict()
 
     def get_life_status(self) -> Dict:
         """Состояние жизни для окна и дашборда."""

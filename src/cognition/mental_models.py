@@ -237,7 +237,7 @@ class MentalModel:
         
         # Находит наиболее часто встречающиеся паттерны
         most_common = max(context_patterns.items(), key=lambda x: len(x[1])) if context_patterns else (None, [])
-        
+
         if most_common[0] and len(most_common[1]) >= 2:
             # Формирует гипотезу определения
             common_outcomes = [e["outcome"] for e in most_common[1]]
@@ -248,6 +248,23 @@ class MentalModel:
                 hypothesis_parts = [p[0] for p in most_frequent if p[1] >= 1]
                 if hypothesis_parts:
                     node.definition_hypothesis = f"По опыту ({len(node.experiences)} встреч): '{concept_name}' связано с {' -> '.join(hypothesis_parts[:3])}"
+        else:
+            # Контексты у разных встреч могут не пересекаться (например,
+            # «гипотеза_цикл_12» и «гипотеза_цикл_57»). Раньше в этом
+            # случае определение не формировалось НИКОГДА, хотя агент уже
+            # дважды сталкивался с концепцией. Теперь собираем определение
+            # из самих результатов встреч.
+            outcomes = [
+                str(e.get("outcome") or "").strip()
+                for e in node.experiences
+                if str(e.get("outcome") or "").strip()
+            ]
+            if outcomes:
+                unique = list(dict.fromkeys(o[:80] for o in outcomes))
+                node.definition_hypothesis = (
+                    f"По опыту ({len(node.experiences)} встреч): "
+                    f"'{concept_name}' — {' -> '.join(unique[:3])}"
+                )
         
         # Обновляет уверенность
         consistent_valences = [e["valence"] for e in node.experiences if abs(e["valence"]) > 0.3]
