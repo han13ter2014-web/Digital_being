@@ -279,7 +279,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
     if args.ui in ("gui", "tray"):
         from src.ui.main_window import MainWindow
 
-        window = MainWindow(bus, agent.name)
+        window = MainWindow(
+            bus,
+            agent.name,
+            # Без трея прятать окно нельзя: вернуть его нечем.
+            hide_on_close=(args.ui == "tray"),
+        )
 
     runtime = Runtime(agent, bus, runner, window)
     runtime.report = report  # type: ignore[attr-defined]
