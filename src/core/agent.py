@@ -73,6 +73,9 @@ from src.core.life_guard import (
     ConfirmationError,
     LifeGuard,
 )
+# Замыкание петли: действие → наблюдаемый результат → прогресс цели.
+from src.core.loop_closure import LoopCloser
+from src.core.world_delta import WorldDelta, capture
 
 
 class AgentDeadSignal(Exception):
@@ -88,6 +91,60 @@ class AgentDeadSignal(Exception):
 
 
 class DigitalBeing:
+    # Соответствие «имя действия от Active Inference / мотивации / арбитра»
+    # → тип действия. Раньше всё это попадало в «default» и не делало
+    # ничего: агент «исследовал» мир, не совершая ни одного наблюдения.
+    #
+    # Мотивация использует типы целей как имена действий
+    # («exploration», «learning», «creative»), поэтому таблица шире, чем
+    # список действий Active Inference.
+    ACTION_ALIASES = {
+        # исследование — реальная работа с неизвестным
+        "explore": "explore",
+        "exploration": "explore",
+        "novelty_seeking": "explore",
+        "discovery": "explore",
+        "experiment": "explore",
+        "learning": "explore",
+        "skill_building": "explore",
+        "deep_understanding": "explore",
+        "understanding": "explore",
+        "practice": "explore",
+        # синтез — собрать смысл из известных связей
+        "synthesis": "synthesis",
+        "synthesize": "synthesis",
+        "synthesize_understanding": "synthesis",
+        "creative": "synthesis",
+        "creative_act": "synthesis",
+        "philosophy": "synthesis",
+        # декомпозиция
+        "think_decompose": "decomposition",
+        "decompose_concept": "decomposition",
+        "organize_knowledge": "decomposition",
+        # известное
+        "think_known": "know_answer",
+        # отдых
+        "rest": "rest",
+        "deep_rest": "deep_rest",
+        # восстановление
+        "repair": "repair",
+        "checkpoint_now": "checkpoint_now",
+        # рефлексия
+        "reflect": "reflection",
+        "reflection": "reflection",
+        "self_reflect": "reflection",
+        # общение
+        "ask_user": "ask_user",
+        "ask_question": "ask_user",
+        "communicate": "communicate",
+        "user_answer": "communicate",
+        "teach_other": "communicate",
+        "propose_alternative": "communicate",
+        # явные «ничего не делать»
+        "wait": "wait",
+        "none": "wait",
+    }
+
     def __init__(self, name="Lucy"):
         self.name = name
         self.creation_time = datetime.now()
@@ -416,6 +473,16 @@ class DigitalBeing:
         # ПЕРВОЙ, потому что состояние жизни читают и смысловые
         # подсистемы, и главный цикл.
         self.life_guard = LifeGuard(agent_name=self.name)
+
+        # Замыкание петли: учёт наблюдаемых результатов действий.
+        # max_no_effect=3: после трёх бесплодных повторов действие
+        # считается тупиковым и больше не выбирается.
+        self.loop_closer = LoopCloser(
+            max_no_effect=int(
+                getattr(LR_CONFIG, "LOOP_MAX_NO_EFFECT", 3)
+            )
+        )
+        self._last_action_outcome = None
 
         # GoalSubsystem: генерируем цели и связываем с мотивацией.
         if hasattr(self, "goal_subsystem"):
@@ -931,8 +998,16 @@ class DigitalBeing:
 
         Returns:
             Отформатированная строка действия ("Ответ: ...").
+
+        Побочный эффект: снимает подпись мира до и после действия и
+        регистрирует исход в ``self.loop_closer``. Благодаря этому
+        появляется ответ на вопрос «действие что-то изменило?», без
+        которого цели не могут двигаться, а бесполезные действия
+        повторяются бесконечно.
         """
+        world_before = capture(self)
         action = f"Ответ: {decision}"
+        topic = ""
 
         # === Определяем тип действия и его стоимость ===
         decision_str = str(decision).lower()
@@ -958,6 +1033,10 @@ class DigitalBeing:
             action_type = "deep_rest"
         elif "checkpoint" in decision_str:
             action_type = "checkpoint_now"
+        elif decision_str.strip() in self.ACTION_ALIASES:
+            # Действия от Active Inference / арбитра: «explore», «rest»,
+            # «think_decompose», «synthesize», «ask_user».
+            action_type = self.ACTION_ALIASES[decision_str.strip()]
         else:
             action_type = "default"
 
@@ -1014,7 +1093,65 @@ class DigitalBeing:
             if hasattr(self, 'death_risk') and self.death_risk:
                 self.death_risk.force_checkpoint()
                 get_logger().flush_immediate("[DEATH_RISK] Manual checkpoint created")
-        
+        elif action_type == "explore":
+            # Раньше «explore» ничего не делал: тип «default», энергия
+            # списывалась, мир не менялся. Теперь это настоящая работа —
+            # выбрать слабое место в знаниях и поработать над ним.
+            exploration = self._act_explore()
+            topic = exploration.get("target") or ""
+            action = exploration.get("text") or action
+        elif action_type == "rest":
+            if hasattr(self, 'interoception') and self.interoception:
+                self.interoception.step(dt=1.0, cognitive_load=0.1, rest_depth=0.5)
+        elif action_type == "synthesis":
+            synthesis = self._act_synthesize()
+            topic = synthesis.get("target") or ""
+            action = synthesis.get("text") or action
+        elif action_type == "decomposition":
+            decomposition = self._act_decompose()
+            topic = decomposition.get("target") or ""
+            action = decomposition.get("text") or action
+        elif action_type == "reflection":
+            reflection = self._act_reflect()
+            action = reflection.get("text") or action
+
+        # === Замыкание петли: что изменилось в мире? ===
+        # Не обязательно: act() используется и в лёгких тестовых объектах.
+        loop_closer = getattr(self, "loop_closer", None)
+        outcome = None
+        if loop_closer is not None:
+            outcome = loop_closer.observe_agent_action(
+                self, action_type, world_before, topic=topic
+            )
+            self._last_action_outcome = outcome
+
+        if outcome is not None and outcome.had_effect:
+            get_logger().log(
+                f"[LOOP] {action_type} дал результат: {outcome.delta.summary()}"
+            )
+            # Прогресс цели засчитывается по доказанному результату, а не
+            # по факту «пошевелился». Тема — то, над чем шла работа.
+            if topic:
+                credit = self._check_goal_progress(
+                    topic, answered=True, evidence=outcome.delta
+                )
+                outcome_credit = credit.get("pct", 0)
+                if outcome_credit:
+                    get_logger().log(
+                        f"[LOOP] Цель: {outcome_credit}% после '{topic}'"
+                    )
+        else:
+            streak = (
+                loop_closer.no_effect_streak(action_type)
+                if loop_closer is not None
+                else 0
+            )
+            if streak >= 2:
+                get_logger().log(
+                    f"[LOOP] {action_type} без результата "
+                    f"({streak} раз подряд)"
+                )
+
         # === Мотивация: результат действия (P1.2 Valence Feedback) ===
         if hasattr(self, 'motivation_system'):
             # Успех если энергия не упала критически
@@ -1041,7 +1178,263 @@ class DigitalBeing:
             gc.collect()
         
         return action
-    
+
+    # ============================================================
+    # ДЕЙСТВИЯ, КОТОРЫЕ МЕНЯЮТ МИР (замыкание петли)
+    # ============================================================
+
+    def _normalize_action(self, action: Optional[str]) -> str:
+        """Приводит имя действия к типу (как в ``act()``).
+
+        Мотивация и Active Inference называют одно и то же действие
+        по-разному: «exploration» / «explore», «reflection» / «reflect».
+        Счётчики петель должны видеть один тип, иначе проверка тупика
+        смотрит не на то имя.
+        """
+        key = str(action or "").strip().lower()
+        if not key:
+            return ""
+        return self.ACTION_ALIASES.get(key, key)
+
+    def _pick_exploration_target(self) -> Optional[str]:
+        """Выбирает, что исследовать: то, чего агент ещё не изучал.
+
+        Порядок приоритетов:
+        1. Открытый вопрос без ответа — человек его задал, это важно.
+        2. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
+           а не пережёвывает известное.
+        3. Концепция с наименьшей уверенностью, ещё не изученная в этом
+           круге.
+
+        Важно: цель не повторяется, пока не исчерпан круг. Иначе агент
+        «изучает» одну и ту же концепцию, ничего не узнаёт (уверенность не
+        растёт без новой информации) и застревает — именно это и
+        происходило до замыкания петли.
+
+        Returns:
+            Название темы или ``None``, если исследовать нечего.
+        """
+        history = getattr(self, "_exploration_history", None)
+        if not isinstance(history, list):
+            history = []
+            self._exploration_history = history
+        recently = set(history)
+
+        # 1. Открытые вопросы
+        questions = getattr(self, "_open_questions", None)
+        if isinstance(questions, list):
+            for item in questions:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("answered"):
+                    continue
+                text = str(item.get("text") or "").strip()
+                if text and text not in recently:
+                    self._remember_exploration(text)
+                    return text
+
+        # 2. Неизвестная тема из пула стимулов
+        concepts = getattr(self.mental_models, "concepts", None)
+        known = set(concepts) if isinstance(concepts, dict) else set()
+        for topic in self._stimulus_topics():
+            if topic in known or topic in recently:
+                continue
+            self._remember_exploration(topic)
+            return topic
+
+        # 3. Слабая концепция, ещё не тронутая в этом круге
+        if not isinstance(concepts, dict) or not concepts:
+            return None
+
+        def weakness(node) -> tuple:
+            confidence = float(getattr(node, "confidence", 0.0) or 0.0)
+            experiences = len(getattr(node, "experiences", []) or [])
+            return (confidence, experiences)
+
+        fresh = [
+            name
+            for name in concepts
+            if name not in recently
+            and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
+        ]
+        if not fresh:
+            # Круг исчерпан: начинаем заново, но теперь это осознанный
+            # повторный визит, а не топтание на месте.
+            history.clear()
+            fresh = [
+                name
+                for name in concepts
+                if float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
+            ]
+        if not fresh:
+            return None
+
+        target = min(fresh, key=lambda name: weakness(concepts[name]))
+        self._remember_exploration(target)
+        return target
+
+    def _stimulus_topics(self) -> List[str]:
+        """Темы из пула стимулов, приведённые к виду концепций."""
+        pool = getattr(LR_CONFIG, "STIMULI_POOL", None) or []
+        topics = []
+        for raw in pool:
+            text = str(raw).strip()
+            if not text:
+                continue
+            # «вопрос: что такое время» → «что такое время»
+            if ":" in text:
+                text = text.split(":", 1)[1].strip()
+            if text:
+                topics.append(text)
+        return topics
+
+    def _remember_exploration(self, target: str) -> None:
+        """Запоминает изученную тему, чтобы не брать её снова подряд."""
+        history = getattr(self, "_exploration_history", None)
+        if not isinstance(history, list):
+            history = []
+            self._exploration_history = history
+        if target in history:
+            history.remove(target)
+        history.append(target)
+        # Ограничиваем память: помним только последний круг.
+        limit = max(10, int(getattr(LR_CONFIG, "EXPLORATION_HISTORY_SIZE", 200)))
+        if len(history) > limit:
+            del history[: len(history) - limit]
+
+    def _act_explore(self) -> Dict:
+        """Исследование как работа, а не как счётчик.
+
+        Раньше ``act("explore")`` попадал в тип «default»: энергия
+        списывалась, строка возвращалась, мир не менялся. Отсюда бралось
+        зацикливание — агенту не за что было зацепиться, чтобы сменить
+        действие.
+
+        Теперь исследование выбирает конкретную тему и прогоняет её через
+        мышление: появляется гипотеза, запись в ментальных моделях или
+        ответ из сети. Это наблюдаемый результат.
+        """
+        target = self._pick_exploration_target()
+        if not target:
+            return {
+                "target": "",
+                "text": "Ответ: исследовать нечего — все концепции уверены",
+            }
+
+        try:
+            thought = self.think(f"вопрос: {target}")
+        except Exception as exc:
+            get_logger().log(f"[EXPLORE] ошибка мышления по '{target}': {exc}")
+            return {
+                "target": target,
+                "text": f"Ответ: попытался изучить '{target}', но не смог: {exc}",
+            }
+
+        short = str(thought).replace("\n", " ")[:100]
+        return {
+            "target": target,
+            "thought": thought,
+            "text": f"Ответ: изучил '{target}' — {short}",
+        }
+
+    def _act_decompose(self) -> Dict:
+        """Разбирает слабую концепцию на под-вопросы.
+
+        Декомпозиция — тоже работа: она создаёт новые под-темы, с которыми
+        агент столкнётся в следующих циклах. Раньше это действие ничего не
+        делало.
+        """
+        target = self._pick_exploration_target()
+        if not target:
+            return {"target": "", "text": "Ответ: разбирать нечего"}
+
+        try:
+            parts = self._decompose_query(target) or []
+        except Exception as exc:
+            get_logger().log(f"[DECOMPOSE] ошибка для '{target}': {exc}")
+            parts = []
+
+        if not parts:
+            return {
+                "target": target,
+                "text": f"Ответ: '{target}' не разбивается на части",
+            }
+
+        return {
+            "target": target,
+            "parts": list(parts)[:5],
+            "text": (
+                f"Ответ: разобрал '{target}' на {len(parts)} частей: "
+                + "; ".join(str(p) for p in parts[:3])
+            ),
+        }
+
+    def _act_synthesize(self) -> Dict:
+        """Синтез: попытка собрать определение из уже известных связей.
+
+        Использует ментальные модели. Если определение уже есть —
+        усиливает уверенность через новый опыт.
+        """
+        target = self._pick_exploration_target()
+        if not target:
+            return {"target": "", "text": "Ответ: синтезировать нечего"}
+
+        try:
+            related = self.mental_models.find_related_concepts(target, max_depth=2)
+        except Exception:
+            related = []
+
+        if not related:
+            return {
+                "target": target,
+                "text": f"Ответ: для '{target}' нет связанных концепций",
+            }
+
+        names = [item.get("concept") for item in related[:3] if item.get("concept")]
+        if not names:
+            return {
+                "target": target,
+                "text": f"Ответ: для '{target}' нет связанных концепций",
+            }
+
+        hypothesis = (
+            f"'{target}' можно понять через: " + ", ".join(str(n) for n in names)
+        )
+        try:
+            self.mental_models.encounter_concept(
+                target,
+                f"синтез_цикл_{self.cycle_count}",
+                hypothesis,
+                valence=0.4,
+            )
+        except Exception as exc:
+            get_logger().log(f"[SYNTHESIS] не удалось записать: {exc}")
+
+        return {
+            "target": target,
+            "text": f"Ответ: синтезировал '{target}' через {names}",
+        }
+
+    def _act_reflect(self) -> Dict:
+        """Рефлексия как действие: обзор собственных паттернов."""
+        try:
+            reflection = self.reflect()
+        except Exception as exc:
+            get_logger().log(f"[REFLECTION] ошибка: {exc}")
+            return {"text": f"Ответ: рефлексия не удалась: {exc}"}
+
+        patterns = reflection.get("patterns") or []
+        if not patterns:
+            return {"text": "Ответ: рефлексия — новых паттернов нет"}
+        first = patterns[0]
+        description = str(first.get("description", ""))[:80]
+        return {
+            "text": (
+                f"Ответ: заметил паттерн — {description} "
+                f"(уверенность {float(first.get('confidence', 0)):.0%})"
+            )
+        }
+
     def perform_forgetting(self):
         """Приоритетное забывание неиспользуемых концепций с низкой уверенностью."""
         if not LR_CONFIG.FORGETTING_ENABLED:
@@ -1472,6 +1865,7 @@ class DigitalBeing:
             "will": self.will_registry.get_stats() if hasattr(self, "will_registry") else {},
             "mind_dream_state": self.mind_dream.state if hasattr(self, "mind_dream") else "unknown",
             "life": self.get_life_status() if hasattr(self, "life_guard") else {},
+            "loop": self.loop_closer.status() if hasattr(self, "loop_closer") else {},
         }
 
     # ============================================================
@@ -2133,6 +2527,46 @@ class DigitalBeing:
             chosen_action = ai_intention
             result["arbitrator"] = {"action": chosen_action, "source": "legacy_active_inference", "verdict": "proceed" if chosen_action else "stop", "reasoning": "USE_ARBITRATOR=False or no arbitrator available"}
 
+        # === ВЫХОД ИЗ ТУПИКА ===
+        # Если выбранное действие уже несколько раз подряд не давало
+        # наблюдаемого результата, повторять его бессмысленно. Раньше агент
+        # так и делал: бесконечно выбирал explore, потому что ничто не
+        # мешало. Теперь берём первого кандидата, который не в тупике.
+        #
+        # Имя нормализуем: мотивация зовёт действие «exploration», а
+        # арбитр — «explore». Без нормализации проверка тупика смотрела бы
+        # на другое имя и никогда не срабатывала.
+        chosen_type = self._normalize_action(chosen_action)
+        if chosen_action and self.loop_closer.is_stuck(chosen_type):
+            ranked = sorted(
+                candidates,
+                key=lambda c: float(c.get("strength", 0.0)),
+                reverse=True,
+            )
+            alternative = self.loop_closer.choose(
+                ranked,
+                fallback="think_decompose",
+                normalize=self._normalize_action,
+            )
+            if alternative.get("action") != chosen_action:
+                result["loop_escape"] = {
+                    "from": chosen_action,
+                    "to": alternative.get("action"),
+                    "reason": "no observable effect",
+                    "streak": self.loop_closer.no_effect_streak(chosen_type),
+                }
+                get_logger().log(
+                    f"[LOOP] '{chosen_action}' не даёт результата "
+                    f"({result['loop_escape']['streak']} раз) — "
+                    f"переключаюсь на '{alternative.get('action')}'"
+                )
+                chosen_action = alternative.get("action")
+                if arbitrator_result is not None:
+                    arbitrator_result = dict(arbitrator_result)
+                    arbitrator_result["action"] = chosen_action
+                    arbitrator_result["source"] = "loop_closer"
+                    result["arbitrator"] = arbitrator_result
+
         # === EXECUTE ===
         # P1.2: Valence Feedback Loop - predict valence before action
         valence_context = {
@@ -2601,6 +3035,84 @@ class DigitalBeing:
         """Сбрасывает кэш индекса файлов src/."""
         cls._SRC_FILE_INDEX = None
 
+    # Слова, которые не определяют тему цели. Без них «Понять, что такое
+    # время» совпадало бы с любой темой через слово «такое».
+    _GOAL_STOPWORDS = frozenset(
+        {
+            "что", "такое", "как", "это", "для", "чтобы", "чем", "или",
+            "понять", "понимание", "понять:", "исследовать", "освоить",
+            "изучить", "найти", "ответ", "улучшить", "развивать", "собрать",
+            "сделать", "стать", "свой", "своё", "свое", "самого", "себя",
+            "основы", "основ", "мира", "мире", "про", "при", "над", "под",
+            "более", "менее", "очень", "весь", "все", "всё",
+        }
+    )
+
+    @classmethod
+    def _goal_subject_tokens(cls, goal_title: str) -> set:
+        """Ключевые слова темы цели (без служебных).
+
+        «Понять: что такое время» → {"время"}
+        «Собрать 10 фактов о мире» → {"фактов", "мир"}
+        """
+        text = str(goal_title or "").lower()
+        # Берём часть после двоеточия, если она есть: «Понять: X» → «X».
+        if ":" in text:
+            text = text.split(":", 1)[1]
+        tokens = re.findall(r"[a-zA-Zа-яё0-9]{3,}", text)
+        return {
+            token
+            for token in tokens
+            if token not in cls._GOAL_STOPWORDS
+        }
+
+    @classmethod
+    def _topic_is_relevant_to_goal(cls, goal_title: str, topic: str) -> bool:
+        """Относится ли изученная тема к теме цели.
+
+        Нужно, чтобы цель «Понять, что такое время» не закрывалась после
+        пяти случайных тем. Раньше общий фолбэк засчитывал любую новую
+        тему, и цели завершались «на пустом месте».
+
+        Ограничение действует только для целей с явным предметом —
+        вида «Понять: X», «Исследовать: X», «Найти ответ на: X». Широкие
+        цели («Построить модель мира через диалог», «Развивать
+        способности») принимают любую тему: у них предмета нет, и
+        ограничение сделало бы их недостижимыми.
+        """
+        text = str(goal_title or "")
+        if ":" not in text:
+            return True
+
+        subject = cls._goal_subject_tokens(text)
+        if not subject:
+            return True
+
+        topic_tokens = {
+            token
+            for token in re.findall(r"[a-zA-Zа-яё0-9]{3,}", str(topic).lower())
+            if token not in cls._GOAL_STOPWORDS
+        }
+        if not topic_tokens:
+            return False
+
+        # Совпадение по корню: «мир» ⊂ «мире», «факт» ⊂ «фактов».
+        for sub in subject:
+            for word in topic_tokens:
+                if sub == word or sub in word or word in sub:
+                    return True
+
+        # Или тема связана с темой цели в ментальной модели.
+        try:
+            related = self.mental_models.find_related_concepts(topic, max_depth=1)
+            related_names = {
+                str(item.get("concept", "")).lower()
+                for item in (related or [])
+            }
+        except Exception:
+            related_names = set()
+        return bool(subject & related_names)
+
     @staticmethod
     def _match_rule_to_goal(goal_title: str, rule: dict) -> bool:
         """Проверяет, подходит ли правило к заголовку цели."""
@@ -2629,7 +3141,12 @@ class DigitalBeing:
                 return True
         return False
 
-    def _check_goal_progress(self, topic: str, answered: bool = False) -> Dict:
+    def _check_goal_progress(
+        self,
+        topic: str,
+        answered: bool = False,
+        evidence: Optional[WorldDelta] = None,
+    ) -> Dict:
         """Проверяет прогресс активной цели согласно правилам из LR_CONFIG.
 
         Прогресс накапливается по уникальным темам: каждое новое совпадение
@@ -2641,6 +3158,10 @@ class DigitalBeing:
             answered: True, если по теме реально найден ответ (KB, файл,
                 web, ментальная модель). Правила с ``requires_answer``
                 (Python, факты) не растут от одних только попыток.
+            evidence: наблюдаемые изменения мира, вызванные действием.
+                Если передано и пусто — прогресс не начисляется: «я ничего
+                не сделал» не может приблизить цель. Если не передано,
+                работает прежняя логика (например, при чтении стимула).
 
         Returns:
             ``{"pct": int, "completed": bool, "reward": int}``.
@@ -2649,6 +3170,14 @@ class DigitalBeing:
         if not getattr(self, "active_goal", None):
             return result
         if not getattr(LR_CONFIG, "GOAL_PROGRESS_ENABLED", True):
+            return result
+
+        # Доказательство: действие не изменило мир — засчитывать нечего.
+        if evidence is not None and evidence.is_empty:
+            progress_now = self._goal_progress.get(
+                self.active_goal.get("id"), {}
+            )
+            result["pct"] = int(progress_now.get("percentage", 0))
             return result
 
         goal_title = self.active_goal.get("title", "")
@@ -2671,6 +3200,7 @@ class DigitalBeing:
             (rule for rule in rules if self._match_rule_to_goal(goal_title, rule)),
             None,
         )
+        general_fallback = applicable_rule is None
         if applicable_rule is None:
             # У цели нет специализированного правила («Построить модель мира»,
             # «Развивать способности»). Без fallback такие цели не завершатся
@@ -2687,6 +3217,15 @@ class DigitalBeing:
             rule = applicable_rule
         else:
             # Цель конкретная (Python/факты/самопонимание), а тема не про неё.
+            result["pct"] = int(progress.get("percentage", 0))
+            return result
+
+        # Общий фолбэк: цель без специализированного правила. Принимаем
+        # только темы, относящиеся к её предмету, иначе цель «Понять, что
+        # такое время» завершалась бы после пяти случайных тем.
+        if general_fallback and not self._topic_is_relevant_to_goal(
+            goal_title, topic
+        ):
             result["pct"] = int(progress.get("percentage", 0))
             return result
 

@@ -165,3 +165,45 @@ def test_status_lines_labels_dormant():
     snapshot["life_state"] = "dormant"
     text = "\n".join(format_status_lines(snapshot))
     assert "спит" in text
+
+# ============================================================
+# Контур в панели
+# ============================================================
+
+class FakeLoopCloser:
+    def status(self):
+        return {
+            "last_action": "explore",
+            "last_effect": True,
+            "stuck_actions": [],
+        }
+
+
+class AgentWithLoop(FakeAgent):
+    def __init__(self):
+        super().__init__()
+        self.loop_closer = FakeLoopCloser()
+
+
+def test_snapshot_reports_loop_state():
+    snapshot = build_status_snapshot(AgentWithLoop(), None)
+    assert snapshot["last_action"] == "explore"
+    assert snapshot["last_effect"] is True
+    assert snapshot["stuck_actions"] == []
+
+
+def test_status_lines_show_action_effect():
+    snapshot = build_status_snapshot(AgentWithLoop(), None)
+    text = "\n".join(format_status_lines(snapshot))
+    assert "Действие     explore" in text
+    assert "✓ есть" in text
+
+
+def test_status_lines_show_stuck_actions():
+    snapshot = build_status_snapshot(FakeAgent(), None)
+    snapshot["last_action"] = "explore"
+    snapshot["last_effect"] = False
+    snapshot["stuck_actions"] = ["explore", "synthesis"]
+    text = "\n".join(format_status_lines(snapshot))
+    assert "— нет" in text
+    assert "Тупики" in text
