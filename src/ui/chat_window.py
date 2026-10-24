@@ -348,6 +348,19 @@ class ChatWindow:
         # Запрос на показ — UI-поток создаст и поднимет окно
         self._incoming_queue.put(("__show__", None))
 
+    def run_blocking(self) -> None:
+        """Построить окно и крутить mainloop в ВЫЗЫВАЮЩЕМ потоке.
+
+        Нужно, когда UI живёт в главном потоке (так требует Tk, особенно
+        на macOS), а жизнь агента — в фоновом. Возвращает управление
+        после закрытия окна.
+        """
+        if not _HAS_TK:
+            logger.info("[ChatWindow] run_blocking() — no-op (нет tkinter)")
+            return
+        self._poll_running = True
+        self._tk_mainloop()
+
     def hide(self) -> None:
         """Скрыть окно (без уничтожения)."""
         if self._root is not None:
@@ -372,7 +385,7 @@ class ChatWindow:
 
             # Приветствие
             self._append_agent(
-                f"Привет! Я {self.agent_name}. Я живу в трее и думаю в фоне.\n"
+                f"Привет! Я {self.agent_name}. Я живу, пока открыто это окно.\n"
                 "Введи сообщение или /help для команд."
             )
 

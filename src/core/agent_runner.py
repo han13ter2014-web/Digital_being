@@ -410,6 +410,14 @@ class AgentRunner:
             logger.exception(f"[{self.name}] Ошибка сохранения: {e}")
             return False
 
+    def save_now(self) -> bool:
+        """Публичное сохранение состояния.
+
+        Нужно слою приложения: первый чекпоинт пишется сразу после
+        старта, чтобы аварийное закрытие окна не стирало жизнь.
+        """
+        return self._save_state_safe()
+
     async def start(self) -> None:
         """Запустить фоновый цикл. Возвращает управление сразу (async task).
 
@@ -458,6 +466,15 @@ class AgentRunner:
         logger.info(f"[{self.name}] run_forever() стартовал")
         try:
             while not self._stop_requested:
+                # Состояние жизни — источник правды. Спящий или ушедший
+                # агент не должен продолжать цикл: иначе окно показывало
+                # бы «спит», а существо продолжало жить в фоне.
+                if not self._agent_is_alive():
+                    logger.info(
+                        f"[{self.name}] Агент не жив — цикл остановлен"
+                    )
+                    self._stop_requested = True
+                    break
                 await self._one_iteration()
         except asyncio.CancelledError:
             logger.info(f"[{self.name}] run_forever() отменён")
@@ -493,6 +510,16 @@ class AgentRunner:
         else:
             # Даём event loop шанс обслужить шину и UI, не задерживая цикл.
             await asyncio.sleep(0)
+
+    def _agent_is_alive(self) -> bool:
+        """Жив ли агент по его собственному состоянию."""
+        checker = getattr(self.agent, "is_alive", None)
+        if checker is None:
+            return True
+        try:
+            return bool(checker())
+        except Exception:
+            return True
 
     def _pause_poll_sec(self) -> float:
         """Как часто проверять, не сняли ли паузу. Компромисс CPU/отзывчивость."""
