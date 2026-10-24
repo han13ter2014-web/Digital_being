@@ -104,6 +104,17 @@ class ValueEvolution:
             outcome="removed", cycle=cycle,
         )
 
+    def to_dict(self) -> Dict:
+        """Сериализует текущие ценности для чекпоинта / снапшота."""
+        return {"current_values": list(self.current_values)}
+
+    @classmethod
+    def from_dict(cls, data: Dict, registry: Optional[WillRegistry] = None) -> "ValueEvolution":
+        """Восстанавливает ценности через реестр воли."""
+        module = cls(registry=registry or WillRegistry())
+        module.current_values = list(data.get("current_values") or module.current_values)
+        return module
+
 
 class SpontaneousGenerator:
     """Спонтанные цели без мотива."""

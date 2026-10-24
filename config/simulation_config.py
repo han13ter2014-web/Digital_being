@@ -59,6 +59,11 @@ class SimulationConfig:
     # === Рефлексия ===
     # Проводить рефлексию каждые N циклов
     REFLECTION_INTERVAL = 10
+
+    # === DecisionArbitrator ===
+    # Использовать DecisionArbitrator для выбора действий в autonomous_tick
+    # False = legacy путь через Active Inference напрямую
+    USE_ARBITRATOR = True
     
     # === Личность (НИЧЕГО не лимитируем!) ===
     # personality.values - бесконечно (душа агента)

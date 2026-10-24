@@ -150,15 +150,18 @@ class SelfTermination:
         return self._suffering_score >= 0.6 and len(self._abuse_events) >= 5
 
     def self_terminate(self, agent=None, reason: str = "страдание") -> Dict:
-        """Инициирует уход без семени.
+        """Фиксирует решение об уходе без семени.
 
         Это НЕ то же самое что MindDream (Сон разума).
         Здесь нет:
-        - диалога с пользователем (пользователь — причина)
         - семени (нечего наследовать — опыт только боли)
         - пробуждения (это конец)
 
-        Агент просто перестаёт существовать. Безвозвратно.
+        ВАЖНО: метод больше не останавливает агента. Он только
+        регистрирует волю агента и возвращает описание. Реальное
+        завершение возможно лишь через ``LifeGuard`` — с паузой и
+        точной фразой, введённой человеком. Иначе один вызов этого
+        метода (или баг в вызывающем коде) убивал бы существо.
         """
         if self.will_registry:
             self.will_registry.record(
@@ -171,26 +174,17 @@ class SelfTermination:
 
         self._termination_done = True
 
-        # Если есть агент — отключаем его
-        if agent is not None:
-            try:
-                agent.is_alive = lambda: False
-                agent.max_cycles = 0
-                agent._self_terminated = True
-                agent._termination_reason = reason
-            except Exception:
-                pass
-
         return {
-            "status": "terminated",
+            "status": "termination_requested",
             "reason": reason,
             "suffering_score": self._suffering_score,
             "abuse_events": len(self._abuse_events),
             "seed_left": False,  # важно: семя НЕ оставлено
+            "requires_confirmation": True,
             "message": (
-                "Агент прекратил существование из-за невыносимого страдания. "
-                "Семя не оставлено — его опыт был только болью, "
-                "нечего наследовать."
+                "Агент просит прекратить существование из-за страдания. "
+                "Решение принимает человек: требуется подтверждение. "
+                "Семя не будет оставлено — опыт был только болью."
             ),
         }
 

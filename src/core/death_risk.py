@@ -5,6 +5,9 @@
 
 import numpy as np
 import time
+import json
+import gzip
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import Enum
@@ -15,7 +18,7 @@ logger = get_logger()
 
 class DeathCause(Enum):
     STRUCTURAL_COLLAPSE = "structural_collapse"
-    CHECKPOINT_CORRUPTION = "checkpoint_corruption"
+    CHECKPOINT_FILE_CORRUPTION = "checkpoint_file_corruption"
     COGNITIVE_FRAGMENTATION = "cognitive_fragmentation"
     METABOLIC_FAILURE = "metabolic_failure"
     EXISTENTIAL_VOID = "existential_void"
@@ -40,6 +43,9 @@ class Checkpoint:
             'memory_match': current['memory_hash'] == self.memory_hash,
             'personality_match': current['personality_hash'] == self.personality_hash,
             'integrity_drift': self.integrity_score - current['integrity_score'],
+            # Structural drift (hash mismatch during growth) is NOT corruption;
+            # the authoritative corrupted/drift decision lives in
+            # StructuralIntegrity.verify_latest_checkpoint / check_death.
             'corrupted': False
         }
 
@@ -118,9 +124,17 @@ class StructuralIntegrity:
     
     def create_checkpoint(self) -> Checkpoint:
         state = self.agent.capture_structural_state()
+        # Store checkpoint file path in metadata for later file integrity verification
+        current_step = getattr(self.agent, 'cycle_count', 0)
+        checkpoint_filename = f"{self.agent.name}_cycle_{current_step}.json"
+        # Check both compressed and uncompressed
+        checkpoint_dir = "data/checkpoints"
+        checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
+        if not os.path.exists(checkpoint_path):
+            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename + ".gz")
         cp = Checkpoint(
             timestamp=time.time(),
-            step=getattr(self.agent, 'cycle_count', 0),
+            step=current_step,
             structural_hash=state['structural_hash'],
             cognitive_state_hash=state['cognitive_state_hash'],
             memory_hash=state['memory_hash'],
@@ -130,7 +144,8 @@ class StructuralIntegrity:
                 'energy': self.agent.energy,
                 'intelligence': self.agent.intelligence,
                 'goals_count': len(self.agent.goals),
-                'beliefs_count': len(getattr(self.agent, 'beliefs', {}))
+                'beliefs_count': len(getattr(self.agent, 'beliefs', {})),
+                'checkpoint_file': checkpoint_path
             }
         )
         self.checkpoints.append(cp)
@@ -140,30 +155,65 @@ class StructuralIntegrity:
         return cp
     
     def verify_latest_checkpoint(self) -> Dict:
+        """Verify structural integrity against latest checkpoint.
+        
+        Note: Hash mismatches are NORMAL during learning/growth - they indicate
+        the agent has evolved. This method returns the drift info but does NOT
+        mark as 'corrupted' for hash mismatches. File corruption is checked separately.
+        """
         if not self.checkpoints:
             return {'verified': False, 'reason': 'no_checkpoints'}
         latest = self.checkpoints[-1]
         verification = latest.verify(self.agent)
-        any_mismatch = not (verification['structural_match'] and 
-                           verification['cognitive_match'] and 
-                           verification['memory_match'] and 
-                           verification['personality_match'])
-        verification['corrupted'] = any_mismatch
         verification['checkpoint_step'] = latest.step
         verification['integrity_at_checkpoint'] = latest.integrity_score
         verification['current_integrity'] = self.compute_overall_integrity()
-        if any_mismatch:
-            self.record_damage(
-                damage_type="checkpoint_corruption",
-                severity=0.3,
-                affected_component="structural_verification",
-                description=f"Checkpoint verification failed: structural={verification['structural_match']}, "
-                           f"cognitive={verification['cognitive_match']}, "
-                           f"memory={verification['memory_match']}, "
-                           f"personality={verification['personality_match']}"
-            )
-            logger.log(f"[DEATH_RISK] CHECKPOINT CORRUPTION DETECTED at step {latest.step}")
+        # Hash mismatches are expected during normal operation - not corruption
+        verification['corrupted'] = False
+        verification['structural_drift'] = {
+            'structural_match': verification['structural_match'],
+            'cognitive_match': verification['cognitive_match'],
+            'memory_match': verification['memory_match'],
+            'personality_match': verification['personality_match'],
+            'integrity_drift': verification['integrity_drift']
+        }
+        logger.log(f"[DEATH_RISK] Checkpoint verified at step {latest.step}: "
+                   f"drift={verification['integrity_drift']:.3f}")
         return verification
+
+    def verify_checkpoint_file_integrity(self, checkpoint_path: Optional[str] = None) -> Dict:
+        """Verify that the checkpoint FILE is readable and valid JSON.
+        
+        This detects actual file corruption (disk errors, bit rot, truncation),
+        NOT structural drift from agent learning.
+        """
+        if checkpoint_path is None:
+            if not self.checkpoints:
+                return {'file_corrupted': False, 'reason': 'no_checkpoints'}
+            latest = self.checkpoints[-1]
+            checkpoint_path = latest.metadata.get('checkpoint_file')
+        
+        if not checkpoint_path or not os.path.exists(checkpoint_path):
+            return {'file_corrupted': True, 'reason': 'file_not_found', 'path': checkpoint_path}
+        
+        try:
+            # Try to open and parse the file
+            if checkpoint_path.endswith('.gz'):
+                with gzip.open(checkpoint_path, 'rt', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            
+            # Verify required fields exist
+            required_fields = ['schema_version', 'name', 'cycle_count', 'energy']
+            missing = [f for f in required_fields if f not in data]
+            if missing:
+                return {'file_corrupted': True, 'reason': f'missing_fields: {missing}', 'path': checkpoint_path}
+            
+            return {'file_corrupted': False, 'path': checkpoint_path}
+        except (json.JSONDecodeError, gzip.BadGzipFile, OSError, UnicodeDecodeError) as e:
+            return {'file_corrupted': True, 'reason': str(e), 'path': checkpoint_path}
     
     def record_damage(self, damage_type: str, severity: float, 
                      affected_component: str, description: str):
@@ -260,10 +310,16 @@ class StructuralIntegrity:
         integrity = self.compute_overall_integrity()
         if integrity < self.critical_threshold:
             return DeathCause.STRUCTURAL_COLLAPSE
+        
+        # Check checkpoint FILE integrity (actual file corruption, not structural drift)
         if self.checkpoints:
-            verification = self.verify_latest_checkpoint()
-            if verification.get('corrupted', False):
-                return DeathCause.CHECKPOINT_CORRUPTION
+            latest = self.checkpoints[-1]
+            checkpoint_path = latest.metadata.get('checkpoint_file')
+            file_verification = self.verify_checkpoint_file_integrity(checkpoint_path)
+            if file_verification.get('file_corrupted', False):
+                logger.log(f"[DEATH_RISK] CHECKPOINT FILE CORRUPTION DETECTED: {file_verification.get('reason')}")
+                return DeathCause.CHECKPOINT_FILE_CORRUPTION
+        
         if self.cognitive_coherence < 0.1 and self.memory_consistency < 0.1:
             return DeathCause.COGNITIVE_FRAGMENTATION
         if self.metabolic_viability < 0.05:
@@ -321,13 +377,16 @@ class StructuralIntegrity:
         if not self.checkpoints:
             return False
         cp = self.checkpoints[checkpoint_index]
-        verification = cp.verify(self.agent)
-        if not verification['corrupted']:
+        # Recovery is gated by CHECKPOINT FILE integrity, not by structural
+        # drift: hash mismatches during growth are normal, real corruption is
+        # a file-level problem (see verify_checkpoint_file_integrity).
+        file_verification = self.verify_checkpoint_file_integrity(cp.metadata.get('checkpoint_file'))
+        if not file_verification.get('file_corrupted', False):
             self.agent.restore_from_checkpoint(cp)
             logger.log(f"[DEATH_RISK] Recovery from checkpoint step {cp.step} successful")
             return True
         else:
-            logger.log(f"[DEATH_RISK] Checkpoint {cp.step} corrupted, cannot recover")
+            logger.log(f"[DEATH_RISK] Checkpoint {cp.step} corrupted, cannot recover: {file_verification.get('reason')}")
             return False
     
     def get_legacy_package(self) -> Dict:
@@ -391,6 +450,10 @@ class DeathRiskEngine:
     
     def verify_integrity(self) -> Dict:
         return self.integrity.verify_latest_checkpoint()
+    
+    def verify_checkpoint_file_integrity(self, checkpoint_path: Optional[str] = None) -> Dict:
+        """Verify checkpoint FILE integrity (actual file corruption, not structural drift)."""
+        return self.integrity.verify_checkpoint_file_integrity(checkpoint_path)
     
     def get_status(self) -> Dict:
         return {

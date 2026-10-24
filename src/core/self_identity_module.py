@@ -82,6 +82,25 @@ class CoreSelfModule:
             print(f"\n[CORE SELF] ✅ Новая фундаментальная ценность добавлена: {new_value}")
 
 
+    def to_dict(self) -> dict:
+        """Сериализует состояние «Я» для чекпоинта / снапшота."""
+        return {
+            "core_identity": self.core_identity,
+            "core_values": list(self.core_values),
+            "identity_stability_score": self.identity_stability_score,
+            "history": list(self.history),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CoreSelfModule":
+        """Восстанавливает «Я» из сериализованного состояния."""
+        module = cls()
+        module.core_identity = str(data.get("core_identity") or module.core_identity)
+        module.core_values = list(data.get("core_values") or module.core_values)
+        module.identity_stability_score = float(data.get("identity_stability_score") or module.identity_stability_score)
+        module.history = list(data.get("history") or [])
+        return module
+
     def get_status_report(self) -> dict:
         """Возвращает полный отчёт о состоянии самоопределения."""
         return {

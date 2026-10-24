@@ -165,6 +165,8 @@ class TestCheckpointBenchmarks:
     def _make_state_dict(self, n_keys: int = 100):
         """Создаёт state-словарь с N ключами разных типов."""
         state = {
+            "schema_version": 1,
+            "name": "bench_agent",
             "cycle_count": 12345,
             "energy": 145.5,
             "intelligence": 3.0,

@@ -49,6 +49,7 @@ from src.core.stimulus_selector import (
 from src.core.watchdog import get_watchdog, Watchdog
 from src.core.buffered_logger import flush_logs
 from src.core.paths import data_path
+from src.core.agent import AgentDeadSignal
 
 
 logger = logging.getLogger(__name__)
@@ -451,6 +452,26 @@ class AgentRunner:
             autonomous_report = self.agent.autonomous_tick()
             # Логируем интересные события автономной жизни
             self._log_autonomous_events(autonomous_report)
+        except AgentDeadSignal as e:
+            # Agent died — graceful shutdown
+            logger.info(f"[{self.name}] Agent died: {e.cause}. Initiating graceful shutdown...")
+            # Publish death event
+            self.bus.publish_sync(
+                Events.TICK,
+                {
+                    "phase": "death",
+                    "cause": e.cause,
+                    "legacy": e.legacy,
+                    "cycle": self.agent.cycle_count,
+                },
+                source="runner",
+            )
+            # Request stop
+            self._stop_requested = True
+            self._running = False
+            # Save final state
+            self._save_state_safe()
+            return
         except Exception as e:
             logger.exception(f"autonomous_tick failed: {e}")
 
