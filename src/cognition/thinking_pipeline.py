@@ -100,10 +100,16 @@ class ThinkingPipeline:
             check_progress(clean_data)
 
         # === Шаг 1: Ментальные модели ===
-        if agent.mental_models.can_answer_about(clean_data):
-            understanding = agent.mental_models.get_concept_understanding(clean_data)
+        # Узлы хранятся под нормализованными именами («счастье»), а
+        # стимул приходит как «что такое счастье». Раньше проверка шла по
+        # сырому тексту, поэтому ветка «я знаю» не срабатывала для
+        # вопросов — то есть почти никогда, при том что тема могла быть
+        # изучена восемь раз.
+        concept_key = normalize_concept_name(clean_data) or clean_data
+        if agent.mental_models.can_answer_about(concept_key):
+            understanding = agent.mental_models.get_concept_understanding(concept_key)
             if understanding.get("can_define", False):
-                thought = f"[Ментальная модель] '{clean_data}': {understanding['hypothesis']}"
+                thought = f"[Ментальная модель] '{concept_key}': {understanding['hypothesis']}"
                 thought += f" (уверенность: {understanding['confidence']:.0%})"
                 related = understanding.get("connections", [])
                 if related:
