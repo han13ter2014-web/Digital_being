@@ -46,6 +46,52 @@ def _mentions(text_lower: str, name_lower: str) -> bool:
     return False
 
 
+# ============================================================
+# Уверенность как функция свидетельств
+# ============================================================
+#
+# Раньше уверенность считалась так:
+#
+#     confidence = 0.1 + 0.7 * (встреч с |valence| > 0.3) / (всего встреч)
+#
+# У этой формулы три порока, и все три проявились в замерах:
+#
+# 1. **Обрыв на границе.** При valence ровно 0.3 (а именно это значение
+#    пишет путь гипотезы: ``hypothesis['confidence'] * 0.5``) условие
+#    ``> 0.3`` ложно, и уверенность остаётся 0.1 навсегда. При 0.31 —
+#    сразу 0.8. Сотая доля разницы решала, «знает» агент или «не знает».
+#    Замер: 8 встреч, определение 108 символов, уверенность 0.100.
+# 2. **Нет объёма.** Одна встреча с 0.8 и десять встреч с 0.8 давали
+#    одинаковые 0.8. Количество подтверждений не влияло ни на что.
+# 3. **Нет различения силы.** Слабая догадка (0.3) и найденный источник
+#    (0.7) весили одинаково — как только перешли порог.
+#
+# Теперь уверенность — это накопленная сила свидетельств, взвешенная их
+# согласованностью:
+#
+#     сила = сумма |valence| по встречам, где |valence| >= EVIDENCE_MIN
+#     объём = min(1, сила / EVIDENCE_FULL)
+#     согласие = |сумма valence| / сила
+#     confidence = 0.1 + 0.8 * объём * согласие
+#
+# Свойства (проверены тестами):
+#   * одна встреча 0.3 → 0.30 — «видел, но не знаю»;
+#   * две встречи 0.3 → 0.50 — уже можно ответить;
+#   * четыре встречи 0.3 → 0.90 — потолок;
+#   * один найденный источник 0.7 → 0.57;
+#   * противоречия снижают: 2×0.3 и 1×−0.3 → 0.30.
+#
+# Порог намеренно включающий (``>=``): значение 0.3 — рабочее, а не
+# граничное, и не должно попадать в «мёртвую зону».
+
+EVIDENCE_MIN = 0.25
+EVIDENCE_FULL = 1.2
+CONFIDENCE_BASE = 0.1
+CONFIDENCE_RANGE = 0.8
+CONFIDENCE_MAX = 0.9
+
+
+
 class ConceptNode:
     """Узел ментальной модели - представляет одну концепцию."""
     
@@ -71,12 +117,52 @@ class ConceptNode:
         self.experiences.append(experience)
         self.contexts_encountered.add(context)
         self.last_updated = datetime.now()
-        
-        # Обновляет уверенность на основе количества консистентного опыта
-        consistent_outcomes = len([e for e in self.experiences if abs(e["valence"]) > 0.3])
-        if len(self.experiences) > 0:
-            self.confidence = min(1.0, consistent_outcomes / len(self.experiences) * 0.7 + 0.1)
-    
+
+        self.recompute_confidence()
+
+    # ------------------------------------------------------------------
+    # Уверенность из свидетельств
+    # ------------------------------------------------------------------
+
+    def evidence(self) -> tuple[float, float]:
+        """Сила свидетельств и их согласованность.
+
+        Returns:
+            ``(сила, согласие)``: сумма модулей валентностей выше порога
+            и доля, которую в ней составляет преобладающий знак (0..1).
+            Встречи без сигнала (valence ≈ 0) не считаются свидетельством:
+            «увидел тему» — не «узнал о ней».
+        """
+        total = 0.0
+        signed = 0.0
+        for experience in self.experiences:
+            try:
+                value = float(experience.get("valence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            strength = abs(value)
+            if strength < EVIDENCE_MIN:
+                continue
+            total += strength
+            signed += value
+        agreement = (abs(signed) / total) if total > 0 else 0.0
+        return total, agreement
+
+    def recompute_confidence(self) -> float:
+        """Пересчитать уверенность из накопленных свидетельств.
+
+        Единственный источник истины: и новая встреча, и сон, и синтез
+        определения ведут сюда. Иначе получается то, что было до правки —
+        три разных формулы, две из которых давали несовместимые числа.
+        """
+        strength, agreement = self.evidence()
+        volume = min(1.0, strength / EVIDENCE_FULL) if EVIDENCE_FULL > 0 else 0.0
+        self.confidence = min(
+            CONFIDENCE_MAX,
+            CONFIDENCE_BASE + CONFIDENCE_RANGE * volume * agreement,
+        )
+        return self.confidence
+
     def connect_to(self, other_concept: str, weight: float = 0.5):
         """Создает связь с другой концепцией."""
         self.connections[other_concept] = max(self.connections.get(other_concept, 0.0), weight)
@@ -326,16 +412,14 @@ class MentalModel:
 
     @staticmethod
     def _has_consistent_experience(node: ConceptNode) -> bool:
-        """Опыт согласован: три и более встречи с одним знаком валентности."""
-        valences = [
-            float(exp.get("valence", 0.0) or 0.0)
-            for exp in node.experiences
-        ]
-        if len(valences) < 3:
-            return False
-        positive = sum(1 for value in valences if value > 0.3)
-        negative = sum(1 for value in valences if value < -0.3)
-        return positive >= 3 or negative >= 3
+        """Опыт согласован: свидетельства есть и указывают в одну сторону.
+
+        Порог тот же, что у уверенности: без него сон «закреплял» бы
+        концепции, о которых агент ничего не узнал (одна встреча без
+        сигнала), и уверенность росла бы из воздуха.
+        """
+        strength, agreement = node.evidence()
+        return strength >= EVIDENCE_FULL * 0.5 and agreement >= 0.75
 
     def _invalidate_cache_if_needed(self) -> None:
         """Инвалидирует кеш по TTL."""
@@ -522,12 +606,12 @@ class MentalModel:
                     f"'{concept_name}' — {' -> '.join(unique[:3])}"
                 )
         
-        # Обновляет уверенность
-        consistent_valences = [e["valence"] for e in node.experiences if abs(e["valence"]) > 0.3]
-        if len(consistent_valences) >= 2:
-            variance = sum((v - sum(consistent_valences)/len(consistent_valences))**2 
-                          for v in consistent_valences) / len(consistent_valences)
-            node.confidence = min(1.0, 0.3 + (1 - variance) * 0.5 + len(node.experiences) * 0.05)
+        # Обновляет уверенность. Формула одна на всю систему: см.
+        # ConceptNode.recompute_confidence. Раньше здесь считалась своя
+        # (0.3 + (1-дисперсия)*0.5 + встречи*0.05), и она перетирала
+        # значение из add_experience — два источника истины давали
+        # несовместимые числа.
+        node.recompute_confidence()
     
     def _record_association(self, concept1: str, concept2: str, weight: float):
         """Записывает ассоциацию в память."""

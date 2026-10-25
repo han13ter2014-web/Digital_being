@@ -13,6 +13,7 @@ python tools/manual/checkpoint_restore_manual.py
 python tools/manual/death_risk_driven_manual.py
 python tools/manual/motivation_measure.py 200
 python tools/manual/body_calibration.py
+python tools/manual/memory_maturity_measure.py 300 --hold-energy --seed 1
 ```
 
 `motivation_measure.py` — замер мотивации, тела и памяти через настоящий
@@ -40,6 +41,12 @@ python tools/manual/body_calibration.py
 покой, работа, отдых после работы, выход из полного истощения. Нужен,
 чтобы подбирать числа модели (скорость утомления и восстановления) по
 видимой кривой, а не на глаз.
+
+`memory_maturity_measure.py` — замер зрелости памяти: сколько своих
+концепций (без родовых) имеют формулировку, о скольких агент может
+ответить и о скольких отвечает из памяти. Сравнивает прогон со сном и
+без сна; `--seed N` фиксирует зерно случайности, иначе два прогона —
+разные траектории и разницу нельзя приписать консолидации.
 
 Автоматические тесты живут в `tests/` и запускаются так:
 
