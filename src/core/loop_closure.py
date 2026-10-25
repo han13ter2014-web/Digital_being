@@ -266,6 +266,15 @@ class LoopCloser:
         self._no_effect_streak.pop(str(action), None)
         self._denied_streak.pop(str(action), None)
 
+    def reset_denial(self, action: str) -> None:
+        """Снимает только пометку об отказе, не трогая «нет эффекта».
+
+        Отказ по усталости перестаёт быть правдой, когда энергия
+        вернулась. Счётчик «нет эффекта» — отдельный факт (действие
+        выполнялось, но мир не изменился), и его сбрасывать нельзя.
+        """
+        self._denied_streak.pop(str(action), None)
+
     # ------------------------------------------------------------------
     # Выбор действия
     # ------------------------------------------------------------------
@@ -343,6 +352,7 @@ class LoopCloser:
         """Сохраняет счётчики: тупики не должны исчезать после рестарта."""
         return {
             "no_effect_streak": dict(self._no_effect_streak),
+            "denied_streak": dict(self._denied_streak),
             "effect_count": dict(self._effect_count),
             "total_actions": self._total_actions,
             "total_with_effect": self._total_with_effect,
@@ -364,6 +374,13 @@ class LoopCloser:
             self._effect_count = {
                 str(key): int(value)
                 for key, value in counts.items()
+                if isinstance(value, (int, float))
+            }
+        denied = state.get("denied_streak")
+        if isinstance(denied, dict):
+            self._denied_streak = {
+                str(key): int(value)
+                for key, value in denied.items()
                 if isinstance(value, (int, float))
             }
         total = state.get("total_actions")

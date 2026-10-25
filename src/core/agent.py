@@ -90,6 +90,18 @@ class AgentDeadSignal(Exception):
         super().__init__(f"Agent died: {cause}")
 
 
+# Действия, которые восстанавливают ресурс, а не расходуют его.
+# Отдых не может стоить энергии: иначе он недоступен ровно тогда, когда
+# нужен, — при истощении. Замер до правки: 243 отказа «too_tired» на 400
+# попыток, и отдых среди них.
+RECOVERY_ACTIONS: frozenset = frozenset({"rest", "deep_rest"})
+
+# Действия, которые нельзя запретить по нехватке энергии. Иначе существо
+# не сможет ни восстановиться, ни починиться, ни сохраниться — и выйдет
+# из строя навсегда. Совпадает с «essential» в ActionBudget, плюс rest.
+ESSENTIAL_ACTIONS: frozenset = RECOVERY_ACTIONS | {"repair", "checkpoint_now"}
+
+
 def record_denied_outcome(obj, action_type: str, world_before, reason: str) -> None:
     """Отказ — тоже исход: мир не изменился, действие не сработало.
 
@@ -825,7 +837,13 @@ class DigitalBeing:
 
         Раньше обе ветки возвращали одно и то же значение — мёртвая
         логика адаптации (флаг ADAPTIVE_COSTS_ENABLED игнорировался).
+
+        Восстановительные действия бесплатны всегда: это не «скидка», а
+        условие существования — платный отдых при нулевой энергии
+        превращается в отказ от отдыха.
         """
+        if action_type in RECOVERY_ACTIONS:
+            return 0
         if not LR_CONFIG.ADAPTIVE_COSTS_ENABLED:
             # Фиксированная «честная» стоимость (без обратной связи).
             return self._action_costs.get(action_type, 2)
@@ -833,10 +851,68 @@ class DigitalBeing:
         # результатам действий. По умолчанию — 2.
         return self._action_costs.get(action_type, 2)
     
+    def _recover_energy(self, deep: bool = False) -> float:
+        """Возвращает энергию за отдых. Возвращает, сколько добавлено.
+
+        Отдых — единственный способ выйти из истощения: пассивная
+        регенерация EnergyPolicy ниже 20% даёт 0.1–1.2 за цикл, а действие
+        стоит 2–4. Без этого истощённый агент навсегда оставался в
+        состоянии «слишком устал» и не мог даже отдохнуть.
+        """
+        amount = float(
+            getattr(
+                LR_CONFIG,
+                "DEEP_REST_ENERGY_RECOVERY" if deep else "REST_ENERGY_RECOVERY",
+                30.0 if deep else 12.0,
+            )
+        )
+        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0))
+        before = float(self.energy)
+        self.energy = min(max_energy, before + amount)
+        return max(0.0, float(self.energy) - before)
+
+    def _body_needs_rest(self) -> bool:
+        """Нужен ли телу отдых прямо сейчас (усталость или мало энергии)."""
+        fatigue = 0.0
+        interoception = getattr(self, "interoception", None)
+        if interoception is not None:
+            try:
+                fatigue = float(interoception.state.fatigue)
+            except Exception:
+                fatigue = 0.0
+        threshold = float(getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6))
+        if fatigue >= threshold:
+            return True
+
+        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0))
+        ratio = float(self.energy) / max_energy if max_energy > 0 else 1.0
+        return ratio <= float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
+
+    def _action_cost_now(self, action_type: str) -> float:
+        """Сколько энергии действие стоит прямо сейчас (с поправкой на усталость)."""
+        base = self._get_adaptive_cost(action_type)
+        if action_type in ESSENTIAL_ACTIONS:
+            return 0.0 if action_type in RECOVERY_ACTIONS else float(base)
+        interoception = getattr(self, "interoception", None)
+        if interoception is not None:
+            try:
+                return float(interoception.get_action_cost(base))
+            except Exception:
+                return float(base)
+        return float(base)
+
+    def _is_action_affordable(self, action_type: str) -> bool:
+        """Хватает ли энергии на действие (отдых доступен всегда)."""
+        if action_type in RECOVERY_ACTIONS:
+            return True
+        return float(self.energy) >= self._action_cost_now(action_type)
+
     def _adapt_costs_after_action(self, success: bool, action_type: str):
         """Адаптирует энергетические затраты после действия."""
         if not LR_CONFIG.ADAPTIVE_COSTS_ENABLED:
             return
+        if action_type in RECOVERY_ACTIONS:
+            return  # отдых остаётся бесплатным
         
         current_cost = self._action_costs.get(action_type, 2)
         rate = LR_CONFIG.COST_ADAPTATION_RATE
@@ -1095,7 +1171,13 @@ class DigitalBeing:
         base_cost = self._get_adaptive_cost(action_type)
         
         # === Интероцепция: модулируем стоимость и проверяем возможность ===
-        if hasattr(self, 'interoception') and self.interoception:
+        # Восстановительные и служебные действия (отдых, ремонт, чекпоинт)
+        # не проверяются на усталость: запрещать отдых уставшему — значит
+        # запирать его в истощении навсегда. Замер до правки: 243 отказа
+        # «too_tired» на 400 попыток, включая сами попытки отдохнуть.
+        if action_type in ESSENTIAL_ACTIONS:
+            cost = 0.0 if action_type in RECOVERY_ACTIONS else base_cost
+        elif hasattr(self, 'interoception') and self.interoception:
             cost = self.interoception.get_action_cost(base_cost)
             if not self.interoception.can_perform_action(base_cost, self.energy):
                 get_logger().log(f"[INTEROCEPTION] Too exhausted for {action_type} (cost={cost:.1f}, energy={self.energy})")
@@ -1138,6 +1220,16 @@ class DigitalBeing:
             if hasattr(self, 'interoception') and self.interoception:
                 self.interoception.step(dt=1.0, cognitive_load=0.0, rest_depth=1.0)
                 get_logger().flush_immediate(f"[INTEROCEPTION] Deep rest: fatigue={self.interoception.state.fatigue:.2f}")
+            # Отдых возвращает ресурс, который тратят действия. Без этого
+            # тело не выходило из истощения: пассивная регенерация ниже
+            # 20% — 0.1 за цикл при стоимости действия 2–4.
+            recover = getattr(self, "_recover_energy", None)
+            recovered = recover(deep=True) if recover else 0.0
+            if recovered:
+                action = (
+                    f"Ответ: отдохнул, восстановил {recovered:.0f} энергии "
+                    f"(теперь {self.energy:.0f})"
+                )
         elif action_type == "checkpoint_now":
             if hasattr(self, 'death_risk') and self.death_risk:
                 self.death_risk.force_checkpoint()
@@ -1156,6 +1248,13 @@ class DigitalBeing:
         elif action_type == "rest":
             if hasattr(self, 'interoception') and self.interoception:
                 self.interoception.step(dt=1.0, cognitive_load=0.1, rest_depth=0.5)
+            recover = getattr(self, "_recover_energy", None)
+            recovered = recover(deep=False) if recover else 0.0
+            if recovered:
+                action = (
+                    f"Ответ: отдохнул, восстановил {recovered:.0f} энергии "
+                    f"(теперь {self.energy:.0f})"
+                )
         elif action_type == "synthesis":
             handler = getattr(self, "_act_synthesize", None)
             synthesis = handler() if handler else None
@@ -1364,8 +1463,13 @@ class DigitalBeing:
         """Можно ли выполнить действие прямо сейчас.
 
         Проверяются только те ограничения, которые заведомо откажут:
-        кулдаун вопроса и выключенный поиск. Остальное (усталость,
-        бюджет) решается в ``act()`` и записывается как исход.
+        кулдаун вопроса, выключенный поиск и нехватка энергии. Остальное
+        решается в ``act()`` и записывается как исход.
+
+        Нехватка энергии добавлена потому, что отказ — это не выбор, а
+        пустой цикл. Замер до правки: 243 отказа «too_tired» на 400
+        попыток, при этом арбитр каждый раз выбирал действие, которое
+        тело выполнить не могло. Дешевле не предлагать невозможное.
         """
         normalized = self._normalize_action(action)
         if normalized == "ask_user":
@@ -1375,7 +1479,23 @@ class DigitalBeing:
             if searcher is None:
                 return False
             return bool(getattr(searcher, "is_enabled", False))
-        return True
+        return self._is_action_affordable(normalized)
+
+    def _release_recovered_denials(self) -> None:
+        """Снимает пометку «тупик» с действий, которые снова по карману.
+
+        Отказ по усталости — факт о теле, а не о действии. Пока энергия не
+        вернулась, повторять бессмысленно; когда вернулась — запрет должен
+        исчезнуть сам, иначе отдых не возвращает агента к работе.
+        """
+        closer = getattr(self, "loop_closer", None)
+        if closer is None:
+            return
+        for action in closer.stuck_actions():
+            if not closer.denied_streak(action):
+                continue
+            if self._is_action_affordable(action):
+                closer.reset_denial(action)
 
     def _has_question_target(self) -> bool:
         """Есть ли о чём спросить человека прямо сейчас.
@@ -3104,14 +3224,33 @@ class DigitalBeing:
                 get_logger().log(f"[MOTIVATION_CANDIDATES] Error: {e}")
 
         # 2. Embodiment candidates
-        if hasattr(self, "interoception"):
+        # Раньше здесь читался ``self._interoception_status``, который
+        # никто никогда не выставлял: ветка была мёртвой, и тело не
+        # предлагало отдых даже при полном истощении. Теперь состояние
+        # берётся напрямую у интероцепции, а «eat» (не существующее
+        # действие) заменён на отдых.
+        if hasattr(self, "interoception") and self.interoception is not None:
             try:
-                intero_status = getattr(self, '_interoception_status', {})
-                if intero_status:
-                    if intero_status.get("fatigue", 0) > 0.7 or intero_status.get("stress", 0) > 0.7:
-                        candidates.append({"source": "embodiment", "action": "deep_rest", "strength": max(intero_status.get("fatigue", 0), intero_status.get("stress", 0)), "params": {"reason": "high_fatigue_or_stress"}})
-                    elif intero_status.get("energy_level", 1.0) < 0.3:
-                        candidates.append({"source": "embodiment", "action": "eat", "strength": 0.9, "params": {"reason": "low_energy"}})
+                intero_status = self.interoception.get_status()
+                fatigue = float(intero_status.get("fatigue", 0.0) or 0.0)
+                energy_ratio = (
+                    float(self.energy) / float(LR_CONFIG.ENERGY_MAX or 1.0)
+                )
+                rest_threshold = float(
+                    getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6)
+                )
+                low_ratio = float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
+                if fatigue >= rest_threshold or energy_ratio <= low_ratio:
+                    candidates.append({
+                        "source": "embodiment",
+                        "action": "deep_rest",
+                        "strength": max(fatigue, 1.0 - energy_ratio),
+                        "params": {
+                            "reason": "tired" if fatigue >= rest_threshold else "low_energy",
+                            "fatigue": round(fatigue, 3),
+                            "energy_ratio": round(energy_ratio, 3),
+                        },
+                    })
             except Exception as e:
                 get_logger().log(f"[EMBODIMENT_CANDIDATES] Error: {e}")
 
@@ -3125,17 +3264,34 @@ class DigitalBeing:
 
         # === ФИЛЬТР ДОСТУПНОСТИ ===
         # Не предлагаем арбитру то, что сейчас физически нельзя выполнить:
-        # вопрос при кулдауне, поиск при выключенной сети. Иначе действие
-        # выигрывает выбор, упирается в отказ и сжигает цикл.
+        # вопрос при кулдауне, поиск при выключенной сети, действие при
+        # нехватке энергии. Иначе действие выигрывает выбор, упирается в
+        # отказ и сжигает цикл.
         #
         # Гасить силу уже выбранных действий пробовали — это приводило к
         # метанию между бесплодными вариантами. Дешевле не предлагать
         # невозможное вовсе.
+        #
+        # Отказы, ставшие неправдой (энергия вернулась), снимаются здесь же:
+        # иначе отдых не возвращал бы агента к работе — действие навсегда
+        # осталось бы помеченным как тупиковое.
+        self._release_recovered_denials()
         candidates = [
             candidate
             for candidate in candidates
             if self._is_action_available(candidate.get("action"))
         ]
+
+        # Тело не может ничего из предложенного — но отдых доступен всегда.
+        # Без этого арбитр получал пустой список и выбирал «wait», то есть
+        # агент в истощении не отдыхал, а просто стоял.
+        if not candidates and self._body_needs_rest():
+            candidates = [{
+                "source": "embodiment",
+                "action": "deep_rest",
+                "strength": 1.0,
+                "params": {"reason": "nothing_affordable"},
+            }]
 
         # === ARBITRATION ===
         chosen_action = None
@@ -3171,9 +3327,12 @@ class DigitalBeing:
                 key=lambda c: float(c.get("strength", 0.0)),
                 reverse=True,
             )
+            # Запасной вариант тоже должен быть выполнимым: если тело
+            # истощено, «think_decompose» — это ещё один отказ, а не выход.
+            fallback = "deep_rest" if self._body_needs_rest() else "think_decompose"
             alternative = self.loop_closer.choose(
                 ranked,
-                fallback="think_decompose",
+                fallback=fallback,
                 normalize=self._normalize_action,
             )
             if alternative.get("action") != chosen_action:

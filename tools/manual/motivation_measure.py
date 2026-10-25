@@ -13,6 +13,7 @@
     --hold-energy          держать энергию на максимуме: изолировать
                            мотивацию от телесной экономики;
     --hungry               начать с неудовлетворённых любопытства и связи;
+    --exhausted            начать с нулевой энергии и высокой усталости;
     --seconds-per-cycle N  сколько «живых» секунд проживает цикл
                            (по умолчанию 5 — как в режиме live).
 
@@ -67,6 +68,7 @@ class Measurement:
         self.denials: Counter = Counter()
         self.denied_actions: Counter = Counter()
         self.first_choices: list = []
+        self.energy_curve: list = []
 
     def observe(self, agent) -> None:
         self.cycles += 1
@@ -107,6 +109,9 @@ class Measurement:
         else:
             self.effects["есть эффект" if outcome.had_effect else "без эффекта"] += 1
 
+        if len(self.energy_curve) < 40:
+            self.energy_curve.append(round(float(agent.energy), 1))
+
     def report(self, agent, candidate_samples) -> None:
         from src.core.motivation import unified_motivation as um
 
@@ -133,6 +138,7 @@ class Measurement:
         print(f"Результаты вопросов: {dict(self.ask_texts.most_common(5))}")
         print(f"Отказы до выполнения: {dict(self.denials)} по действиям {dict(self.denied_actions.most_common(6))}")
         print(f"Первые выборы: {self.first_choices}")
+        print(f"Энергия по циклам: {self.energy_curve}")
         if self.cycles:
             print("Средний уровень потребностей:")
             for name, total in sorted(self.need_levels_sum.items()):
@@ -148,6 +154,7 @@ async def main(
     hold_energy: bool = False,
     seconds_per_cycle: float = 5.0,
     hungry: bool = False,
+    exhausted: bool = False,
 ) -> int:
     agent = DigitalBeing(name="MotivationMeasure")
     # Замер без сети: поиск иначе ждёт rate-limit и искажает картину.
@@ -161,6 +168,14 @@ async def main(
         # тиков естественного затухания.
         for need_name in ("curiosity", "connection"):
             agent.motivation_system.needs[need_name].current_level = 0.05
+
+    if exhausted:
+        # Сценарий «тело на нуле»: ровно то состояние, в котором агент
+        # раньше застревал навсегда — энергия 0, каждое действие
+        # отклоняется, а отдых сам стоит энергии.
+        agent.energy = 0.0
+        agent.interoception.state.fatigue = 0.8
+        agent.interoception.state.atp = 0.5
 
     bus = EventBus(max_queue_size=500, history_size=100)
     runner = AgentRunner(agent, bus, name="MeasureRunner")
@@ -252,6 +267,7 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     hold = "--hold-energy" in args
     hungry = "--hungry" in args
+    exhausted = "--exhausted" in args
     seconds = 5.0
     if "--seconds-per-cycle" in args:
         index = args.index("--seconds-per-cycle")
@@ -266,6 +282,7 @@ if __name__ == "__main__":
                 hold_energy=hold,
                 seconds_per_cycle=seconds,
                 hungry=hungry,
+                exhausted=exhausted,
             )
         )
     )

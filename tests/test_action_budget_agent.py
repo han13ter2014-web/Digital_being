@@ -95,6 +95,12 @@ def test_enabled_budget_allows_act_above_reserve() -> None:
 
 
 def test_essential_action_is_allowed_below_reserve() -> None:
+    """Отдых проходит ниже резерва и больше не стоит энергии.
+
+    Раньше отдых был платным (2 единицы) и потому недоступен именно при
+    истощении: 243 отказа «too_tired» на 400 попыток в замере. Теперь
+    восстановительное действие бесплатно и не блокируется резервом.
+    """
     from src.core.agent import DigitalBeing
 
     being = _FakeBeing(energy=2, min_reserve=5)
@@ -102,7 +108,29 @@ def test_essential_action_is_allowed_below_reserve() -> None:
     result = DigitalBeing.act(being, "глубокий отдых")
 
     assert result == "Ответ: глубокий отдых"
-    assert being.energy == 0.0
+    assert being.energy == 2.0
+    last = being.action_budget.status()["last_decision"]
+    assert last["allowed"] is True
+    assert last["reason"] == "zero_cost"
+
+
+def test_repair_is_allowed_below_reserve() -> None:
+    """Служебное действие не блокируется резервом — иначе не починиться."""
+    from src.core.agent import DigitalBeing
+
+    class _Integrity:
+        def manual_repair(self, intensity: float) -> Dict[str, Any]:
+            return {"intensity": intensity}
+
+    class _DeathRisk:
+        def __init__(self) -> None:
+            self.integrity = _Integrity()
+
+    being = _FakeBeing(energy=2, min_reserve=5)
+    being.death_risk = _DeathRisk()
+
+    DigitalBeing.act(being, "repair")
+
     last = being.action_budget.status()["last_decision"]
     assert last["allowed"] is True
     assert last["reason"] == "essential"
