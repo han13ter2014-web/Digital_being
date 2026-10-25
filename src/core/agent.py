@@ -619,6 +619,10 @@ class DigitalBeing:
         self._last_action_outcome = None
         # Тело: цикл последнего такта и режим отдыха (гистерезис).
         self._rest_mode = False
+        # Сон: накопленный «материал» для консолидации.
+        self._sleep_units = 0.0
+        self._consolidation_count = 0
+        self._last_consolidation: Dict = {}
 
         # GoalSubsystem: генерируем цели и связываем с мотивацией.
         if hasattr(self, "goal_subsystem"):
@@ -1045,6 +1049,66 @@ class DigitalBeing:
         """
         step_body(self, action_type, performed=performed)
 
+    def _accumulate_sleep(self, units: float) -> Dict:
+        """Накопить «единицы сна» и, если хватит, осмыслить накопленное.
+
+        Один проход консолидации — это работа, а не отсчёт: связи,
+        разбросанные по формулировкам, укрепляются, опыт превращается в
+        определения. Поэтому сон измеряется не тиками, а накопленным
+        материалом: ``deep_rest`` даёт 1.0, ``rest`` — 0.5.
+
+        Returns:
+            Отчёт последнего прохода или пустой словарь, если порог не
+            набран.
+        """
+        if not bool(getattr(LR_CONFIG, "CONSOLIDATION_ENABLED", True)):
+            return {}
+        mental_models = getattr(self, "mental_models", None)
+        if mental_models is None or not hasattr(mental_models, "consolidate"):
+            return {}
+
+        self._sleep_units = float(getattr(self, "_sleep_units", 0.0)) + float(units)
+        threshold = float(
+            getattr(LR_CONFIG, "CONSOLIDATION_SLEEP_UNITS", 3.0) or 3.0
+        )
+        report: Dict = {}
+        while self._sleep_units >= threshold:
+            self._sleep_units -= threshold
+            try:
+                report = mental_models.consolidate(
+                    link_delta=float(
+                        getattr(LR_CONFIG, "CONSOLIDATION_LINK_DELTA", 0.05)
+                    ),
+                    max_links=int(
+                        getattr(LR_CONFIG, "CONSOLIDATION_MAX_LINKS", 400)
+                    ),
+                    max_definitions=int(
+                        getattr(LR_CONFIG, "CONSOLIDATION_MAX_DEFINITIONS", 25)
+                    ),
+                    confidence_bonus=float(
+                        getattr(
+                            LR_CONFIG, "CONSOLIDATION_CONFIDENCE_BONUS", 0.02
+                        )
+                    ),
+                    scan_batch=int(
+                        getattr(LR_CONFIG, "CONSOLIDATION_SCAN_BATCH", 400)
+                    ),
+                )
+            except Exception as exc:
+                get_logger().log(f"[CONSOLIDATION] ошибка: {exc}")
+                return {}
+            self._consolidation_count = int(
+                getattr(self, "_consolidation_count", 0)
+            ) + 1
+            self._last_consolidation = dict(report)
+            get_logger().flush_immediate(
+                f"[CONSOLIDATION] связей +{report.get('links', 0)}, "
+                f"формулировок +{report.get('definitions', 0)}, "
+                f"уточнений {report.get('refined', 0)}, "
+                f"уверенность ×{report.get('confidence', 0)}"
+            )
+        return report
+
     def _adapt_costs_after_action(self, success: bool, action_type: str):
         """Адаптирует энергетические затраты после действия."""
         if not LR_CONFIG.ADAPTIVE_COSTS_ENABLED:
@@ -1359,14 +1423,23 @@ class DigitalBeing:
         elif action_type == "deep_rest":
             # Тело «живёт» этот такт централизованно, в конце act():
             # см. step_body(action_type). Здесь только восстановление
-            # энергии агента.
+            # энергии агента и работа сна.
             recover = getattr(self, "_recover_energy", None)
             recovered = recover(deep=True) if recover else 0.0
+            consolidate = getattr(self, "_accumulate_sleep", None)
+            consolidated = consolidate(1.0) if consolidate else {}
+            parts = []
             if recovered:
-                action = (
-                    f"Ответ: отдохнул, восстановил {recovered:.0f} энергии "
-                    f"(теперь {self.energy:.0f})"
+                parts.append(
+                    f"восстановил {recovered:.0f} энергии (теперь {self.energy:.0f})"
                 )
+            if consolidated:
+                parts.append(
+                    f"осмыслил накопленное: связей {consolidated.get('links', 0)}, "
+                    f"формулировок {consolidated.get('definitions', 0)}"
+                )
+            if parts:
+                action = "Ответ: " + "; ".join(parts)
         elif action_type == "checkpoint_now":
             if hasattr(self, 'death_risk') and self.death_risk:
                 self.death_risk.force_checkpoint()
@@ -1385,11 +1458,20 @@ class DigitalBeing:
         elif action_type == "rest":
             recover = getattr(self, "_recover_energy", None)
             recovered = recover(deep=False) if recover else 0.0
+            consolidate = getattr(self, "_accumulate_sleep", None)
+            consolidated = consolidate(0.5) if consolidate else {}
+            parts = []
             if recovered:
-                action = (
-                    f"Ответ: отдохнул, восстановил {recovered:.0f} энергии "
-                    f"(теперь {self.energy:.0f})"
+                parts.append(
+                    f"восстановил {recovered:.0f} энергии (теперь {self.energy:.0f})"
                 )
+            if consolidated:
+                parts.append(
+                    f"осмыслил накопленное: связей {consolidated.get('links', 0)}, "
+                    f"формулировок {consolidated.get('definitions', 0)}"
+                )
+            if parts:
+                action = "Ответ: " + "; ".join(parts)
         elif action_type == "synthesis":
             handler = getattr(self, "_act_synthesize", None)
             synthesis = handler() if handler else None
@@ -1964,18 +2046,45 @@ class DigitalBeing:
         if not target:
             return {"target": "", "text": "Ответ: синтезировать нечего"}
 
+        # Сначала — связи, подкреплённые свидетельствами (вес выше порога):
+        # их укрепляет сон, когда видит одну концепцию в формулировке
+        # другой. Только если таких нет, смотрим широкий обход графа.
+        #
+        # Раньше здесь стоял вызов с именем ``max_depth``, а параметр
+        # называется ``max_distance``: TypeError молча глотался, и синтез
+        # всегда отвечал «нет связанных концепций». Действие при этом
+        # считалось выполненным.
+        names: list = []
         try:
-            related = self.mental_models.find_related_concepts(target, max_depth=2)
-        except Exception:
-            related = []
+            node = self.mental_models.concepts.get(target)
+            if node is not None:
+                names = [
+                    item["concept"]
+                    for item in node.get_related_concepts(0.3)
+                    if item.get("concept") in self.mental_models.concepts
+                ][:3]
+        except Exception as exc:
+            get_logger().log(f"[SYNTHESIS] ошибка связей '{target}': {exc}")
+            names = []
 
-        if not related:
-            return {
-                "target": target,
-                "text": f"Ответ: для '{target}' нет связанных концепций",
-            }
+        if not names:
+            try:
+                related = self.mental_models.find_related_concepts(
+                    target, max_distance=2
+                )
+            except Exception:
+                related = []
+            # find_related_concepts возвращает ConceptNode, а не словари:
+            # второй слой той же ошибки — оба вида обращений надо уметь.
+            for item in related[:3]:
+                name = (
+                    item.get("concept")
+                    if isinstance(item, dict)
+                    else getattr(item, "name", None)
+                )
+                if name:
+                    names.append(name)
 
-        names = [item.get("concept") for item in related[:3] if item.get("concept")]
         if not names:
             return {
                 "target": target,
@@ -2721,6 +2830,13 @@ class DigitalBeing:
             "mortality": self._mortality_state if hasattr(self, "_mortality_state") else {},
             "attachment": self.attachment.get_status() if hasattr(self, "attachment") else {},
             "sleep": self.sleep_cycle.get_status() if hasattr(self, "sleep_cycle") else {},
+            "consolidation": {
+                "count": int(getattr(self, "_consolidation_count", 0)),
+                "pending_sleep_units": round(
+                    float(getattr(self, "_sleep_units", 0.0)), 2
+                ),
+                "last": dict(getattr(self, "_last_consolidation", {}) or {}),
+            },
             "motivation": (self.motivation_system.get_status() if hasattr(self, "motivation_system")
                             else (self.motivation.get_status() if hasattr(self, "motivation") else {})),
             "will": self.will_registry.get_stats() if hasattr(self, "will_registry") else {},
