@@ -157,22 +157,27 @@ def test_queue_revives_after_rest(agent):
     """Из нуля агент выходит отдыхом и снова начинает действовать.
 
     Это главная проверка: раньше цикл замыкался на «слишком устал» и
-    энергия оставалась 0.0 навсегда.
+    энергия оставалась 0.0 навсегда. Отдых длится, пока тело не
+    восстановится (гистерезис), поэтому циклов нужно больше, чем один
+    «порог усталости».
     """
     agent.energy = 0.0
     agent.interoception.state.fatigue = 0.9
+    agent.interoception.state.atp = 0.0
+    agent.interoception.state.glucose = 0.0
 
     actions = []
-    for _ in range(12):
+    for _ in range(80):
         result = agent.autonomous_tick()
         chosen = (result.get("arbitrator") or {}).get("action")
         if chosen:
             actions.append(chosen)
 
-    assert actions[0] in {"deep_rest", "rest"}, actions
+    assert actions[0] in {"deep_rest", "rest"}, actions[:5]
     # Работа вернулась: среди выборов есть не только отдых.
     assert any(a not in {"deep_rest", "rest"} for a in actions), actions
     assert agent.energy > 0
+    assert agent.interoception.state.fatigue < 0.6
 
 
 # ============================================================
@@ -224,3 +229,108 @@ def test_denial_survives_checkpoint():
 
     assert restored.denied_streak("explore") == 1
     assert restored.is_stuck("explore") is True
+
+
+# ============================================================
+# 6. Тело живёт от действий, а не от времени
+# ============================================================
+
+
+def test_work_accumulates_fatigue_through_act(agent):
+    """Каждое действие — такт тела: работа утомляет по-настоящему."""
+    assert agent.interoception.state.fatigue == 0.0
+
+    for _ in range(40):
+        agent.energy = float(agent.energy_subsystem.max_energy)
+        agent.act("explore")
+
+    assert agent.interoception.state.fatigue > 0.5
+    assert agent.interoception.state.atp < agent.interoception.state.atp_max * 0.4
+
+
+def test_rest_reduces_fatigue_through_act(agent):
+    state = agent.interoception.state
+    state.fatigue = 0.8
+    state.atp = 0.0
+    state.glucose = 0.0
+
+    for _ in range(20):
+        agent.energy = 100.0
+        agent.act("deep_rest")
+
+    assert state.fatigue < 0.5
+    assert state.atp > 0.5
+
+
+def test_denied_action_ages_body_less_than_work(agent):
+    """Отказ — не работа: тело живёт такт, но почти не тратит ресурс."""
+    agent.energy = 0.0
+    agent.act("explore")  # отказ по усталости
+    denied_atp = agent.interoception.state.atp
+
+    agent2 = DigitalBeing(name="BodyAgentWork")
+    try:
+        agent2.energy = float(agent2.energy_subsystem.max_energy)
+        agent2.act("explore")
+        work_atp = agent2.interoception.state.atp
+    finally:
+        agent2.plugin_registry.teardown_all()
+
+    assert denied_atp > work_atp
+
+
+def test_rest_mode_has_hysteresis(agent):
+    """Отдых не прекращается на самом пороге усталости."""
+    agent.energy = 100.0
+    agent.interoception.state.fatigue = 0.7
+
+    assert agent._update_rest_mode() is True
+
+    # Усталость упала чуть ниже порога, но АТФ ещё не восстановлен.
+    agent.interoception.state.fatigue = 0.5
+    agent.interoception.state.atp = 1.0
+    assert agent._update_rest_mode() is True
+
+    # Восстановлено и то, и другое — можно работать.
+    agent.interoception.state.fatigue = 0.2
+    agent.interoception.state.atp = agent.interoception.state.atp_max
+    assert agent._update_rest_mode() is False
+
+
+def test_rest_choice_appears_when_tired(agent):
+    agent.energy = 100.0
+    agent.interoception.state.fatigue = 0.8
+    agent.interoception.state.atp = 0.0
+
+    result = agent.autonomous_tick()
+    chosen = (result.get("arbitrator") or {}).get("action")
+
+    assert chosen in {"deep_rest", "rest"}, result.get("arbitrator")
+
+
+def test_checkpoint_restore_does_not_age_body(agent):
+    """Загрузка чекпоинта не должна тратить глюкозу и АТФ."""
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    state = agent.interoception.state
+    state.glucose = 4.0
+    state.atp = 3.0
+    state.fatigue = 0.5
+
+    snapshot = build_state_from_agent(agent)
+
+    reborn = DigitalBeing(name="BodyAgentReborn")
+    try:
+        reborn.web_searcher.toggle(False)
+        apply_state_to_agent(reborn, snapshot)
+        restored = reborn.interoception.state
+        assert restored.glucose == pytest.approx(4.0, abs=1e-6)
+        assert restored.atp == pytest.approx(3.0, abs=1e-6)
+        assert restored.fatigue == pytest.approx(0.5, abs=1e-6)
+        # Производные величины пересчитаны, а не взяты из файла.
+        assert restored.action_cost_multiplier == pytest.approx(2.5, abs=0.01)
+    finally:
+        reborn.plugin_registry.teardown_all()

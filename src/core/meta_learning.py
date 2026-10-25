@@ -69,8 +69,8 @@ class MetaLearner:
         self.register("ai_temperature", 1.0, 0.1, 3.0)
         self.register("ai_temperature_decay", 0.9995, 0.99, 0.9999)
         self.register("ai_policy_length", 3, 1, 10)
-        self.register("fatigue_tau", 10.0, 2.0, 50.0)
-        self.register("glucose_to_atp_eff", 0.4, 0.1, 0.8)
+        self.register("fatigue_tau", 30.0, 2.0, 50.0)
+        self.register("glucose_to_atp_eff", 0.6, 0.1, 0.8)
         self.register("mito_stress_response", 0.1, 0.01, 0.5)
         self.register("retention_compression", 0.95, 0.8, 0.99)
         self.register("protension_horizon", 30.0, 5.0, 120.0)
@@ -120,8 +120,8 @@ class MetaLearner:
         
         if hasattr(self.agent, 'interoception'):
             ic = self.agent.interoception
-            ic.state.fatigue_integration_tau = hp.get('fatigue_tau', HyperParameter('', 10.0, 0, 0)).value
-            ic.glucose_to_atp_efficiency = hp.get('glucose_to_atp_eff', HyperParameter('', 0.4, 0, 0)).value
+            ic.state.fatigue_integration_tau = hp.get('fatigue_tau', HyperParameter('', 30.0, 0, 0)).value
+            ic.glucose_to_atp_efficiency = hp.get('glucose_to_atp_eff', HyperParameter('', 0.6, 0, 0)).value
             ic.mito_stress_response = hp.get('mito_stress_response', HyperParameter('', 0.1, 0, 0)).value
         
         if hasattr(self.agent, 'continuous_time'):

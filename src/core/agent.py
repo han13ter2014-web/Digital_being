@@ -101,6 +101,83 @@ RECOVERY_ACTIONS: frozenset = frozenset({"rest", "deep_rest"})
 # из строя навсегда. Совпадает с «essential» в ActionBudget, плюс rest.
 ESSENTIAL_ACTIONS: frozenset = RECOVERY_ACTIONS | {"repair", "checkpoint_now"}
 
+# Сколько ресурса тело тратит на действие (0..1). Раньше интероцепция
+# вообще не знала о работе: ``step()`` вызывался только из отдыха и
+# восстановления чекпоинта, поэтому усталость не росла от действий.
+# Замер: после 20 рабочих циклов fatigue = 0.0, множитель стоимости 1.0.
+BODY_LOAD: Dict[str, float] = {
+    # тяжёлая мыслительная работа
+    "explore": 0.9,
+    "synthesis": 0.9,
+    "decomposition": 0.85,
+    "hypothesis": 0.8,
+    "reflection": 0.7,
+    "web_search": 0.6,
+    # общение и решения
+    "know_answer": 0.5,
+    "ask_user": 0.5,
+    "communicate": 0.4,
+    "set_own_goal": 0.4,
+    "default": 0.3,
+    # обслуживание тела
+    "repair": 0.2,
+    "checkpoint_now": 0.1,
+    "wait": 0.0,
+}
+
+# Глубина отдыха для действий восстановления.
+BODY_REST_DEPTH: Dict[str, float] = {"rest": 0.5, "deep_rest": 1.0}
+
+# Действия, которые уставший мозг делает хуже. Не запрет, а снижение
+# тяги: при высокой усталости они проигрывают отдыху и лёгким действиям,
+# и агент чередует работу с восстановлением.
+HEAVY_ACTIONS: frozenset = frozenset(
+    name for name, load in BODY_LOAD.items() if load >= 0.6
+)
+
+# Нагрузка отказа: тело живёт этот такт, но не работает.
+BODY_DENIED_LOAD: float = 0.05
+
+
+def step_body(obj, action_type: str, performed: bool = True) -> None:
+    """Прожить телом один такт: потратить ресурс или восстановить его.
+
+    Модульная функция, как и ``record_denied_outcome``: ``act()``
+    вызывается и в лёгких объектах без тела (тесты бюджета, заглушки), и
+    отсутствие интероцепции не должно ронять действие.
+
+    Один такт тела — одно действие. В трей-режиме за цикл действие может
+    произойти дважды (спонтанное в ``autonomous_tick`` и ответ на стимул),
+    и это два разных усилия, а не одно.
+    """
+    interoception = getattr(obj, "interoception", None)
+    if interoception is None:
+        return
+    rest_depth = BODY_REST_DEPTH.get(action_type, 0.0)
+    if rest_depth > 0:
+        load = 0.0
+    elif performed:
+        load = BODY_LOAD.get(action_type, 0.3)
+    else:
+        load = BODY_DENIED_LOAD
+    try:
+        interoception.step(dt=1.0, cognitive_load=load, rest_depth=rest_depth)
+    except Exception as exc:  # тело не должно ронять действие
+        get_logger().log(f"[BODY] step error for {action_type}: {exc}")
+        return
+    if rest_depth > 0:
+        get_logger().log(
+            f"[INTEROCEPTION] Отдых ({action_type}): "
+            f"fatigue={interoception.state.fatigue:.2f}, "
+            f"atp={interoception.state.atp:.1f}"
+        )
+    elif load >= 0.6:
+        get_logger().log(
+            f"[INTEROCEPTION] {action_type}: fatigue="
+            f"{interoception.state.fatigue:.2f}, "
+            f"atp={interoception.state.atp:.1f}"
+        )
+
 
 def record_denied_outcome(obj, action_type: str, world_before, reason: str) -> None:
     """Отказ — тоже исход: мир не изменился, действие не сработало.
@@ -540,6 +617,8 @@ class DigitalBeing:
             )
         )
         self._last_action_outcome = None
+        # Тело: цикл последнего такта и режим отдыха (гистерезис).
+        self._rest_mode = False
 
         # GoalSubsystem: генерируем цели и связываем с мотивацией.
         if hasattr(self, "goal_subsystem"):
@@ -888,6 +967,52 @@ class DigitalBeing:
         ratio = float(self.energy) / max_energy if max_energy > 0 else 1.0
         return ratio <= float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
 
+    def _body_recovered(self) -> bool:
+        """Достаточно ли восстановлено тело, чтобы вернуться к работе."""
+        interoception = getattr(self, "interoception", None)
+        if interoception is not None:
+            try:
+                fatigue = float(interoception.state.fatigue)
+                atp_ratio = float(interoception.state.atp) / max(
+                    1e-6, float(interoception.state.atp_max)
+                )
+            except Exception:
+                fatigue, atp_ratio = 0.0, 1.0
+            if fatigue > float(
+                getattr(LR_CONFIG, "REST_RECOVERY_FATIGUE", 0.3)
+            ):
+                return False
+            if atp_ratio < float(
+                getattr(LR_CONFIG, "REST_RECOVERY_ATP_RATIO", 0.75)
+            ):
+                return False
+
+        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0))
+        ratio = float(self.energy) / max_energy if max_energy > 0 else 1.0
+        return ratio >= float(
+            getattr(LR_CONFIG, "REST_RECOVERY_ENERGY_RATIO", 0.5)
+        )
+
+    def _update_rest_mode(self) -> bool:
+        """Гистерезис отдыха: решает, продолжает ли тело отдыхать.
+
+        Вход в отдых — по усталости или низкой энергии, выход — только
+        когда восстановлено и то, и другое. Без гистерезиса агент
+        возвращался к работе на пороге 0.6 с пустым АТФ и тут же снова
+        уставал: замер показывал 53 «работа→отдых» за 200 циклов и АТФ,
+        застрявший около нуля.
+        """
+        resting = bool(getattr(self, "_rest_mode", False))
+        if self._body_needs_rest():
+            resting = True
+        elif resting and self._body_recovered():
+            resting = False
+        self._rest_mode = resting
+        return resting
+
+    def _is_resting(self) -> bool:
+        return bool(getattr(self, "_rest_mode", False))
+
     def _action_cost_now(self, action_type: str) -> float:
         """Сколько энергии действие стоит прямо сейчас (с поправкой на усталость)."""
         base = self._get_adaptive_cost(action_type)
@@ -906,6 +1031,19 @@ class DigitalBeing:
         if action_type in RECOVERY_ACTIONS:
             return True
         return float(self.energy) >= self._action_cost_now(action_type)
+
+    def _step_body(self, action_type: str, performed: bool = True) -> None:
+        """Прожить телом один такт: потратить ресурс или восстановить его.
+
+        Вызывается ровно один раз за действие — и при отказе тоже (тело
+        живёт независимо от того, разрешили ему работать). До этой правки
+        ``interoception.step()`` вызывался только из обработчиков отдыха,
+        поэтому усталость не зависела от работы вообще.
+
+        Тонкая обёртка над модульной ``step_body``: ``act()`` работает и в
+        лёгких объектах без тела.
+        """
+        step_body(self, action_type, performed=performed)
 
     def _adapt_costs_after_action(self, success: bool, action_type: str):
         """Адаптирует энергетические затраты после действия."""
@@ -1183,6 +1321,7 @@ class DigitalBeing:
                 get_logger().log(f"[INTEROCEPTION] Too exhausted for {action_type} (cost={cost:.1f}, energy={self.energy})")
                 # Отказ — тоже исход: мир не изменился. Без записи
                 # действие не гаснет и выбирается снова и снова.
+                step_body(self, action_type, performed=False)
                 record_denied_outcome(self, action_type, world_before, "too_tired")
                 return f"Ответ: Слишком устал для {action_type}"
         else:
@@ -1203,6 +1342,7 @@ class DigitalBeing:
                     f"[BUDGET] denied {action_type}: {decision.reason} "
                     f"(cost={decision.cost:.1f}, energy={decision.energy_before:.1f})"
                 )
+                step_body(self, action_type, performed=False)
                 record_denied_outcome(self, action_type, world_before, "budget")
                 return (
                     f"Ответ: Бюджет не разрешает {action_type}: "
@@ -1217,12 +1357,9 @@ class DigitalBeing:
                 changes = self.death_risk.integrity.manual_repair(intensity=2.0)
                 get_logger().flush_immediate(f"[DEATH_RISK] Manual repair: {changes}")
         elif action_type == "deep_rest":
-            if hasattr(self, 'interoception') and self.interoception:
-                self.interoception.step(dt=1.0, cognitive_load=0.0, rest_depth=1.0)
-                get_logger().flush_immediate(f"[INTEROCEPTION] Deep rest: fatigue={self.interoception.state.fatigue:.2f}")
-            # Отдых возвращает ресурс, который тратят действия. Без этого
-            # тело не выходило из истощения: пассивная регенерация ниже
-            # 20% — 0.1 за цикл при стоимости действия 2–4.
+            # Тело «живёт» этот такт централизованно, в конце act():
+            # см. step_body(action_type). Здесь только восстановление
+            # энергии агента.
             recover = getattr(self, "_recover_energy", None)
             recovered = recover(deep=True) if recover else 0.0
             if recovered:
@@ -1246,8 +1383,6 @@ class DigitalBeing:
             topic = (exploration or {}).get("target") or ""
             action = (exploration or {}).get("text") or action
         elif action_type == "rest":
-            if hasattr(self, 'interoception') and self.interoception:
-                self.interoception.step(dt=1.0, cognitive_load=0.1, rest_depth=0.5)
             recover = getattr(self, "_recover_energy", None)
             recovered = recover(deep=False) if recover else 0.0
             if recovered:
@@ -1330,6 +1465,14 @@ class DigitalBeing:
                     f"[LOOP] {action_type} без результата "
                     f"({streak} раз подряд)"
                 )
+
+        # === Тело: прожить такт ===
+        # Ровно один раз за действие, после того как оно выполнено.
+        # Нагрузка зависит от типа: тяжёлая работа утомляет, отдых
+        # восстанавливает. Отказы обрабатываются отдельно, до обработчика.
+        # Модульная функция, а не метод: act() работает и в лёгких
+        # объектах без тела (тесты бюджета, заглушки).
+        step_body(self, action_type, performed=True)
 
         # === Мотивация: результат действия (P1.2 Valence Feedback) ===
         if hasattr(self, 'motivation_system'):
@@ -3229,6 +3372,11 @@ class DigitalBeing:
         # предлагало отдых даже при полном истощении. Теперь состояние
         # берётся напрямую у интероцепции, а «eat» (не существующее
         # действие) заменён на отдых.
+        #
+        # Отдых включается по усталости и выключается только после
+        # восстановления (гистерезис): иначе агент возвращался к работе
+        # на самом пороге и не успевал восполнить АТФ.
+        resting = self._update_rest_mode()
         if hasattr(self, "interoception") and self.interoception is not None:
             try:
                 intero_status = self.interoception.get_status()
@@ -3240,13 +3388,21 @@ class DigitalBeing:
                     getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6)
                 )
                 low_ratio = float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
-                if fatigue >= rest_threshold or energy_ratio <= low_ratio:
+                if resting or fatigue >= rest_threshold or energy_ratio <= low_ratio:
                     candidates.append({
                         "source": "embodiment",
                         "action": "deep_rest",
-                        "strength": max(fatigue, 1.0 - energy_ratio),
+                        # Пока тело отдыхает — это главное дело. На входе
+                        # в отдых сила растёт быстрее усталости (0.6 → 0.75),
+                        # иначе отдых проигрывал обучению.
+                        "strength": 1.0 if resting else min(
+                            1.0,
+                            max(fatigue, 1.0 - energy_ratio) * 1.25,
+                        ),
                         "params": {
-                            "reason": "tired" if fatigue >= rest_threshold else "low_energy",
+                            "reason": "resting" if resting else (
+                                "tired" if fatigue >= rest_threshold else "low_energy"
+                            ),
                             "fatigue": round(fatigue, 3),
                             "energy_ratio": round(energy_ratio, 3),
                         },
@@ -3261,6 +3417,33 @@ class DigitalBeing:
             candidates.extend(self._social_candidates(cycle))
         except Exception as e:
             get_logger().log(f"[SOCIAL_CANDIDATES] Error: {e}")
+
+        # === УСТАЛОСТЬ: тяжёлая работа хуже даётся ===
+        # ``cognitive_throughput`` падает с усталостью (1 - 0.7*fatigue).
+        # Раньше величина только считалась и сохранялась в чекпоинт —
+        # на выбор она не влияла. Теперь она снижает тягу к тяжёлым
+        # действиям: уставший агент сам выбирает отдых или лёгкое дело,
+        # а не потому, что ему запретили работать.
+        try:
+            intero = getattr(self, "interoception", None)
+            throughput = (
+                float(intero.state.cognitive_throughput)
+                if intero is not None
+                else 1.0
+            )
+            if resting:
+                # Пока тело отдыхает, тяжёлая работа не тянет: это не
+                # запрет, а отсутствие желания работать через силу.
+                throughput = min(throughput, 0.15)
+            if throughput < 0.99:
+                for candidate in candidates:
+                    action_type = self._normalize_action(candidate.get("action"))
+                    if action_type in HEAVY_ACTIONS:
+                        candidate["strength"] = float(
+                            candidate.get("strength", 0.5)
+                        ) * max(0.2, throughput)
+        except Exception as e:
+            get_logger().log(f"[BODY] throughput damping error: {e}")
 
         # === ФИЛЬТР ДОСТУПНОСТИ ===
         # Не предлагаем арбитру то, что сейчас физически нельзя выполнить:
@@ -3285,7 +3468,7 @@ class DigitalBeing:
         # Тело не может ничего из предложенного — но отдых доступен всегда.
         # Без этого арбитр получал пустой список и выбирал «wait», то есть
         # агент в истощении не отдыхал, а просто стоял.
-        if not candidates and self._body_needs_rest():
+        if not candidates and (self._body_needs_rest() or self._is_resting()):
             candidates = [{
                 "source": "embodiment",
                 "action": "deep_rest",
@@ -3329,7 +3512,11 @@ class DigitalBeing:
             )
             # Запасной вариант тоже должен быть выполнимым: если тело
             # истощено, «think_decompose» — это ещё один отказ, а не выход.
-            fallback = "deep_rest" if self._body_needs_rest() else "think_decompose"
+            fallback = (
+                "deep_rest"
+                if (self._body_needs_rest() or self._is_resting())
+                else "think_decompose"
+            )
             alternative = self.loop_closer.choose(
                 ranked,
                 fallback=fallback,
