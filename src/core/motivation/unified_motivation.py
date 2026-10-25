@@ -49,37 +49,95 @@ def fill_template(template: str, value: str) -> str:
 
 @dataclass
 class Need:
+    """Дефицитарная потребность: сигнал нехватки, а не достигнутости.
+
+    ``current_level`` — удовлетворённость (0.0 — не удовлетворена вовсе,
+    1.0 — полностью). ``base_level`` — уровень, на котором потребность
+    считается «закрытой»; он же служит масштабом для сравнения
+    потребностей с разной базой. ``threshold`` — порог насущности:
+    ниже него потребность начинает требовать действия.
+    """
     name: str
     label: str
     base_level: float = 0.5
     current_level: float = 0.5
     decay_rate: float = 0.01
-    growth_rate: float = 0.1
     threshold: float = 0.4
     priority: float = 1.0
     related_concepts: List[str] = field(default_factory=list)
     related_actions: List[str] = field(default_factory=list)
     
     def deficit(self) -> float:
+        """Насколько потребность не удовлетворена (в абсолютных единицах)."""
         return max(0.0, self.base_level - self.current_level)
-    
+
+    def pressure(self) -> float:
+        """Неудовлетворённость, нормированная в 0..1.
+
+        Нужна, чтобы потребности с разной базой были сравнимы: у «смысла»
+        база 0.3, у «любопытства» 0.8, и абсолютный дефицит несравним.
+        Нормировка на ``base_level`` делает их одной шкалой.
+        """
+        if self.base_level <= 0:
+            return 0.0
+        return max(0.0, min(1.0, self.deficit() / self.base_level))
+
     def urgency(self) -> float:
-        return self.deficit() * self.priority
-    
+        """Срочность: давление × приоритет.
+
+        Раньше здесь был абсолютный дефицит, поэтому потребность с низкой
+        базой («смысл», база 0.3) не могла выиграть у «любопытства»
+        (база 0.8) ни при каких условиях.
+        """
+        return self.pressure() * self.priority
+
     def is_pressing(self) -> bool:
+        """Требует ли потребность действия прямо сейчас."""
         return self.current_level < self.threshold
-    
+
     def tick(self):
-        if self.current_level < self.base_level:
-            self.current_level = min(self.base_level, self.current_level + self.decay_rate)
-        elif self.current_level > self.base_level:
-            self.current_level = max(self.base_level, self.current_level - self.decay_rate)
-    
+        """Удовлетворение убывает со временем: потребность возвращается.
+
+        Раньше ``tick()`` ПОВЫШАЛ удовлетворение к ``base_level``. Из-за
+        этого потребность не могла стать насущной: у любопытства база 0.8,
+        а порог 0.35, и уровень уходил вверх. Все потребности постоянно
+        были «удовлетворены», кандидатов от них не появлялось, и
+        поведением управляли только драйвы — которые, в свою очередь,
+        считались от удовлетворённости. Получалась инверсия: сытый агент
+        активнее голодного.
+
+        Теперь наоборот: без удовлетворяющего действия потребность
+        «голодает» и через ``threshold / decay_rate`` тиков становится
+        насущной. ``decay_rate`` — это скорость, с которой удовлетворение
+        рассеивается.
+        """
+        self.current_level = max(0.0, self.current_level - self.decay_rate)
+
     def satisfy(self, amount: float):
-        self.current_level = min(1.0, self.current_level + amount * self.growth_rate)
-    
+        """Удовлетворяет потребность, закрывая долю остатка до 1.0.
+
+        ``amount`` — доля 0..1 (обычно ``valence * 0.5``). Закрываем
+        именно долю остатка, а не фиксированные единицы: слабое
+        удовлетворение не должно перескакивать порог, а сильное —
+        упираться в потолок. Одно сильное результативное действие
+        (valence ≈ 0.8 → amount ≈ 0.4) поднимает потребность с нуля
+        до 0.4, то есть выше типичного порога 0.2–0.35.
+        """
+        try:
+            share = max(0.0, min(1.0, float(amount)))
+        except (TypeError, ValueError):
+            return
+        self.current_level = min(
+            1.0, self.current_level + share * (1.0 - self.current_level)
+        )
+
     def frustrate(self, amount: float):
-        self.current_level = max(0.0, self.current_level - amount)
+        """Снижает удовлетворение (неудача, разочарование)."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return
+        self.current_level = max(0.0, self.current_level - value)
     
     def to_dict(self) -> dict:
         return {
@@ -88,6 +146,7 @@ class Need:
             "base_level": self.base_level,
             "current_level": round(self.current_level, 3),
             "deficit": round(self.deficit(), 3),
+            "pressure": round(self.pressure(), 3),
             "urgency": round(self.urgency(), 3),
             "pressing": self.is_pressing(),
             "threshold": self.threshold,
@@ -98,49 +157,49 @@ class Need:
 DEFAULT_NEEDS = {
     "curiosity": Need(
         name="curiosity", label="Любопытство / Познавательная потребность",
-        base_level=0.8, current_level=0.5, decay_rate=0.02, growth_rate=0.15,
+        base_level=0.8, current_level=0.5, decay_rate=0.02,
         threshold=0.35, priority=1.2,
         related_concepts=["вопрос", "понимать", "знать", "обучение", "ошибка", "любопытство", "исследовать"],
         related_actions=["ask_question", "decompose_concept", "explore", "web_search", "synthesize", "hypothesis"]
     ),
     "competence": Need(
         name="competence", label="Компетентность / Мастерство",
-        base_level=0.7, current_level=0.4, decay_rate=0.005, growth_rate=0.1,
+        base_level=0.7, current_level=0.4, decay_rate=0.005,
         threshold=0.3, priority=1.0,
         related_concepts=["понимать", "знать", "обучение", "навык", "успех", "рост", "мастерство"],
         related_actions=["synthesize_understanding", "self_reflect", "successful_action", "teach_other", "hypothesis", "decomposition"]
     ),
     "autonomy": Need(
         name="autonomy", label="Автономия / Свобода воли",
-        base_level=0.6, current_level=0.5, decay_rate=0.003, growth_rate=0.08,
+        base_level=0.6, current_level=0.5, decay_rate=0.003,
         threshold=0.25, priority=1.1,
         related_concepts=["выбор", "цель", "воля", "свобода", "решение", "автономность", "инициатива"],
         related_actions=["set_own_goal", "make_choice", "refuse_action", "propose_alternative", "act"]
     ),
     "connection": Need(
         name="connection", label="Связь / Принадлежность",
-        base_level=0.5, current_level=0.4, decay_rate=0.005, growth_rate=0.12,
+        base_level=0.5, current_level=0.4, decay_rate=0.005,
         threshold=0.3, priority=0.9,
         related_concepts=["общение", "диалог", "друг", "партнёр", "социальный", "взаимодействие"],
         related_actions=["user_answer", "social_interaction", "communicate"]
     ),
     "play": Need(
         name="play", label="Игра / Исследование ради процесса",
-        base_level=0.4, current_level=0.3, decay_rate=0.01, growth_rate=0.15,
+        base_level=0.4, current_level=0.3, decay_rate=0.01,
         threshold=0.25, priority=0.8,
         related_concepts=["игра", "эксперимент", "попробовать", "творчество", "фантазия"],
         related_actions=["explore", "creative_act", "experiment", "synthesize"]
     ),
     "meaning": Need(
         name="meaning", label="Смысл / Понимание своего места",
-        base_level=0.3, current_level=0.2, decay_rate=0.002, growth_rate=0.05,
+        base_level=0.3, current_level=0.2, decay_rate=0.002,
         threshold=0.2, priority=1.3,
         related_concepts=["смысл", "цель", "значение", "миссия", "причина", "зачем"],
         related_actions=["reflect", "set_own_goal", "synthesize_understanding", "self_reflect"]
     ),
     "coherence": Need(
         name="coherence", label="Когерентность / Внутренняя непротиворечивость",
-        base_level=0.6, current_level=0.5, decay_rate=0.005, growth_rate=0.08,
+        base_level=0.6, current_level=0.5, decay_rate=0.005,
         threshold=0.3, priority=1.0,
         related_concepts=["согласованность", "логика", "структура", "порядок", "система"],
         related_actions=["self_reflect", "synthesize_understanding", "repair", "organize_knowledge"]
@@ -162,19 +221,54 @@ class Drive:
     activation_count: int = 0
     goal_types: List[str] = field(default_factory=list)
     
-    def calculate_intensity(self, needs_state: Dict[str, float]) -> float:
+    def calculate_intensity(self, needs_state: Dict[str, Any]) -> float:
+        """Давление драйва: насколько его потребности НЕ удовлетворены.
+
+        Раньше считалось среднее удовлетворение, поэтому драйв
+        активировался от «сытости»: чем лучше агенту, тем сильнее он
+        чего-то хотел. Теперь — от нехватки.
+
+        Args:
+            needs_state: отображение имя → уровень (0..1) или имя → ``Need``.
+                Объект ``Need`` предпочтителен: он знает свой ``base_level``,
+                и потребности с разной базой становятся сравнимыми.
+        """
         if not self.contributing_needs:
-            return 0.0
-        weighted_sum = sum(
-            needs_state.get(name, 0.0) * weight
-            for name, weight in self.contributing_needs.items()
-        )
-        total_weight = sum(self.contributing_needs.values())
-        if total_weight > 0:
-            self.current_level = min(1.0, weighted_sum / total_weight)
-        else:
             self.current_level = 0.0
+            return 0.0
+
+        weighted = 0.0
+        total = 0.0
+        for name, weight in self.contributing_needs.items():
+            try:
+                share = float(weight)
+            except (TypeError, ValueError):
+                continue
+            if share <= 0:
+                continue
+            weighted += self._pressure_of(needs_state.get(name)) * share
+            total += share
+
+        self.current_level = (
+            max(0.0, min(1.0, weighted / total)) if total > 0 else 0.0
+        )
         return self.current_level
+
+    @staticmethod
+    def _pressure_of(value: Any) -> float:
+        """Давление одной потребности: объект ``Need`` или просто уровень."""
+        if value is None:
+            return 0.0
+        pressure = getattr(value, "pressure", None)
+        if callable(pressure):
+            try:
+                return max(0.0, min(1.0, float(pressure())))
+            except Exception:
+                return 0.0
+        try:
+            return max(0.0, min(1.0, 1.0 - float(value)))
+        except (TypeError, ValueError):
+            return 0.0
     
     def is_active(self) -> bool:
         return self.current_level >= self.activation_threshold
@@ -190,35 +284,42 @@ class Drive:
         }
 
 
+# Порог активации — в шкале ДАВЛЕНИЯ (0 — потребности закрыты,
+# 1 — полностью не удовлетворены), а не в прежней шкале
+# удовлетворённости. Старые 0.55–0.65 были калиброваны под инверсию:
+# там драйв включался, когда потребности были сыты. На шкале давления
+# такие пороги означали «в среднем 60 % нехватки по всем нуждам» и не
+# срабатывали почти никогда. 0.35–0.45 — это «одна потребность голодает
+# сильно, остальные заметно»: драйв как сочетание, а не как одна искра.
 DEFAULT_DRIVES = {
     "creativity": Drive(
         name="creativity", label="Творчество / Самореализация",
         contributing_needs={"curiosity": 0.4, "autonomy": 0.3, "play": 0.3},
-        activation_threshold=0.55,
+        activation_threshold=0.35,
         goal_types=["creative", "exploration", "synthesis"]
     ),
     "mastery": Drive(
         name="mastery", label="Мастерство / Совершенствование",
         contributing_needs={"competence": 0.5, "curiosity": 0.3, "coherence": 0.2},
-        activation_threshold=0.6,
+        activation_threshold=0.4,
         goal_types=["learning", "skill_building", "deep_understanding"]
     ),
     "self_transcendence": Drive(
         name="self_transcendence", label="Самотрансценденция / Служение высшему",
         contributing_needs={"meaning": 0.5, "connection": 0.3, "coherence": 0.2},
-        activation_threshold=0.65,
+        activation_threshold=0.45,
         goal_types=["teaching", "contribution", "legacy", "helping_others"]
     ),
     "exploration": Drive(
         name="exploration", label="Исследование / Поиск новизны",
         contributing_needs={"curiosity": 0.5, "play": 0.3, "autonomy": 0.2},
-        activation_threshold=0.55,
+        activation_threshold=0.35,
         goal_types=["exploration", "novelty_seeking", "discovery"]
     ),
     "understanding": Drive(
         name="understanding", label="Глубокое понимание / Мудрость",
         contributing_needs={"curiosity": 0.4, "competence": 0.3, "meaning": 0.3},
-        activation_threshold=0.6,
+        activation_threshold=0.4,
         goal_types=["deep_understanding", "synthesis", "philosophy"]
     ),
 }
@@ -294,21 +395,36 @@ DRIVE_GOAL_TEMPLATES = {
 # УНИФИЦИРОВАННАЯ СИСТЕМА МОТИВАЦИИ
 # ============================================================
 
-# Mapping internal action types (used by DigitalBeing.act) -> related
-# motivation action names (English tokens used in Need.related_actions).
-# Keeps valence feedback / need satisfaction coherent across the loop:
-# stимул -> действие -> результат -> валентность -> потребность.
+# Мост «тип действия агента → действия, которые оно удовлетворяет».
+#
+# Ключи — это ровно те типы, которые возвращает ``DigitalBeing.act()``
+# (см. ``DigitalBeing.ACTION_ALIASES``), а значения — имена из
+# ``Need.related_actions``. Раньше таблица была составлена из имён
+# мотивации («ask_question», «synthesize_understanding»), а act() отдаёт
+# «ask_user», «synthesis», «reflection». Из-за этого успешный вопрос не
+# удовлетворял любопытство: потребность оставалась насущной, и агент
+# спрашивал снова и снова. Обратный мост был, прямого не было.
 ACTION_ALIASES: Dict[str, List[str]] = {
+    # исследование и работа с материалом
+    "explore": ["explore", "experiment", "act", "creative_act", "practice"],
     "hypothesis": ["hypothesis", "synthesize_understanding"],
-    "decomposition": ["decompose_concept", "decomposition", "think_decompose"],
+    "decomposition": ["decompose_concept", "decomposition", "organize_knowledge", "think_decompose"],
+    "synthesis": ["synthesize", "synthesize_understanding", "creative_act", "teach_other"],
     "know_answer": ["know_answer", "synthesize", "successful_action"],
     "search_miss": ["web_search", "search_miss"],
+    # общение
+    "ask_user": ["ask_question", "ask_user", "user_answer", "social_interaction"],
     "user_answer": ["user_answer", "ask_user", "communicate", "social_interaction"],
+    "communicate": ["communicate", "teach_other", "social_interaction", "user_answer"],
+    # поиск
+    "web_search": ["web_search", "search_miss"],
+    # автономия и рефлексия
+    "set_own_goal": ["set_own_goal", "make_choice", "propose_alternative"],
+    "reflection": ["self_reflect", "reflect", "synthesize_understanding"],
+    # восстановление и порядок
     "repair": ["repair", "organize_knowledge"],
     "deep_rest": ["deep_rest", "rest", "reduce_activity", "conserve_energy"],
     "checkpoint_now": ["checkpoint_now", "checkpoint"],
-    "mental_model": ["synthesize", "synthesize_understanding", "teach_other"],
-    "creative_act": ["creative_act", "explore", "experiment", "play"],
     "default": [
         "default", "explore", "act", "creative_act", "experiment", "reflect",
         "self_reflect", "set_own_goal", "make_choice", "propose_alternative",
@@ -325,6 +441,10 @@ class UnifiedMotivationSystem:
                                           for name, template in DEFAULT_DRIVES.items()}
         self.goal_history: List[dict] = []
         self.last_generated_cycle: int = 0
+        # Цикл, в котором потребности уже «прожили» свой тик. Нужен,
+        # чтобы два вызова tick() за один цикл (autonomous_tick и
+        # evolve-пайплайн) не удваивали затухание.
+        self.last_tick_cycle: Optional[int] = None
         self._needs_state_cache: Dict[str, float] = {}
         logger.log("[MOTIVATION] UnifiedMotivationSystem initialized")
     
@@ -336,7 +456,9 @@ class UnifiedMotivationSystem:
         self._needs_state_cache = {name: need.current_level for name, need in self.needs.items()}
         for drive in self.drives.values():
             was_active = drive.is_active()
-            drive.calculate_intensity(self._needs_state_cache)
+            # Драйвам передаём сами потребности: им нужен base_level,
+            # чтобы давление было нормировано и сравнимо.
+            drive.calculate_intensity(self.needs)
             if drive.is_active() and not was_active:
                 logger.log(f"[MOTIVATION] 🌟 Drive activated: {drive.label} (level={drive.current_level:.2f})")
         pressing_needs = [n for n in self.needs.values() if n.is_pressing()]
@@ -344,6 +466,8 @@ class UnifiedMotivationSystem:
         new_goals: List[dict] = []
         if (pressing_needs or active_drives) and self.last_generated_cycle != self.agent.cycle_count:
             new_goals = self.generate_goals(pressing_needs, active_drives)
+
+        self.last_tick_cycle = getattr(self.agent, "cycle_count", None)
 
         return {
             "needs_state": dict(self._needs_state_cache),
@@ -354,13 +478,19 @@ class UnifiedMotivationSystem:
         }
     
     def _apply_contextual_modifiers(self, context: Dict):
-        for concept in context.get("unknown_concepts", [])[:3]:
-            self.needs["curiosity"].current_level = max(0.0, self.needs["curiosity"].current_level - 0.05)
-            self.needs["play"].current_level = max(0.0, self.needs["play"].current_level - 0.03)
-        for area in context.get("novel_areas", [])[:2]:
-            self.needs["curiosity"].current_level = max(0.0, self.needs["curiosity"].current_level - 0.08)
-        for area in context.get("weak_areas", [])[:2]:
-            self.needs["competence"].current_level = max(0.0, self.needs["competence"].current_level - 0.05)
+        """Событийные поправки к потребностям.
+
+        Раньше здесь были ещё и штрафы за контекст: «есть неизвестные
+        концепции» вычитало до 0.31 у любопытства за тик. Это была
+        подпорка для перевёрнутого ``tick()``: время тянуло потребность
+        вверх, и без штрафа она не становилась насущной. Теперь
+        потребность возвращается сама, а контекстные штрафы лишь
+        дублировали время — и, будучи на порядок сильнее затухания,
+        держали любопытство у нуля навсегда.
+
+        Контекст по-прежнему влияет на поведение — через формулировку
+        целей (``generate_goals``), а не через подмену уровня.
+        """
         if context.get("recent_success"):
             self.needs["competence"].satisfy(0.1)
             self.needs["autonomy"].satisfy(0.05)
@@ -374,14 +504,24 @@ class UnifiedMotivationSystem:
         for need in self.needs.values():
             if any(k in need.related_actions for k in action_keys):
                 if success and valence > 0:
+                    before = need.current_level
                     need.satisfy(valence * 0.5)
-                    logger.log(f"[MOTIVATION] Need '{need.label}' satisfied by {action_type} (+{valence*0.5*need.growth_rate:.3f})")
-                elif not success and valence < 0:
+                    logger.log(
+                        f"[MOTIVATION] Need '{need.label}' satisfied by "
+                        f"{action_type} ({before:.2f} → {need.current_level:.2f})"
+                    )
+                elif valence < 0:
+                    # Отрицательная валентность — сигнал неудачи, даже если
+                    # действие формально «выполнилось». Раньше здесь
+                    # требовалось ещё и success=False, а success в act()
+                    # означал «энергия не кончилась», поэтому неудачный
+                    # поиск никогда не расстраивал любопытство: провалы не
+                    # оставляли следа, и потребность не возвращалась.
                     need.frustrate(abs(valence) * 0.3)
                     logger.log(f"[MOTIVATION] Need '{need.label}' frustrated by {action_type} ({valence:.2f})")
         self._needs_state_cache = {name: need.current_level for name, need in self.needs.items()}
         for drive in self.drives.values():
-            drive.calculate_intensity(self._needs_state_cache)
+            drive.calculate_intensity(self.needs)
 
     def predict_valence(self, action_type: str, context: Dict = None) -> float:
         """
@@ -397,41 +537,60 @@ class UnifiedMotivationSystem:
         if context is None:
             context = {}
         
-        # Base valence by action type (heuristic defaults)
+        # Базовая валентность по типу действия. Здесь должны быть ОБА
+        # имени: мотивация предлагает действия как «ask_question», а
+        # ``act()`` сообщает о результате как «ask_user». Раньше таблица
+        # знала только первые, поэтому фактический результат вопроса или
+        # синтеза получал нейтральные 0.1 и почти не удовлетворял
+        # потребность.
         action_valence_map = {
-            "hypothesis": 0.7,      # Curiosity satisfaction
-            "decomposition": 0.6,   # Learning
-            "explore": 0.7,         # Curiosity
-            "ask_question": 0.6,    # Curiosity
-            "web_search": 0.5,      # Information seeking
-            "synthesize": 0.6,      # Competence
+            # исследование и обучение
+            "hypothesis": 0.7,        # Curiosity + Competence
+            "decomposition": 0.6,     # Learning
             "decompose_concept": 0.6, # Competence
-            "deep_rest": 0.8,       # Restores energy/embodiment
-            "eat": 0.7,             # Restores energy
-            "repair": 0.6,          # Integrity/survival
-            "checkpoint_now": 0.3,  # Safety
-            "set_own_goal": 0.7,    # Autonomy
-            "make_choice": 0.6,     # Autonomy
-            "refuse_action": 0.5,   # Autonomy
-            "teach_other": 0.7,     # Connection/Competence
-            "propose_alternative": 0.5,
-            "act": 0.4,
+            "explore": 0.7,           # Curiosity
+            "learning": 0.6,          # Curiosity (имя цели драйва)
+            "synthesis": 0.6,         # Competence / Meaning
+            "synthesize": 0.6,
+            "synthesize_understanding": 0.6,
             "know_answer": 0.5,
-            "search_miss": -0.3,    # Frustration
+            "search_miss": -0.3,      # Frustration
+            "web_search": 0.5,        # Information seeking
+            # общение
+            "ask_user": 0.6,          # Curiosity + Connection
+            "ask_question": 0.6,
+            "communicate": 0.5,       # Connection
             "user_answer": 0.4,
+            "teach_other": 0.7,       # Connection / Competence
+            # автономия и рефлексия
+            "set_own_goal": 0.7,      # Autonomy
+            "make_choice": 0.6,
+            "refuse_action": 0.5,
+            "propose_alternative": 0.5,
+            "reflection": 0.5,        # Meaning / Coherence
+            "act": 0.4,
+            # тело и безопасность
+            "deep_rest": 0.8,         # Restores energy/embodiment
+            "eat": 0.7,
+            "repair": 0.6,            # Integrity/survival
+            "checkpoint_now": 0.3,    # Safety
             "default": 0.1,
         }
         
         base_valence = action_valence_map.get(action_type, 0.1)
         
-        # Adjust based on current need deficits
-        # If action relates to a pressing need, valence should be higher
+        # Adjust based on current need deficits.
+        # Сравниваем НОРМИРОВАННОЕ давление, а не абсолютный дефицит:
+        # у потребности с базой 0.3 дефицит никогда не превысит 0.3, и
+        # старая проверка `deficit > 0.3` для неё не срабатывала никогда.
         related_need_bonus = 0.0
+        action_keys = {action_type}
+        action_keys.update(ACTION_ALIASES.get(action_type, []))
         for need in self.needs.values():
-            if action_type in need.related_actions:
-                deficit = need.deficit()
-                if deficit > 0.3:  # Need is pressing
-                    related_need_bonus += deficit * 0.3
+            if any(k in need.related_actions for k in action_keys):
+                pressure = need.pressure()
+                if pressure > 0.3:  # Need is pressing
+                    related_need_bonus += pressure * 0.3
         
         # Adjust based on energy level (low energy = lower valence for costly actions)
         energy_level = context.get("energy", 100)
@@ -553,15 +712,20 @@ class UnifiedMotivationSystem:
             if strength < 0.1:
                 continue
                 
-            # Определяем действие на основе related_actions потребности
-            for action_hint in need.related_actions[:2]:  # топ-2 действия
+            # Определяем действие на основе related_actions потребности.
+            # Список упорядочен по прямоте: первое действие обслуживает
+            # потребность напрямую, второе — косвенно. Раньше оба
+            # получали одинаковую силу, и «спросить» tie-разрешалось в
+            # пользу «изучать»: арбитр ставил обучение выше по порядку.
+            for rank, action_hint in enumerate(need.related_actions[:2]):
+                hint_strength = strength * (1.0 if rank == 0 else 0.7)
                 candidates.append({
                     "source": "motivation",
                     "action": action_hint,
-                    "strength": strength,
+                    "strength": hint_strength,
                     "params": {"need": need.name, "concept": self._pick_relevant_concept(need.related_concepts)},
                     "need": need.name,
-                    "priority": strength,
+                    "priority": hint_strength,
                     "type": "need_driven"
                 })
         
@@ -581,14 +745,15 @@ class UnifiedMotivationSystem:
                     if need_name in self.needs:
                         action_hints.extend(self.needs[need_name].related_actions)
             
-            for action_hint in action_hints[:2]:
+            for rank, action_hint in enumerate(action_hints[:2]):
+                hint_strength = strength * 0.8 * (1.0 if rank == 0 else 0.7)
                 candidates.append({
                     "source": "motivation",
                     "action": action_hint,
-                    "strength": strength * 0.8,  # драйвы чуть слабее нужд
+                    "strength": hint_strength,  # драйвы чуть слабее нужд
                     "params": {"drive": drive.name, "concept": self._pick_relevant_concept(list(drive.contributing_needs.keys()))},
                     "drive": drive.name,
-                    "priority": strength * 0.8,
+                    "priority": hint_strength,
                     "type": "drive_driven"
                 })
         
@@ -678,7 +843,7 @@ class UnifiedMotivationSystem:
             "needs": {name: {
                 "name": need.name, "label": need.label, "base_level": need.base_level,
                 "current_level": need.current_level, "decay_rate": need.decay_rate,
-                "growth_rate": need.growth_rate, "threshold": need.threshold,
+                "threshold": need.threshold,
                 "priority": need.priority,
                 "related_concepts": need.related_concepts,
                 "related_actions": need.related_actions

@@ -188,6 +188,12 @@ def make_motivation_tick() -> MiddlewareFn:
         if motivation is None or (hasattr(motivation, "available") and not motivation.available):
             return MiddlewareResult()
 
+        # Потребности уже тикнули в autonomous_tick этого же цикла.
+        # Второй тик удваивал бы затухание и незаметно ускорял «голод»
+        # относительно остальных часов агента.
+        if getattr(motivation, "last_tick_cycle", None) == cycle:
+            return MiddlewareResult()
+
         motivation_state = motivation.tick({
             "unknown_concepts": [
                 name for name, node in agent.mental_models.concepts.items()

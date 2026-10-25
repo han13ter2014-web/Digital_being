@@ -11,7 +11,15 @@ python tools/manual/synthesis_manual.py
 python tools/manual/new_systems_manual.py
 python tools/manual/checkpoint_restore_manual.py
 python tools/manual/death_risk_driven_manual.py
+python tools/manual/motivation_measure.py 200
 ```
+
+`motivation_measure.py` — замер мотивации через настоящий раннер: кто
+предлагает действия (потребности, драйвы, Active Inference), что выбрал
+арбитр и чем это кончилось. Данные пишутся во временную папку, сеть
+выключена. Флаг `--hold-energy` удерживает энергию на максимуме, чтобы
+изолировать мотивацию от телесной экономики; без флага каждый цикл
+«проживает» 5 секунд и энергия восстанавливается как в live.
 
 Автоматические тесты живут в `tests/` и запускаются так:
 

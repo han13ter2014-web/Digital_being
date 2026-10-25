@@ -149,6 +149,36 @@ def test_non_productive_action_never_stuck():
     assert "rest" not in DEFAULT_PRODUCTIVE_ACTIONS
 
 
+def test_denied_action_is_stuck_even_if_non_productive():
+    """Вопрос, который нельзя задать, не должен выбираться снова.
+
+    Регрессия: отказ записывался как «мир не изменился», но
+    непродуктивные действия (вопрос, общение) никогда не считались
+    тупиковыми — и невозможный вопрос выбирался каждый цикл.
+    """
+    closer = LoopCloser(max_no_effect=3)
+    empty = WorldSignature()
+
+    closer.observe("ask_user", empty, empty, reason="denied:too_tired")
+
+    assert closer.denied_streak("ask_user") == 1
+    assert closer.is_stuck("ask_user") is True
+    assert "ask_user" in closer.stuck_actions()
+
+
+def test_success_clears_denials():
+    """Успешное действие доказывает, что тело снова способно действовать."""
+    closer = LoopCloser()
+    closer.observe(
+        "ask_user", WorldSignature(), WorldSignature(), reason="denied:too_tired"
+    )
+    assert closer.is_stuck("ask_user") is True
+
+    closer.observe("explore", WorldSignature(), WorldSignature(concepts=1))
+
+    assert closer.is_stuck("ask_user") is False
+
+
 def test_reset_clears_streak():
     closer = LoopCloser(max_no_effect=1)
     empty = WorldSignature()
