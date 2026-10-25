@@ -1,4 +1,4 @@
-import json
+﻿import json
 import time
 import gc
 import random
@@ -90,6 +90,26 @@ class AgentDeadSignal(Exception):
         super().__init__(f"Agent died: {cause}")
 
 
+def record_denied_outcome(obj, action_type: str, world_before, reason: str) -> None:
+    """Отказ — тоже исход: мир не изменился, действие не сработало.
+
+    Модульная функция, а не метод: ``act()`` вызывается и в лёгких
+    объектах без подсистем, и отказ не должен падать из-за отсутствия
+    метода.
+    """
+    closer = getattr(obj, "loop_closer", None)
+    if closer is None:
+        return
+    try:
+        outcome = closer.observe_agent_action(
+            obj, action_type, world_before, reason=f"denied:{reason}"
+        )
+        # Для диагностики: последний исход должен быть виден и при отказе.
+        obj._last_action_outcome = outcome
+    except Exception:
+        pass
+
+
 class DigitalBeing:
     # Соответствие «имя действия от Active Inference / мотивации / арбитра»
     # → тип действия. Раньше всё это попадало в «default» и не делало
@@ -123,6 +143,14 @@ class DigitalBeing:
         "organize_knowledge": "decomposition",
         # известное
         "think_known": "know_answer",
+        # поиск в сети (мотивация предлагает его как «web_search»)
+        "web_search": "web_search",
+        # гипотеза и своя цель: мотивация предлагает их напрямую
+        "hypothesis": "hypothesis",
+        "set_own_goal": "set_own_goal",
+        "make_choice": "reflection",
+        # «Практика: {skill}» — это работа с материалом
+        "act": "explore",
         # отдых
         "rest": "rest",
         "deep_rest": "deep_rest",
@@ -1071,6 +1099,9 @@ class DigitalBeing:
             cost = self.interoception.get_action_cost(base_cost)
             if not self.interoception.can_perform_action(base_cost, self.energy):
                 get_logger().log(f"[INTEROCEPTION] Too exhausted for {action_type} (cost={cost:.1f}, energy={self.energy})")
+                # Отказ — тоже исход: мир не изменился. Без записи
+                # действие не гаснет и выбирается снова и снова.
+                record_denied_outcome(self, action_type, world_before, "too_tired")
                 return f"Ответ: Слишком устал для {action_type}"
         else:
             cost = base_cost
@@ -1090,6 +1121,7 @@ class DigitalBeing:
                     f"[BUDGET] denied {action_type}: {decision.reason} "
                     f"(cost={decision.cost:.1f}, energy={decision.energy_before:.1f})"
                 )
+                record_denied_outcome(self, action_type, world_before, "budget")
                 return (
                     f"Ответ: Бюджет не разрешает {action_type}: "
                     f"{decision.reason}"
@@ -1110,27 +1142,58 @@ class DigitalBeing:
             if hasattr(self, 'death_risk') and self.death_risk:
                 self.death_risk.force_checkpoint()
                 get_logger().flush_immediate("[DEATH_RISK] Manual checkpoint created")
+        # Обработчики действий вызываются через getattr: act() работает и в
+        # лёгких объектах (тесты бюджета, заглушки), где их нет. Отсутствие
+        # обработчика — не ошибка: действие остаётся без эффекта.
         elif action_type == "explore":
             # Раньше «explore» ничего не делал: тип «default», энергия
             # списывалась, мир не менялся. Теперь это настоящая работа —
             # выбрать слабое место в знаниях и поработать над ним.
-            exploration = self._act_explore()
-            topic = exploration.get("target") or ""
-            action = exploration.get("text") or action
+            handler = getattr(self, "_act_explore", None)
+            exploration = handler() if handler else None
+            topic = (exploration or {}).get("target") or ""
+            action = (exploration or {}).get("text") or action
         elif action_type == "rest":
             if hasattr(self, 'interoception') and self.interoception:
                 self.interoception.step(dt=1.0, cognitive_load=0.1, rest_depth=0.5)
         elif action_type == "synthesis":
-            synthesis = self._act_synthesize()
-            topic = synthesis.get("target") or ""
-            action = synthesis.get("text") or action
+            handler = getattr(self, "_act_synthesize", None)
+            synthesis = handler() if handler else None
+            topic = (synthesis or {}).get("target") or ""
+            action = (synthesis or {}).get("text") or action
         elif action_type == "decomposition":
-            decomposition = self._act_decompose()
-            topic = decomposition.get("target") or ""
-            action = decomposition.get("text") or action
+            handler = getattr(self, "_act_decompose", None)
+            decomposition = handler() if handler else None
+            topic = (decomposition or {}).get("target") or ""
+            action = (decomposition or {}).get("text") or action
         elif action_type == "reflection":
-            reflection = self._act_reflect()
-            action = reflection.get("text") or action
+            handler = getattr(self, "_act_reflect", None)
+            reflection = handler() if handler else None
+            action = (reflection or {}).get("text") or action
+        elif action_type == "ask_user":
+            handler = getattr(self, "_act_ask_user", None)
+            asked = handler() if handler else None
+            topic = (asked or {}).get("target") or ""
+            action = (asked or {}).get("text") or action
+        elif action_type == "communicate":
+            handler = getattr(self, "_act_communicate", None)
+            told = handler() if handler else None
+            action = (told or {}).get("text") or action
+        elif action_type == "web_search":
+            handler = getattr(self, "_act_web_search", None)
+            found = handler() if handler else None
+            topic = (found or {}).get("target") or ""
+            action = (found or {}).get("text") or action
+        elif action_type == "hypothesis":
+            handler = getattr(self, "_act_hypothesis", None)
+            guess = handler() if handler else None
+            topic = (guess or {}).get("target") or ""
+            action = (guess or {}).get("text") or action
+        elif action_type == "set_own_goal":
+            handler = getattr(self, "_act_set_own_goal", None)
+            own = handler() if handler else None
+            topic = (own or {}).get("target") or ""
+            action = (own or {}).get("text") or action
 
         # === Замыкание петли: что изменилось в мире? ===
         # Не обязательно: act() используется и в лёгких тестовых объектах.
@@ -1200,6 +1263,134 @@ class DigitalBeing:
     # ДЕЙСТВИЯ, КОТОРЫЕ МЕНЯЮТ МИР (замыкание петли)
     # ============================================================
 
+    def _social_candidates(self, cycle: int) -> List[Dict]:
+        """Кандидаты на общение: спросить, рассказать, поискать.
+
+        Почему это отдельный источник, а не только мотивация: в текущей
+        модели потребности почти всегда «удовлетворены» (``tick()`` тянет
+        их к базовому уровню, а порог насущности ниже базы), поэтому
+        кандидаты от потребностей не появляются, и агент выбирает только
+        обучение. Здесь общение встроено в выбор напрямую — по реальным
+        признакам, а не по декларации.
+
+        Признаки честные и проверяемые:
+        * есть открытый вопрос, который агент давно не может закрыть сам;
+        * агент давно ничего не говорил человеку;
+        * есть тема без собственной формулировки, а поиск доступен.
+        """
+        candidates: List[Dict] = []
+        interaction = getattr(self, "user_interaction", None)
+
+        # 1. Незакрытый вопрос — попросить помощи у человека.
+        # Предлагаем только если вопрос РАЗРЕШЕНО задать: иначе кандидат
+        # выигрывает арбитраж, упирается в кулдаун и сжигает цикл впустую.
+        questions = getattr(self, "_open_questions", None)
+        if (
+            interaction is not None
+            and isinstance(questions, list)
+            and self._can_ask_now(cycle)
+        ):
+            for item in questions:
+                if not isinstance(item, dict) or item.get("answered"):
+                    continue
+                explored = len(item.get("explorations") or [])
+                limit = int(item.get("max_explorations") or 5)
+                # Агент уже пробовал сам и не смог — время спросить.
+                if explored >= max(1, limit - 1):
+                    candidates.append({
+                        "source": "social",
+                        "action": "ask_user",
+                        "strength": self._dampen("ask_user", 0.78),
+                        "params": {"topic": item.get("text", "")},
+                    })
+                    break
+
+        # 2. Давно молчал — рассказать, что узнал.
+        if interaction is not None:
+            silence = int(
+                getattr(LR_CONFIG, "SOCIAL_SILENCE_CYCLES", 40) or 40
+            )
+            last = getattr(self, "_last_share_cycle", None)
+            if last is None:
+                last = 0
+            if cycle - int(last) >= silence and self._compose_share_message():
+                candidates.append({
+                    "source": "social",
+                    "action": "communicate",
+                    "strength": self._dampen("communicate", 0.72),
+                    "params": {},
+                })
+
+        # 3. Тема без своей формулировки — поискать в сети.
+        searcher = getattr(self, "web_searcher", None)
+        if searcher is not None and getattr(searcher, "is_enabled", False):
+            concepts = getattr(self.mental_models, "concepts", None)
+            if isinstance(concepts, dict):
+                for name, node in concepts.items():
+                    if not self._is_learnable(name):
+                        continue
+                    if len(str(getattr(node, "definition_hypothesis", "") or "")) > 10:
+                        continue
+                    if len(getattr(node, "experiences", []) or []) < 1:
+                        continue
+                    candidates.append({
+                        "source": "social",
+                        "action": "web_search",
+                        "strength": self._dampen("web_search", 0.6),
+                        "params": {"topic": name},
+                    })
+                    break
+
+        return candidates
+
+    def _is_action_available(self, action: Optional[str]) -> bool:
+        """Можно ли выполнить действие прямо сейчас.
+
+        Проверяются только те ограничения, которые заведомо откажут:
+        кулдаун вопроса и выключенный поиск. Остальное (усталость,
+        бюджет) решается в ``act()`` и записывается как исход.
+        """
+        normalized = self._normalize_action(action)
+        if normalized == "ask_user":
+            return self._can_ask_now(self.cycle_count)
+        if normalized == "web_search":
+            searcher = getattr(self, "web_searcher", None)
+            if searcher is None:
+                return False
+            return bool(getattr(searcher, "is_enabled", False))
+        return True
+
+    def _can_ask_now(self, cycle: int) -> bool:
+        """Можно ли сейчас задать вопрос человеку (кулдаун и лимиты)."""
+        interaction = getattr(self, "user_interaction", None)
+        checker = getattr(interaction, "can_ask_question", None)
+        if checker is None:
+            return False
+        try:
+            return bool(checker(cycle))
+        except Exception:
+            return False
+
+    def _dampen(self, action: str, strength: float) -> float:
+        """Снижает силу кандидата, если действие подряд не давало эффекта.
+
+        Иначе действие, которое сейчас невозможно (кулдаун, нет сети),
+        выигрывает арбитраж каждый цикл и сжигает жизнь впустую. Каждая
+        неудача вдвое снижает шанс: 0.78 → 0.39 → 0.20 → …
+        """
+        closer = getattr(self, "loop_closer", None)
+        if closer is None:
+            return strength
+        try:
+            streak = closer.no_effect_streak(action)
+        except Exception:
+            return strength
+        return strength * (0.5 ** max(0, streak))
+
+    def _record_denied(self, action_type: str, world_before, reason: str) -> None:
+        """Совместимость: см. модульную ``record_denied_outcome``."""
+        record_denied_outcome(self, action_type, world_before, reason)
+
     def _normalize_action(self, action: Optional[str]) -> str:
         """Приводит имя действия к типу (как в ``act()``).
 
@@ -1213,6 +1404,23 @@ class DigitalBeing:
             return ""
         return self.ACTION_ALIASES.get(key, key)
 
+    def _is_learnable(self, name: str) -> bool:
+        """Годится ли концепция как тема для изучения и вопросов.
+
+        Служебные узлы (``_bootstrap_loaded``) и врождённые убеждения
+        (``убеждение_1``) — не темы для исследования: спрашивать человека
+        про «_bootstrap_loaded» бессмысленно, а «изучать» собственный
+        маркер загрузки — имитация работы.
+        """
+        text = str(name or "").strip()
+        if not text:
+            return False
+        if text.startswith("_"):
+            return False
+        if text.startswith("убеждение_"):
+            return False
+        return True
+
     def _pick_shallow_concept(self, concepts: Dict) -> Optional[str]:
         """Концепция, которую стоит углубить: встречена, но не осмыслена.
 
@@ -1222,6 +1430,8 @@ class DigitalBeing:
         """
         candidates = []
         for name, node in concepts.items():
+            if not self._is_learnable(name):
+                continue
             experiences = len(getattr(node, "experiences", []) or [])
             if experiences < 1 or experiences >= 3:
                 continue
@@ -1311,6 +1521,7 @@ class DigitalBeing:
             name
             for name in concepts
             if name not in recently
+            and self._is_learnable(name)
             and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
         ]
         if not fresh:
@@ -1320,7 +1531,8 @@ class DigitalBeing:
             fresh = [
                 name
                 for name in concepts
-                if float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
+                if self._is_learnable(name)
+                and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
             ]
         if not fresh:
             return None
@@ -1490,6 +1702,282 @@ class DigitalBeing:
                 f"(уверенность {float(first.get('confidence', 0)):.0%})"
             )
         }
+
+    # ============================================================
+    # ПРОВОДКА: действия, которые раньше ничего не делали
+    # ============================================================
+
+    def _act_ask_user(self) -> Dict:
+        """Спросить человека о том, что агенту непонятно.
+
+        До этой проводки действие ``ask_user`` (его предлагала мотивация
+        как «ask_question») доходило до ``act()`` и молча заканчивалось:
+        подсистема ``UserInteraction`` умеет задавать вопросы, публикует
+        события, окно их показывает — но никто не вызывал её из петли.
+        Агент «хотел спросить» и не спрашивал.
+
+        Вопрос задаётся только по реальной нужде: берётся тема, в которой
+        агент не уверен. Спрашивать о том, что уже знает, — шум.
+        """
+        interaction = getattr(self, "user_interaction", None)
+        if interaction is None:
+            return {"text": "Ответ: спросить некого — нет связи с человеком"}
+
+        target = self._pick_exploration_target()
+        if not target:
+            return {"text": "Ответ: не о чем спрашивать — всё понятно"}
+
+        question = (
+            f"Я разбираюсь с темой «{target}» и пока не уверен, "
+            f"что понимаю её правильно. Можешь объяснить своими словами?"
+        )
+        try:
+            result = interaction.ask_user(
+                question=question,
+                context=f"самостоятельный вопрос по теме: {target}",
+                cycle=self.cycle_count,
+            )
+        except Exception as exc:
+            get_logger().log(f"[ASK] не удалось спросить: {exc}")
+            return {"text": f"Ответ: хотел спросить про '{target}', но не смог"}
+
+        if result.get("status") != "queued":
+            # Лимит вопросов или пауза — это нормально, не ошибка.
+            reason = result.get("reason", "не сейчас")
+            return {
+                "target": target,
+                "text": f"Ответ: вопрос про '{target}' отложен ({reason})",
+            }
+
+        self._record_will("questions_asked", target, "самостоятельный вопрос")
+        return {
+            "target": target,
+            "text": f"Ответ: спросил человека про '{target}'",
+        }
+
+    def _act_communicate(self) -> Dict:
+        """Рассказать человеку что-то, что агент счёл важным.
+
+        Действие ``communicate`` (мотивация: «поделиться знанием»,
+        «ответить пользователю») раньше тоже ничего не делало.
+        """
+        interaction = getattr(self, "user_interaction", None)
+        if interaction is None:
+            return {"text": "Ответ: рассказать некому — нет связи с человеком"}
+
+        message = self._compose_share_message()
+        if not message:
+            return {"text": "Ответ: нечего рассказать — нет новостей"}
+
+        try:
+            interaction.send_message(
+                content=message,
+                msg_type="statement",
+                tone="casual",
+                urgency=0.4,
+                context="делюсь тем, что узнал",
+                cycle=self.cycle_count,
+            )
+        except Exception as exc:
+            get_logger().log(f"[COMMUNICATE] не удалось отправить: {exc}")
+            return {"text": f"Ответ: хотел рассказать, но не смог: {exc}"}
+
+        self._record_will("messages_sent", "share", "делюсь знанием")
+        self._last_share_cycle = self.cycle_count
+        return {"text": f"Ответ: рассказал человеку: {message[:60]}"}
+
+    def _compose_share_message(self) -> str:
+        """Текст сообщения: о самом свежем или самом слабом знании.
+
+        Берём то, что агент недавно узнал и в чём уже уверен: делиться
+        догадкой, которую сам не проверил, — нечестно.
+        """
+        concepts = getattr(self.mental_models, "concepts", None)
+        if not isinstance(concepts, dict) or not concepts:
+            return ""
+
+        # Предпочитаем концепции с собственной формулировкой.
+        candidates = [
+            (name, node)
+            for name, node in concepts.items()
+            if len(str(getattr(node, "definition_hypothesis", "") or "")) > 10
+            and not name.startswith(("_", "убеждение_"))
+        ]
+        if not candidates:
+            return ""
+
+        name, node = max(
+            candidates,
+            key=lambda item: getattr(item[1], "last_updated", None) or 0,
+            default=(None, None),
+        )
+        if not name:
+            return ""
+        definition = str(getattr(node, "definition_hypothesis", ""))[:200]
+        return f"Я разобрался с темой «{name}»: {definition}"
+
+    def _act_web_search(self) -> Dict:
+        """Найти в сети то, чего нет в своей памяти.
+
+        Действие ``web_search`` предлагалось мотивацией, но не
+        исполнялось. При этом ``WebSearcher`` уже был подключён к
+        мышлению — не хватало только вызова из петли.
+        """
+        searcher = getattr(self, "web_searcher", None)
+        if searcher is None or not getattr(searcher, "is_enabled", False):
+            return {
+                "text": "Ответ: поиск в сети недоступен или выключен"
+            }
+
+        target = self._pick_exploration_target()
+        if not target:
+            return {"text": "Ответ: искать нечего — нет темы"}
+
+        try:
+            result = searcher.search(target)
+        except Exception as exc:
+            get_logger().log(f"[WEB] поиск упал: {exc}")
+            return {
+                "target": target,
+                "text": f"Ответ: поиск по '{target}' не удался",
+            }
+
+        if not result.get("found"):
+            reason = result.get("error") or "не найдено"
+            return {
+                "target": target,
+                "text": f"Ответ: в сети про '{target}' ничего ({reason})",
+            }
+
+        extract = str(result.get("extract") or "")
+        title = str(result.get("title") or target)
+        if not extract:
+            return {
+                "target": target,
+                "text": f"Ответ: нашёл '{title}', но без содержания",
+            }
+
+        # Сохраняем как знание: без записи поиск ничего не изменил бы.
+        try:
+            from src.memory.knowledge_quality import check_entry
+
+            if check_entry(target, extract):
+                return {
+                    "target": target,
+                    "text": f"Ответ: результат по '{target}' отклонён как слабый",
+                }
+            self.knowledge_base[target] = extract
+            self._known_definitions[target] = extract
+            self._save_knowledge_base()
+        except Exception as exc:
+            get_logger().log(f"[WEB] не удалось сохранить: {exc}")
+            return {
+                "target": target,
+                "text": f"Ответ: нашёл '{title}', но не сохранил",
+            }
+
+        self._record_will("web_searches", target, f"нашёл в сети: {title}")
+        return {
+            "target": target,
+            "text": f"Ответ: нашёл в сети «{title}» про '{target}'",
+        }
+
+    def _act_hypothesis(self) -> Dict:
+        """Выдвинуть гипотезу о теме, в которой агент не уверен.
+
+        Мотивация предлагает это действие («Понять: {concept}»), но
+        раньше оно уходило в «default»: агент «выдвигал гипотезу» и
+        ничего не происходило. Гипотеза — это запись в ментальной модели,
+        то есть наблюдаемое изменение.
+        """
+        target = self._pick_exploration_target()
+        if not target:
+            return {"text": "Ответ: гипотезу выдвигать не о чем"}
+
+        try:
+            hypothesis = self._generate_hypothesis(target)
+        except Exception as exc:
+            get_logger().log(f"[HYPOTHESIS] ошибка для '{target}': {exc}")
+            hypothesis = None
+
+        if not hypothesis:
+            return {
+                "target": target,
+                "text": f"Ответ: про '{target}' пока не из чего строить гипотезу",
+            }
+
+        text = str(hypothesis.get("text") or "")
+        confidence = float(hypothesis.get("confidence") or 0.0)
+        try:
+            self.mental_models.encounter_concept(
+                target,
+                f"гипотеза_цикл_{self.cycle_count}",
+                text[:80],
+                confidence * 0.5,
+            )
+        except Exception as exc:
+            get_logger().log(f"[HYPOTHESIS] не удалось записать: {exc}")
+
+        return {
+            "target": target,
+            "text": (
+                f"Ответ: гипотеза о '{target}' — {text[:70]} "
+                f"(уверенность {confidence:.0%})"
+            ),
+        }
+
+    def _act_set_own_goal(self) -> Dict:
+        """Поставить себе цель по своей воле.
+
+        Мотивация предлагает «Поставить свою цель» (autonomy). Раньше
+        действие ничего не делало. Цель — наблюдаемое изменение: она
+        появляется в списке и начинает влиять на жизнь.
+        """
+        target = self._pick_exploration_target()
+        if not target:
+            return {"text": "Ответ: свою цель ставить не из чего"}
+
+        title = f"Понять: {target}"
+        # Не дублируем уже существующую цель.
+        for goal in getattr(self, "goals", []) or []:
+            if str(goal.get("title", "")).lower() == title.lower():
+                return {
+                    "target": target,
+                    "text": f"Ответ: цель '{title}' уже есть",
+                }
+
+        try:
+            goal_id = self.set_goal(title, difficulty=1)
+        except Exception as exc:
+            get_logger().log(f"[OWN_GOAL] не удалось поставить цель: {exc}")
+            return {
+                "target": target,
+                "text": f"Ответ: хотел поставить цель '{title}', но не смог",
+            }
+
+        self._record_will("goals_set", target, f"своя цель #{goal_id}")
+        return {
+            "target": target,
+            "text": f"Ответ: поставил себе цель '{title}' (#{goal_id})",
+        }
+
+    def _record_will(self, will_type: str, topic: str, reason: str) -> None:
+        """Записывает действие в журнал воли, если он есть.
+
+        Журнал переживает перезапуск и служит доказательством эффекта:
+        без записи дельта мира не увидела бы, что сообщение отправлено
+        или вопрос задан.
+        """
+        registry = getattr(self, "will_registry", None)
+        if registry is None:
+            return
+        try:
+            registry.record(
+                will_type, topic, reason,
+                outcome="executed", cycle=self.cycle_count,
+            )
+        except Exception:
+            pass
 
     def perform_forgetting(self):
         """Приоритетное забывание неиспользуемых концепций с низкой уверенностью."""
@@ -2573,12 +3061,27 @@ class DigitalBeing:
             except Exception as e:
                 get_logger().log(f"[EMBODIMENT_CANDIDATES] Error: {e}")
 
-        # 3. Social candidates
-        if hasattr(self, "social_cell"):
-            try:
-                pass
-            except Exception as e:
-                get_logger().log(f"[SOCIAL_CANDIDATES] Error: {e}")
+        # 3. Social candidates: потребность в контакте и незакрытые вопросы.
+        # Раньше здесь стоял `pass`: секция существовала, но ничего не
+        # добавляла, поэтому общение никогда не попадало в выбор.
+        try:
+            candidates.extend(self._social_candidates(cycle))
+        except Exception as e:
+            get_logger().log(f"[SOCIAL_CANDIDATES] Error: {e}")
+
+        # === ФИЛЬТР ДОСТУПНОСТИ ===
+        # Не предлагаем арбитру то, что сейчас физически нельзя выполнить:
+        # вопрос при кулдауне, поиск при выключенной сети. Иначе действие
+        # выигрывает выбор, упирается в отказ и сжигает цикл.
+        #
+        # Гасить силу уже выбранных действий пробовали — это приводило к
+        # метанию между бесплодными вариантами. Дешевле не предлагать
+        # невозможное вовсе.
+        candidates = [
+            candidate
+            for candidate in candidates
+            if self._is_action_available(candidate.get("action"))
+        ]
 
         # === ARBITRATION ===
         chosen_action = None
@@ -2639,6 +3142,8 @@ class DigitalBeing:
                     result["arbitrator"] = arbitrator_result
 
         # === EXECUTE ===
+        # Для диагностики: что именно выбрал арбитр в этом цикле.
+        self._last_arbitration = result.get("arbitrator")
         # P1.2: Valence Feedback Loop - predict valence before action
         valence_context = {
             "energy": self.energy,

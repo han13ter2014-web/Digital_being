@@ -33,6 +33,14 @@ class WillRegistry:
             "fail_as_experience": 0,
             "architecture_proposals": 0,
             "dreams": 0,
+            # Действия, которые до этого не были подключены к петле:
+            # агент мог «захотеть» спросить или рассказать, но ничего не
+            # происходило. Счётчики нужны, чтобы увидеть, что проводка
+            # работает, и чтобы дельта мира замечала эффект.
+            "messages_sent": 0,
+            "questions_asked": 0,
+            "web_searches": 0,
+            "goals_set": 0,
         }
         self._last_value_change_cycle = 0
 

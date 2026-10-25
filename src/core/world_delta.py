@@ -48,6 +48,8 @@ class WorldSignature:
     web_hits: int = 0
     notes: int = 0
     experiences: int = 0
+    pending_questions: int = 0
+    messages_sent: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -58,6 +60,8 @@ class WorldSignature:
             "web_hits": self.web_hits,
             "notes": self.notes,
             "experiences": self.experiences,
+            "pending_questions": self.pending_questions,
+            "messages_sent": self.messages_sent,
         }
 
 
@@ -77,6 +81,8 @@ class WorldDelta:
     web_hits: int = 0
     notes: int = 0
     experiences: int = 0
+    pending_questions: int = 0
+    messages_sent: int = 0
 
     # ------------------------------------------------------------------
     # Свойства
@@ -94,6 +100,8 @@ class WorldDelta:
                 self.web_hits,
                 self.notes,
                 self.experiences,
+                self.pending_questions,
+                self.messages_sent,
             )
         )
 
@@ -110,6 +118,8 @@ class WorldDelta:
                 self.web_hits,
                 self.notes,
                 self.experiences,
+                self.pending_questions,
+                self.messages_sent,
             )
         )
 
@@ -138,6 +148,10 @@ class WorldDelta:
             parts.append(f"записей {self.notes:+d}")
         if self.experiences:
             parts.append(f"опыта {self.experiences:+d}")
+        if self.pending_questions:
+            parts.append(f"вопросов {self.pending_questions:+d}")
+        if self.messages_sent:
+            parts.append(f"сообщений {self.messages_sent:+d}")
         return ", ".join(parts)
 
     def as_dict(self) -> Dict[str, int]:
@@ -149,6 +163,8 @@ class WorldDelta:
             "web_hits": self.web_hits,
             "notes": self.notes,
             "experiences": self.experiences,
+            "pending_questions": self.pending_questions,
+            "messages_sent": self.messages_sent,
         }
 
 
@@ -164,6 +180,10 @@ def between(before: WorldSignature, after: WorldSignature) -> WorldDelta:
         web_hits=after.web_hits - before.web_hits,
         notes=after.notes - before.notes,
         experiences=after.experiences - before.experiences,
+        pending_questions=(
+            after.pending_questions - before.pending_questions
+        ),
+        messages_sent=after.messages_sent - before.messages_sent,
     )
 
 
@@ -212,6 +232,47 @@ def _count_notes(agent: Any) -> int:
     return 0
 
 
+def _count_pending_questions(agent: Any) -> int:
+    """Сколько вопросов агент задал человеку.
+
+    Считаем по журналу воли: он переживает перезапуск. Очередь вопросов
+    не годится — после ответа она очищается, и «спросил, получил ответ»
+    выглядело бы как «ничего не сделал».
+    """
+    registry = getattr(agent, "will_registry", None)
+    if registry is not None:
+        try:
+            by_type = (registry.get_stats() or {}).get("by_type") or {}
+            value = by_type.get("questions_asked")
+            if isinstance(value, int):
+                return value
+        except Exception:
+            pass
+    return 0
+
+
+def _count_messages_sent(agent: Any) -> int:
+    """Сколько сообщений агент отправил человеку.
+
+    Берём журнал воли: он переживает перезапуск и не зависит от того,
+    какая подсистема отправляла сообщение.
+    """
+    registry = getattr(agent, "will_registry", None)
+    if registry is not None:
+        try:
+            by_type = (registry.get_stats() or {}).get("by_type") or {}
+            value = by_type.get("messages_sent")
+            if isinstance(value, int):
+                return value
+        except Exception:
+            pass
+    proactive = getattr(agent, "proactive_communication", None)
+    log = getattr(proactive, "message_log", None)
+    if isinstance(log, list):
+        return len(log)
+    return 0
+
+
 def capture(agent: Any) -> WorldSignature:
     """Снимает подпись мира с агента.
 
@@ -250,6 +311,8 @@ def capture(agent: Any) -> WorldSignature:
         web_hits=_count_web_hits(agent),
         notes=_count_notes(agent),
         experiences=experiences,
+        pending_questions=_count_pending_questions(agent),
+        messages_sent=_count_messages_sent(agent),
     )
 
 
