@@ -124,6 +124,19 @@ def test_repeated_dead_action_is_escaped(agent):
         agent.act("explore")
     assert agent.loop_closer.is_stuck("explore") is True
 
+    # Арбитр должен выбрать именно тупиковое действие — иначе проверять
+    # нечего. Мотивация могла бы предложить вопрос или рефлексию, и это
+    # был бы не выход из тупика, а другой выбор. Фиксируем выбор explore.
+    agent.decision_arbitrator.choose_action = lambda candidates, context: {
+        "action": "explore",
+        "source": "test",
+        "verdict": "proceed",
+        "confidence": 1.0,
+        "reasoning": "test: принудительный выбор тупикового действия",
+        "voices": {},
+        "all_evaluations": [],
+    }
+
     # Тик должен переключиться на другое действие.
     result = agent.autonomous_tick()
     escape = result.get("loop_escape")

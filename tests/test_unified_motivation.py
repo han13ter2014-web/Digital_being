@@ -41,47 +41,72 @@ class TestUnifiedMotivationSystem:
             assert d in self.system.drives
 
     def test_need_deficit_and_urgency(self):
-        """Test need deficit and urgency calculations."""
+        """Дефицит абсолютный, давление — доля нехватки, срочность — с приоритетом."""
         need = self.system.needs['curiosity']
         need.current_level = 0.3  # base_level is 0.8
-        
-        assert need.deficit() == 0.5
-        assert need.urgency() == 0.5 * 1.2  # deficit * priority
+
+        assert need.deficit() == pytest.approx(0.5)
+        # 0.5 из 0.8 — потребность не удовлетворена на 62.5 %.
+        assert need.pressure() == pytest.approx(0.625)
+        assert need.urgency() == pytest.approx(0.625 * 1.2)
         assert need.is_pressing() == True  # below threshold 0.35
 
-    def test_need_tick_returns_to_base(self):
-        """Test that needs naturally drift toward base_level."""
+    def test_need_tick_drains_satisfaction(self):
+        """Без удовлетворения потребность «голодает», а не насыщается.
+
+        Регрессия: раньше tick() тянул уровень ВВЕРХ к base_level, поэтому
+        потребность не могла стать насущной, и поведением управляли только
+        драйвы — которые считались от удовлетворённости.
+        """
         need = self.system.needs['curiosity']
-        need.current_level = 0.3
-        base = need.base_level
-        
-        need.tick()
-        assert need.current_level > 0.3
-        assert need.current_level <= base
+        need.current_level = 0.5
+
+        for _ in range(10):
+            need.tick()
+
+        assert need.current_level == pytest.approx(0.3)  # 0.5 - 10*0.02
+        assert need.is_pressing() is True
+
+        for _ in range(100):
+            need.tick()
+
+        assert need.current_level == 0.0  # ниже нуля не уходит
 
     def test_need_satisfy_and_frustrate(self):
-        """Test need satisfaction and frustration."""
+        """satisfy закрывает долю остатка, frustrate снижает уровень."""
         need = self.system.needs['curiosity']
-        original = need.current_level
-        
+        need.current_level = 0.2
+
         need.satisfy(0.5)
-        assert need.current_level > original
-        
+        # 0.2 + 0.5 * (1.0 - 0.2) = 0.6
+        assert need.current_level == pytest.approx(0.6)
+
         need.frustrate(0.3)
-        assert need.current_level < original + 0.5 * need.growth_rate
+        assert need.current_level == pytest.approx(0.3)
 
     def test_drive_calculation(self):
-        """Test drive intensity calculation from needs."""
-        # Set needs high enough to activate creativity
-        self.system.needs['curiosity'].current_level = 0.8
-        self.system.needs['autonomy'].current_level = 0.7
-        self.system.needs['play'].current_level = 0.7
-        
+        """Драйв активируется ДЕФИЦИТОМ, а не удовлетворённостью."""
+        # «Голодные» потребности — драйв творчества должен проснуться.
+        self.system.needs['curiosity'].current_level = 0.1
+        self.system.needs['autonomy'].current_level = 0.1
+        self.system.needs['play'].current_level = 0.05
+
         self.system.tick({})
-        
+
         creativity = self.system.drives['creativity']
-        assert creativity.current_level > 0.5
+        assert creativity.current_level > 0.55
         assert creativity.is_active() == True
+
+    def test_satisfied_needs_do_not_activate_drives(self):
+        """Сытый агент не должен хотеть сильнее голодного."""
+        for need in self.system.needs.values():
+            need.current_level = need.base_level
+
+        self.system.tick({})
+
+        assert all(
+            not drive.is_active() for drive in self.system.drives.values()
+        )
 
     def test_goal_generation_from_pressing_need(self):
         """Test that pressing needs generate goals."""
@@ -95,9 +120,9 @@ class TestUnifiedMotivationSystem:
 
     def test_goal_generation_from_active_drive(self):
         """Test that active drives generate goals."""
-        self.system.needs['curiosity'].current_level = 0.8
-        self.system.needs['autonomy'].current_level = 0.7
-        self.system.needs['play'].current_level = 0.7
+        self.system.needs['curiosity'].current_level = 0.1
+        self.system.needs['autonomy'].current_level = 0.1
+        self.system.needs['play'].current_level = 0.05
         self.system.tick({})
         
         goals = self.system.generate_goals()
@@ -267,27 +292,26 @@ class TestMotivationIntegration:
         need_goals = [g for g in goals if g['source'] == 'need']
         assert len(need_goals) == 0
 
-    def test_motivation_drive_priority_lower_than_need(self):
-        """Test that need goals have higher priority than drive goals."""
+    def test_motivation_need_priority_not_lower_than_drive(self):
+        """Цель насущной потребности весит не меньше цели драйва."""
         agent = DigitalBeing(name='TestAgent')
-        
-        # Make curiosity pressing
-        agent.motivation_system.needs['curiosity'].current_level = 0.2
-        
-        # Also activate creativity drive
-        agent.motivation_system.needs['curiosity'].current_level = 0.8
-        agent.motivation_system.needs['autonomy'].current_level = 0.8
-        agent.motivation_system.needs['play'].current_level = 0.8
+
+        # Любопытство насущно, остальные тоже дефицитны — драйв точно активен.
+        agent.motivation_system.needs['curiosity'].current_level = 0.1
+        for name in ('autonomy', 'play', 'competence', 'coherence', 'meaning', 'connection'):
+            agent.motivation_system.needs[name].current_level = 0.0
+
         agent.motivation_system.tick({})
-        
         goals = agent.motivation_system.generate_goals()
-        
-        # Need goals should come first (higher priority)
+
         need_goals = [g for g in goals if g['source'] == 'need']
         drive_goals = [g for g in goals if g['source'] == 'drive']
-        
-        if need_goals and drive_goals:
-            assert max(g['priority'] for g in need_goals) >= max(g['priority'] for g in drive_goals)
+
+        assert need_goals, "насущная потребность не дала ни одной цели"
+        assert drive_goals, "активный драйв не дал ни одной цели"
+        assert max(g['priority'] for g in need_goals) >= max(
+            g['priority'] for g in drive_goals
+        )
 
 
 if __name__ == '__main__':
@@ -348,3 +372,162 @@ def test_fill_template_handles_any_placeholder():
     assert fill_template("{a} и {b}", "X") == "X и X"
     # Шаблон без плейсхолдеров не портится.
     assert fill_template("Просто текст", "X") == "Просто текст"
+
+
+# ============================================================
+# Инверсия мотивации: дефицит, а не удовлетворённость
+# ============================================================
+
+def test_time_alone_makes_needs_pressing():
+    """Потребность возвращается сама, без внешнего «стимула».
+
+    Это и есть отличие живого голода от декоративной переменной: если
+    агенту ничего не давать, через N тиков потребность становится
+    насущной и начинает требовать действия.
+    """
+    system = create_motivation_system(MockAgent())
+
+    for _ in range(200):
+        system.tick({})
+
+    assert all(need.is_pressing() for need in system.needs.values())
+    assert any(drive.is_active() for drive in system.drives.values())
+
+
+def test_urgency_comparable_across_different_bases():
+    """«Смысл» (база 0.3) должен уметь выиграть у «любопытства» (0.8).
+
+    Раньше urgency считалась от абсолютного дефицита, поэтому потребность
+    с низкой базой не могла обогнать высокую ни при каком уровне.
+    """
+    system = create_motivation_system(MockAgent())
+
+    curiosity = system.needs['curiosity']
+    curiosity.current_level = 0.4      # pressure 0.5, priority 1.2 → 0.60
+    meaning = system.needs['meaning']
+    meaning.current_level = 0.1        # pressure 0.667, priority 1.3 → 0.87
+
+    assert meaning.urgency() > curiosity.urgency()
+
+
+def test_need_returns_after_satisfaction():
+    """Удовлетворение не отменяет потребность навсегда."""
+    system = create_motivation_system(MockAgent())
+    need = system.needs['curiosity']
+    need.current_level = 0.1
+
+    system.on_action_result('ask_user', True, 0.8)
+    assert not need.is_pressing(), "успешный вопрос должен снять насущность"
+
+    for _ in range(40):
+        need.tick()
+
+    assert need.is_pressing(), "без действий потребность должна вернуться"
+
+
+@pytest.mark.parametrize(
+    "action_type,need_name",
+    [
+        # ровно те типы, которые возвращает DigitalBeing.act()
+        ("ask_user", "curiosity"),
+        ("ask_user", "connection"),
+        ("synthesis", "competence"),
+        ("synthesis", "meaning"),
+        ("reflection", "meaning"),
+        ("reflection", "coherence"),
+        ("communicate", "connection"),
+        ("web_search", "curiosity"),
+        ("set_own_goal", "autonomy"),
+        ("explore", "curiosity"),
+        ("decomposition", "competence"),
+        ("hypothesis", "curiosity"),
+        ("repair", "coherence"),
+    ],
+)
+def test_actual_action_types_satisfy_needs(action_type, need_name):
+    """Результат действия должен гасить ту потребность, которая его вызвала.
+
+    Регрессия: мотивация предлагала «ask_question», а act() сообщал
+    «ask_user». Ключа в ACTION_ALIASES не было, потребность не
+    удовлетворялась, и агент спрашивал снова и снова.
+    """
+    system = create_motivation_system(MockAgent())
+    need = system.needs[need_name]
+    need.current_level = 0.1
+
+    system.on_action_result(action_type, True, 0.8)
+
+    assert need.current_level > 0.1
+    assert not need.is_pressing(), (
+        f"{action_type} не снял насущность {need_name}: "
+        f"level={need.current_level:.2f}"
+    )
+
+
+def test_every_agent_action_type_has_motivation_feedback():
+    """У каждого действия агента есть адресат в потребностях.
+
+    Исключения — телесные и служебные действия (отдых, чекпоинт, wait):
+    они восстанавливают не психику, а ресурс. Если появится новое
+    действие без обратной связи, тест укажет на дыру в мосте.
+    """
+    from src.core.agent import DigitalBeing
+    from src.core.motivation.unified_motivation import ACTION_ALIASES, DEFAULT_NEEDS
+
+    inert = {"rest", "wait", "deep_rest", "checkpoint_now"}
+    action_types = set(DigitalBeing.ACTION_ALIASES.values()) | {"default"}
+
+    for action_type in sorted(action_types - inert):
+        keys = {action_type} | set(ACTION_ALIASES.get(action_type, []))
+        related = set().union(
+            *(set(need.related_actions) for need in DEFAULT_NEEDS.values())
+        )
+        assert keys & related, (
+            f"действие '{action_type}' ни одну потребность не удовлетворяет"
+        )
+
+
+def test_no_need_candidates_when_all_needs_satisfied():
+    """Сытые потребности не должны предлагать действия."""
+    system = create_motivation_system(MockAgent())
+    for need in system.needs.values():
+        need.current_level = need.base_level
+
+    candidates = system.get_action_candidates({})
+
+    assert not any(c.get("type") == "need_driven" for c in candidates)
+
+
+def test_hungry_curiosity_prefers_asking_over_studying():
+    """Голодное любопытство ведёт к вопросу, а не к очередному изучению.
+
+    ``related_actions`` упорядочены по прямоте, поэтому «спросить»
+    должно быть сильнее «разложить на части», а не делить с ним силу.
+    """
+    system = create_motivation_system(MockAgent())
+    system.needs['curiosity'].current_level = 0.1
+
+    candidates = system.get_action_candidates({})
+    by_action = {c['action']: c for c in candidates}
+
+    assert 'ask_question' in by_action
+    assert 'decompose_concept' in by_action
+    assert by_action['ask_question']['strength'] > (
+        by_action['decompose_concept']['strength']
+    )
+    assert candidates[0]['action'] == 'ask_question'
+
+
+def test_negative_valence_frustrates_executed_action():
+    """Неудачный исход расстраивает потребность, даже если действие дошло.
+
+    Регрессия: условие требовало ``success=False``, а success означал
+    «энергия не кончилась». Поэтому провальный поиск не оставлял следа.
+    """
+    system = create_motivation_system(MockAgent())
+    need = system.needs['curiosity']
+    need.current_level = 0.5
+
+    system.on_action_result('search_miss', True, -0.2)
+
+    assert need.current_level < 0.5

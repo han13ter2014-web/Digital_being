@@ -49,7 +49,10 @@ class UserInteraction:
         self.max_pending_questions = 3
         self.min_answer_length = 2
         self.cooldown_cycles = 50
-        self.last_question_cycle = 0
+        # Вопрос ещё не задавался, поэтому кулдауна нет. Раньше здесь
+        # стоял 0, и первые 50 циклов жизни вопрос был запрещён: агент
+        # голодал по любопытству, но спросить физически не мог.
+        self.last_question_cycle = -self.cooldown_cycles
 
         # === НОВОЕ: настройки quiet hours (приложения, где не беспокоить) ===
         self.user_quiet_hours = {

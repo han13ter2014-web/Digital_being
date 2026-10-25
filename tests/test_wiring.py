@@ -349,6 +349,37 @@ def test_ask_becomes_available_after_cooldown(agent):
     assert agent._is_action_available("ask_question") is True
 
 
+def test_ask_allowed_from_first_cycle():
+    """Первый вопрос в жизни не должен упираться в кулдаун.
+
+    Регрессия: ``last_question_cycle = 0`` означал «вопрос уже задан в
+    нулевом цикле», и первые 50 циклов агент не мог спросить, даже если
+    потребность голодала.
+    """
+    from src.perception.user_interaction import UserInteraction
+
+    fresh = UserInteraction(agent_name="Fresh")
+
+    assert fresh.can_ask_question(0) is True
+
+
+def test_ask_not_offered_when_there_is_nothing_to_ask(agent):
+    """Вопрос без темы — не действие, а пустой цикл.
+
+    Регрессия: при исчерпанных темах ``_act_ask_user`` возвращал «не о
+    чем спрашивать», не запускал кулдаун, и арбитр выбирал вопрос
+    каждые несколько циклов. Потребность при этом не удовлетворялась.
+    """
+    agent.cycle_count = 10_000
+    for node in agent.mental_models.concepts.values():
+        node.confidence = 0.95
+    agent._open_questions = []
+    agent._stimulus_topics = lambda: []
+
+    assert agent._has_question_target() is False
+    assert agent._is_action_available("ask_question") is False
+
+
 def test_web_search_unavailable_when_disabled(agent):
     searcher = getattr(agent, "web_searcher", None)
     if searcher is None:

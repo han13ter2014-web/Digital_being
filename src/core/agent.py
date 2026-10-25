@@ -1234,13 +1234,30 @@ class DigitalBeing:
 
         # === Мотивация: результат действия (P1.2 Valence Feedback) ===
         if hasattr(self, 'motivation_system'):
-            # Успех если энергия не упала критически
-            success = self.energy > 10
+            # Успех — это факт исполнения, а не остаток энергии. Раньше
+            # здесь стояло `self.energy > 10`: усталый агент не мог
+            # удовлетворить ни одну потребность, любое действие считалось
+            # неуспешным, и голод только рос — отсюда бесконечные вопросы.
+            # Отказы (усталость, бюджет) выходят из act() раньше и сюда не
+            # доходят. Качество исхода передаётся отдельно, в valence.
+            success = action_type not in ("default", "wait")
             # Compute actual valence from result
             valence_context = {"energy": self.energy, "max_energy": getattr(self, "_legacy_energy", 150)}
             actual_valence = self.motivation_system.compute_actual_valence(
                 action_type, action, success, valence_context
             )
+            # Учебное действие, которое ничего не изменило в мире, не
+            # должно удовлетворять любопытство. Раньше «изучил, но не
+            # нашёл» получало положительную валентность (в тексте нет
+            # слова error), и потребность закрывалась впустую — агент
+            # «учился» вечно и никогда не шёл спрашивать.
+            if (
+                loop_closer is not None
+                and outcome is not None
+                and loop_closer.is_productive(action_type)
+                and not outcome.had_effect
+            ):
+                actual_valence = min(actual_valence, -0.2)
             self.motivation_system.on_action_result(action_type, success, actual_valence)
             get_logger().log(f"[ACT VALENCE] {action_type}: success={success}, valence={actual_valence:.3f}")
         elif hasattr(self, 'internal_motivation'):
@@ -1266,12 +1283,12 @@ class DigitalBeing:
     def _social_candidates(self, cycle: int) -> List[Dict]:
         """Кандидаты на общение: спросить, рассказать, поискать.
 
-        Почему это отдельный источник, а не только мотивация: в текущей
-        модели потребности почти всегда «удовлетворены» (``tick()`` тянет
-        их к базовому уровню, а порог насущности ниже базы), поэтому
-        кандидаты от потребностей не появляются, и агент выбирает только
-        обучение. Здесь общение встроено в выбор напрямую — по реальным
-        признакам, а не по декларации.
+        Почему это отдельный источник, а не только мотивация: у общения
+        есть собственные наблюдаемые признаки, не сводимые к уровню
+        потребности. Потребность «связь» может быть удовлетворена
+        недавним разговором, но незакрытый вопрос всё равно стоит того,
+        чтобы попросить помощи. Здесь общение встроено в выбор напрямую —
+        по реальным признакам, а не по декларации.
 
         Признаки честные и проверяемые:
         * есть открытый вопрос, который агент давно не может закрыть сам;
@@ -1352,13 +1369,50 @@ class DigitalBeing:
         """
         normalized = self._normalize_action(action)
         if normalized == "ask_user":
-            return self._can_ask_now(self.cycle_count)
+            return self._can_ask_now(self.cycle_count) and self._has_question_target()
         if normalized == "web_search":
             searcher = getattr(self, "web_searcher", None)
             if searcher is None:
                 return False
             return bool(getattr(searcher, "is_enabled", False))
         return True
+
+    def _has_question_target(self) -> bool:
+        """Есть ли о чём спросить человека прямо сейчас.
+
+        Проверка без побочных эффектов (в отличие от
+        ``_pick_exploration_target``, который запоминает тему). Нужна,
+        чтобы не предлагать арбитру вопрос, который заведомо закончится
+        «не о чем спрашивать»: иначе действие выбирается каждый цикл,
+        ничего не меняет и не запускает кулдаун, потому что вопрос так и
+        не был задан.
+        """
+        questions = getattr(self, "_open_questions", None)
+        if isinstance(questions, list):
+            for item in questions:
+                if not isinstance(item, dict) or item.get("answered"):
+                    continue
+                if str(item.get("text") or "").strip():
+                    return True
+
+        history = getattr(self, "_exploration_history", None)
+        recently = set(history) if isinstance(history, list) else set()
+
+        concepts = getattr(self.mental_models, "concepts", None)
+        if isinstance(concepts, dict):
+            for name, node in concepts.items():
+                if not self._is_learnable(name):
+                    continue
+                if float(getattr(node, "confidence", 0.0) or 0.0) < 0.9:
+                    return True
+            known = set(concepts)
+        else:
+            known = set()
+
+        for topic in self._stimulus_topics():
+            if topic not in known and topic not in recently:
+                return True
+        return False
 
     def _can_ask_now(self, cycle: int) -> bool:
         """Можно ли сейчас задать вопрос человеку (кулдаун и лимиты)."""
@@ -3178,9 +3232,15 @@ class DigitalBeing:
                         result["actual_valence"] = actual_valence
                         prediction_error = actual_valence - predicted_valence
                         result["valence_prediction_error"] = prediction_error
-                        
-                        self.motivation_system.on_action_result(chosen_action, success, actual_valence)
-                        get_logger().log(f"[VALENCE] Actual for {chosen_action}: {actual_valence:.3f}, error: {prediction_error:.3f}")
+                        # Сам исход в потребности уже записал act(): он
+                        # знает фактический тип действия. Второй вызов
+                        # здесь удваивал удовлетворение (одно действие
+                        # закрывало две доли дефицита), и потребности
+                        # «залипали» сытыми.
+                        get_logger().log(
+                            f"[VALENCE] Actual for {chosen_action}: "
+                            f"{actual_valence:.3f}, error: {prediction_error:.3f}"
+                        )
 
                         # P2: Outcome loop — стимул -> действие -> результат -> валентность -> опыт
                         self._record_active_inference_experience(chosen_action, obs_before, actual_valence)

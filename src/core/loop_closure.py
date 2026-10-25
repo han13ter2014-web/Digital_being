@@ -90,6 +90,7 @@ class LoopCloser:
     )
 
     _no_effect_streak: Dict[str, int] = field(default_factory=dict, repr=False)
+    _denied_streak: Dict[str, int] = field(default_factory=dict, repr=False)
     _effect_count: Dict[str, int] = field(default_factory=dict, repr=False)
     _history: List[ActionOutcome] = field(default_factory=list, repr=False)
     _last: Optional[ActionOutcome] = None
@@ -138,6 +139,18 @@ class LoopCloser:
 
         key = str(action)
         self._total_actions += 1
+        denied = str(reason).startswith("denied:")
+        if denied:
+            # Отказ — не «действие без результата», а «действие не
+            # выполнялось». Для непродуктивных действий (вопрос,
+            # общение) отсутствие эффекта нормально, а отказ — нет:
+            # повторять его немедленно бессмысленно.
+            self._denied_streak[key] = self._denied_streak.get(key, 0) + 1
+        elif not delta.is_empty:
+            # Успешное действие доказывает, что тело снова способно
+            # действовать: старые отказы больше не актуальны.
+            self._denied_streak.clear()
+
         if delta.is_empty:
             self._no_effect_streak[key] = self._no_effect_streak.get(key, 0) + 1
         else:
@@ -182,12 +195,24 @@ class LoopCloser:
         """Сколько раз подряд действие не давало эффекта."""
         return int(self._no_effect_streak.get(str(action), 0))
 
+    def denied_streak(self, action: str) -> int:
+        """Сколько раз подряд действие отклоняли до выполнения."""
+        return int(self._denied_streak.get(str(action), 0))
+
     def is_stuck(self, action: str) -> bool:
         """Действие повторяется без эффекта слишком долго.
 
-        Непродуктивные действия (отдых, рефлексия, общение) тупиковыми не
-        бывают: они и не должны добавлять знаний.
+        Отказ (усталость, бюджет) делает действие тупиковым немедленно —
+        независимо от того, продуктивно оно или нет. Иначе вопрос,
+        который нельзя задать, выбирается каждый цикл: отказа не видно в
+        счётчике эффектов, а кулдаун не запускается, потому что вопрос
+        так и не был задан.
+
+        Непродуктивные действия (отдых, рефлексия, общение) без эффекта
+        тупиковыми не бывают: они и не должны добавлять знаний.
         """
+        if self.denied_streak(action) >= 1:
+            return True
         if not self.is_productive(action):
             return False
         return self.no_effect_streak(action) >= max(1, int(self.max_no_effect))
@@ -224,7 +249,7 @@ class LoopCloser:
         """Действия, которые сейчас в тупике."""
         return sorted(
             action
-            for action in self._no_effect_streak
+            for action in set(self._no_effect_streak) | set(self._denied_streak)
             if self.is_stuck(action)
         )
 
@@ -236,8 +261,10 @@ class LoopCloser:
         """
         if action is None:
             self._no_effect_streak.clear()
+            self._denied_streak.clear()
             return
         self._no_effect_streak.pop(str(action), None)
+        self._denied_streak.pop(str(action), None)
 
     # ------------------------------------------------------------------
     # Выбор действия
