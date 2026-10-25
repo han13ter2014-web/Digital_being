@@ -211,6 +211,14 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "birth_concepts": getattr(agent, "_birth_concepts", None),
         "birth_defined": getattr(agent, "_birth_defined", None),
         "birth_values": list(getattr(agent, "_birth_values", []) or []),
+        # Сон: счётчик проходов консолидации и недонакопленный материал.
+        # Без этого после перезапуска «сколько раз агент осмыслял
+        # накопленное» начиналось бы с нуля, а недоспанные единицы
+        # терялись бы.
+        "consolidation": {
+            "count": int(getattr(agent, "_consolidation_count", 0)),
+            "sleep_units": float(getattr(agent, "_sleep_units", 0.0)),
+        },
     }
 
 
@@ -272,6 +280,16 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     saved_history = state.get("exploration_history")
     if isinstance(saved_history, list):
         agent._exploration_history = [str(item) for item in saved_history]
+
+    # Сон: счётчик консолидаций и недонакопленный материал.
+    saved_sleep = state.get("consolidation")
+    if isinstance(saved_sleep, dict):
+        count = saved_sleep.get("count")
+        if isinstance(count, (int, float)) and count >= 0:
+            agent._consolidation_count = int(count)
+        units = saved_sleep.get("sleep_units")
+        if isinstance(units, (int, float)) and units >= 0:
+            agent._sleep_units = float(units)
 
     # Отметки рождения: восстанавливаем как есть. Если в чекпоинте их нет
     # (старый формат), оставляем текущие — но не выдумываем нули.

@@ -26,6 +26,26 @@ def _lr_config():
         return None
 
 
+def _mentions(text_lower: str, name_lower: str) -> bool:
+    """Есть ли ``name`` в тексте как отдельное слово, а не часть другого.
+
+    Нужно, чтобы «время» не совпало с «временной», а «цель» — с
+    «цельностью»: иначе сон начнёт связывать концепции по случайным
+    вхождениям букв.
+    """
+    if not name_lower:
+        return False
+    index = text_lower.find(name_lower)
+    while index != -1:
+        before = text_lower[index - 1] if index > 0 else " "
+        end = index + len(name_lower)
+        after = text_lower[end] if end < len(text_lower) else " "
+        if not before.isalnum() and not after.isalnum():
+            return True
+        index = text_lower.find(name_lower, index + 1)
+    return False
+
+
 class ConceptNode:
     """Узел ментальной модели - представляет одну концепцию."""
     
@@ -111,6 +131,212 @@ class MentalModel:
         """Увеличить счётчик циклов (для инвалидации кеша)."""
         self._cycle_counter += 1
 
+    # ============================================================
+    # Консолидация (сон)
+    # ============================================================
+
+    def consolidate(
+        self,
+        *,
+        link_delta: float = 0.05,
+        max_links: int = 400,
+        max_definitions: int = 25,
+        confidence_bonus: float = 0.02,
+        scan_batch: int = 400,
+    ) -> dict:
+        """Осмыслить накопленное: связи, формулировки, уверенность.
+
+        Это работа с текущим графом знаний — то, что происходит во сне.
+        Не путать с ``SleepCycle``: тот архивирует значимые концепции в
+        долговременную память по таймеру циклов, а здесь меняется сама
+        модель (рёбра, формулировки, уверенность). Два разных дела, и
+        оба нужны: архив без понимания — склад, понимание без архива —
+        забывается при перезапуске.
+
+        Зачем это отдельный шаг, а не часть ``encounter_concept``: во время
+        работы агент только записывает опыт. Превращать записи в понимание
+        нужно отдельно — иначе «сон» был бы ритуалом, а не работой.
+
+        Три операции, каждая с проверяемым результатом:
+
+        1. **Связи.** Определения содержат имена других концепций
+           («X связано с A -> B»). Если концепция A упомянута в
+           формулировке X, между ними есть отношение — усиливаем его.
+           Раньше связи создавались один раз с весом 0.1 и не укреплялись
+           никогда: контексты встреч уникальны (``гипотеза_цикл_12``), их
+           пересечение всегда пусто.
+        2. **Формулировки.** Концепция с двумя и более встречами, но без
+           собственного определения, получает его из накопленного опыта.
+           Уже существующая формулировка уточняется по окрепшим связям:
+           вместо сырых результатов встреч в ней появляются концепции, с
+           которыми связь подкреплена.
+        3. **Уверенность.** Согласованный опыт (три и более встречи с
+           одинаковым знаком валентности) стабилизирует уверенность —
+           воспоминание закрепляется.
+
+        Обрабатывается не всё сразу, а порция (``scan_batch``) с
+        продвижением курсора: у долгой жизни тысячи концепций, и полный
+        перебор на каждом проходе был бы квадратичным.
+
+        Returns:
+            Отчёт: сколько связей усилено, сколько определений создано,
+            сколько уверенностей стабилизировано.
+        """
+        names = list(self.concepts)
+        total = len(names)
+        if total == 0:
+            return {
+                "links": 0,
+                "definitions": 0,
+                "confidence": 0,
+                "scanned": 0,
+                "concepts": 0,
+            }
+
+        batch = max(1, int(scan_batch))
+        cursor = int(getattr(self, "_consolidation_cursor", 0)) % total
+        window = [names[(cursor + offset) % total] for offset in range(min(batch, total))]
+        self._consolidation_cursor = (cursor + len(window)) % total
+
+        links = 0
+        definitions = 0
+        refined = 0
+        stabilized = 0
+
+        for name in window:
+            node = self.concepts.get(name)
+            if node is None:
+                continue
+
+            # 1. Связи из собственной формулировки.
+            if links < max_links:
+                links += self._links_from_definition(
+                    name, node, names, link_delta, max_links - links
+                )
+
+            # 2. Определение из накопленного опыта.
+            if definitions < max_definitions:
+                if (
+                    len(node.experiences) >= 2
+                    and len(str(node.definition_hypothesis or "")) <= 10
+                ):
+                    self._synthesize_definition(name)
+                    if len(str(node.definition_hypothesis or "")) > 10:
+                        definitions += 1
+
+            # 2b. Уточнение формулировки по окрепшим связям.
+            refined += self._refine_definition(name, node)
+
+            # 3. Стабилизация уверенности.
+            if self._has_consistent_experience(node):
+                before = node.confidence
+                node.confidence = min(1.0, before + confidence_bonus)
+                if node.confidence > before:
+                    stabilized += 1
+
+        if links or definitions or refined or stabilized:
+            # Граф изменился — кеш обходов устарел.
+            self._related_cache.clear()
+
+        return {
+            "links": links,
+            "definitions": definitions,
+            "refined": refined,
+            "confidence": stabilized,
+            "scanned": len(window),
+            "concepts": total,
+        }
+
+    def _refine_definition(
+        self, name: str, node: ConceptNode, min_weight: float = 0.4
+    ) -> int:
+        """Переписать формулировку через окрепшие связи.
+
+        Рабочее определение собирается из сырых результатов встреч
+        («'X' — текст1 -> текст2») — это ещё не понимание. После того как
+        сон укрепил связи, у концепции появляются настоящие соседи, и
+        формулировка может опираться на них.
+
+        Ничего не выдумывается: в текст попадают только концепции, с
+        которыми уже есть подкреплённая связь (вес ≥ ``min_weight``).
+        """
+        if len(node.experiences) < 2:
+            return 0
+        strong = [
+            other
+            for other, weight in sorted(
+                node.connections.items(), key=lambda item: item[1], reverse=True
+            )
+            if weight >= min_weight and other in self.concepts
+        ][:3]
+        if len(strong) < 2:
+            return 0
+        text = (
+            f"По опыту ({len(node.experiences)} встреч): "
+            f"'{name}' связано с {', '.join(strong)}"
+        )
+        if text == node.definition_hypothesis:
+            return 0
+        node.definition_hypothesis = text
+        return 1
+
+    def _links_from_definition(
+        self,
+        name: str,
+        node: ConceptNode,
+        names: list,
+        delta: float,
+        budget: int,
+    ) -> int:
+        """Усиливает связи с концепциями, упомянутыми в определении."""
+        text = str(node.definition_hypothesis or "")
+        if len(text) <= 10 or budget <= 0:
+            return 0
+        low = text.lower()
+        made = 0
+        for other in names:
+            if made >= budget:
+                break
+            if other == name:
+                continue
+            # Короткие имена дают ложные совпадения внутри слов.
+            if len(other) < 4:
+                continue
+            other_node = self.concepts.get(other)
+            if other_node is None:
+                continue
+            if not _mentions(low, other.lower()):
+                continue
+            current = float(node.connections.get(other, 0.0))
+            # Формулировка — уже осмысленное утверждение, а не случайное
+            # упоминание: первая связь из неё весит больше, чем связь из
+            # беглого упоминания в результате (0.2).
+            base = current if current > 0.0 else 0.2
+            updated = min(1.0, base + delta)
+            if updated <= current:
+                continue
+            node.connections[other] = updated
+            # Связь двусторонняя: упоминание в одну сторону всё равно
+            # означает отношение между концепциями.
+            other_node.connections[name] = max(
+                float(other_node.connections.get(name, 0.0)), updated
+            )
+            made += 1
+        return made
+
+    @staticmethod
+    def _has_consistent_experience(node: ConceptNode) -> bool:
+        """Опыт согласован: три и более встречи с одним знаком валентности."""
+        valences = [
+            float(exp.get("valence", 0.0) or 0.0)
+            for exp in node.experiences
+        ]
+        if len(valences) < 3:
+            return False
+        positive = sum(1 for value in valences if value > 0.3)
+        negative = sum(1 for value in valences if value < -0.3)
+        return positive >= 3 or negative >= 3
+
     def _invalidate_cache_if_needed(self) -> None:
         """Инвалидирует кеш по TTL."""
         cfg = _lr_config()
@@ -186,39 +412,69 @@ class MentalModel:
             return node
     
     def _find_initial_associations(self, new_node: ConceptNode):
-        """Находит потенциальные связи для новой концепции."""
+        """Находит потенциальные связи для новой концепции.
+
+        Раньше здесь создавалась связь с КАЖДОЙ существующей концепцией
+        (вес 0.1) — «на всякий случай». На 80 концепциях это 6320 рёбер,
+        и граф превращался в шум: обход в ширину возвращал всё подряд, а
+        синтез «находил связи» между случайными темами. Теперь связь
+        появляется только по свидетельству — общий контекст встречи или
+        упоминание в результате (см. ``_update_associations``).
+        """
         if len(self.concepts) < 2:
             return
-        
+
         for existing_name, existing_node in self.concepts.items():
             if existing_name == new_node.name:
                 continue
-            
-            # Проверяет пересечение контекстов
+
             common_contexts = new_node.contexts_encountered & existing_node.contexts_encountered
             if common_contexts:
                 weight = min(0.7, len(common_contexts) * 0.25)
                 new_node.connect_to(existing_name, weight)
                 existing_node.connect_to(new_node.name, weight)
                 self._record_association(new_node.name, existing_name, weight)
-            else:
-                # Слабая базовая связь (возможно связана по теме)
-                new_node.connect_to(existing_name, 0.1)
-                existing_node.connect_to(new_node.name, 0.1)
     
     def _update_associations(self, updated_node: ConceptNode):
-        """Обновляет ассоциации на основе нового опыта."""
+        """Обновляет ассоциации на основе нового опыта.
+
+        Раньше здесь проверялось пересечение контекстов встреч, но
+        контексты уникальны по построению (``гипотеза_цикл_12``,
+        ``синтез_цикл_57``): их пересечение всегда пусто, и связи никогда
+        не усиливались. Второй сигнал — упоминание другой концепции в
+        результате встречи — работает и виден в данных.
+
+        Вес одной встречи намеренно невелик (0.2): одно упоминание — это
+        наблюдение, а не знание. До устойчивой связи его доводит сон
+        (``consolidate``), когда видит отношение повторно.
+        """
         for other_name, other_node in self.concepts.items():
             if other_name == updated_node.name:
                 continue
-            
-            # Если встретились вместе в каком-то контексте
-            if any(exp["context"] in other_node.contexts_encountered 
-                   for exp in updated_node.experiences):
-                updated_node.strengthen_connection(other_name, 0.1)
-                other_node.strengthen_connection(updated_node.name, 0.1)
-                self._record_association(updated_node.name, other_name, 
-                                       updated_node.connections.get(other_name, 0.3))
+
+            shared_context = any(
+                exp["context"] in other_node.contexts_encountered
+                for exp in updated_node.experiences
+            )
+            mentioned = len(other_name) >= 4 and any(
+                _mentions(
+                    str(exp.get("outcome") or "").lower(),
+                    other_name.lower(),
+                )
+                for exp in updated_node.experiences
+            )
+            if not (shared_context or mentioned):
+                continue
+
+            weight = 0.4 if shared_context else 0.2
+            # Связь создаётся, а не только усиливается: после отказа от
+            # «связей со всеми» её может ещё не быть.
+            updated_node.connect_to(other_name, weight)
+            other_node.connect_to(updated_node.name, weight)
+            self._record_association(
+                updated_node.name, other_name,
+                updated_node.connections.get(other_name, weight),
+            )
     
     def _synthesize_definition(self, concept_name: str):
         """Синтезирует гипотезу определения на основе опыта."""

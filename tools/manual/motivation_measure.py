@@ -76,6 +76,10 @@ class Measurement:
         self.rest_after_work = 0
         self.work_after_rest = 0
         self._last_was_rest = None
+        self.consolidations = 0
+        self.definitions_formed = 0
+        self.links_strengthened = 0
+        self.definitions_refined = 0
 
     def observe(self, agent) -> None:
         self.cycles += 1
@@ -138,9 +142,67 @@ class Measurement:
                     self.work_after_rest += 1
             self._last_was_rest = is_rest
 
+        count = int(getattr(agent, "_consolidation_count", 0))
+        if count > self.consolidations:
+            self.consolidations = count
+            last = getattr(agent, "_last_consolidation", {}) or {}
+            self.definitions_formed += int(last.get("definitions", 0) or 0)
+            self.links_strengthened += int(last.get("links", 0) or 0)
+            self.definitions_refined += int(last.get("refined", 0) or 0)
+
+    def _print_graph(self, agent) -> None:
+        """Что осталось в памяти: формулировки, связи, уверенность."""
+        print = self._emit  # noqa: A001  (строки должны попасть в отчёт)
+        concepts = getattr(getattr(agent, "mental_models", None), "concepts", {}) or {}
+        total = len(concepts)
+        defined = sum(
+            1
+            for node in concepts.values()
+            if len(str(getattr(node, "definition_hypothesis", "") or "")) > 10
+        )
+        weights = [
+            float(weight)
+            for node in concepts.values()
+            for weight in (getattr(node, "connections", {}) or {}).values()
+        ]
+        strong = sum(1 for weight in weights if weight >= 0.3)
+        mean_weight = sum(weights) / len(weights) if weights else 0.0
+        experiences = sum(
+            len(getattr(node, "experiences", []) or []) for node in concepts.values()
+        )
+        confidence = (
+            sum(float(getattr(node, "confidence", 0.0) or 0.0) for node in concepts.values())
+            / total
+            if total
+            else 0.0
+        )
+        print(
+            f"Память: концепций {total}, с формулировкой {defined}, "
+            f"опыта {experiences}"
+        )
+        print(
+            f"Связи: всего {len(weights)}, сильных (≥0.3) {strong}, "
+            f"средний вес {mean_weight:.3f}; средняя уверенность {confidence:.3f}"
+        )
+        print(
+            f"Консолидаций: {self.consolidations} "
+            f"(формулировок +{self.definitions_formed}, "
+            f"уточнений {self.definitions_refined}, "
+            f"связей +{self.links_strengthened})"
+        )
+        refined_examples = [
+            f"{name}: {node.definition_hypothesis}"
+            for name, node in concepts.items()
+            if str(getattr(node, "definition_hypothesis", "")).startswith("По опыту")
+            and "связано с" in str(node.definition_hypothesis)
+        ][:3]
+        for example in refined_examples:
+            print(f"  {example[:160]}")
     def report(self, agent, candidate_samples) -> None:
         from src.core.motivation import unified_motivation as um
 
+        self._lines = []
+        print = self._emit  # noqa: A001  (собираем отчёт для файла)
         print("=" * 68)
         print(f"Модуль: {um.__file__} (pressure={hasattr(um.Need, 'pressure')})")
         print(f"Циклов: {self.cycles}")
@@ -172,6 +234,7 @@ class Measurement:
             f"(из них при усталости ≥0.6: {self.rest_when_tired}); "
             f"работа→отдых {self.rest_after_work}, отдых→работа {self.work_after_rest}"
         )
+        self._print_graph(agent)
         if self.cycles:
             print("Средний уровень потребностей:")
             for name, total in sorted(self.need_levels_sum.items()):
@@ -181,6 +244,21 @@ class Measurement:
             print(f"  {sample}")
         print("=" * 68)
 
+    def _emit(self, text: str = "") -> None:
+        """Напечатать и запомнить строку отчёта (для записи в файл)."""
+        if not hasattr(self, "_lines"):
+            self._lines = []
+        self._lines.append(str(text))
+        print(text)
+
+    def write_report(self, path: str) -> None:
+        """Записать отчёт в UTF-8: консоль Windows искажает кириллицу."""
+        lines = getattr(self, "_lines", [])
+        if not lines:
+            return
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
 
 async def main(
     cycles: int = 200,
@@ -188,12 +266,21 @@ async def main(
     seconds_per_cycle: float = 5.0,
     hungry: bool = False,
     exhausted: bool = False,
+    report_path: str = "",
+    consolidate: bool = True,
 ) -> int:
     agent = DigitalBeing(name="MotivationMeasure")
     # Замер без сети: поиск иначе ждёт rate-limit и искажает картину.
     searcher = getattr(agent, "web_searcher", None)
     if searcher is not None:
         searcher.toggle(False)
+
+    if not consolidate:
+        # Контрольная группа: тот же код, но сон не осмысляет накопленное.
+        # Нужен, чтобы отделить вклад консолидации от вклада работы.
+        from config.simulation_config import LR_CONFIG
+
+        LR_CONFIG.CONSOLIDATION_ENABLED = False
 
     if hungry:
         # Сценарий «голодный агент»: любопытство и связь не удовлетворены
@@ -292,6 +379,9 @@ async def main(
 
     measurement.report(agent, samples)
     print(f"Режим энергии: {'удерживается' if hold_energy else 'как в жизни'}")
+    if report_path:
+        measurement.write_report(report_path)
+        print(f"Отчёт: {report_path}")
     print(f"Данные: {_DATA_DIR}")
     return 0
 
@@ -301,6 +391,12 @@ if __name__ == "__main__":
     hold = "--hold-energy" in args
     hungry = "--hungry" in args
     exhausted = "--exhausted" in args
+    consolidate = "--no-consolidation" not in args
+    report = ""
+    if "--report" in args:
+        index = args.index("--report")
+        report = args[index + 1]
+        del args[index:index + 2]
     seconds = 5.0
     if "--seconds-per-cycle" in args:
         index = args.index("--seconds-per-cycle")
@@ -316,6 +412,8 @@ if __name__ == "__main__":
                 seconds_per_cycle=seconds,
                 hungry=hungry,
                 exhausted=exhausted,
+                report_path=report,
+                consolidate=consolidate,
             )
         )
     )
