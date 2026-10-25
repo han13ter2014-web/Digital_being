@@ -331,7 +331,10 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         s.action_cost_multiplier = intero_state.get("action_cost_multiplier", s.action_cost_multiplier)
         s.cognitive_throughput = intero_state.get("cognitive_throughput", s.cognitive_throughput)
         s.exploration_drive = intero_state.get("exploration_drive", s.exploration_drive)
-        agent.interoception.step(cognitive_load=0)  # пересчитывает множители
+        # Пересчитываем производные величины без проживания ещё одного
+        # такта: раньше здесь вызывался step(), и загрузка чекпоинта
+        # тратила глюкозу и АТФ.
+        agent.interoception._refresh_derived()
     
     # NEW: Восстанавливаем Непрерывное время
     ct_state = state.get("continuous_time", {})

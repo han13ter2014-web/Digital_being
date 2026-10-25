@@ -69,6 +69,13 @@ class Measurement:
         self.denied_actions: Counter = Counter()
         self.first_choices: list = []
         self.energy_curve: list = []
+        self.fatigue_curve: list = []
+        self.atp_curve: list = []
+        self.rest_chosen = 0
+        self.rest_when_tired = 0
+        self.rest_after_work = 0
+        self.work_after_rest = 0
+        self._last_was_rest = None
 
     def observe(self, agent) -> None:
         self.cycles += 1
@@ -112,6 +119,25 @@ class Measurement:
         if len(self.energy_curve) < 40:
             self.energy_curve.append(round(float(agent.energy), 1))
 
+        intero = getattr(agent, "interoception", None)
+        if intero is not None:
+            state = intero.get_status()
+            fatigue = float(state.get("fatigue", 0.0) or 0.0)
+            if len(self.fatigue_curve) < 60:
+                self.fatigue_curve.append(round(fatigue, 2))
+                self.atp_curve.append(round(float(state.get("atp", 0.0)), 1))
+            is_rest = chosen in ("rest", "deep_rest")
+            if is_rest:
+                self.rest_chosen += 1
+                if fatigue >= 0.6:
+                    self.rest_when_tired += 1
+            if self._last_was_rest is not None:
+                if is_rest and not self._last_was_rest:
+                    self.rest_after_work += 1
+                elif not is_rest and self._last_was_rest:
+                    self.work_after_rest += 1
+            self._last_was_rest = is_rest
+
     def report(self, agent, candidate_samples) -> None:
         from src.core.motivation import unified_motivation as um
 
@@ -139,6 +165,13 @@ class Measurement:
         print(f"Отказы до выполнения: {dict(self.denials)} по действиям {dict(self.denied_actions.most_common(6))}")
         print(f"Первые выборы: {self.first_choices}")
         print(f"Энергия по циклам: {self.energy_curve}")
+        print(f"Усталость по циклам: {self.fatigue_curve}")
+        print(f"АТФ по циклам: {self.atp_curve}")
+        print(
+            f"Отдых выбран {self.rest_chosen} раз "
+            f"(из них при усталости ≥0.6: {self.rest_when_tired}); "
+            f"работа→отдых {self.rest_after_work}, отдых→работа {self.work_after_rest}"
+        )
         if self.cycles:
             print("Средний уровень потребностей:")
             for name, total in sorted(self.need_levels_sum.items()):
