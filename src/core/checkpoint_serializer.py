@@ -240,6 +240,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent: экземпляр DigitalBeing.
         state: словарь, полученный из ``build_state_from_agent``.
     """
+    from src.core.checkpoint_validation import validate_checkpoint_state
+
+    validate_checkpoint_state(state)
     saved_models = state.get("mental_models")
     if saved_models is not None and getattr(agent, "mental_models", None) is not None:
         from src.cognition.mental_models import ConceptNode
@@ -587,9 +590,9 @@ class CheckpointSerializer:
                 return None
             try:
                 state = SQLiteCheckpointStore(database).load(int(snapshot_id))
-                return migrate_state(state)
             except (ValueError, KeyError) as exc:
                 raise CheckpointCorruptedError(f"Повреждён снимок SQLite: {exc}") from exc
+            return migrate_state(state)
         if not os.path.exists(checkpoint_file):
             logger.warning(f"Чекпоинт не найден: {checkpoint_file}")
             return None

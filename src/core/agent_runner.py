@@ -473,6 +473,10 @@ class AgentRunner:
                 # агент не должен продолжать цикл: иначе окно показывало
                 # бы «спит», а существо продолжало жить в фоне.
                 if not self._agent_is_alive():
+                    guard = getattr(self.agent, "life_guard", None)
+                    if guard is not None and guard.load_state() == "dormant":
+                        await asyncio.sleep(self._pause_poll_sec())
+                        continue
                     logger.info(
                         f"[{self.name}] Агент не жив — цикл остановлен"
                     )

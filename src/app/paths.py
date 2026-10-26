@@ -64,7 +64,9 @@ def resolve_base_dir() -> tuple[str, bool]:
     """
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return str(sys._MEIPASS), True
-    return os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd(), False
+    from src.core.paths import project_root
+
+    return project_root(), False
 
 
 def resolve_user_data_dir(frozen: bool, base_dir: str) -> str:
@@ -182,6 +184,9 @@ def setup_environment(*, chdir: bool = True, console: bool = True) -> AppEnv:
     """
     base_dir, frozen = resolve_base_dir()
     user_data_dir = resolve_user_data_dir(frozen, base_dir)
+    override = os.environ.get("DIGITAL_BEING_DATA_DIR")
+    if override:
+        override = os.path.abspath(override)
 
     if chdir:
         try:
@@ -191,12 +196,16 @@ def setup_environment(*, chdir: bool = True, console: bool = True) -> AppEnv:
 
     # DIGITAL_BEING_DATA_DIR перенаправляет изменяемые данные (тесты,
     # отдельный профиль) и указывает прямо на папку data.
-    override = os.environ.get("DIGITAL_BEING_DATA_DIR")
     data_root = (
         os.path.abspath(override)
         if override
         else os.path.join(user_data_dir, "data")
     )
+
+    # Устанавливаем до создания любых хранилищ и агента: все data_path
+    # и динамические Settings должны видеть постоянный профиль, не _MEIPASS.
+    data_root = os.path.abspath(data_root)
+    os.environ["DIGITAL_BEING_DATA_DIR"] = data_root
 
     logger = logging.getLogger("app.env")
     _configure_console_encoding(logger)

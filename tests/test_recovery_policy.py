@@ -60,6 +60,33 @@ def test_corrupt_sqlite_snapshot_recovers_older(env):
     assert report["recovered_from_older"]
 
 
+def test_readable_but_invalid_late_section_recovers_previous(env):
+    agent, _ = create_agent(env, "Recovery", new=True)
+    serializer = CheckpointSerializer(agent.checkpoint_dir)
+    state = build_state_from_agent(agent)
+    state["cycle_count"] = 10
+    serializer.save(state, agent.name, 10)
+    state["cycle_count"] = 20
+    state["social_cell"]["current_tom_level"] = 999
+    serializer.save(state, agent.name, 20)
+    restored, report = create_agent(env, "Recovery")
+    assert restored.cycle_count == 10
+    assert report["recovered_from_older"]
+    assert "social_cell" in report["recovery_failures"][0]["error"]
+
+
+@pytest.mark.parametrize("backend", ["json", "sqlite"])
+def test_future_schema_stops_without_silent_rollback(env, backend):
+    agent, _ = create_agent(env, "Recovery", new=True)
+    serializer = CheckpointSerializer(agent.checkpoint_dir, backend=backend)
+    state = build_state_from_agent(agent)
+    serializer.save(state, agent.name, 0)
+    state["schema_version"] = 999
+    serializer.save(state, agent.name, 20)
+    with pytest.raises(RecoveryRequiredError, match="формат"):
+        create_agent(env, "Recovery")
+
+
 def test_broken_database_requires_explicit_recovery(env):
     root = Path(env.data_root) / "checkpoints"
     root.mkdir(exist_ok=True)
