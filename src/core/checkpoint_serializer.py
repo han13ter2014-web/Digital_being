@@ -41,6 +41,7 @@ checkpoint_serializer.py — сериализация/десериализаци
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import gzip
 import json
 import logging
@@ -220,6 +221,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # Изученные темы: чтобы исследование продолжалось, а не начиналось
         # с той же концепции после перезапуска.
+        "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
         "pending_user_messages": list(getattr(agent, "_pending_message_texts", []) or []),
         "deferred_stimulus": getattr(agent, "_deferred_stimulus", None),
         "method_information_context": getattr(agent, "_method_information_context", None),
@@ -342,6 +344,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # и не изучать ту же тему заново.
     if getattr(agent, "loop_closer", None) is not None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    from src.cognition.intention_history import restore_history
+
+    agent._intention_history = restore_history(state.get("intention_history", []))
     agent._pending_message_texts = list(state.get("pending_user_messages", []))
     agent._deferred_stimulus = state.get("deferred_stimulus")
     agent._method_information_context = state.get("method_information_context")
