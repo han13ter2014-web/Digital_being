@@ -559,7 +559,9 @@ class LifeGuard:
 
         Возвращает путь к снимку или None, если копировать нечего.
         """
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        from uuid import uuid4
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S") + "_" + uuid4().hex[:8]
         safe_tag = "".join(
             ch if ch.isalnum() or ch in "-_" else "_" for ch in str(tag)
         )[:40]
@@ -568,34 +570,14 @@ class LifeGuard:
         )
         os.makedirs(target, exist_ok=True)
 
-        copied = 0
-        for name in ("checkpoints", "mind", "memory", "nursery"):
-            source = data_path(name)
-            if not os.path.isdir(source):
-                continue
-            try:
-                shutil.copytree(
-                    source,
-                    os.path.join(target, name),
-                    dirs_exist_ok=True,
-                )
-                copied += 1
-            except OSError:
-                continue
+        import sqlite3
+        from src.memory.profile_backup import create_backup
 
-        kb_source = data_path("knowledge_base.json")
-        if os.path.isfile(kb_source):
-            try:
-                shutil.copy2(kb_source, os.path.join(target, "knowledge_base.json"))
-                copied += 1
-            except OSError:
-                pass
-
-        if copied == 0:
-            try:
-                os.rmdir(target)
-            except OSError:
-                pass
+        try:
+            os.rmdir(target)
+            create_backup(data_path(), target)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            self._log_event("snapshot_failed", error=str(exc), tag=tag)
             return None
 
         self._prune_snapshots()

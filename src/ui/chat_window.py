@@ -312,6 +312,10 @@ class ChatWindow:
         self._thread.start()
         logger.info("[ChatWindow] UI-поток запущен")
 
+    def request_close(self) -> None:
+        """Передать закрытие потоку Tk без вызова его API из потока жизни."""
+        self._incoming_queue.put(("__close__", None))
+
     def stop(self) -> None:
         """Остановить UI-поток."""
         self._poll_running = False
@@ -560,7 +564,10 @@ class ChatWindow:
         Вынесено отдельным методом, чтобы наследник (``MainWindow``)
         мог добавить свои виды сообщений, не копируя цикл опроса.
         """
-        if kind == "__show__":
+        if kind == "__close__":
+            self._poll_running = False
+            self._destroy_root()
+        elif kind == "__show__":
             self._show_window()
         elif kind == "user":
             self._append_user(data)

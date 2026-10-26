@@ -140,6 +140,8 @@ class Runtime:
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self.finished = threading.Event()
+        self.error = None
+        self.saved_on_stop = False
 
     # --- поток ---
 
@@ -156,7 +158,8 @@ class Runtime:
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._main(speed_mode))
-        except Exception:
+        except Exception as exc:
+            self.error = str(exc)
             logger.exception("Цикл жизни упал")
         finally:
             try:
@@ -164,6 +167,8 @@ class Runtime:
             except Exception:
                 pass
             self.finished.set()
+            if self.window is not None:
+                self.window.request_close()
 
     async def _main(self, speed_mode: str) -> None:
         from src.core.event_bus import Events
@@ -197,7 +202,19 @@ class Runtime:
                 asyncio.create_task(self._status_loop(), name="StatusLoop")
             )
 
-        await self.shutdown.wait()
+        shutdown_task = asyncio.create_task(self.shutdown.wait(), name="ShutdownWait")
+        try:
+            done, _ = await asyncio.wait([*tasks, shutdown_task], return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task is not shutdown_task and not task.cancelled():
+                    exception = task.exception()
+                    if exception is not None:
+                        self.error = str(exception)
+                        logger.error("Задача %s завершилась ошибкой: %s", task.get_name(), exception)
+        finally:
+            self.shutdown.set()
+            shutdown_task.cancel()
+            await asyncio.gather(shutdown_task, return_exceptions=True)
 
         logger.info("Останавливаемся...")
         self.runner._stop_requested = True
@@ -210,6 +227,9 @@ class Runtime:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await self.runner.stop()
+        self.saved_on_stop = self.runner.save_now()
+        if not self.saved_on_stop:
+            self.error = self.error or "Не удалось сохранить состояние при остановке"
         try:
             from src.core.buffered_logger import flush_logs
 
@@ -345,9 +365,10 @@ def run_gui(runtime: Runtime, args: argparse.Namespace) -> int:
     window.run_blocking()  # возвращается, когда окно закрыто
 
     runtime.request_shutdown()
-    runtime.wait(timeout=10)
-    _save_and_report(runtime.agent)
-    return 0
+    if not runtime.wait(timeout=10):
+        logger.error("Поток жизни не завершён; сохранение из чужого потока отменено")
+        return 1
+    return 1 if runtime.error else 0
 
 
 def run_maturity(runtime: Runtime, args: argparse.Namespace) -> int:
@@ -393,9 +414,10 @@ def run_headless(runtime: Runtime, args: argparse.Namespace) -> int:
         stop.wait(0.5)
 
     runtime.request_shutdown()
-    runtime.wait(timeout=10)
-    _save_and_report(runtime.agent)
-    return 0
+    if not runtime.wait(timeout=10):
+        logger.error("Поток жизни не завершён; сохранение из чужого потока отменено")
+        return 1
+    return 1 if runtime.error else 0
 
 
 def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
@@ -432,9 +454,10 @@ def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
         pass
 
     runtime.request_shutdown()
-    runtime.wait(timeout=10)
-    _save_and_report(agent)
-    return 0
+    if not runtime.wait(timeout=10):
+        logger.error("Поток жизни не завершён; сохранение из чужого потока отменено")
+        return 1
+    return 1 if runtime.error else 0
 
 
 def _print_banner(agent) -> None:
@@ -490,18 +513,27 @@ def main(argv: Optional[list] = None) -> int:
     json_output = bool(getattr(args, "maturity_json", False))
     env = setup_environment(console=not json_output)
 
-    if json_output:
-        import contextlib
+    from src.app.bootstrap import RecoveryRequiredError
 
-        with contextlib.redirect_stdout(sys.stderr):
+    try:
+        if json_output:
+            import contextlib
+
+            with contextlib.redirect_stdout(sys.stderr):
+                runtime = build_runtime(args, env)
+        else:
             runtime = build_runtime(args, env)
-    else:
-        try:
-            runtime = build_runtime(args, env)
-        except FileNotFoundError as exc:
-            # Понятное сообщение вместо трассировки: человек указал не то семя.
-            print(f"\n❌ {exc}\n", file=sys.stderr)
-            return 2
+    except RecoveryRequiredError as exc:
+        print(
+            f"\nВосстановление жизни остановлено: {exc}\n"
+            "Данные не заменены новой жизнью. Сохраните копию профиля и "
+            "проверьте резервный комплект. Не используйте --new для исправления ошибки.\n",
+            file=sys.stderr,
+        )
+        return 3
+    except FileNotFoundError as exc:
+        print(f"\n❌ {exc}\n", file=sys.stderr)
+        return 2
 
     def atexit_save() -> None:
         try:

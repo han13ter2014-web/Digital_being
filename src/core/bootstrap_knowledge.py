@@ -50,10 +50,10 @@ def load_initial_knowledge(agent, knowledge_path: str = None) -> bool:
                 evidence_strength=max(0.0, min(1.0, (info.get("confidence", 0.9) - 0.1) * 1.5)),
                 evidence_kind="innate", source=f"innate:{name}",
             )
-            # Устанавливаем высокую уверенность для врожденных знаний
+            # Та же формула свидетельств, что при загрузке и новом опыте.
             node = agent.mental_models.concepts.get(name)
             if node:
-                node.confidence = info.get("confidence", 0.9)
+                node.recompute_confidence()
                 node.tags = info.get("tags", [])
                 node.source = info.get("source", "innate")
                 concepts_loaded += 1
@@ -69,7 +69,7 @@ def load_initial_knowledge(agent, knowledge_path: str = None) -> bool:
             )
             node = agent.mental_models.concepts.get(f"убеждение_{i+1}")
             if node:
-                node.confidence = 0.8
+                node.recompute_confidence()
                 node.tags = ["belief", "innate"]
         
         # 3. Сохраняем ценности в атрибуты агента
@@ -86,7 +86,7 @@ def load_initial_knowledge(agent, knowledge_path: str = None) -> bool:
         )
         node = agent.mental_models.concepts.get("_bootstrap_loaded")
         if node:
-            node.confidence = 1.0
+            node.recompute_confidence()
             node.tags = ["system", "bootstrap"]
         
         logger.log(f"[BOOTSTRAP] Успешно загружено: {concepts_loaded} концептов, "

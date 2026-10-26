@@ -232,6 +232,7 @@ def create_agent(
     from src.core.agent import DigitalBeing
 
     logger.info("Создаю агента '%s'...", name)
+    os.environ["DIGITAL_BEING_DATA_DIR"] = os.path.abspath(env.data_root)
     agent = DigitalBeing(name)
 
     # Пути к пользовательским данным: рядом с .exe их писать нельзя.
@@ -271,7 +272,7 @@ def create_agent(
 
     if restore and not new:
         from src.core.checkpoint_serializer import CheckpointSerializer
-        from src.core.checkpoint_migrations import SCHEMA_VERSION
+        from src.core.checkpoint_migrations import SCHEMA_VERSION, CheckpointMigrationError
 
         candidates = checkpoint_candidates(name, agent.checkpoint_dir)
         failures = []
@@ -282,8 +283,13 @@ def create_agent(
                     raise ValueError("Имя в снимке не соответствует выбранной жизни")
                 if state.get("schema_version", 0) > SCHEMA_VERSION:
                     raise RecoveryRequiredError("Снимок создан более новой версией программы")
+                from src.core.checkpoint_validation import validate_checkpoint_state
+
+                validate_checkpoint_state(state)
             except RecoveryRequiredError:
                 raise
+            except CheckpointMigrationError as exc:
+                raise RecoveryRequiredError(f"Нельзя преобразовать формат {checkpoint}: {exc}") from exc
             except Exception as exc:
                 failures.append({"checkpoint": checkpoint, "error": str(exc)})
                 logger.warning("Снимок не читается %s: %s", checkpoint, exc)

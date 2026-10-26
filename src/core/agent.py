@@ -768,7 +768,7 @@ class DigitalBeing:
             from src.core.subsystems.nursery_watcher import NurseryWatcher
             existing = self.plugin_registry.get("nursery_watcher")
             if existing is None:
-                watcher = NurseryWatcher(agent_name=self.name)
+                watcher = NurseryWatcher(agent_name=self.name, nursery_dir=data_path("nursery"))
                 self.plugin_registry.register(watcher)
             # Подключаем агента для контекста
             w = self.plugin_registry.get("nursery_watcher")

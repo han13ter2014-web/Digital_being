@@ -1,5 +1,13 @@
 # Ручные проверки
 
+`backup_life_measure.py --report PATH` — полный путь save → backup → restore
+в новый профиль → запуск и следующее ожидание, JSON/SQLite × сон/бодрствование.
+
+`profile_backup.py create SOURCE NEW_DESTINATION`, `verify BACKUP`,
+`restore BACKUP NEW_PROFILE` — явная резервная копия с manifest и проверкой
+SQLite. Перед create остановить приложение; restore не затирает старый профиль.
+[Границы согласованности](../../docs/LIFE_CONTINUITY_CONTRACT.md).
+
 Скрипты в этой папке **не запускаются pytest** — у них нет утверждений
 (`assert`) и они печатают результат в консоль. Это инструменты для
 ручной проверки поведения, когда нужно посмотреть на живой вывод.
