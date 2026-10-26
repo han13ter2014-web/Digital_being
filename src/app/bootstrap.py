@@ -24,35 +24,51 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 
+class RecoveryRequiredError(RuntimeError):
+    """История существует, но безопасное восстановление не завершено."""
+
+
+def checkpoint_candidates(agent_name: str, checkpoint_dir: Optional[str] = None):
+    """Снимки от новых к старым; существующий приоритет SQLite сохранён."""
+    import re
+    import sqlite3
+
+    directory = checkpoint_dir or data_path("checkpoints")
+    if not os.path.isdir(directory):
+        return []
+    candidates = []
+    database = os.path.join(directory, "life.sqlite3")
+    if os.path.isfile(database):
+        from pathlib import Path
+        from contextlib import closing
+
+        try:
+            with closing(sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                if version != 1:
+                    raise ValueError(f"Неподдерживаемая версия SQLite: {version}")
+                ids = connection.execute(
+                    "SELECT id FROM snapshots WHERE agent_name = ? ORDER BY id DESC", (agent_name,)
+                ).fetchall()
+                candidates.extend(f"{os.path.abspath(database)}#snapshot={row[0]}" for row in ids)
+        except (sqlite3.Error, ValueError) as exc:
+            raise RecoveryRequiredError(f"Не удалось прочитать историю {database}: {exc}") from exc
+    pattern = re.compile(re.escape(agent_name) + r"_cycle_([0-9]+)[.]json(?:[.]gz)?$")
+    files = []
+    for name in os.listdir(directory):
+        match = pattern.fullmatch(name)
+        if match and os.path.isfile(os.path.join(directory, name)):
+            files.append((int(match.group(1)), name))
+    candidates.extend(os.path.join(directory, name) for _, name in sorted(files, reverse=True))
+    return candidates
+
+
 def latest_checkpoint(
     agent_name: str, checkpoint_dir: Optional[str] = None
 ) -> Optional[str]:
     """Путь к последнему чекпоинту агента или None."""
-    directory = checkpoint_dir or data_path("checkpoints")
-    if not os.path.isdir(directory):
-        return None
-    database = os.path.join(directory, "life.sqlite3")
-    if os.path.isfile(database):
-        from src.memory.checkpoint_store import SQLiteCheckpointStore
-
-        snapshot_id = SQLiteCheckpointStore(database).latest(agent_name)
-        if snapshot_id is not None:
-            return f"{os.path.abspath(database)}#snapshot={snapshot_id}"
-    names = [
-        name
-        for name in os.listdir(directory)
-        if name.startswith(f"{agent_name}_cycle_")
-    ]
-    if not names:
-        return None
-
-    def step_of(name: str) -> int:
-        tail = name.rsplit("_", 1)[-1]
-        digits = "".join(ch for ch in tail if ch.isdigit())
-        return int(digits) if digits else 0
-
-    names.sort(key=step_of)
-    return os.path.join(directory, names[-1])
+    candidates = checkpoint_candidates(agent_name, checkpoint_dir)
+    return candidates[0] if candidates else None
 
 
 # ============================================================
@@ -238,10 +254,6 @@ def create_agent(
     if knowledge is not None:
         knowledge.knowledge_file = knowledge_file
         knowledge._known_definitions_file = knowledge_file
-        try:
-            knowledge.save()
-        except Exception as exc:
-            logger.warning("Не удалось сохранить БЗ: %s", exc)
 
     report: Dict[str, Any] = {
         "source": "new",
@@ -258,25 +270,35 @@ def create_agent(
         return agent, report
 
     if restore and not new:
-        checkpoint = latest_checkpoint(name, agent.checkpoint_dir)
-        if checkpoint:
+        from src.core.checkpoint_serializer import CheckpointSerializer
+        from src.core.checkpoint_migrations import SCHEMA_VERSION
+
+        candidates = checkpoint_candidates(name, agent.checkpoint_dir)
+        failures = []
+        for checkpoint in candidates:
             try:
-                if not agent.load_state(checkpoint):
-                    raise ValueError("Восстановление состояния не завершено")
-                report.update(
-                    source="checkpoint",
-                    checkpoint=os.path.basename(checkpoint),
-                    cycle=agent.cycle_count,
-                )
-                logger.info(
-                    "Восстановлен из %s, цикл: %s, интеллект: %s",
-                    os.path.basename(checkpoint),
-                    agent.cycle_count,
-                    agent.intelligence,
-                )
+                state = CheckpointSerializer().load(checkpoint)
+                if not isinstance(state, dict) or state.get("name") != name:
+                    raise ValueError("Имя в снимке не соответствует выбранной жизни")
+                if state.get("schema_version", 0) > SCHEMA_VERSION:
+                    raise RecoveryRequiredError("Снимок создан более новой версией программы")
+            except RecoveryRequiredError:
+                raise
             except Exception as exc:
-                logger.warning("Чекпоинт не загружен: %s", exc)
+                failures.append({"checkpoint": checkpoint, "error": str(exc)})
+                logger.warning("Снимок не читается %s: %s", checkpoint, exc)
+                continue
+            # Применение пока не полностью транзакционно: после его ошибки
+            # не пытаемся продолжить на частично изменённом объекте.
+            if not agent.load_state(checkpoint):
+                raise RecoveryRequiredError(f"Не удалось применить снимок {checkpoint}; запуск остановлен")
+            report.update(source="checkpoint", checkpoint=os.path.basename(checkpoint),
+                          cycle=agent.cycle_count, recovery_failures=failures,
+                          recovered_from_older=bool(failures))
+            break
         else:
+            if candidates:
+                raise RecoveryRequiredError(f"Ни один из {len(candidates)} снимков не читается; данные сохранены")
             logger.info("Чекпоинтов не найдено — стартуем новую жизнь")
 
     return agent, report

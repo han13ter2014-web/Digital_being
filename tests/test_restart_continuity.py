@@ -138,5 +138,7 @@ def test_failed_restore_is_not_reported_as_checkpoint(env, monkeypatch):
     from src.core.agent import DigitalBeing
 
     monkeypatch.setattr(DigitalBeing, "load_state", lambda self, filename: False)
-    _, report = create_agent(env, "Continuity")
-    assert report["source"] != "checkpoint"
+    from src.app.bootstrap import RecoveryRequiredError
+
+    with pytest.raises(RecoveryRequiredError):
+        create_agent(env, "Continuity")
