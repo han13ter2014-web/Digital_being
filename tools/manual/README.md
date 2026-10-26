@@ -1,5 +1,13 @@
 # Ручные проверки
 
+`new_evidence_measure.py --report PATH` — отсутствие источника, ответ по
+другой теме и по нужной; настоящее принятие ответа без сети.
+[Результаты и ограничения](../../docs/NEW_EVIDENCE_OPPORTUNITY.md).
+
+`continuation_summary.py REPORT [REPORT ...]` — сводка естественных возвратов:
+предложения, выбор, pending/satisfied и повторы в том же контексте.
+[Результаты](../../docs/INTENTION_EVIDENCE.md).
+
 `attention_measure.py --cycles 1000 --seed N --report PATH` — реальный
 арбитраж внешнего/собственного внимания, счётчик act на тик и ожидание
 вопросов. Офлайн, лабораторное время; качество ответов не оценивает.
@@ -87,6 +95,9 @@ python tools/manual/loop_accounting_measure.py 200 --hold-energy --seed 1
 Также сохраняет initial_sources, escape_transitions и escape_traces:
 исходный выбор, причину тупика, замену и её исход.
 [Диагностика](../../docs/LOOP_ESCAPE_DIAGNOSTICS.md).
+`--no-continuation` отключает только кандидат возврата для контроля;
+continuation_offers/choices/losses/traces показывают его естественную работу.
+[Результаты](../../docs/INTENTION_CONTINUATION.md).
 `--no-method-feedback` отключает только раннюю обратную связь для контроля
 «до/после»; результаты: [METHOD_FEEDBACK.md](../../docs/METHOD_FEEDBACK.md).
 

@@ -37,6 +37,8 @@ async def measure(cycles, seed):
     initial_sources, transitions = Counter(), Counter()
     deferred_methods, released_methods = Counter(), Counter()
     energies, fatigues = [], []
+    continuation_offers, continuation_choices, continuation_losses = Counter(), Counter(), Counter()
+    continuation_traces = []
     restart = None
 
     def attach(current):
@@ -47,6 +49,18 @@ async def measure(cycles, seed):
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
+            continuation = report.get("continuation_proposal")
+            if continuation:
+                target = continuation["params"]["topic"]
+                continuation_offers[target] += 1
+                if arbiter.get("source") == "intention_continuation":
+                    continuation_choices[target] += 1
+                    entry = next((item for item in reversed(getattr(current, "_intention_history", []))
+                                  if item["id"] == report.get("intention_id")), None)
+                    continuation_traces.append({"cycle": current.cycle_count, "target": target,
+                                                "entry": entry.copy() if entry else None})
+                else:
+                    continuation_losses[arbiter.get("source", "none")] += 1
             feedback = report.get("method_feedback") or {}
             deferred_methods.update(item["normalized_action"] for item in feedback.get("deferred", []))
             released_methods.update(feedback.get("released", []))
@@ -97,13 +111,18 @@ async def measure(cycles, seed):
                 energy_before = agent.energy
                 fatigue_before = agent.interoception.state.fatigue
                 last_check = getattr(agent, "_last_experiment_cycle", None)
+                history_before = list(getattr(agent, "_intention_history", []))
                 await runner.stop()
+                from src.core.subsystem_base import PluginRegistry
+
+                PluginRegistry.reset_global()
                 agent, report = create_agent(env, "AutonomousMeasure")
                 restart = {"source": report["source"],
                            "memory_identical": before == agent.mental_models.to_storage_dict(),
                            "energy_identical": energy_before == agent.energy,
                            "fatigue_identical": fatigue_before == agent.interoception.state.fatigue,
                            "cooldown_identical": last_check == getattr(agent, "_last_experiment_cycle", None)}
+                restart["intention_history_equal"] = history_before == getattr(agent, "_intention_history", [])
                 runner = attach(agent)
                 await runner.start()
     finally:
@@ -111,6 +130,11 @@ async def measure(cycles, seed):
     claims = {key: {**claim.conclusion(), "observations": len(claim.evidence_node.experiences)}
               for key, claim in agent.mental_models.claims.items()}
     return {"seed": seed, "cycles": cycles, "arbitrated_actions": dict(actions),
+            "continuation_offers": dict(continuation_offers),
+            "continuation_choices": dict(continuation_choices),
+            "continuation_losses": dict(continuation_losses),
+            "continuation_traces": continuation_traces,
+            "final_intention_history": list(getattr(agent, "_intention_history", [])),
             "winning_sources": dict(sources), "initial_sources": dict(initial_sources),
             "escape_transitions": dict(transitions), "escape_traces": escape_traces,
             "deferred_methods": dict(deferred_methods), "released_methods": dict(released_methods),
@@ -132,6 +156,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--no-method-feedback", action="store_true")
+    parser.add_argument("--no-continuation", action="store_true")
     args = parser.parse_args()
     if args.cycles < 2:
         parser.error("Нужно минимум два цикла")
@@ -141,13 +166,16 @@ if __name__ == "__main__":
         from config.simulation_config import LR_CONFIG
 
         LR_CONFIG.WEB_SEARCH_ENABLED = False
-        if args.no_method_feedback:
-            from unittest.mock import patch
+        from contextlib import ExitStack
+        from unittest.mock import patch
 
-            with patch("src.cognition.method_feedback.prepare_candidates", side_effect=lambda agent, candidates: (candidates, {})):
-                result = asyncio.run(measure(args.cycles, args.seed))
-        else:
+        with ExitStack() as stack:
+            if args.no_method_feedback:
+                stack.enter_context(patch("src.cognition.method_feedback.prepare_candidates", side_effect=lambda agent, candidates: (candidates, {})))
+            if args.no_continuation:
+                stack.enter_context(patch("src.cognition.intention_continuation.continuation_candidate", return_value=None))
             result = asyncio.run(measure(args.cycles, args.seed))
+        result["continuation_enabled"] = not args.no_continuation
         result["method_feedback_enabled"] = not args.no_method_feedback
         args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         logging.shutdown()
