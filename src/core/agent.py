@@ -3789,6 +3789,13 @@ class DigitalBeing:
             candidates.append(experimental)
             result["experiment_proposal"] = experimental
 
+        from src.cognition.intention_continuation import continuation_candidate
+
+        continuation = continuation_candidate(self)
+        if continuation is not None:
+            candidates.append(continuation)
+            result["continuation_proposal"] = continuation
+
         # === УСТАЛОСТЬ: тяжёлая работа хуже даётся ===
         # ``cognitive_throughput`` падает с усталостью (1 - 0.7*fatigue).
         # Раньше величина только считалась и сохранялась в чекпоинт —
@@ -3980,6 +3987,9 @@ class DigitalBeing:
                 else:
                     action_result = self.act(chosen_action)
                 finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
+                from src.cognition.intention_evidence import finish_evidence_goal
+
+                finish_evidence_goal(self, intention_entry)
                 result["intention_id"] = intention_entry["id"]
                 result["executed_intention"] = {"action": chosen_action,
                                                 "source": selected_intention.get("source"),
