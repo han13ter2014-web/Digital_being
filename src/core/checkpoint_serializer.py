@@ -84,8 +84,15 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         Словарь, готовый для сериализации в JSON.
     """
     from src.core.checkpoint_migrations import SCHEMA_VERSION
+    from src.core.personal_continuity import capture_personal_state
+    from src.cognition.inference_continuity import capture_inference
 
     return {
+        "personal_state": capture_personal_state(agent),
+        "active_inference": (
+            capture_inference(agent.active_inference)
+            if getattr(agent, "active_inference", None) is not None else None
+        ),
         "schema_version": SCHEMA_VERSION,
         "name": agent.name,
         "energy": agent.energy,
@@ -125,6 +132,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
                 "started_at": q["started_at"],
                 "last_explored_at": q["last_explored_at"],
                 "explorations_count": len(q["explorations"]),
+                "explorations": [dict(entry) for entry in q["explorations"]],
                 "max_explorations": q["max_explorations"],
                 "hint": q.get("hint"),
                 "answered": q["answered"],
@@ -245,6 +253,13 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     from src.core.checkpoint_validation import validate_checkpoint_state
 
     validate_checkpoint_state(state)
+    inference_data = state.get("active_inference")
+    if inference_data is not None:
+        from src.cognition.inference_continuity import validate_inference
+
+        if getattr(agent, "active_inference", None) is None:
+            raise ValueError("active_inference: подсистема недоступна для восстановления")
+        validate_inference(inference_data, agent.active_inference)
     saved_models = state.get("mental_models")
     if saved_models is not None and getattr(agent, "mental_models", None) is not None:
         from src.cognition.mental_models import ConceptNode
@@ -371,9 +386,10 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             existing = list(getattr(agent.naming_dialogue, "_name_history", []))
             agent.naming_dialogue._name_history = list(saved_history) + existing
 
-    # Восстанавливаем открытые вопросы (без полной истории explorations)
+    # История попыток нужна для продолжения стратегии, а не нового старта.
     saved_questions = state.get("open_questions") or []
-    if saved_questions and hasattr(agent, "_open_questions"):
+    if "open_questions" in state and hasattr(agent, "_open_questions"):
+        agent._open_questions.clear()
         for q_data in saved_questions:
             agent._open_questions.append({
                 "text": q_data.get("text", ""),
@@ -382,7 +398,7 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
                 "last_explored_at": q_data.get(
                     "last_explored_at", agent.cycle_count
                 ),
-                "explorations": [],  # истории размышлений в чекпоинт не сохраняем
+                "explorations": [dict(entry) for entry in q_data.get("explorations", [])],
                 "max_explorations": q_data.get("max_explorations", 5),
                 "hint": q_data.get("hint"),
                 "answered": q_data.get("answered", False),
@@ -470,6 +486,15 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     if mot_state and hasattr(agent, 'motivation_system') and agent.motivation_system:
         from src.core.motivation.unified_motivation import UnifiedMotivationSystem
         agent.motivation_system = UnifiedMotivationSystem.from_checkpoint_dict(agent, mot_state)
+
+    if inference_data is not None:
+        from src.cognition.inference_continuity import restore_inference
+
+        restore_inference(agent.active_inference, inference_data)
+    if "personal_state" in state:
+        from src.core.personal_continuity import restore_personal_state
+
+        restore_personal_state(agent, state["personal_state"])
 
 # ============================================================
 # Сериализатор (I/O)

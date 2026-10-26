@@ -56,6 +56,10 @@ class DecisionArbitrator:
     # ============================================================
     # Связывание с иммунной системой (создаётся извне)
     # ============================================================
+    def attach_identity(self, identity) -> None:
+        self._systems["self"] = identity
+        self._available["self"] = identity is not None
+
     def attach_immune_system(self, immune_system) -> None:
         self._systems["immune"] = immune_system
         self._available["immune"] = True
@@ -120,15 +124,9 @@ class DecisionArbitrator:
         if self._available.get("self"):
             try:
                 core = self._systems["self"]
-                # Синтезируем с учётом текущего вердикта диалога
-                dominant = opinions.get("dialogue", {}).get(
-                    "dominant_voice", "Наблюдатель"
-                )
-                new_identity = core.synthesize({
-                    "dominant_voice": dominant,
-                    "voices": [dominant],
-                    "reason": topic,
-                })
+                # Оценка альтернатив читает идентичность, но не проживает
+                # каждый рассмотренный вариант как изменение себя.
+                new_identity = core.core_identity
                 opinions["self"] = {
                     "stability": core.identity_stability_score,
                     "identity": new_identity[:120],

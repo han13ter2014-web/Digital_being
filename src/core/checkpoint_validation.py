@@ -186,6 +186,14 @@ def validate_checkpoint_state(state) -> None:
     modifies the input, constructs an agent, or applies saved hyperparameters.
     """
     _dict(state, "state")
+    if state.get("active_inference") is not None:
+        from src.cognition.inference_continuity import validate_inference
+
+        validate_inference(state["active_inference"])
+    if "personal_state" in state:
+        from src.core.personal_continuity import validate_personal_state
+
+        validate_personal_state(state["personal_state"])
     if "schema_version" in state:
         _integer(state["schema_version"], "schema_version", nonnegative=True)
         if state["schema_version"] > SCHEMA_VERSION:
@@ -246,6 +254,14 @@ def validate_checkpoint_state(state) -> None:
         for index, question in enumerate(_list(state["open_questions"], "open_questions")):
             path = f"open_questions[{index}]"
             _dict(question, path)
+            if "explorations" in question:
+                for attempt_index, attempt in enumerate(_list(question["explorations"], f"{path}.explorations")):
+                    attempt_path = f"{path}.explorations[{attempt_index}]"
+                    _dict(attempt, attempt_path)
+                    _integer(attempt.get("cycle"), f"{attempt_path}.cycle", nonnegative=True)
+                    for field in ("thought", "strategy"):
+                        if not isinstance(attempt.get(field), str):
+                            _fail(f"{attempt_path}.{field}", "expected a string")
             for field in ("started_at", "last_explored_at", "explorations_count", "max_explorations"):
                 if field in question:
                     _integer(question[field], f"{path}.{field}", nonnegative=True)

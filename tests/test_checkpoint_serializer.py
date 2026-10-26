@@ -175,7 +175,7 @@ def test_build_state_open_questions_metadata():
     assert q["text"] == "что такое любовь?"
     assert q["explorations_count"] == 1  # посчитали
     # Полные explorations НЕ сохраняются
-    assert "explorations" not in q
+    assert q["explorations"] == [{"cycle": 6, "strategy": "x", "thought": "..."}]
 
 
 # ============================================================
