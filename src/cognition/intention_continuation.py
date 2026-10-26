@@ -28,6 +28,9 @@ def continuation_candidate(agent):
         if key in seen:
             continue
         seen.add(key)
+        durable = waits.get(waiting_key(action, target))
+        if durable and durable.get("resolution"):
+            continue
         outcome = entry.get("outcome") or {}
         evidence_goal = entry.get("evidence_goal")
         if evidence_goal is not None:
