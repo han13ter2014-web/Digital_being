@@ -123,6 +123,7 @@ class ChatWindow:
         self.bus.subscribe(Events.ENERGY_LOW, self._on_energy_low)
         self.bus.subscribe(Events.ENERGY_RECOVERED, self._on_energy_recovered)
         self.bus.subscribe(Events.TICK, self._on_tick)
+        self.bus.subscribe(Events.USER_OPENED_CHAT, self._on_open_requested)
         # === Этап 2.5: вопросы и сообщения агента пользователю ===
         # Раньше UserInteraction только print()ал в stdout (для терминала),
         # а GUI не получал ничего. Теперь ask_user публикует AGENT_QUESTION,
@@ -141,6 +142,9 @@ class ChatWindow:
             self.bus.subscribe("naming_initiated", self._on_naming_initiated)
         except Exception:
             pass
+
+    async def _on_open_requested(self, event) -> None:
+        self.show()
 
     async def _on_naming_initiated(self, event) -> None:
         """Показываем приветствие агента + просьбу ввести имя.
