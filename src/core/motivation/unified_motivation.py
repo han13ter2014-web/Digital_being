@@ -757,16 +757,16 @@ class UnifiedMotivationSystem:
                     "type": "drive_driven"
                 })
         
-        # 3. Если нет нажимающих нужд/драйвов — базовый исследовательский кандидат
+        # Нет насущного побуждения — допустима пауза, не обязанность учиться.
         if not candidates:
             candidates.append({
                 "source": "motivation",
-                "action": "explore",
+                "action": "wait",
                 "strength": 0.3,
                 "params": {"reason": "no_pressing_needs"},
-                "need": "curiosity",
+                "need": None,
                 "priority": 0.3,
-                "type": "default_exploration"
+                "type": "unpressured_pause"
             })
         
         # Сортируем по приоритету (убывание)
