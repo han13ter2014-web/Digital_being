@@ -3862,10 +3862,20 @@ class DigitalBeing:
         # арбитр — «explore». Без нормализации проверка тупика смотрела бы
         # на другое имя и никогда не срабатывала.
         result["initial_arbitration"] = dict(result.get("arbitrator") or {})
+        if (result.get("arbitrator") or {}).get("verdict") == "stop":
+            result["action_refused"] = {"action": chosen_action,
+                                        "reason": result["arbitrator"].get("reasoning", "stop")}
+            chosen_action = "wait"
         chosen_type = self._normalize_action(chosen_action)
         if chosen_action and self.loop_closer.is_stuck(chosen_type):
+            stopped_types = {
+                self._normalize_action(entry.get("action"))
+                for entry in result.get("arbitrator", {}).get("all_evaluations", [])
+                if entry.get("verdict") == "stop"
+            }
             ranked = sorted(
-                candidates,
+                [candidate for candidate in candidates
+                 if self._normalize_action(candidate.get("action")) not in stopped_types],
                 key=lambda c: float(c.get("strength", 0.0)),
                 reverse=True,
             )
@@ -3873,6 +3883,8 @@ class DigitalBeing:
             # если тело истощено, «think_decompose» — это ещё один отказ, а
             # если очередь вопросов полна — пустой ход.
             fallback = self._stuck_fallback()
+            if self._normalize_action(fallback) in stopped_types:
+                fallback = "wait"
             alternative = self.loop_closer.choose(
                 ranked,
                 fallback=fallback,
@@ -4111,14 +4123,7 @@ class DigitalBeing:
                     f"(anxiety={soul_report['mortality']['mortality_anxiety']:.2f})"
                 )
 
-        # === ПРИВЯЗАННОСТЬ: записываем взаимодействие с пользователем ===
-        if hasattr(self, "attachment") and hasattr(self, "user_interaction"):
-            if self.user_interaction and self.user_interaction.pending_questions:
-                self.attachment.record_interaction(
-                    name="user",
-                    was_helpful=True,  # пользователь ответил — это хорошо
-                    was_substantial=True,
-                )
+        # Контакт записывается при принятии ответа, не при ожидании.
 
         # === Шаг 2: лимит ментальных моделей (вызывается периодически) ===
         if self.cycle_count % 50 == 0:

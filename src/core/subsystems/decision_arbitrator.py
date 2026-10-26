@@ -311,15 +311,23 @@ class DecisionArbitrator:
         # Сортируем по комбинированному скору (убывание)
         evaluations.sort(key=lambda e: e["combined_score"], reverse=True)
         
-        best = evaluations[0]
+        allowed = [entry for entry in evaluations if entry["verdict"]["verdict"] != "stop"]
+        if not allowed:
+            return {
+                "action": "wait", "source": "arbitrator_refusal", "params": {},
+                "verdict": "stop", "confidence": 1.0,
+                "reasoning": "Все предложенные действия остановлены арбитром",
+                "voices": {},
+                "all_evaluations": [
+                    {"action": entry["candidate"]["action"], "source": entry["candidate"]["source"],
+                     "combined_score": round(entry["combined_score"], 3),
+                     "verdict": entry["verdict"]["verdict"]} for entry in evaluations
+                ],
+            }
+        best = allowed[0]
         best_candidate = best["candidate"]
         best_verdict = best["verdict"]
-        
-        # Если лучший вердикт stop — всё равно возвращаем, но с предупреждением
-        if best_verdict["verdict"] == "stop":
-            reasoning = f"Арбитр блокирует: {best_verdict['reasoning']}. Выбрано наименее плохое: {best_candidate['action']}"
-        else:
-            reasoning = f"Выбрано: {best_candidate['action']} (источник: {best_candidate['source']}, score: {best['combined_score']:.2f}). {best_verdict['reasoning']}"
+        reasoning = f"Выбрано: {best_candidate['action']} (источник: {best_candidate['source']}, score: {best['combined_score']:.2f}). {best_verdict['reasoning']}"
 
         return {
             "action": best_candidate["action"],
