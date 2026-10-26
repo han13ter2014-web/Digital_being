@@ -1704,7 +1704,62 @@ class DigitalBeing:
             if searcher is None:
                 return False
             return bool(getattr(searcher, "is_enabled", False))
+        if normalized == "decomposition":
+            # Декомпозиция полезна только пока есть что разложить и куда
+            # положить результат: под-вопросы идут в очередь, а она не
+            # резиновая. Раньше действие предлагалось всегда и в
+            # большинстве случаев заканчивалось «не разбивается на части» —
+            # гарантированный пустой цикл.
+            return (
+                self._decomposition_has_room()
+                and self._pick_decomposable_target(remember=False) is not None
+            )
         return self._is_action_affordable(normalized)
+
+    def _decomposition_has_room(self) -> bool:
+        """Есть ли место в очереди открытых вопросов для под-вопросов."""
+        limit = int(
+            getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0
+        )
+        if limit <= 0:
+            return False
+        try:
+            questions = self.get_open_questions()
+        except Exception:
+            return False
+        unanswered = sum(1 for q in questions if not q.get("answered"))
+        return unanswered < limit
+
+    def _stuck_fallback(self) -> str:
+        """Что делать, когда все кандидаты оказались тупиковыми.
+
+        Раньше здесь всегда был ``think_decompose`` — причём это же
+        действие чаще всего и было тупиковым. То есть запасной выход вёл
+        обратно в тот же тупик.
+
+        Порядок: отдых, если тело требует; иначе продуктивное действие с
+        доказанной историей эффекта, которое сейчас выполнимо и не в
+        тупике. Если такого нет — отдых: он хотя бы восстанавливает тело,
+        вместо того чтобы делать вид, что агент работает.
+        """
+        if self._body_needs_rest() or self._is_resting():
+            return "deep_rest"
+
+        closer = getattr(self, "loop_closer", None)
+        if closer is not None:
+            proven = sorted(
+                closer.effective_actions(),
+                key=lambda name: -closer.effect_count(name),
+            )
+            for name in proven:
+                if not closer.is_productive(name):
+                    continue
+                if closer.is_stuck(name):
+                    continue
+                if not self._is_action_available(name):
+                    continue
+                return name
+        return "deep_rest"
 
     def _release_recovered_denials(self) -> None:
         """Снимает пометку «тупик» с действий, которые снова по карману.
@@ -1940,6 +1995,59 @@ class DigitalBeing:
         self._remember_exploration(target)
         return target
 
+    def _decomposable_targets(self) -> List[str]:
+        """Кандидаты на декомпозицию в порядке приоритета, без побочных эффектов.
+
+        Отдельный список, потому что у декомпозиции другое требование, чем
+        у исследования: ей нужно не «что угодно неизученное», а «то, что
+        делится на части». Раньше она брала первую попавшуюся цель и в
+        большинстве случаев возвращала «не разбивается на части» — цикл
+        потрачен, мир не изменился.
+        """
+        targets: List[str] = []
+
+        questions = getattr(self, "_open_questions", None)
+        if isinstance(questions, list):
+            for item in questions:
+                if not isinstance(item, dict) or item.get("answered"):
+                    continue
+                text = str(item.get("text") or "").strip()
+                if text:
+                    targets.append(text)
+
+        concepts = getattr(self.mental_models, "concepts", None)
+        known = set(concepts) if isinstance(concepts, dict) else set()
+        for topic in self._stimulus_topics():
+            if topic not in known:
+                targets.append(topic)
+
+        if isinstance(concepts, dict):
+            for name in concepts:
+                if not self._is_learnable(name):
+                    continue
+                confidence = float(
+                    getattr(concepts[name], "confidence", 0.0) or 0.0
+                )
+                if confidence < 0.9:
+                    targets.append(name)
+
+        # Порядок важен: первый разложимый — самый приоритетный.
+        return list(dict.fromkeys(targets))
+
+    def _pick_decomposable_target(self, remember: bool = True) -> Optional[str]:
+        """Первая тема, которую действительно есть на что разложить."""
+        for target in self._decomposable_targets():
+            try:
+                parts = self._decompose_query(target)
+            except Exception:
+                continue
+            if not parts:
+                continue
+            if remember:
+                self._remember_exploration(target)
+            return target
+        return None
+
     def _stimulus_topics(self) -> List[str]:
         """Темы из пула стимулов, приведённые к виду концепций."""
         pool = getattr(LR_CONFIG, "STIMULI_POOL", None) or []
@@ -2005,13 +2113,17 @@ class DigitalBeing:
         }
 
     def _act_decompose(self) -> Dict:
-        """Разбирает слабую концепцию на под-вопросы.
+        """Разбирает слабую концепцию на под-вопросы и сохраняет их.
 
-        Декомпозиция — тоже работа: она создаёт новые под-темы, с которыми
-        агент столкнётся в следующих циклах. Раньше это действие ничего не
-        делало.
+        Декомпозиция — работа: она создаёт новые темы, с которыми агент
+        столкнётся в следующих циклах. Раньше под-вопросы вычислялись,
+        попадали в текст ответа и терялись: мир не менялся, действие
+        считалось бесплодным, попадало в тупики — и при этом служило
+        запасным вариантом выхода из тупика. Агент тратил циклы на
+        действие, которое по построению ничего не делало (в замере —
+        115–162 выбора за 500 циклов).
         """
-        target = self._pick_exploration_target()
+        target = self._pick_decomposable_target()
         if not target:
             return {"target": "", "text": "Ответ: разбирать нечего"}
 
@@ -2027,14 +2139,66 @@ class DigitalBeing:
                 "text": f"Ответ: '{target}' не разбивается на части",
             }
 
+        queued = self._queue_sub_questions(parts)
+        suffix = (
+            f"; в очередь вопросов +{queued}" if queued else ""
+        )
         return {
             "target": target,
             "parts": list(parts)[:5],
+            "queued": queued,
             "text": (
                 f"Ответ: разобрал '{target}' на {len(parts)} частей: "
                 + "; ".join(str(p) for p in parts[:3])
+                + suffix
             ),
         }
+
+    def _queue_sub_questions(self, parts) -> int:
+        """Ставит под-вопросы в очередь открытых вопросов.
+
+        Ограничения те же, что в ``thinking_pipeline``: не больше
+        ``OPEN_QUESTIONS_MAX_UNANSWERED`` неотвеченных, по одной попытке
+        размышления на под-вопрос и без дублей. Иначе декомпозиция
+        вытеснила бы всё остальное из очереди.
+
+        Returns:
+            Сколько вопросов реально добавлено.
+        """
+        ask = getattr(self, "ask_user", None)
+        if not callable(ask):
+            return 0
+        limit = int(getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0)
+        try:
+            existing = self.get_open_questions()
+        except Exception:
+            existing = []
+        unanswered = sum(1 for q in existing if not q.get("answered"))
+        known = {
+            str(q.get("text", "")).strip().lower() for q in existing
+        }
+
+        added = 0
+        for part in parts:
+            if unanswered + added >= limit:
+                break
+            text = str(part or "").strip()
+            key = text.lower()
+            if not text or key in known or "стратегия=" in key:
+                continue
+            try:
+                result = ask(
+                    text, source="decomposition", max_explorations=1
+                )
+            except Exception as exc:
+                get_logger().log(
+                    f"[DECOMPOSE] не удалось поставить '{text[:40]}': {exc}"
+                )
+                continue
+            if result.get("status") == "queued":
+                added += 1
+                known.add(key)
+        return added
 
     def _act_synthesize(self) -> Dict:
         """Синтез: попытка собрать определение из уже известных связей.
@@ -3626,13 +3790,10 @@ class DigitalBeing:
                 key=lambda c: float(c.get("strength", 0.0)),
                 reverse=True,
             )
-            # Запасной вариант тоже должен быть выполнимым: если тело
-            # истощено, «think_decompose» — это ещё один отказ, а не выход.
-            fallback = (
-                "deep_rest"
-                if (self._body_needs_rest() or self._is_resting())
-                else "think_decompose"
-            )
+            # Запасной вариант тоже должен быть выполнимым и результативным:
+            # если тело истощено, «think_decompose» — это ещё один отказ, а
+            # если очередь вопросов полна — пустой ход.
+            fallback = self._stuck_fallback()
             alternative = self.loop_closer.choose(
                 ranked,
                 fallback=fallback,

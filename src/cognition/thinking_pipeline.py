@@ -164,7 +164,10 @@ class ThinkingPipeline:
                 str(q.get("text", "")).strip().lower() for q in open_questions
             }
             unanswered = sum(1 for q in open_questions if not q.get("answered"))
-            if unanswered < 3:
+            limit = int(
+                getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0
+            )
+            if unanswered < limit:
                 for sub_question in decomposed[:3]:
                     key = sub_question.strip().lower()
                     if not key or key in known_questions or "стратегия=" in key:

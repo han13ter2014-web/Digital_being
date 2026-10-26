@@ -212,7 +212,9 @@ def test_reset_denial_keeps_no_effect_counter():
     closer = LoopCloser(max_no_effect=3)
     empty = WorldSignature()
     closer.observe("explore", empty, empty)
+    closer.observe("explore", empty, empty)
     closer.observe("explore", empty, empty, reason="denied:too_tired")
+    assert closer.no_effect_streak("explore") == 2
 
     closer.reset_denial("explore")
 

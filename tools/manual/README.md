@@ -14,6 +14,7 @@ python tools/manual/death_risk_driven_manual.py
 python tools/manual/motivation_measure.py 200
 python tools/manual/body_calibration.py
 python tools/manual/memory_maturity_measure.py 300 --hold-energy --seed 1
+python tools/manual/loop_accounting_measure.py 200 --hold-energy --seed 1
 ```
 
 `motivation_measure.py` — замер мотивации, тела и памяти через настоящий
@@ -47,6 +48,14 @@ python tools/manual/memory_maturity_measure.py 300 --hold-energy --seed 1
 ответить и о скольких отвечает из памяти. Сравнивает прогон со сном и
 без сна; `--seed N` фиксирует зерно случайности, иначе два прогона —
 разные траектории и разницу нельзя приписать консолидации.
+
+`loop_accounting_measure.py` — замер бухгалтерии петли: сколько действий
+дают наблюдаемый результат, какие действия агент перестал выбирать и
+почему (отказ тела или «выполнял, мир не менялся»), и как считается доля
+результативности. Печатает два числа: по продуктивным действиям (как
+считается теперь) и по всем (как считалось раньше, включая отдых и
+отказы). `--seed N` нужен, чтобы «до/после» сравнивалось на одной
+траектории.
 
 Автоматические тесты живут в `tests/` и запускаются так:
 

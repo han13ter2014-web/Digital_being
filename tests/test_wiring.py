@@ -303,11 +303,16 @@ def test_set_own_goal_does_not_duplicate(agent):
 
 
 def test_denied_action_is_recorded(agent):
-    """Отказ (усталость, бюджет) — тоже «мир не изменился».
+    """Отказ (усталость, бюджет) — исход, но не «бесплодное действие».
 
     Раньше act() выходил досрочно и ничего не записывал, поэтому
     действие, которое сейчас невозможно, выбиралось каждый цикл: за
     250 тиков агент 247 раз выбирал вопрос, который нельзя было задать.
+
+    Отказ считается отдельным счётчиком ``denied_streak``: тело не дало
+    действие выполнить, и в «нет эффекта» это не превращается — иначе
+    после восстановления действие оставалось бы тупиковым по причине,
+    которой уже нет.
     """
     agent.energy = 0.0  # гарантированно «слишком устал»
 
@@ -317,14 +322,16 @@ def test_denied_action_is_recorded(agent):
     assert outcome is not None
     assert outcome.had_effect is False
     assert "denied" in outcome.reason
-    assert agent.loop_closer.no_effect_streak("explore") >= 1
+    assert agent.loop_closer.denied_streak("explore") >= 1
+    assert agent.loop_closer.no_effect_streak("explore") == 0
 
 
 def test_denied_streak_grows(agent):
     agent.energy = 0.0
     for _ in range(3):
         agent.act("explore")
-    assert agent.loop_closer.no_effect_streak("explore") >= 3
+    assert agent.loop_closer.denied_streak("explore") >= 3
+    assert agent.loop_closer.is_stuck("explore") is True
 
 
 # ============================================================

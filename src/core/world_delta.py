@@ -37,6 +37,7 @@ class WorldSignature:
         confidence_milli: сумма уверенностей × 1000 (целое, чтобы снимок
             был сравнимым и не зависел от плавающих погрешностей).
         answered_questions: открытых вопросов с найденным ответом.
+        open_questions: вопросов, ждущих ответа в очереди.
         web_hits: успешных ответов из сети за жизнь процесса.
         notes: записей в журнале агента (если он есть).
     """
@@ -45,6 +46,7 @@ class WorldSignature:
     concepts: int = 0
     confidence_milli: int = 0
     answered_questions: int = 0
+    open_questions: int = 0
     web_hits: int = 0
     notes: int = 0
     experiences: int = 0
@@ -57,6 +59,7 @@ class WorldSignature:
             "concepts": self.concepts,
             "confidence_milli": self.confidence_milli,
             "answered_questions": self.answered_questions,
+            "open_questions": self.open_questions,
             "web_hits": self.web_hits,
             "notes": self.notes,
             "experiences": self.experiences,
@@ -78,6 +81,7 @@ class WorldDelta:
     concepts: int = 0
     confidence_milli: int = 0
     answered_questions: int = 0
+    open_questions: int = 0
     web_hits: int = 0
     notes: int = 0
     experiences: int = 0
@@ -97,6 +101,7 @@ class WorldDelta:
                 self.concepts,
                 self.confidence_milli,
                 self.answered_questions,
+                self.open_questions,
                 self.web_hits,
                 self.notes,
                 self.experiences,
@@ -115,6 +120,7 @@ class WorldDelta:
                 self.concepts,
                 self.confidence_milli,
                 self.answered_questions,
+                self.open_questions,
                 self.web_hits,
                 self.notes,
                 self.experiences,
@@ -142,6 +148,8 @@ class WorldDelta:
             parts.append(f"уверенность {self.confidence_gain:+.2f}")
         if self.answered_questions:
             parts.append(f"ответов {self.answered_questions:+d}")
+        if self.open_questions:
+            parts.append(f"открытых вопросов {self.open_questions:+d}")
         if self.web_hits:
             parts.append(f"из сети {self.web_hits:+d}")
         if self.notes:
@@ -160,6 +168,7 @@ class WorldDelta:
             "concepts": self.concepts,
             "confidence_milli": self.confidence_milli,
             "answered_questions": self.answered_questions,
+            "open_questions": self.open_questions,
             "web_hits": self.web_hits,
             "notes": self.notes,
             "experiences": self.experiences,
@@ -177,6 +186,7 @@ def between(before: WorldSignature, after: WorldSignature) -> WorldDelta:
         answered_questions=(
             after.answered_questions - before.answered_questions
         ),
+        open_questions=after.open_questions - before.open_questions,
         web_hits=after.web_hits - before.web_hits,
         notes=after.notes - before.notes,
         experiences=after.experiences - before.experiences,
@@ -201,6 +211,23 @@ def _count_answered_questions(agent: Any) -> int:
         1
         for item in questions
         if isinstance(item, dict) and item.get("answered") and item.get("answer")
+    )
+
+
+def _count_open_questions(agent: Any) -> int:
+    """Сколько вопросов ждут ответа в очереди.
+
+    Нужно, чтобы декомпозиция была видна как результат: она создаёт новые
+    темы, но до сих пор это происходило «в тексте ответа» и не меняло
+    ничего наблюдаемого, поэтому действие считалось бесплодным.
+    """
+    questions = getattr(agent, "_open_questions", None)
+    if not isinstance(questions, list):
+        return 0
+    return sum(
+        1
+        for item in questions
+        if isinstance(item, dict) and not item.get("answered")
     )
 
 
@@ -308,6 +335,7 @@ def capture(agent: Any) -> WorldSignature:
         concepts=concepts,
         confidence_milli=confidence_milli,
         answered_questions=_count_answered_questions(agent),
+        open_questions=_count_open_questions(agent),
         web_hits=_count_web_hits(agent),
         notes=_count_notes(agent),
         experiences=experiences,
