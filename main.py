@@ -457,7 +457,10 @@ def _print_banner(agent) -> None:
 def _save_and_report(agent) -> None:
     try:
         agent.save_state(force=True)
-        agent.save_mental_models()
+        from config.simulation_config import SIM_CONFIG
+
+        if getattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite") != "sqlite":
+            agent.save_mental_models()
     except Exception as exc:
         logger.warning("Не удалось сохранить состояние: %s", exc)
     print("\n" + "=" * 60)

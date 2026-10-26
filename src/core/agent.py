@@ -1210,6 +1210,7 @@ class DigitalBeing:
         ser = CheckpointSerializer(
             checkpoint_dir=getattr(self, "checkpoint_dir", None),
             max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
+            backend=getattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite"),
         )
         filename = ser.save(state, self.name, self.cycle_count)
 
@@ -3798,6 +3799,20 @@ class DigitalBeing:
                 "strength": 1.0,
                 "params": {"reason": "nothing_affordable"},
             }]
+
+        from src.cognition.method_feedback import prepare_candidates
+
+        candidates, feedback = prepare_candidates(self, candidates)
+        result["method_feedback"] = feedback
+        if not candidates:
+            if self._body_needs_rest() or self._is_resting():
+                fallback = "deep_rest"
+                reason = "body_needs_rest"
+            else:
+                fallback = "wait"
+                reason = "no_working_method"
+            candidates = [{"action": fallback, "source": "deliberate_pause",
+                           "strength": 0.1, "params": {"reason": reason}}]
 
         # === ARBITRATION ===
         chosen_action = None

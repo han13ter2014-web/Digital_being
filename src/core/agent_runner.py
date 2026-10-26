@@ -403,7 +403,10 @@ class AgentRunner:
         """Сохранить состояние и ментальные модели. Не падает при ошибках."""
         try:
             self.agent.save_state(force=True)
-            self.agent.save_mental_models()
+            from config.simulation_config import SIM_CONFIG
+
+            if getattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite") != "sqlite":
+                self.agent.save_mental_models()
             flush_logs()
             return True
         except Exception as e:

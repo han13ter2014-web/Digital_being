@@ -48,6 +48,9 @@
 | [EXPERIMENT_CHOICE.md](EXPERIMENT_CHOICE.md) | проверка собственного утверждения как необязательный кандидат арбитру |
 | [AUTONOMOUS_LIFE_EXPERIMENT.md](AUTONOMOUS_LIFE_EXPERIMENT.md) | три естественные траектории с перезапуском; границы проверок и доминирование выхода из тупика |
 | [LOOP_ESCAPE_DIAGNOSTICS.md](LOOP_ESCAPE_DIAGNOSTICS.md) | причинный журнал: повторные предложения застрявших способов и замена отдыхом |
+| [METHOD_FEEDBACK.md](METHOD_FEEDBACK.md) | этап 1: бесплодный способ откладывается до арбитража, новые сведения допускают повтор |
+| [SQLITE_CHECKPOINTS.md](SQLITE_CHECKPOINTS.md) | opt-in SQLite: разделяемые блоки снимков, совместимость JSON, ограничения масштаба |
+| [ACCESS_AND_STORAGE_PLAN.md](ACCESS_AND_STORAGE_PLAN.md) | аудит доступов и порядок подключения собственной среды деятельности |
 | [CHANGELOG.md](../CHANGELOG.md) | история изменений |
 
 ## Эксплуатация и сборка

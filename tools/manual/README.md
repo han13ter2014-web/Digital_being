@@ -57,6 +57,12 @@ python tools/manual/loop_accounting_measure.py 200 --hold-energy --seed 1
 а не по округлённым процентам. Результат проверки гипотезы глубины:
 [`docs/DEPTH_EXPERIMENT.md`](../../docs/DEPTH_EXPERIMENT.md).
 
+`checkpoint_storage_measure.py --records 10000 --snapshots 20 --report PATH` —
+размер и время JSON/SQLite на одинаковом растущем опыте.
+`checkpoint_maintenance.py DATABASE --import-json FILE` — явный импорт без
+удаления исходника; `--gc` — удаление недостижимых блоков.
+[Формат и ограничения](../../docs/SQLITE_CHECKPOINTS.md).
+
 `autonomous_life_measure.py --cycles 1000 --seed N --report PATH` — естественная
 энергия, неподменённый арбитр, перезапуск посередине; источники выбора,
 предложения проверок, целевые наблюдения и целостность восстановления.
@@ -64,6 +70,8 @@ python tools/manual/loop_accounting_measure.py 200 --hold-energy --seed 1
 Также сохраняет initial_sources, escape_transitions и escape_traces:
 исходный выбор, причину тупика, замену и её исход.
 [Диагностика](../../docs/LOOP_ESCAPE_DIAGNOSTICS.md).
+`--no-method-feedback` отключает только раннюю обратную связь для контроля
+«до/после»; результаты: [METHOD_FEEDBACK.md](../../docs/METHOD_FEEDBACK.md).
 
 `experiment_choice_measure.py --report PATH` — контролируемое сравнение
 арбитража с предложением проверки и без него: слабое побуждение уступает,

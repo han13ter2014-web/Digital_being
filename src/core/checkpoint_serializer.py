@@ -153,7 +153,10 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             "current_config": agent.meta_learner._get_current_config(),
             "current_fitness": agent.meta_learner.fitness_history[-1] if agent.meta_learner.fitness_history else 0.0,
             "best_config": agent.meta_learner.best_config,
-            "best_fitness": agent.meta_learner.best_fitness,
+            "best_fitness": (
+                agent.meta_learner.best_fitness
+                if agent.meta_learner.best_fitness != float("-inf") else None
+            ),
             "population": agent.meta_learner.population,
             "cycle_counter": agent.meta_learner.cycle_counter,
         } or {},
@@ -209,6 +212,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # Изученные темы: чтобы исследование продолжалось, а не начиналось
         # с той же концепции после перезапуска.
+        "method_information_context": getattr(agent, "_method_information_context", None),
         "last_experiment_cycle": getattr(agent, "_last_experiment_cycle", None),
         "exploration_history": list(
             getattr(agent, "_exploration_history", [])[-200:]
@@ -315,6 +319,7 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # и не изучать ту же тему заново.
     if getattr(agent, "loop_closer", None) is not None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    agent._method_information_context = state.get("method_information_context")
     last_experiment = state.get("last_experiment_cycle")
     agent._last_experiment_cycle = last_experiment if isinstance(last_experiment, int) and 0 <= last_experiment <= agent.cycle_count else None
     saved_history = state.get("exploration_history")
@@ -411,7 +416,8 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             if name in agent.meta_learner.hyperparams:
                 agent.meta_learner.hyperparams[name].value = value
         agent.meta_learner.best_config = ml_state.get("best_config", agent.meta_learner.best_config)
-        agent.meta_learner.best_fitness = ml_state.get("best_fitness", agent.meta_learner.best_fitness)
+        if ml_state.get("best_fitness") is not None:
+            agent.meta_learner.best_fitness = ml_state["best_fitness"]
         agent.meta_learner.population = ml_state.get("population", agent.meta_learner.population)
         agent.meta_learner.cycle_counter = ml_state.get("cycle_counter", agent.meta_learner.cycle_counter)
     
@@ -478,6 +484,7 @@ class CheckpointSerializer:
         max_checkpoints: int = 20,
         compress: bool = False,
         compress_level: int = 6,
+        backend: str = "json",
     ) -> None:
         """
         Args:
@@ -486,6 +493,9 @@ class CheckpointSerializer:
             compress: использовать ли gzip-сжатие (Этап 5 оптимизации).
             compress_level: уровень сжатия 1-9 (по умолчанию 6 — хороший баланс).
         """
+        if backend not in {"json", "sqlite"}:
+            raise ValueError("Неизвестный backend чекпоинтов")
+        self.backend = backend
         self.checkpoint_dir = checkpoint_dir or data_path("checkpoints")
         self.max_checkpoints = max_checkpoints
         self.compress = compress
@@ -504,6 +514,15 @@ class CheckpointSerializer:
         Returns:
             Полный путь к сохранённому файлу.
         """
+        if self.backend == "sqlite":
+            from src.memory.checkpoint_store import SQLiteCheckpointStore
+
+            database = os.path.abspath(os.path.join(self.checkpoint_dir, "life.sqlite3"))
+            snapshot_id = SQLiteCheckpointStore(database).save(
+                json.loads(json.dumps(state, ensure_ascii=False, allow_nan=False)),
+                agent_name, cycle_count, max_checkpoints=self.max_checkpoints,
+            )
+            return f"{database}#snapshot={snapshot_id}"
         import tempfile
 
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -559,6 +578,18 @@ class CheckpointSerializer:
             CheckpointCorruptedError: если файл чекпоинта повреждён (невалидный JSON, 
                 отсутствуют обязательные поля и т.д.)
         """
+        checkpoint_file = str(checkpoint_file)
+        if "#snapshot=" in checkpoint_file:
+            from src.memory.checkpoint_store import SQLiteCheckpointStore
+
+            database, snapshot_id = checkpoint_file.rsplit("#snapshot=", 1)
+            if not os.path.isfile(database):
+                return None
+            try:
+                state = SQLiteCheckpointStore(database).load(int(snapshot_id))
+                return migrate_state(state)
+            except (ValueError, KeyError) as exc:
+                raise CheckpointCorruptedError(f"Повреждён снимок SQLite: {exc}") from exc
         if not os.path.exists(checkpoint_file):
             logger.warning(f"Чекпоинт не найден: {checkpoint_file}")
             return None

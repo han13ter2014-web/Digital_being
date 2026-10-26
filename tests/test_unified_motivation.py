@@ -262,12 +262,11 @@ class TestMotivationIntegration:
         
         # Save checkpoint
         agent.cycle_count = 100
-        agent.save_state()
+        ckpt_path = agent.save_state()
+        assert ckpt_path is not None
         
         # Load into new agent
         agent2 = DigitalBeing(name='TestAgent')
-        ckpt_files = os.listdir(ckpt_dir)
-        ckpt_path = os.path.join(ckpt_dir, ckpt_files[0])
         
         ser = CheckpointSerializer()
         state = ser.load(ckpt_path)
