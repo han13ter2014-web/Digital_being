@@ -269,8 +269,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         model.association_memory = list(saved_models.get("recent_associations") or [])
         model._related_cache.clear()
         model._cycle_counter = state.get("cycle_count", 0)
-    if hasattr(agent, "_last_soul_tick_cycle"):
-        agent._last_soul_tick_cycle = None
+    for marker in ("_last_soul_tick_cycle", "_last_will_tick_cycle", "_last_communication_tick_cycle"):
+        if hasattr(agent, marker):
+            setattr(agent, marker, None)
     # Прежняя незавершённая попытка не является наблюдением. Следующее
     # ожидание строится из восстановленного опыта, а не из pending trial.
     if hasattr(agent, "action_expectations"):
