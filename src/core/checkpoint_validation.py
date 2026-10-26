@@ -235,6 +235,10 @@ def validate_checkpoint_state(state) -> None:
             _hashables(matched if matched is not None else [], f"{path}.matched_concepts")
         else:
             _hashables(progress, path)
+    if "waiting_intentions" in state:
+        from src.cognition.intention_waiting import validate_waits
+
+        validate_waits(state["waiting_intentions"])
     if "intention_history" in state:
         from src.cognition.intention_history import validate_history
 

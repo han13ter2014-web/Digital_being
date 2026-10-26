@@ -41,3 +41,6 @@ def finish_evidence_goal(agent, entry):
     new = sorted(current - set(goal["baseline_sources"]))
     goal["new_sources"] = new
     goal["status"] = "satisfied" if new else "pending"
+    from src.cognition.intention_waiting import remember_wait
+
+    remember_wait(agent, entry)
