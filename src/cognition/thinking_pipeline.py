@@ -361,6 +361,12 @@ class ThinkingPipeline:
             pending["id"], answer_text, on_synthesis_needed=on_synthesis_needed
         )
 
+        if result.get("status") != "answered":
+            return "Ответ не принят: вопрос не найден или уже отвечен."
+        attachment = getattr(agent, "attachment", None)
+        if attachment is not None:
+            attachment.record_interaction("user", was_helpful=True, was_substantial=bool(answer_text.strip()))
+
         concept_name = pending["question"]
         if "задаю" in concept_name or "объясни" in concept_name:
             match = re.search(

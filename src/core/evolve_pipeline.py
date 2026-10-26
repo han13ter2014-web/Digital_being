@@ -257,14 +257,8 @@ def make_attachment_tick() -> MiddlewareFn:
     """Middleware: записывает взаимодействие с пользователем."""
 
     def middleware(agent, cycle, context):
-        if hasattr(agent, "attachment") and hasattr(agent, "user_interaction"):
-            ui = agent.user_interaction
-            if ui and ui.pending_questions:
-                agent.attachment.record_interaction(
-                    name="user",
-                    was_helpful=True,
-                    was_substantial=True,
-                )
+        # Наличие исходящего вопроса не является ответом человека.
+        # Состоявшийся контакт регистрируется при принятии ответа.
         return MiddlewareResult()
 
     return middleware
