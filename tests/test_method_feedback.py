@@ -70,7 +70,10 @@ def test_arbiter_receives_alternatives_not_stuck_winner():
         captured.extend(candidates)
         return {**candidates[0], "verdict": "proceed", "reasoning": "test"}
 
-    with patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose):
+    with patch.object(agent.motivation_system, "get_action_candidates", return_value=[
+            {"action": "explore", "source": "motivation", "strength": 0.8},
+            {"action": "rest", "source": "body", "strength": 0.4}]), \
+         patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose):
         result = agent.autonomous_tick()
     assert captured
     assert all(agent._normalize_action(c["action"]) != "explore" for c in captured)
