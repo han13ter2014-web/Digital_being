@@ -133,6 +133,27 @@ create_agent для JSON и SQLite: текущий вопрос + 40 ожида�
 теста выбор внешнего внимания принудителен; естественный выбор проверяется
 измерителем выше. Профильный набор message/attention: 8 passed.
 
+## Mortality: чтение не обновляет состояние
+
+После фиксации внимания коммитом 2e9899e проверен MortalityAwareness.
+Повторный tick не увеличивал возраст: формула использует cycle_count,
+поэтому утверждение о «двойном старении» для этого класса неверно.
+Но get_status вызывал tick и изменял состояние при чтении. Теперь status
+читает последний отчёт, tick переиспользует расчёт при одинаковых cycle
+и expected_lifespan. Возвращается копия, чтобы потребитель не менял кеш.
+Изменение expected_lifespan в том же цикле пересчитывает фазу.
+Профильный прогон mortality/life_tick/plugins/life_guard: 48 passed.
+
+## Повторные вызовы воли и коммуникации
+
+Добавлен same-cycle guard для tick_will и tick_communication. Повторный вызов
+возвращает skipped=duplicate_cycle, не повторяет случайный порыв, проверки
+таймаутов и отправку сообщения. Маркеры transient сбрасываются при загрузке.
+Это не включение интервалов WILL_TICK_INTERVAL/COMMUNICATION_TICK_INTERVAL:
+обычный один вызов на тик сохранён, разрежение и таймеры требуют отдельной
+проверки. Регрессии test_subsystem_tick_schedule.py. Набор schedule/mortality/
+life/attention/messages/loop: 24 passed.
+
 ## Ещё не завершено
 
 - Stimulated-путь всё ещё может выполнять autonomous act и act(thought).

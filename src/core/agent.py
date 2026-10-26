@@ -3291,6 +3291,9 @@ class DigitalBeing:
 
         Вызывается каждый цикл из main.py (или evolve).
         """
+        if getattr(self, "_last_will_tick_cycle", None) == cycle_count:
+            return {"cycle": cycle_count, "skipped": "duplicate_cycle"}
+        self._last_will_tick_cycle = cycle_count
         result = {
             "cycle": cycle_count,
             "spontaneous": None,
@@ -3411,6 +3414,9 @@ class DigitalBeing:
         Вызывается каждый цикл (можно из main.py или из tick_will).
         Возвращает отчёт о проактивных сообщениях.
         """
+        if getattr(self, "_last_communication_tick_cycle", None) == cycle_count:
+            return {"cycle": cycle_count, "skipped": "duplicate_cycle"}
+        self._last_communication_tick_cycle = cycle_count
         result = {
             "cycle": cycle_count,
             "proactive_message": None,

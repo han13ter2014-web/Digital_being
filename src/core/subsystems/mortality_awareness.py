@@ -38,9 +38,14 @@ class MortalityAwareness:
         self.creation_time = creation_time or datetime.now()
         self._cycle_count = 0
         self._mortality_anxiety = 0.0  # 0.0-1.0 — экзистенциальная тревога
+        self._last_report = None
+        self._last_context = None
 
     def tick(self, cycle_count: int) -> Dict:
         """Обновляет осознание возраста каждый цикл."""
+        context = (cycle_count, self.expected_lifespan)
+        if context == self._last_context:
+            return dict(self._last_report)
         self._cycle_count = cycle_count
 
         # Возраст — доля от ожидаемой жизни
@@ -69,7 +74,8 @@ class MortalityAwareness:
         else:
             self._mortality_anxiety = 0.0
 
-        return {
+        self._last_context = context
+        self._last_report = {
             "age_ratio": round(age_ratio, 3),
             "phase": phase,
             "cycles_lived": cycle_count,
@@ -77,6 +83,7 @@ class MortalityAwareness:
             "cycles_remaining": max(0, self.expected_lifespan - cycle_count),
             "mortality_anxiety": round(self._mortality_anxiety, 3),
         }
+        return dict(self._last_report)
 
     # ============================================================
     # Влияние на мотивацию и приоритеты
@@ -103,7 +110,7 @@ class MortalityAwareness:
     def get_status(self) -> Dict:
         return {
             "agent_name": self.agent_name,
-            "current_phase": self.tick(self._cycle_count).get("phase"),
+            "current_phase": (self._last_report or {"phase": LifePhase.CHILDHOOD})["phase"],
             "mortality_anxiety": round(self._mortality_anxiety, 3),
             "meaning_orientation": self.meaning_orientation(),
         }
