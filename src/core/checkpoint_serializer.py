@@ -212,6 +212,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # Изученные темы: чтобы исследование продолжалось, а не начиналось
         # с той же концепции после перезапуска.
+        "pending_user_messages": list(getattr(agent, "_pending_message_texts", []) or []),
+        "deferred_stimulus": getattr(agent, "_deferred_stimulus", None),
         "method_information_context": getattr(agent, "_method_information_context", None),
         "last_experiment_cycle": getattr(agent, "_last_experiment_cycle", None),
         "exploration_history": list(
@@ -267,6 +269,8 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         model.association_memory = list(saved_models.get("recent_associations") or [])
         model._related_cache.clear()
         model._cycle_counter = state.get("cycle_count", 0)
+    if hasattr(agent, "_last_soul_tick_cycle"):
+        agent._last_soul_tick_cycle = None
     # Прежняя незавершённая попытка не является наблюдением. Следующее
     # ожидание строится из восстановленного опыта, а не из pending trial.
     if hasattr(agent, "action_expectations"):
@@ -322,6 +326,8 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # и не изучать ту же тему заново.
     if getattr(agent, "loop_closer", None) is not None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    agent._pending_message_texts = list(state.get("pending_user_messages", []))
+    agent._deferred_stimulus = state.get("deferred_stimulus")
     agent._method_information_context = state.get("method_information_context")
     last_experiment = state.get("last_experiment_cycle")
     agent._last_experiment_cycle = last_experiment if isinstance(last_experiment, int) and 0 <= last_experiment <= agent.cycle_count else None

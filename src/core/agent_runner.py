@@ -110,6 +110,29 @@ def generate_prioritized_stimulus(agent) -> str:
 # AgentRunner
 # ============================================================
 
+class PersistentMessageQueue(asyncio.Queue):
+    """Зеркало ожидающих сообщений для согласованного checkpoint раннера."""
+
+    def __init__(self, agent):
+        super().__init__()
+        self.agent = agent
+        for text in getattr(agent, "_pending_message_texts", []) or []:
+            super().put_nowait(text)
+        self._sync()
+
+    def _sync(self):
+        self.agent._pending_message_texts = list(self._queue)
+
+    def put_nowait(self, item):
+        super().put_nowait(item)
+        self._sync()
+
+    def get_nowait(self):
+        item = super().get_nowait()
+        self._sync()
+        return item
+
+
 class AgentRunner:
     """Фоновый оркестратор жизни агента.
 
@@ -217,7 +240,7 @@ class AgentRunner:
         # Ленивое создание очереди — сообщения, пришедшие до start(),
         # не теряются, а дожидаются первого тика.
         if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
-            self._pending_user_messages = asyncio.Queue()
+            self._pending_user_messages = PersistentMessageQueue(self.agent)
             logger.debug(
                 f"[{self.name}] Очередь user-сообщений создана лениво "
                 f"(до start()) — сообщение будет обработано."
@@ -454,7 +477,7 @@ class AgentRunner:
         # Очередь создаётся лениво в _on_user_message — НЕ пересоздаём,
         # иначе потеряем все сообщения, пришедшие до start().
         if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
-            self._pending_user_messages = asyncio.Queue()
+            self._pending_user_messages = PersistentMessageQueue(self.agent)
 
         logger.info(f"[{self.name}] Старт. Циклов до: ∞ (без смерти от энергии)")
         await self.bus.publish(
@@ -562,9 +585,15 @@ class AgentRunner:
         cycle_start_ts = time.time()
         stimulus = None
         user_initiated = False
+        deferred = getattr(self.agent, "_deferred_stimulus", None)
+        if deferred is not None:
+            stimulus = deferred["text"]
+            user_initiated = deferred["user_initiated"]
 
-        # === Ждём либо сообщение пользователя, либо таймаут ===
-        if wait_for_user:
+        # Пока отложенный стимул не обработан, новые остаются в очереди.
+        if deferred is not None:
+            pass
+        elif wait_for_user:
             timeout = self.current_interval_sec()
             try:
                 if timeout <= 0:
@@ -665,11 +694,28 @@ class AgentRunner:
     def _rest_tick(self) -> None:
         """Тик отдыха: подсистемы живут, но агент не повторяет себя."""
         self._idle_ticks += 1
+        cycle_before = self.agent.cycle_count
+        energy_before = self.agent.energy
+        self._last_tick_ledger = {"kind": "idle", "cycle_before": cycle_before,
+                                  "energy_before": energy_before, "completed": False}
         try:
             report = self.agent.autonomous_tick()
             self._log_autonomous_events(report)
+            self.agent.evolve()
+            self._tick_count += 1
+            self.agent.cycle_count += 1
+            self._last_tick_ledger.update(completed=True, autonomous_action=report.get("autonomous_action"))
+            self.bus.publish_sync(Events.TICK, {"phase": "idle", "cycle": self.agent.cycle_count,
+                                  "tick": self._tick_count, "energy": self.agent.energy}, source="runner")
+        except AgentDeadSignal:
+            self._stop_requested = True
+            self._running = False
+            self._save_state_safe()
         except Exception as e:
+            self._last_tick_ledger["error"] = str(e)
             logger.exception(f"[{self.name}] idle autonomous_tick failed: {e}")
+        finally:
+            self._last_tick_ledger.update(cycle_after=self.agent.cycle_count, energy_after=self.agent.energy)
 
     def _do_one_agent_cycle(self, stimulus: str, user_initiated: bool = False) -> None:
         """Один полный цикл агента: perceive → think → act → evolve.
@@ -677,6 +723,9 @@ class AgentRunner:
         Публикует события на шине о мыслях, действиях, эволюции.
         Не использует input()/print() — общение через EventBus.
         """
+        autonomous_report = {}
+        self.agent._deferred_stimulus = {"text": stimulus, "user_initiated": user_initiated}
+        self.agent._attention_stimulus = {"text": stimulus, "user_initiated": user_initiated}
         # === АВТОНОМНЫЙ ТИК ЖИЗНИ ===
         # Вызываем КАЖДЫЙ цикл, независимо от того, был ли стимул от пользователя.
         # Это делает агента по-настоящему живым: он думает, чувствует, мечтает,
@@ -707,6 +756,20 @@ class AgentRunner:
             return
         except Exception as e:
             logger.exception(f"autonomous_tick failed: {e}")
+        finally:
+            self.agent._attention_stimulus = None
+        selected = (autonomous_report.get("arbitrator") or {}).get("action", "")
+        if not autonomous_report.get("attention_selected"):
+            self.agent._deferred_stimulus = {"text": stimulus, "user_initiated": user_initiated}
+            self.agent.evolve()
+            self._tick_count += 1
+            self.agent.cycle_count += 1
+            self._last_tick_ledger = {"kind": "stimulus_deferred", "cycle_after": self.agent.cycle_count,
+                                      "reason": "another_intention_selected", "autonomous_action": selected,
+                                      "user_initiated": user_initiated, "completed": True}
+            self.bus.publish_sync(Events.TICK, {"phase": "stimulus_deferred", "cycle": self.agent.cycle_count,
+                                  "energy": self.agent.energy, "user_initiated": user_initiated}, source="runner")
+            return
 
         try:
             perceived = self.agent.perceive(stimulus)
@@ -732,6 +795,10 @@ class AgentRunner:
             logger.exception(f"evolve failed: {e}")
             return
 
+        self.agent._deferred_stimulus = None
+        self._last_tick_ledger = {"kind": "stimulus_processed", "completed": True,
+                                  "autonomous_action": selected, "stimulus_action": str(action),
+                                  "user_initiated": user_initiated}
         self._tick_count += 1
         # Используем существующее поле cycle_count в агенте
         self.agent.cycle_count += 1

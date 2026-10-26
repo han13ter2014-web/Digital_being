@@ -227,6 +227,14 @@ def validate_checkpoint_state(state) -> None:
             _hashables(matched if matched is not None else [], f"{path}.matched_concepts")
         else:
             _hashables(progress, path)
+    if "pending_user_messages" in state:
+        pending = _list(state["pending_user_messages"], "pending_user_messages")
+        if any(not isinstance(text, str) for text in pending):
+            _fail("pending_user_messages", "expected a list of strings")
+    if state.get("deferred_stimulus") is not None:
+        deferred = _dict(state["deferred_stimulus"], "deferred_stimulus")
+        if not isinstance(deferred.get("text"), str) or not isinstance(deferred.get("user_initiated"), bool):
+            _fail("deferred_stimulus", "expected text and boolean user_initiated")
     if state.get("mental_models") is not None:
         _mental_models(state["mental_models"])
     for field in ("naming_dialogue_history", "exploration_history", "birth_values"):

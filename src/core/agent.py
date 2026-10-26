@@ -2962,6 +2962,9 @@ class DigitalBeing:
         Вызывается каждый цикл из main.py (или evolve).
         Возвращает сводный отчёт всех систем.
         """
+        if getattr(self, "_last_soul_tick_cycle", None) == cycle_count:
+            return self._last_soul_tick_report
+
         # 1. Soul (диалог, иммунитет, выживание, смысл, идентичность)
         soul_state = self.soul.tick(cycle_count, self)
 
@@ -2992,7 +2995,7 @@ class DigitalBeing:
         self._embodiment_signals = embodiment_signals
         self._mortality_state = mortality_state
 
-        return {
+        report = {
             "cycle": cycle_count,
             "soul": soul_state,
             "embodiment": embodiment_signals,
@@ -3000,6 +3003,9 @@ class DigitalBeing:
             "sleep": sleep_result,
             "motivation": motivation_state,
         }
+        self._last_soul_tick_cycle = cycle_count
+        self._last_soul_tick_report = report
+        return report
 
     def arbitrate(self, topic: str) -> Dict:
         """Запрашивает вердикт у DecisionArbitrator.
@@ -3669,6 +3675,12 @@ class DigitalBeing:
             except Exception as e:
                 get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
 
+        pending_stimulus = getattr(self, "_attention_stimulus", None)
+        if pending_stimulus is not None:
+            candidates.append({"source": "external_attention", "action": "process_stimulus",
+                               "strength": 0.85 if pending_stimulus["user_initiated"] else 0.3,
+                               "params": {"user_initiated": pending_stimulus["user_initiated"]}})
+
         # 1. Motivation candidates
         if hasattr(self, "motivation_system"):
             try:
@@ -3899,7 +3911,9 @@ class DigitalBeing:
             except Exception as e:
                 get_logger().log(f"[VALENCE] Prediction error: {e}")
 
-        if chosen_action and chosen_action not in ("think_known", "wait", "none"):
+        if chosen_action == "process_stimulus":
+            result["attention_selected"] = True
+        if chosen_action and chosen_action not in ("think_known", "wait", "none", "process_stimulus"):
             try:
                 experiment_selected = (
                     result.get("arbitrator", {}).get("source") == "self_experiment"
