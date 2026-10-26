@@ -35,6 +35,7 @@ async def measure(cycles, seed):
     traces = []
     escape_traces = []
     initial_sources, transitions = Counter(), Counter()
+    deferred_methods, released_methods = Counter(), Counter()
     energies, fatigues = [], []
     restart = None
 
@@ -46,6 +47,9 @@ async def measure(cycles, seed):
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
+            feedback = report.get("method_feedback") or {}
+            deferred_methods.update(item["normalized_action"] for item in feedback.get("deferred", []))
+            released_methods.update(feedback.get("released", []))
             initial_sources[(report.get("initial_arbitration") or {}).get("source", "none")] += 1
             escape = report.get("loop_escape")
             if escape:
@@ -109,6 +113,9 @@ async def measure(cycles, seed):
     return {"seed": seed, "cycles": cycles, "arbitrated_actions": dict(actions),
             "winning_sources": dict(sources), "initial_sources": dict(initial_sources),
             "escape_transitions": dict(transitions), "escape_traces": escape_traces,
+            "deferred_methods": dict(deferred_methods), "released_methods": dict(released_methods),
+            "productive_actions": agent.loop_closer.productive_total,
+            "productive_effects": agent.loop_closer.productive_effect_total,
             "proposals": dict(offers),
             "selected_checks": dict(selected), "checks_lost_to": dict(rivals),
             "prediction_matches": dict(matches), "experiment_traces": traces,
@@ -124,6 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--cycles", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--no-method-feedback", action="store_true")
     args = parser.parse_args()
     if args.cycles < 2:
         parser.error("Нужно минимум два цикла")
@@ -133,6 +141,13 @@ if __name__ == "__main__":
         from config.simulation_config import LR_CONFIG
 
         LR_CONFIG.WEB_SEARCH_ENABLED = False
-        result = asyncio.run(measure(args.cycles, args.seed))
+        if args.no_method_feedback:
+            from unittest.mock import patch
+
+            with patch("src.cognition.method_feedback.prepare_candidates", side_effect=lambda agent, candidates: (candidates, {})):
+                result = asyncio.run(measure(args.cycles, args.seed))
+        else:
+            result = asyncio.run(measure(args.cycles, args.seed))
+        result["method_feedback_enabled"] = not args.no_method_feedback
         args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         logging.shutdown()

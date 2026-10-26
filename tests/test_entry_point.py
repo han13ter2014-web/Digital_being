@@ -230,12 +230,11 @@ def test_awaken_from_seed_inherits_and_saves(env):
 
     # Главное отличие от прежнего скрипта: ребёнок сохранён на диск.
     assert report["seed_report"]["saved"] is True
-    checkpoints = [
-        name
-        for name in os.listdir(data_path("checkpoints"))
-        if name.startswith("Child_cycle_")
-    ]
-    assert checkpoints, "ребёнок не сохранился — он жил бы только в памяти"
+    checkpoint = latest_checkpoint("Child", data_path("checkpoints"))
+    assert checkpoint, "ребёнок не сохранился — он жил бы только в памяти"
+    from src.core.checkpoint_serializer import CheckpointSerializer
+
+    assert CheckpointSerializer().load(checkpoint)["name"] == "Child"
 
 
 def test_awaken_from_seed_missing_raises(env):

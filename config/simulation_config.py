@@ -20,6 +20,8 @@ class SimulationConfig:
     
     # Максимум чекпоинтов на диске (старые удаляются)
     MAX_CHECKPOINTS = 20
+    # Безопасная миграция: json сохраняется до явного переключения на sqlite.
+    CHECKPOINT_BACKEND = "json"
     
     # === База знаний (текстовые дубликаты из файлов) ===
     # Лимит записей в knowledge_base (дубликаты docstring)

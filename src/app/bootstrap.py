@@ -31,6 +31,13 @@ def latest_checkpoint(
     directory = checkpoint_dir or data_path("checkpoints")
     if not os.path.isdir(directory):
         return None
+    database = os.path.join(directory, "life.sqlite3")
+    if os.path.isfile(database):
+        from src.memory.checkpoint_store import SQLiteCheckpointStore
+
+        snapshot_id = SQLiteCheckpointStore(database).latest(agent_name)
+        if snapshot_id is not None:
+            return f"{os.path.abspath(database)}#snapshot={snapshot_id}"
     names = [
         name
         for name in os.listdir(directory)
