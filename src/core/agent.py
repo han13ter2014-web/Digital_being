@@ -3962,6 +3962,12 @@ class DigitalBeing:
         if chosen_action == "process_stimulus":
             result["attention_selected"] = True
         if chosen_action and chosen_action not in ("think_known", "wait", "none", "process_stimulus"):
+            from src.cognition.intention_history import begin_intention, finish_intention
+
+            history_selection = dict(result.get("arbitrator") or {})
+            history_selection["action"] = chosen_action
+            intention_entry = begin_intention(self, history_selection)
+            self._last_action_outcome = None
             try:
                 experiment_selected = (
                     result.get("arbitrator", {}).get("source") == "self_experiment"
@@ -3973,6 +3979,8 @@ class DigitalBeing:
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
                     action_result = self.act(chosen_action)
+                finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
+                result["intention_id"] = intention_entry["id"]
                 result["executed_intention"] = {"action": chosen_action,
                                                 "source": selected_intention.get("source"),
                                                 "params": dict(selected_intention.get("params") or {})}
@@ -4015,6 +4023,7 @@ class DigitalBeing:
                         get_logger().log(f"[VALENCE] Feedback error: {e}")
                         
             except Exception as e:
+                finish_intention(intention_entry, error=e)
                 get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
                 result["autonomous_action"] = {"action": chosen_action, "error": str(e)}
                 

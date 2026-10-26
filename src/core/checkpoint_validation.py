@@ -235,6 +235,10 @@ def validate_checkpoint_state(state) -> None:
             _hashables(matched if matched is not None else [], f"{path}.matched_concepts")
         else:
             _hashables(progress, path)
+    if "intention_history" in state:
+        from src.cognition.intention_history import validate_history
+
+        validate_history(state["intention_history"])
     if "pending_user_messages" in state:
         pending = _list(state["pending_user_messages"], "pending_user_messages")
         if any(not isinstance(text, str) for text in pending):
