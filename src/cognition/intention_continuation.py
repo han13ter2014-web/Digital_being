@@ -4,7 +4,13 @@ ACTIONS = frozenset({"explore", "decomposition", "synthesis", "ask_user"})
 
 
 def continuation_candidate(agent):
-    history = getattr(agent, "_intention_history", [])
+    from src.cognition.intention_waiting import reconcile_waits, waiting_key
+
+    reconcile_waits(agent)
+    waits = getattr(agent, "_waiting_intentions", {})
+    history = list(getattr(agent, "_intention_history", []))
+    known_ids = {entry["id"] for entry in history}
+    history = [entry for entry in waits.values() if entry["id"] not in known_ids] + history
     # Более поздняя попытка той же темы определяет её состояние; другие
     # занятия, включая отдых, не стирают отложенную тему.
     from src.cognition.intention_evidence import finish_evidence_goal
@@ -30,6 +36,10 @@ def continuation_candidate(agent):
             from src.cognition.method_feedback import information_context
 
             context = information_context(agent)
+            waiting = waits.get(waiting_key(action, target))
+            if waiting and (waiting["evidence_goal"]["status"] == "satisfied"
+                            or waiting["evidence_goal"].get("information_context") == context):
+                continue
             if any(previous.get("continuation_of")
                    and agent._normalize_action(previous.get("action")) == action
                    and previous.get("target") == target
