@@ -402,7 +402,7 @@ class AgentRunner:
     def _save_state_safe(self) -> bool:
         """Сохранить состояние и ментальные модели. Не падает при ошибках."""
         try:
-            self.agent.save_state()
+            self.agent.save_state(force=True)
             self.agent.save_mental_models()
             flush_logs()
             return True

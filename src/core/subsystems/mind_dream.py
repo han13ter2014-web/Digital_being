@@ -300,7 +300,7 @@ class MindDream:
         # Mental models (все концепции)
         if hasattr(agent, "mental_models"):
             try:
-                data["mental_models"] = agent.mental_models.to_dict()
+                data["mental_models"] = agent.mental_models.to_storage_dict()
             except Exception:
                 data["mental_models"] = {}
 

@@ -91,6 +91,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "energy": agent.energy,
         "cycle_count": agent.cycle_count,
         "knowledge_base": agent.knowledge_base,
+        # Память и тело относятся к одному моменту сохранения. Отдельный
+        # mind/mental_models.json — экспорт, а не источник поверх чекпоинта.
+        "mental_models": (
+            agent.mental_models.to_storage_dict()
+            if getattr(agent, "mental_models", None) is not None else None
+        ),
         "intelligence": agent.intelligence,
         "completed_goals": agent.completed_goals,
         "goals": agent.goals,
@@ -203,6 +209,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # Изученные темы: чтобы исследование продолжалось, а не начиналось
         # с той же концепции после перезапуска.
+        "last_experiment_cycle": getattr(agent, "_last_experiment_cycle", None),
         "exploration_history": list(
             getattr(agent, "_exploration_history", [])[-200:]
         ),
@@ -229,6 +236,37 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent: экземпляр DigitalBeing.
         state: словарь, полученный из ``build_state_from_agent``.
     """
+    saved_models = state.get("mental_models")
+    if saved_models is not None and getattr(agent, "mental_models", None) is not None:
+        from src.cognition.mental_models import ConceptNode
+
+        # Сначала разобрать всё; повреждённая секция не должна частично
+        # подменить память уже созданного существа.
+        restored_nodes = {
+            name: ConceptNode.from_dict({**raw, "name": name})
+            for name, raw in saved_models["concepts"].items()
+        }
+        from src.cognition.empirical_claims import EmpiricalClaim
+
+        restored_claims = {
+            key: EmpiricalClaim.from_dict(raw)
+            for key, raw in (saved_models.get("claims") or {}).items()
+        }
+        model = agent.mental_models
+        model.claims = restored_claims
+        model.concepts = restored_nodes
+        model.name = saved_models.get("name", model.name)
+        model.metadata = dict(saved_models.get("metadata") or {})
+        model.association_memory = list(saved_models.get("recent_associations") or [])
+        model._related_cache.clear()
+        model._cycle_counter = state.get("cycle_count", 0)
+    # Прежняя незавершённая попытка не является наблюдением. Следующее
+    # ожидание строится из восстановленного опыта, а не из pending trial.
+    if hasattr(agent, "action_expectations"):
+        from src.cognition.action_expectations import ActionExpectations
+
+        agent.action_expectations = ActionExpectations()
+
     agent.energy = state.get("energy", 150)
     agent.cycle_count = state.get("cycle_count", 0)
     agent.knowledge_base.update(state.get("knowledge_base", {}))
@@ -277,6 +315,8 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # и не изучать ту же тему заново.
     if getattr(agent, "loop_closer", None) is not None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    last_experiment = state.get("last_experiment_cycle")
+    agent._last_experiment_cycle = last_experiment if isinstance(last_experiment, int) and 0 <= last_experiment <= agent.cycle_count else None
     saved_history = state.get("exploration_history")
     if isinstance(saved_history, list):
         agent._exploration_history = [str(item) for item in saved_history]
@@ -464,23 +504,36 @@ class CheckpointSerializer:
         Returns:
             Полный путь к сохранённому файлу.
         """
+        import tempfile
+
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-
-        # Прунинг ДО записи: чтобы после save осталось ровно ``max_checkpoints``.
-        # Считаем, что новый файл будет создан — значит сейчас должно быть
-        # не больше ``max_checkpoints - 1``.
-        keep = max(self.max_checkpoints - 1, 1)
-        self._prune_old_checkpoints(agent_name, keep_after_save=keep)
-
         filename = self._checkpoint_path(agent_name, cycle_count)
         json_text = json.dumps(state, indent=2, ensure_ascii=False)
-        if self.compress:
-            # Gzip-сжатие: типично 60-80% экономии на больших knowledge_base.
-            with gzip.open(filename, "wt", encoding="utf-8", compresslevel=self.compress_level) as f:
-                f.write(json_text)
-        else:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(json_text)
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=os.path.dirname(filename),
+                prefix=f".{os.path.basename(filename)}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = temporary_file.name
+            if self.compress:
+                with gzip.open(temporary_path, "wt", encoding="utf-8", compresslevel=self.compress_level) as f:
+                    f.write(json_text)
+            else:
+                with open(temporary_path, "w", encoding="utf-8") as f:
+                    f.write(json_text)
+            os.replace(temporary_path, filename)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.remove(temporary_path)
+                except FileNotFoundError:
+                    pass
+
+        self._prune_old_checkpoints(agent_name)
 
         get_logger().flush_immediate(
             f"Состояние сохранено: {os.path.basename(filename)}"

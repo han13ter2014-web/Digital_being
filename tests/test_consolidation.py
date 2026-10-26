@@ -107,8 +107,10 @@ def test_consolidation_link_is_bounded():
 
 def test_consolidation_forms_definition_from_experience():
     model = MentalModel()
-    model.encounter_concept("энтропия", "гипотеза_цикл_1", "мера беспорядка", 0.5)
-    model.encounter_concept("энтропия", "гипотеза_цикл_2", "растёт в замкнутой системе", 0.5)
+    model.encounter_concept("энтропия", "гипотеза_цикл_1", "мера беспорядка", 0.5,
+                            evidence_kind="hypothesis", source="self:hypothesis")
+    model.encounter_concept("энтропия", "гипотеза_цикл_2", "растёт в замкнутой системе", 0.5,
+                            evidence_kind="hypothesis", source="self:hypothesis")
     node = model.concepts["энтропия"]
     # Опыт есть, а формулировки ещё нет — ровно то, что делает сон.
     node.definition_hypothesis = ""
@@ -119,6 +121,8 @@ def test_consolidation_forms_definition_from_experience():
     assert report["definitions"] >= 1
     assert len(node.definition_hypothesis) > 10
     assert "энтропия" in node.definition_hypothesis
+    assert node.confidence == pytest.approx(0.1)
+    assert not model.can_answer_about("энтропия")
 
 
 def test_consolidation_skips_single_encounter():
@@ -139,7 +143,10 @@ def test_consolidation_refines_definition_from_links():
     for name in ("энтропия", "порядок", "хаос"):
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["энтропия"]
-    model.encounter_concept("энтропия", "ctx2", "мера беспорядка", 0.5)
+    model.encounter_concept(
+        "энтропия", "ctx2", "мера беспорядка", 0.5,
+        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+    )
     node.definition_hypothesis = "По опыту (2 встреч): 'энтропия' — мера беспорядка"
     node.connections["порядок"] = 0.6
     node.connections["хаос"] = 0.5
@@ -160,7 +167,10 @@ def test_refinement_needs_evidence():
     for name in ("энтропия", "порядок", "хаос"):
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["энтропия"]
-    model.encounter_concept("энтропия", "ctx2", "мера беспорядка", 0.5)
+    model.encounter_concept(
+        "энтропия", "ctx2", "мера беспорядка", 0.5,
+        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+    )
     original = "По опыту (2 встреч): 'энтропия' — мера беспорядка"
     node.definition_hypothesis = original
     node.connections["порядок"] = 0.1
@@ -177,33 +187,45 @@ def test_refinement_needs_evidence():
 # ============================================================
 
 
-def test_consolidation_stabilizes_consistent_confidence():
+def test_consolidation_recomputes_consistent_confidence_without_bonus():
     model = MentalModel()
     for cycle in range(3):
+        context = f"наблюдение_цикл_{cycle}"
         model.encounter_concept(
-            "градиент", f"гипотеза_цикл_{cycle}", "направление роста", 0.6
+            "градиент", context, "направление роста", 0.6,
+            evidence_strength=0.6, evidence_kind="observation", source=context,
         )
     node = model.concepts["градиент"]
+    expected = node.confidence
     node.confidence = 0.4
 
-    report = model.consolidate(confidence_bonus=0.05)
+    model.consolidate()
 
-    assert report["confidence"] >= 1
-    assert node.confidence > 0.4
+    assert node.confidence == pytest.approx(expected)
+    model.consolidate()
+    assert node.confidence == pytest.approx(expected)
 
 
 def test_inconsistent_experience_is_not_stabilized():
     model = MentalModel()
-    model.encounter_concept("риск", "гипотеза_цикл_1", "плохо", 0.8)
-    model.encounter_concept("риск", "гипотеза_цикл_2", "плохо", 0.8)
-    model.encounter_concept("риск", "гипотеза_цикл_3", "хорошо", -0.8)
+    for cycle, valence in enumerate((0.8, 0.8, -0.8)):
+        context = f"наблюдение_цикл_{cycle}"
+        model.encounter_concept(
+            "риск", context, "плохо" if valence > 0 else "хорошо", valence,
+            evidence_strength=abs(valence), evidence_kind="observation",
+            source=context, evidence_direction=-1 if valence < 0 else 1,
+        )
     node = model.concepts["риск"]
+    expected = node.confidence
+    assert not model.can_answer_about("риск")
     node.confidence = 0.4
 
-    report = model.consolidate(confidence_bonus=0.05)
+    model.consolidate()
 
-    assert report["confidence"] == 0
-    assert node.confidence == 0.4
+    assert node.confidence == pytest.approx(expected)
+    model.consolidate()
+    assert node.confidence == pytest.approx(expected)
+    assert not model.can_answer_about("риск")
 
 
 # ============================================================

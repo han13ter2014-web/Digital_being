@@ -31,7 +31,17 @@ from src.cognition.mental_models import (
 def _node(*valences: float, name: str = "тема") -> ConceptNode:
     node = ConceptNode(name)
     for index, valence in enumerate(valences):
-        node.add_experience(f"ctx_{index}", "результат", valence)
+        context = f"ctx_{index}"
+        if valence == 0.0:
+            node.add_experience(context, "результат", valence)
+        else:
+            node.add_experience(
+                context, "результат", valence,
+                evidence_strength=abs(valence),
+                evidence_kind="observation",
+                source=context,
+                evidence_direction=-1 if valence < 0 else 1,
+            )
     return node
 
 
@@ -40,8 +50,8 @@ def _node(*valences: float, name: str = "тема") -> ConceptNode:
 # ============================================================
 
 
-def test_valence_exactly_threshold_grows_confidence():
-    """0.3 — рабочее значение, а не мёртвая зона."""
+def test_evidence_exactly_threshold_grows_confidence():
+    """Сила свидетельства 0.3 — рабочее значение, а не мёртвая зона."""
     node = _node(0.3)
 
     assert node.confidence > 0.1
@@ -60,6 +70,27 @@ def test_zero_valence_is_not_evidence():
     node = _node(0.0, 0.0, 0.0)
 
     assert node.confidence == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("valence", (-0.8, 0.8))
+def test_emotional_valence_without_evidence_does_not_raise_confidence(valence):
+    node = ConceptNode("тема")
+    for index in range(3):
+        node.add_experience(f"ctx_{index}", "эмоциональная встреча", valence)
+
+    assert node.confidence == pytest.approx(0.1)
+
+
+def test_repeated_hypotheses_are_not_evidence():
+    model = MentalModel()
+    for index in range(8):
+        model.encounter_concept(
+            "тема", f"гипотеза_цикл_{index}", "догадка о теме", 0.3,
+            evidence_kind="hypothesis",
+        )
+
+    assert model.concepts["тема"].confidence == pytest.approx(0.1)
+    assert not model.can_answer_about("тема")
 
 
 # ============================================================
@@ -84,8 +115,14 @@ def test_single_weak_encounter_is_not_enough_to_answer():
 
 def test_two_consistent_encounters_allow_answering():
     model = MentalModel()
-    node = model.encounter_concept("тема", "ctx_1", "следы памяти", 0.3)
-    model.encounter_concept("тема", "ctx_2", "следы памяти", 0.3)
+    node = model.encounter_concept(
+        "тема", "ctx_1", "следы памяти", 0.3,
+        evidence_strength=0.3, evidence_kind="observation", source="ctx_1",
+    )
+    model.encounter_concept(
+        "тема", "ctx_2", "следы памяти", 0.3,
+        evidence_strength=0.3, evidence_kind="observation", source="ctx_2",
+    )
 
     assert node.confidence > 0.4
     assert len(node.definition_hypothesis) > 10
@@ -104,17 +141,20 @@ def test_confidence_is_bounded():
 # ============================================================
 
 
-def test_strong_source_weighs_more_than_guess():
-    guess = _node(0.3)
-    source = _node(0.7)
+def test_strong_evidence_weighs_more_than_weak_evidence():
+    weak = _node(0.3)
+    strong = _node(0.7)
 
-    assert source.confidence > guess.confidence
+    assert strong.confidence > weak.confidence
 
 
 def test_one_real_source_is_enough_to_answer():
     """Прочитал источник — можешь пересказать. Догадка — нет."""
     model = MentalModel()
-    model.encounter_concept("энтропия", "web:wikipedia", "мера беспорядка", 0.7)
+    model.encounter_concept(
+        "энтропия", "web:wikipedia", "мера беспорядка", 0.7,
+        evidence_strength=0.7, evidence_kind="observation", source="web:wikipedia",
+    )
     model.encounter_concept("энтропия", "ctx", "мера беспорядка", 0.0)
 
     assert model.can_answer_about("энтропия") is True
@@ -135,7 +175,12 @@ def test_contradictory_evidence_lowers_confidence():
 def test_contradiction_can_block_answering():
     model = MentalModel()
     for index, valence in enumerate((0.3, 0.3, -0.3)):
-        model.encounter_concept("риск", f"ctx_{index}", "что-то о риске", valence)
+        context = f"ctx_{index}"
+        model.encounter_concept(
+            "риск", context, "что-то о риске", valence,
+            evidence_strength=abs(valence), evidence_kind="observation",
+            source=context, evidence_direction=-1 if valence < 0 else 1,
+        )
 
     assert model.can_answer_about("риск") is False
 
@@ -153,7 +198,10 @@ def test_definition_synthesis_does_not_override_confidence():
     давали несовместимые числа.
     """
     model = MentalModel()
-    model.encounter_concept("тема", "ctx_1", "первый результат", 0.3)
+    model.encounter_concept(
+        "тема", "ctx_1", "первый результат", 0.3,
+        evidence_strength=0.3, evidence_kind="observation", source="ctx_1",
+    )
     node = model.concepts["тема"]
     expected = node.confidence
 

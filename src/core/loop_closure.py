@@ -380,18 +380,21 @@ class LoopCloser:
         }
 
     def describe_candidates(
-        self, candidates: Iterable[Dict[str, Any]]
+        self, candidates: Iterable[Dict[str, Any]], *, normalize=None
     ) -> List[Dict[str, Any]]:
         """Диагностика: какие кандидаты тупиковые и почему."""
         result = []
         for candidate in candidates:
             action = str(candidate.get("action", ""))
+            key = normalize(action) if normalize else action
             result.append(
                 {
                     "action": action,
-                    "stuck": self.is_stuck(action),
-                    "no_effect_streak": self.no_effect_streak(action),
-                    "had_effect_before": self.has_effect_history(action),
+                    "normalized_action": key,
+                    "stuck": self.is_stuck(key),
+                    "no_effect_streak": self.no_effect_streak(key),
+                    "denied_streak": self.denied_streak(key),
+                    "had_effect_before": self.has_effect_history(key),
                 }
             )
         return result

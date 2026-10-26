@@ -456,7 +456,7 @@ def _print_banner(agent) -> None:
 
 def _save_and_report(agent) -> None:
     try:
-        agent.save_state()
+        agent.save_state(force=True)
         agent.save_mental_models()
     except Exception as exc:
         logger.warning("Не удалось сохранить состояние: %s", exc)
@@ -503,7 +503,7 @@ def main(argv: Optional[list] = None) -> int:
     def atexit_save() -> None:
         try:
             if not runtime.finished.is_set():
-                runtime.agent.save_state()
+                runtime.agent.save_state(force=True)
         except Exception:
             pass
 

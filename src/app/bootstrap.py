@@ -110,18 +110,15 @@ def awaken_from_seed(
 
             inherited = 0
             for name, raw in (models.get("concepts") or {}).items():
-                node = ConceptNode(name)
-                node.definition_hypothesis = raw.get(
-                    "definition_hypothesis", ""
-                )
-                node.confidence = float(raw.get("confidence", 0.1) or 0.1)
-                node.connections = {
-                    key: float(value)
-                    for key, value in (raw.get("connections") or {}).items()
-                }
-                node.contexts_encountered = set(raw.get("contexts") or [])
+                node = ConceptNode.from_dict({**raw, "name": name})
                 agent.mental_models.concepts[name] = node
                 inherited += 1
+            from src.cognition.empirical_claims import EmpiricalClaim
+
+            agent.mental_models.claims.update({
+                key: EmpiricalClaim.from_dict(raw)
+                for key, raw in (models.get("claims") or {}).items()
+            })
             report["concepts"] = len(agent.mental_models.concepts)
             report["inherited_concepts"] = inherited
         except Exception as exc:
@@ -257,7 +254,8 @@ def create_agent(
         checkpoint = latest_checkpoint(name, agent.checkpoint_dir)
         if checkpoint:
             try:
-                agent.load_state(checkpoint)
+                if not agent.load_state(checkpoint):
+                    raise ValueError("Восстановление состояния не завершено")
                 report.update(
                     source="checkpoint",
                     checkpoint=os.path.basename(checkpoint),
