@@ -715,6 +715,8 @@ class DigitalBeing:
 
         # DecisionArbitrator: привязываем soul-системы.
         if hasattr(self, "decision_arbitrator") and hasattr(self, "soul"):
+            if self.soul.is_available("self"):
+                self.decision_arbitrator.attach_identity(self.soul.get("self"))
             if self.soul.is_available("immune"):
                 self.decision_arbitrator.attach_immune_system(self.soul.get("immune"))
             if self.soul.is_available("survival"):
