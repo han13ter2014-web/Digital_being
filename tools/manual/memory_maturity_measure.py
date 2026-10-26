@@ -19,6 +19,8 @@
     --seed N            зафиксировать зерно случайности: без него два
                         прогона — разные траектории, и разницу между ними
                         нельзя приписать консолидации
+    --depth N           доля исследований, идущих на углубление уже
+                        встреченной темы (0..1); по умолчанию — из конфига
     --sample-every N    как часто снимать срез памяти (по умолчанию 50)
     --report PATH       записать отчёт в UTF-8 (консоль Windows искажает
                         кириллицу)
@@ -65,6 +67,7 @@ class Sample:
             f"(своих {s['own']:3d}), с формулировкой {s['defined']:3d}, "
             f"отвечаемых {s['answerable']:3d} ({s['answerable_share']:.0%}), "
             f"отвечает из памяти {s['definable']:3d}, "
+            f"встреч на концепцию {s['mean_experiences']:.1f}, "
             f"ср. уверенность {s['mean_confidence']:.3f}, "
             f"связей {s['links']:4d}, консолидаций {s['consolidations']:3d}"
         )
@@ -86,6 +89,11 @@ def snapshot(agent) -> dict:
     definable = 0
     confidence_sum = 0.0
     links = 0
+    encounters = 0
+    deep = 0
+    no_evidence = 0
+    low_confidence = 0
+    evidence_strength = 0.0
     for name in own:
         node = concepts[name]
         text = str(getattr(node, "definition_hypothesis", "") or "")
@@ -99,6 +107,18 @@ def snapshot(agent) -> dict:
             definable += 1
         confidence_sum += float(getattr(node, "confidence", 0.0) or 0.0)
         links += len(getattr(node, "connections", {}) or {})
+        experiences = len(getattr(node, "experiences", []) or [])
+        encounters += experiences
+        # Повторные встречи — охват в глубину, но не обязательно знания:
+        # нейтральная регистрация темы не добавляет свидетельств.
+        if experiences >= 2:
+            deep += 1
+        strength, _ = node.evidence()
+        evidence_strength += strength
+        if strength == 0:
+            no_evidence += 1
+        if node.confidence <= 0.4:
+            low_confidence += 1
 
     own_count = len(own)
     return {
@@ -109,6 +129,13 @@ def snapshot(agent) -> dict:
         "answerable": answerable,
         "answerable_share": (answerable / own_count) if own_count else 0.0,
         "definable": definable,
+        "deep": deep,
+        "deep_share": (deep / own_count) if own_count else 0.0,
+        "encounters": encounters,
+        "no_evidence": no_evidence,
+        "low_confidence": low_confidence,
+        "evidence_strength": evidence_strength,
+        "mean_experiences": (encounters / own_count) if own_count else 0.0,
         "mean_confidence": (confidence_sum / own_count) if own_count else 0.0,
         "links": links,
         "consolidations": int(getattr(agent, "_consolidation_count", 0)),
@@ -122,6 +149,7 @@ async def main(
     report_path: str = "",
     sample_every: int = 50,
     seed: int | None = None,
+    depth_ratio: float | None = None,
 ) -> int:
     if seed is not None:
         # Без фиксации зерна два прогона — разные случайные траектории
@@ -139,10 +167,15 @@ async def main(
     if searcher is not None:
         searcher.toggle(False)
 
-    if not consolidate:
-        from config.simulation_config import LR_CONFIG
+    from config.simulation_config import LR_CONFIG
 
+    if not consolidate:
         LR_CONFIG.CONSOLIDATION_ENABLED = False
+    if depth_ratio is not None:
+        # Доля исследований, идущих на углубление уже встреченной темы.
+        # Флаг нужен, чтобы сравнивать значения на одной траектории, не
+        # правя конфиг между прогонами.
+        LR_CONFIG.EXPLORATION_DEPTH_RATIO = float(depth_ratio)
 
     # Имена родовых концепций фиксируем ДО первого действия: иначе
     # «своими» окажутся и те, что агент только что изучил.
@@ -186,6 +219,9 @@ async def main(
     lines.append(f"Циклов: {cycles}")
     if seed is not None:
         lines.append(f"Зерно случайности: {seed}")
+    lines.append(
+        f"Доля углубления: {getattr(LR_CONFIG, 'EXPLORATION_DEPTH_RATIO', '?')}"
+    )
     lines.append(f"Действия: {actions}")
     lines.append("Динамика памяти (только свои концепции, без родовых):")
     lines.extend(sample.line() for sample in samples)
@@ -193,6 +229,18 @@ async def main(
     lines.append(
         f"  отвечаемых: {first['answerable']} → {final['answerable']} "
         f"({first['answerable_share']:.0%} → {final['answerable_share']:.0%})"
+    )
+    lines.append(
+        f"  встречались дважды и более: {final['deep']} "
+        f"({final['deep_share']:.0%} своих)"
+    )
+    lines.append(
+        f"  встреч на концепцию: {final['mean_experiences']:.2f}"
+    )
+    lines.append(
+        f"  без свидетельств: {final['no_evidence']}, "
+        f"с низкой уверенностью: {final['low_confidence']}, "
+        f"суммарная сила свидетельств: {final['evidence_strength']:.2f}"
     )
     lines.append(
         f"  отвечает из памяти: {first['definable']} → {final['definable']}"
@@ -254,6 +302,11 @@ if __name__ == "__main__":
         index = args.index("--seed")
         seed = int(args[index + 1])
         del args[index:index + 2]
+    depth = None
+    if "--depth" in args:
+        index = args.index("--depth")
+        depth = float(args[index + 1])
+        del args[index:index + 2]
     args = [a for a in args if not a.startswith("--")]
     count = int(args[0]) if args else 500
     raise SystemExit(
@@ -265,6 +318,7 @@ if __name__ == "__main__":
                 report_path=report,
                 sample_every=sample_every,
                 seed=seed,
+                depth_ratio=depth,
             )
         )
     )

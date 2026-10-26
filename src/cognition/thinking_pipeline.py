@@ -110,6 +110,8 @@ class ThinkingPipeline:
             understanding = agent.mental_models.get_concept_understanding(concept_key)
             if understanding.get("can_define", False):
                 thought = f"[Ментальная модель] '{concept_key}': {understanding['hypothesis']}"
+                if understanding.get("evidence_direction") == -1:
+                    thought += " (исходное предположение опровергается моим опытом)"
                 thought += f" (уверенность: {understanding['confidence']:.0%})"
                 related = understanding.get("connections", [])
                 if related:
@@ -134,7 +136,7 @@ class ThinkingPipeline:
                 clean_data,
                 f"гипотеза_цикл_{agent.cycle_count}",
                 hypothesis['text'][:80],
-                hypothesis['confidence'] * 0.5,
+                evidence_kind="hypothesis", source="self:hypothesis",
             )
             agent.energy -= 2
             return thought
@@ -372,9 +374,9 @@ class ThinkingPipeline:
             concept_name=concept_name,
             context=f"пользователь_ответ_цикл_{agent.cycle_count}",
             outcome=answer_text[:100],
-            valence=0.8,
+            valence=0.8, evidence_strength=0.8,
+            evidence_kind="testimony", source=f"user:answer:{pending['id']}",
         )
-        node.confidence = min(1.0, node.confidence + 0.3)
 
         agent.success_streak += 2
         agent.energy -= 3
@@ -451,17 +453,13 @@ class ThinkingPipeline:
                     concept_name=complex_question,
                     context=f"synthesis_cycle_{agent.cycle_count}",
                     outcome=hypothesis,
-                    valence=0.9,
+                    valence=0.9, evidence_kind="hypothesis", source="self:synthesis",
                 )
-                # Увеличиваем уверенность — это ПОНИМАНИЕ, а не просто факт
-                node = agent.mental_models.concepts.get(complex_question)
-                if node:
-                    node.confidence = min(1.0, node.confidence + 0.5)
 
                 agent.success_streak += 5
                 agent.intelligence += 2
                 get_logger().log(f"[СИНТЕЗ УСПЕХ] '{complex_question}' -> '{hypothesis[:100]}...'")
-                get_logger().log(f"[СИНТЕЗ] Интеллект +2, уверенность повышена")
+                get_logger().log(f"[СИНТЕЗ] Интеллект +2, собственная гипотеза сохранена")
                 
                 # === Внутренняя мотивация: концепт усвоен ===
                 if hasattr(agent, 'internal_motivation'):
@@ -522,7 +520,7 @@ class ThinkingPipeline:
             outcome = f"Новая концепция, связана с: {'/'.join(keywords[:3])}"
         else:
             outcome = f"Неизвестный стимул: '{concept_name}'"
-        valence = 0.0 if "вопрос" in original_data else 0.3
+        valence = 0.0
         node = agent.mental_models.encounter_concept(
             concept_name=concept_name,
             context=context,
@@ -583,7 +581,11 @@ class ThinkingPipeline:
 
                     context = f"поиск_в_файле:{filepath}"
                     outcome = docstring[:80]
-                    agent.mental_models.encounter_concept(clean_data, context, outcome, 0.5)
+                    agent.mental_models.encounter_concept(
+                        normalize_concept_name(clean_data), context, outcome,
+                        evidence_strength=0.5, evidence_kind="observation",
+                        source=f"file:{filepath}",
+                    )
 
                     thought = f"Нашел ответ в файле {filepath}: {docstring[:100]}..."
                     agent.success_streak += 1
@@ -690,7 +692,8 @@ class ThinkingPipeline:
             normalize_concept_name(clean_data),
             f"web:{lang}_wikipedia",
             extract[:80],
-            final_confidence,
+            evidence_strength=final_confidence,
+            evidence_kind="testimony", source=url,
         )
         
         # 4. Сохранить метаданные обучения для анализа

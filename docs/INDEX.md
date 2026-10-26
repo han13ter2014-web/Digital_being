@@ -40,6 +40,14 @@
 | [STAGE18_REPORT.md](STAGE18_REPORT.md) | core-owned effector contract: идемпотентный адаптер, restart, approval и ограничения 18A |
 | [STAGE18B_REPORT.md](STAGE18B_REPORT.md) | core-driven effector: один шаг за цикл ядра, пассивный tick, interval, legacy-goal isolation и ограничения 18B |
 | [STAGE19_REPORT.md](STAGE19_REPORT.md) | бюджет действия: одно решение на попытку, резерв, потолок стоимости, остановка, default-off и ограничения 19 |
+| [DEPTH_EXPERIMENT.md](DEPTH_EXPERIMENT.md) | проверка гипотезы глубины: 25 прогонов, коэффициент не повышен |
+| [EXPERIENCE_EPISTEMICS.md](EXPERIENCE_EPISTEMICS.md) | эмоция отдельно от свидетельства, гипотезы, происхождение и сохранение опыта |
+| [ACTION_EXPECTATIONS.md](ACTION_EXPECTATIONS.md) | ожидание до действия, собственное наблюдение и пересмотр представления о теле |
+| [RESTART_CONTINUITY.md](RESTART_CONTINUITY.md) | обычный перезапуск сохраняет опыт и следующее ожидание; атомарный чекпоинт |
+| [EMPIRICAL_CLAIMS.md](EMPIRICAL_CLAIMS.md) | отдельные утверждения об энергии и усталости: условия, независимые выводы, перезапуск |
+| [EXPERIMENT_CHOICE.md](EXPERIMENT_CHOICE.md) | проверка собственного утверждения как необязательный кандидат арбитру |
+| [AUTONOMOUS_LIFE_EXPERIMENT.md](AUTONOMOUS_LIFE_EXPERIMENT.md) | три естественные траектории с перезапуском; границы проверок и доминирование выхода из тупика |
+| [LOOP_ESCAPE_DIAGNOSTICS.md](LOOP_ESCAPE_DIAGNOSTICS.md) | причинный журнал: повторные предложения застрявших способов и замена отдыхом |
 | [CHANGELOG.md](../CHANGELOG.md) | история изменений |
 
 ## Эксплуатация и сборка

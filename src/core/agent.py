@@ -1179,7 +1179,7 @@ class DigitalBeing:
         """Backward-compat: делегирует в ThinkingPipeline."""
         return self.thinking._self_check_knowledge(target_concept)
 
-    def save_state(self):
+    def save_state(self, *, force=False):
         """Сохранение состояния (умные чекпоинты).
 
         Этап 2.3: state.json содержит поле schema_version. При изменении
@@ -1189,7 +1189,7 @@ class DigitalBeing:
         Этап 4.5: фактическая сериализация и прунинг вынесены в
         ``src.core.checkpoint_serializer`` (фасад).
         """
-        should_save = False
+        should_save = bool(force)
 
         # 1. Сохраняем при эволюции
         if SIM_CONFIG.SAVE_ON_EVOLUTION and self.intelligence > self._last_saved_intelligence:
@@ -1207,10 +1207,14 @@ class DigitalBeing:
             build_state_from_agent,
         )
         state = build_state_from_agent(self)
-        ser = CheckpointSerializer(max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS)
-        ser.save(state, self.name, self.cycle_count)
+        ser = CheckpointSerializer(
+            checkpoint_dir=getattr(self, "checkpoint_dir", None),
+            max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
+        )
+        filename = ser.save(state, self.name, self.cycle_count)
 
         self._last_saved_intelligence = self.intelligence
+        return filename
 
     # === Методы для системы Death Risk / Structural Integrity ===
     
@@ -1415,6 +1419,20 @@ class DigitalBeing:
         else:
             self.energy -= cost
 
+        expectation_trial = None
+        expectations = None
+        if action_type in ("rest", "deep_rest") and getattr(self, "mental_models", None) is not None:
+            from src.cognition.action_expectations import ActionExpectations
+
+            expectations = getattr(self, "action_expectations", None)
+            if expectations is None:
+                expectations = self.action_expectations = ActionExpectations()
+            expectation_trial = expectations.begin(
+                self.mental_models, action_type, float(self.energy),
+                float(getattr(LR_CONFIG, "ENERGY_MAX", 200)),
+                fatigue=getattr(getattr(getattr(self, "interoception", None), "state", None), "fatigue", None),
+            )
+
         # === Death Risk actions: выполняем реальную логику восстановления ===
         if action_type == "repair":
             if hasattr(self, 'death_risk') and self.death_risk:
@@ -1555,6 +1573,16 @@ class DigitalBeing:
         # Модульная функция, а не метод: act() работает и в лёгких
         # объектах без тела (тесты бюджета, заглушки).
         step_body(self, action_type, performed=True)
+        if expectations is not None:
+            observation = expectations.finish(
+                self.mental_models, expectation_trial, float(self.energy),
+                fatigue_after=getattr(getattr(getattr(self, "interoception", None), "state", None), "fatigue", None),
+            )
+            if observation is not None:
+                get_logger().log(
+                    f"[EXPECTATION] {action_type}: delta={observation['delta']:.3f}, "
+                    f"matched={observation['prediction_matched']}"
+                )
 
         # === Мотивация: результат действия (P1.2 Valence Feedback) ===
         if hasattr(self, 'motivation_system'):
@@ -1876,22 +1904,22 @@ class DigitalBeing:
         return True
 
     def _pick_shallow_concept(self, concepts: Dict) -> Optional[str]:
-        """Концепция, которую стоит углубить: встречена, но не осмыслена.
+        """Неуверенная тема вне текущего круга: формулировка ещё не знание.
 
-        Кандидаты — концепции с одной-двумя встречами и без собственного
-        определения. Возвращается самая «недоделанная»: меньше встреч,
-        длиннее название (обычно более содержательная тема).
+        Это только кандидат на исследование, не обязательство закрыть
+        пробел. Доля углубления и арбитр по-прежнему допускают иной выбор.
         """
+        if not isinstance(concepts, dict):
+            return None
+        recently = set(getattr(self, "_exploration_history", []) or [])
         candidates = []
         for name, node in concepts.items():
-            if not self._is_learnable(name):
+            if not self._is_learnable(name) or name in recently:
                 continue
             experiences = len(getattr(node, "experiences", []) or [])
-            if experiences < 1 or experiences >= 3:
+            confidence = float(getattr(node, "confidence", 0.0))
+            if experiences < 1 or confidence > 0.4:
                 continue
-            definition = str(getattr(node, "definition_hypothesis", "") or "")
-            if len(definition) > 10:
-                continue  # уже сформулирована — не топчемся
             candidates.append((experiences, name))
 
         if not candidates:
@@ -2263,7 +2291,7 @@ class DigitalBeing:
                 target,
                 f"синтез_цикл_{self.cycle_count}",
                 hypothesis,
-                valence=0.4,
+                evidence_kind="hypothesis", source="self:synthesis",
             )
         except Exception as exc:
             get_logger().log(f"[SYNTHESIS] не удалось записать: {exc}")
@@ -2503,7 +2531,7 @@ class DigitalBeing:
                 target,
                 f"гипотеза_цикл_{self.cycle_count}",
                 text[:80],
-                confidence * 0.5,
+                evidence_kind="hypothesis", source="self:hypothesis",
             )
         except Exception as exc:
             get_logger().log(f"[HYPOTHESIS] не удалось записать: {exc}")
@@ -2761,16 +2789,18 @@ class DigitalBeing:
             get_logger().log(
                 f"[{self.name}] Не удалось загрузить чекпоинт: {checkpoint_file}"
             )
-            return
+            return False
         try:
             apply_state_to_agent(self, state)
             get_logger().flush_immediate(
                 f"Состояние восстановлено из {os.path.basename(checkpoint_file)}"
             )
+            return True
         except Exception as e:
             get_logger().log(
                 f"[{self.name}] Ошибка при загрузке состояния: {e}"
             )
+            return False
 
     def log_activity(self, message):
         """Логирование действий (буферизированное)"""
@@ -3698,6 +3728,19 @@ class DigitalBeing:
         except Exception as e:
             get_logger().log(f"[SOCIAL_CANDIDATES] Error: {e}")
 
+        # Собственная проверка — кандидат, а не приказ и не новая цель.
+        from src.cognition.experiment_proposals import propose_experiment
+
+        experimental = propose_experiment(
+            self.mental_models, energy=float(self.energy),
+            energy_max=float(LR_CONFIG.ENERGY_MAX),
+            fatigue=getattr(getattr(getattr(self, "interoception", None), "state", None), "fatigue", None),
+            cycle=cycle, last_cycle=getattr(self, "_last_experiment_cycle", None),
+        )
+        if experimental is not None:
+            candidates.append(experimental)
+            result["experiment_proposal"] = experimental
+
         # === УСТАЛОСТЬ: тяжёлая работа хуже даётся ===
         # ``cognitive_throughput`` падает с усталостью (1 - 0.7*fatigue).
         # Раньше величина только считалась и сохранялась в чекпоинт —
@@ -3783,6 +3826,7 @@ class DigitalBeing:
         # Имя нормализуем: мотивация зовёт действие «exploration», а
         # арбитр — «explore». Без нормализации проверка тупика смотрела бы
         # на другое имя и никогда не срабатывала.
+        result["initial_arbitration"] = dict(result.get("arbitrator") or {})
         chosen_type = self._normalize_action(chosen_action)
         if chosen_action and self.loop_closer.is_stuck(chosen_type):
             ranked = sorted(
@@ -3805,6 +3849,10 @@ class DigitalBeing:
                     "to": alternative.get("action"),
                     "reason": "no observable effect",
                     "streak": self.loop_closer.no_effect_streak(chosen_type),
+                    "denied_streak": self.loop_closer.denied_streak(chosen_type),
+                    "had_effect_before": self.loop_closer.has_effect_history(chosen_type),
+                    "fallback": alternative.get("reason") == "all_stuck",
+                    "candidate_diagnostics": self.loop_closer.describe_candidates(ranked, normalize=self._normalize_action),
                 }
                 get_logger().log(
                     f"[LOOP] '{chosen_action}' не даёт результата "
@@ -3838,7 +3886,19 @@ class DigitalBeing:
 
         if chosen_action and chosen_action not in ("think_known", "wait", "none"):
             try:
+                experiment_selected = (
+                    result.get("arbitrator", {}).get("source") == "self_experiment"
+                    and experimental is not None
+                    and chosen_action == experimental["action"]
+                )
                 action_result = self.act(chosen_action)
+                if experiment_selected:
+                    self._last_experiment_cycle = cycle
+                    observed = getattr(getattr(self, "action_expectations", None), "last_trial", None)
+                    result["experiment_result"] = {
+                        "claim_id": experimental["params"]["claim_id"],
+                        "observation": observed,
+                    }
                 result["autonomous_action"] = {"action": chosen_action, "result": action_result}
                 get_logger().log(f"[AUTONOMOUS_ACTION] {action_result}")
                 
@@ -4205,7 +4265,7 @@ class DigitalBeing:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             
             with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(self.mental_models.to_dict(), f, indent=2, ensure_ascii=False)
+                json.dump(self.mental_models.to_storage_dict(), f, indent=2, ensure_ascii=False)
             get_logger().log(f"[{self.name}] Ментальные модели сохранены: {filename}")
         except Exception as e:
             get_logger().log(f"[{self.name}] Ошибка сохранения: {e}")
@@ -4221,23 +4281,23 @@ class DigitalBeing:
             with open(filename, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
+            from src.cognition.mental_models import ConceptNode
+
             for name, node_data in data.get("concepts", {}).items():
-                from src.cognition.mental_models import ConceptNode
-                node = ConceptNode(name)
-                node.definition_hypothesis = node_data.get("definition_hypothesis", "")
-                node.confidence = node_data.get("confidence", 0.1)
-                node.experiences = node_data.get("experiences", [])
-                node.connections = {k: float(v) for k, v in node_data.get("connections", {}).items()}
-                node.usage_examples = node_data.get("usage_examples", [])
-                node.contexts_encountered = set(node_data.get("contexts", []))
+                self.mental_models.concepts[name] = ConceptNode.from_dict(
+                    {**node_data, "name": name}
+                )
 
-                if "created_at" in node_data and node_data["created_at"]:
-                    from datetime import datetime
-                    node.created_at = datetime.fromisoformat(node_data["created_at"])
-                if "last_updated" in node_data and node_data["last_updated"]:
-                    node.last_updated = datetime.fromisoformat(node_data["last_updated"])
+            from src.cognition.empirical_claims import EmpiricalClaim
 
-                self.mental_models.concepts[name] = node
+            self.mental_models.claims = {
+                key: EmpiricalClaim.from_dict(raw)
+                for key, raw in (data.get("claims") or {}).items()
+            }
+            self.mental_models.name = data.get("name", self.mental_models.name)
+            self.mental_models.metadata.update(data.get("metadata") or {})
+            self.mental_models.association_memory = data.get("recent_associations", [])
+            self.mental_models._related_cache.clear()
 
             get_logger().log(f"[{self.name}] Ментальные модели загружены: {len(self.mental_models.concepts)} концепций")
         except Exception as e:
