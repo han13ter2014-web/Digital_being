@@ -1320,7 +1320,7 @@ class DigitalBeing:
             get_logger().log(f"[RESTORE] Failed to restore from checkpoint: {e}")
             return False
 
-    def act(self, decision: str) -> str:
+    def act(self, decision: str, *, intention=None) -> str:
         """Действие на основе мышления с учетом разных затрат энергии.
 
         Args:
@@ -1335,6 +1335,9 @@ class DigitalBeing:
         которого цели не могут двигаться, а бесполезные действия
         повторяются бесконечно.
         """
+        from src.cognition.intention_payload import intention_target
+
+        selected_target = intention_target(intention)
         world_before = capture(self)
         action = f"Ответ: {decision}"
         topic = ""
@@ -1473,7 +1476,8 @@ class DigitalBeing:
             # списывалась, мир не менялся. Теперь это настоящая работа —
             # выбрать слабое место в знаниях и поработать над ним.
             handler = getattr(self, "_act_explore", None)
-            exploration = handler() if handler else None
+            target = selected_target
+            exploration = (handler(target=target) if target else handler()) if handler else None
             topic = (exploration or {}).get("target") or ""
             action = (exploration or {}).get("text") or action
         elif action_type == "rest":
@@ -1495,12 +1499,13 @@ class DigitalBeing:
                 action = "Ответ: " + "; ".join(parts)
         elif action_type == "synthesis":
             handler = getattr(self, "_act_synthesize", None)
-            synthesis = handler() if handler else None
+            synthesis = (handler(target=selected_target) if selected_target else handler()) if handler else None
             topic = (synthesis or {}).get("target") or ""
             action = (synthesis or {}).get("text") or action
         elif action_type == "decomposition":
             handler = getattr(self, "_act_decompose", None)
-            decomposition = handler() if handler else None
+            target = selected_target
+            decomposition = (handler(target=target) if target else handler()) if handler else None
             topic = (decomposition or {}).get("target") or ""
             action = (decomposition or {}).get("text") or action
         elif action_type == "reflection":
@@ -1509,7 +1514,7 @@ class DigitalBeing:
             action = (reflection or {}).get("text") or action
         elif action_type == "ask_user":
             handler = getattr(self, "_act_ask_user", None)
-            asked = handler() if handler else None
+            asked = (handler(target=selected_target) if selected_target else handler()) if handler else None
             topic = (asked or {}).get("target") or ""
             action = (asked or {}).get("text") or action
         elif action_type == "communicate":
@@ -1746,6 +1751,28 @@ class DigitalBeing:
                 and self._pick_decomposable_target(remember=False) is not None
             )
         return self._is_action_affordable(normalized)
+
+    def _is_candidate_available(self, candidate) -> bool:
+        from src.cognition.intention_payload import intention_target
+
+        try:
+            target = intention_target(candidate)
+        except ValueError:
+            return False
+        action = self._normalize_action(candidate.get("action"))
+        if target is not None:
+            if not self._is_learnable(target):
+                return False
+            if action == "decomposition":
+                if not self._decomposition_has_room():
+                    return False
+                parts = self._decompose_query(target) or []
+                if len(parts) < 2:
+                    return False
+                return self._is_action_affordable(action)
+            if action == "ask_user":
+                return self._can_ask_now(self.cycle_count) and self._is_action_affordable(action)
+        return self._is_action_available(candidate.get("action"))
 
     def _decomposition_has_room(self) -> bool:
         """Есть ли место в очереди открытых вопросов для под-вопросов."""
@@ -2108,7 +2135,7 @@ class DigitalBeing:
         if len(history) > limit:
             del history[: len(history) - limit]
 
-    def _act_explore(self) -> Dict:
+    def _act_explore(self, target=None) -> Dict:
         """Исследование как работа, а не как счётчик.
 
         Раньше ``act("explore")`` попадал в тип «default»: энергия
@@ -2120,8 +2147,8 @@ class DigitalBeing:
         мышление: появляется гипотеза, запись в ментальных моделях или
         ответ из сети. Это наблюдаемый результат.
         """
-        target = self._pick_exploration_target()
-        if not target:
+        target = str(target).strip() if target is not None else self._pick_exploration_target()
+        if not target or not self._is_learnable(target):
             return {
                 "target": "",
                 "text": "Ответ: исследовать нечего — все концепции уверены",
@@ -2143,7 +2170,7 @@ class DigitalBeing:
             "text": f"Ответ: изучил '{target}' — {short}",
         }
 
-    def _act_decompose(self) -> Dict:
+    def _act_decompose(self, target=None) -> Dict:
         """Разбирает слабую концепцию на под-вопросы и сохраняет их.
 
         Декомпозиция — работа: она создаёт новые темы, с которыми агент
@@ -2154,8 +2181,8 @@ class DigitalBeing:
         действие, которое по построению ничего не делало (в замере —
         115–162 выбора за 500 циклов).
         """
-        target = self._pick_decomposable_target()
-        if not target:
+        target = str(target).strip() if target is not None else self._pick_decomposable_target()
+        if not target or not self._is_learnable(target):
             return {"target": "", "text": "Ответ: разбирать нечего"}
 
         try:
@@ -2231,14 +2258,14 @@ class DigitalBeing:
                 known.add(key)
         return added
 
-    def _act_synthesize(self) -> Dict:
+    def _act_synthesize(self, target=None) -> Dict:
         """Синтез: попытка собрать определение из уже известных связей.
 
         Использует ментальные модели. Если определение уже есть —
         усиливает уверенность через новый опыт.
         """
-        target = self._pick_exploration_target()
-        if not target:
+        target = target if target is not None else self._pick_exploration_target()
+        if not target or not self._is_learnable(target):
             return {"target": "", "text": "Ответ: синтезировать нечего"}
 
         # Сначала — связи, подкреплённые свидетельствами (вес выше порога):
@@ -2328,7 +2355,7 @@ class DigitalBeing:
     # ПРОВОДКА: действия, которые раньше ничего не делали
     # ============================================================
 
-    def _act_ask_user(self) -> Dict:
+    def _act_ask_user(self, target=None) -> Dict:
         """Спросить человека о том, что агенту непонятно.
 
         До этой проводки действие ``ask_user`` (его предлагала мотивация
@@ -2344,8 +2371,8 @@ class DigitalBeing:
         if interaction is None:
             return {"text": "Ответ: спросить некого — нет связи с человеком"}
 
-        target = self._pick_exploration_target()
-        if not target:
+        target = target if target is not None else self._pick_exploration_target()
+        if not target or not self._is_learnable(target):
             return {"text": "Ответ: не о чем спрашивать — всё понятно"}
 
         question = (
@@ -3806,7 +3833,7 @@ class DigitalBeing:
         candidates = [
             candidate
             for candidate in candidates
-            if self._is_action_available(candidate.get("action"))
+            if self._is_candidate_available(candidate)
         ]
 
         # Тело не может ничего из предложенного — но отдых доступен всегда.
@@ -3911,6 +3938,7 @@ class DigitalBeing:
                     arbitrator_result = dict(arbitrator_result)
                     arbitrator_result["action"] = chosen_action
                     arbitrator_result["source"] = "loop_closer"
+                    arbitrator_result["params"] = dict(alternative.get("params") or {})
                     result["arbitrator"] = arbitrator_result
 
         # === EXECUTE ===
@@ -3940,7 +3968,14 @@ class DigitalBeing:
                     and experimental is not None
                     and chosen_action == experimental["action"]
                 )
-                action_result = self.act(chosen_action)
+                selected_intention = result.get("arbitrator") or {}
+                if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user"} and selected_intention.get("params"):
+                    action_result = self.act(chosen_action, intention=selected_intention)
+                else:
+                    action_result = self.act(chosen_action)
+                result["executed_intention"] = {"action": chosen_action,
+                                                "source": selected_intention.get("source"),
+                                                "params": dict(selected_intention.get("params") or {})}
                 if experiment_selected:
                     self._last_experiment_cycle = cycle
                     observed = getattr(getattr(self, "action_expectations", None), "last_trial", None)
