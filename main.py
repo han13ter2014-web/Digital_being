@@ -166,6 +166,9 @@ class Runtime:
                 loop.close()
             except Exception:
                 pass
+            tray = getattr(self, "tray", None)
+            if tray is not None:
+                tray.stop()
             self.finished.set()
             if self.window is not None:
                 self.window.request_close()
@@ -317,7 +320,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             bus,
             agent.name,
             # Без трея прятать окно нельзя: вернуть его нечем.
-            hide_on_close=(args.ui == "tray"),
+            hide_on_close=False,
         )
 
     runtime = Runtime(agent, bus, runner, window)
@@ -524,12 +527,18 @@ def main(argv: Optional[list] = None) -> int:
         else:
             runtime = build_runtime(args, env)
     except RecoveryRequiredError as exc:
-        print(
-            f"\nВосстановление жизни остановлено: {exc}\n"
+        message = (
+            f"Восстановление жизни остановлено: {exc}\n\n"
             "Данные не заменены новой жизнью. Сохраните копию профиля и "
-            "проверьте резервный комплект. Не используйте --new для исправления ошибки.\n",
-            file=sys.stderr,
+            "проверьте резервный комплект. Не используйте --new для исправления ошибки."
         )
+        logger.error("%s", message)
+        if sys.stderr is not None:
+            print(message, file=sys.stderr)
+        if args.ui in ("gui", "tray") and not (args.maturity or json_output):
+            from src.app.recovery_notice import show_recovery_notice
+
+            show_recovery_notice(message)
         return 3
     except FileNotFoundError as exc:
         print(f"\n❌ {exc}\n", file=sys.stderr)
@@ -560,7 +569,11 @@ def main(argv: Optional[list] = None) -> int:
 def _start_tray(runtime: Runtime) -> None:
     """Иконка в системном трее (необязательная зависимость)."""
     try:
-        from src.ui.tray import TrayIcon
+        from src.ui.tray import TrayIcon, _HAS_PYSTRAY
+
+        if not _HAS_PYSTRAY:
+            logger.warning("Трей недоступен; окно останется обычным")
+            return
     except Exception as exc:
         logger.warning("Трей недоступен: %s", exc)
         return
@@ -569,6 +582,8 @@ def _start_tray(runtime: Runtime) -> None:
     try:
         tray.start()
         runtime.tray = tray  # type: ignore[attr-defined]
+        if runtime.window is not None:
+            runtime.window._hide_on_close = True
     except Exception as exc:
         logger.warning("Не удалось запустить трей: %s", exc)
 

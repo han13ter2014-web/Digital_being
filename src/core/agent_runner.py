@@ -413,6 +413,22 @@ class AgentRunner:
             logger.exception(f"[{self.name}] Ошибка сохранения: {e}")
             return False
 
+    def backup_now(self, destination: str) -> str:
+        """Сохранить и скопировать профиль синхронно в потоке event loop.
+
+        Нет await между сохранением и копированием: следующий тик и другие
+        обработчики этой шины не могут вмешаться. Внешние writers исключать
+        отдельно; это не межпроцессная блокировка.
+        """
+        import asyncio
+        from src.core.paths import data_dir
+        from src.memory.profile_backup import create_backup
+
+        asyncio.get_running_loop()
+        if not self._save_state_safe():
+            raise RuntimeError("Резервирование отменено: сохранение не завершено")
+        return create_backup(data_dir(), destination)
+
     def save_now(self) -> bool:
         """Публичное сохранение состояния.
 
