@@ -29,8 +29,14 @@ from src.core.world_delta import WorldDelta, WorldSignature, between, capture
 
 
 # Действия, которые по смыслу должны приводить к приросту знания.
-# Остальные (отдых, рефлексия, общение) — обслуживание, а не прогресс:
-# «нет новых знаний» для них нормально.
+# Остальные (отдых, рефлексия, общение, ответ по памяти) — обслуживание, а
+# не прогресс: «нет новых знаний» для них нормально.
+#
+# ``know_answer`` здесь стоял, и это было ошибкой замера: ответ из
+# ментальной модели ничего не меняет в мире (он читает уже накопленное), а
+# в знаменатель попадал. За 200 циклов таких ответов 104 из 400 действий —
+# доля результативности падала до 46 % на ровном месте. Вспомнить — не
+# значит узнать.
 DEFAULT_PRODUCTIVE_ACTIONS: FrozenSet[str] = frozenset(
     {
         "explore",
@@ -38,7 +44,6 @@ DEFAULT_PRODUCTIVE_ACTIONS: FrozenSet[str] = frozenset(
         "decomposition",
         "hypothesis",
         "web_search",
-        "know_answer",
     }
 )
 
@@ -94,11 +99,17 @@ class LoopCloser:
     _effect_count: Dict[str, int] = field(default_factory=dict, repr=False)
     _history: List[ActionOutcome] = field(default_factory=list, repr=False)
     _last: Optional[ActionOutcome] = None
-    # Общие счётчики: сколько действий наблюдали и сколько дали результат.
-    # Нужны для доли результативности — она показывает, работает ли петля
-    # вообще, а не просто «крутится».
+    # Счётчики наблюдаемых действий и их исходов.
+    #
+    # ``_total_*`` — все выполненные действия (отказы не в счёт: тело их
+    # не выполняло). ``_productive_*`` — только те, что обещают прирост
+    # знания. Доля результативности считается по продуктивным: отдых и
+    # общение по своей природе не меняют мир, и включать их в знаменатель
+    # значит наказывать агента за то, что он дышит.
     _total_actions: int = 0
     _total_with_effect: int = 0
+    _productive_total: int = 0
+    _productive_effect_total: int = 0
 
     # ------------------------------------------------------------------
     # Классификация действий
@@ -138,25 +149,43 @@ class LoopCloser:
         )
 
         key = str(action)
-        self._total_actions += 1
         denied = str(reason).startswith("denied:")
         if denied:
             # Отказ — не «действие без результата», а «действие не
             # выполнялось». Для непродуктивных действий (вопрос,
             # общение) отсутствие эффекта нормально, а отказ — нет:
             # повторять его немедленно бессмысленно.
+            #
+            # В счётчики результативности отказ не входит: тело не дало
+            # выполнить действие, и вины действия в этом нет. Раньше он
+            # попадал и в знаменатель, и в «пустые» исходы — замер
+            # показывал 243 отказа, которые портили долю результативности.
             self._denied_streak[key] = self._denied_streak.get(key, 0) + 1
-        elif not delta.is_empty:
-            # Успешное действие доказывает, что тело снова способно
-            # действовать: старые отказы больше не актуальны.
-            self._denied_streak.clear()
+        else:
+            self._total_actions += 1
+            productive = self.is_productive(key)
+            if productive:
+                self._productive_total += 1
+            if not delta.is_empty:
+                self._total_with_effect += 1
+                if productive:
+                    self._productive_effect_total += 1
+                # Успешное действие доказывает, что тело снова способно
+                # действовать: старые отказы больше не актуальны.
+                self._denied_streak.clear()
 
         if delta.is_empty:
-            self._no_effect_streak[key] = self._no_effect_streak.get(key, 0) + 1
+            # Отказ не делает действие «бесплодным»: оно не выполнялось.
+            # Раньше отказ увеличивал и этот счётчик, поэтому после
+            # восстановления тела действие оставалось тупиковым по
+            # причине, которой уже нет.
+            if not denied:
+                self._no_effect_streak[key] = (
+                    self._no_effect_streak.get(key, 0) + 1
+                )
         else:
             self._no_effect_streak[key] = 0
             self._effect_count[key] = self._effect_count.get(key, 0) + 1
-            self._total_with_effect += 1
 
         self._last = outcome
         self._history.append(outcome)
@@ -221,13 +250,17 @@ class LoopCloser:
         """Действие хотя бы раз давало наблюдаемый эффект."""
         return int(self._effect_count.get(str(action), 0)) > 0
 
+    def effect_count(self, action: str) -> int:
+        """Сколько раз действие давало наблюдаемый эффект за жизнь."""
+        return int(self._effect_count.get(str(action), 0))
+
     def effective_actions(self) -> List[str]:
         """Действия, которые в этой жизни давали эффект."""
         return sorted(self._effect_count)
 
     @property
     def total_actions(self) -> int:
-        """Сколько действий наблюдали за жизнь."""
+        """Сколько действий выполнялось за жизнь (отказы не в счёт)."""
         return int(self._total_actions)
 
     @property
@@ -235,15 +268,34 @@ class LoopCloser:
         """Сколько из них дали наблюдаемый результат."""
         return int(self._total_with_effect)
 
+    @property
+    def productive_total(self) -> int:
+        """Сколько выполнялось действий, обещающих прирост знания."""
+        return int(self._productive_total)
+
+    @property
+    def productive_effect_total(self) -> int:
+        """Сколько из продуктивных дали результат."""
+        return int(self._productive_effect_total)
+
     def effect_ratio(self) -> float:
-        """Доля действий с наблюдаемым результатом (0..1).
+        """Доля продуктивных действий с наблюдаемым результатом (0..1).
 
         Показывает, работает ли петля: агент действует и видит последствия,
-        а не просто увеличивает счётчик. При пустой истории — 0.
+        а не просто увеличивает счётчик.
+
+        Считается только по продуктивным действиям. Раньше в знаменатель
+        попадало всё — включая отдых, рефлексию и общение, которые по
+        своей природе не меняют мир, — и отказы, которые тело не
+        выполняло. Замер: 28 % при 45 % действий-отдыха; критерий
+        зрелости «≥50 %» был недостижим не из-за качества работы, а
+        из-за арифметики.
+
+        При пустой истории — 0.
         """
-        if self._total_actions <= 0:
+        if self._productive_total <= 0:
             return 0.0
-        return self._total_with_effect / self._total_actions
+        return self._productive_effect_total / self._productive_total
 
     def stuck_actions(self) -> List[str]:
         """Действия, которые сейчас в тупике."""
@@ -356,6 +408,8 @@ class LoopCloser:
             "effect_count": dict(self._effect_count),
             "total_actions": self._total_actions,
             "total_with_effect": self._total_with_effect,
+            "productive_total": self._productive_total,
+            "productive_effect_total": self._productive_effect_total,
         }
 
     def restore_from_checkpoint(self, state: Optional[Dict[str, Any]]) -> None:
@@ -389,6 +443,12 @@ class LoopCloser:
         with_effect = state.get("total_with_effect")
         if isinstance(with_effect, (int, float)):
             self._total_with_effect = int(with_effect)
+        productive = state.get("productive_total")
+        if isinstance(productive, (int, float)):
+            self._productive_total = int(productive)
+        productive_effect = state.get("productive_effect_total")
+        if isinstance(productive_effect, (int, float)):
+            self._productive_effect_total = int(productive_effect)
 
     def status(self) -> Dict[str, Any]:
         """Состояние для окна и дашборда."""
@@ -400,6 +460,8 @@ class LoopCloser:
             "effective_actions": self.effective_actions(),
             "total_actions": self.total_actions,
             "total_with_effect": self.total_with_effect,
+            "productive_total": self.productive_total,
+            "productive_effect_total": self.productive_effect_total,
             "effect_ratio": round(self.effect_ratio(), 3),
             "max_no_effect": self.max_no_effect,
         }
