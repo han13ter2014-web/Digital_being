@@ -209,6 +209,7 @@ class DigitalBeing:
     # список действий Active Inference.
     ACTION_ALIASES = {
         # исследование — реальная работа с неизвестным
+        "play": "play",
         "explore": "explore",
         "exploration": "explore",
         "novelty_seeking": "explore",
@@ -224,7 +225,8 @@ class DigitalBeing:
         "synthesize": "synthesis",
         "synthesize_understanding": "synthesis",
         "creative": "synthesis",
-        "creative_act": "synthesis",
+        "creative_act": "create_draft",
+        "create_draft": "create_draft",
         "philosophy": "synthesis",
         # декомпозиция
         "think_decompose": "decomposition",
@@ -1338,6 +1340,11 @@ class DigitalBeing:
         from src.cognition.intention_payload import intention_target
 
         selected_target = intention_target(intention)
+        creative_choice = None
+        if DigitalBeing.ACTION_ALIASES.get(str(decision).strip().lower()) == "create_draft":
+            from src.cognition.creative_catalog import creative_request
+
+            creative_choice = creative_request(intention)
         world_before = capture(self)
         action = f"Ответ: {decision}"
         topic = ""
@@ -1471,6 +1478,24 @@ class DigitalBeing:
         # Обработчики действий вызываются через getattr: act() работает и в
         # лёгких объектах (тесты бюджета, заглушки), где их нет. Отсутствие
         # обработчика — не ошибка: действие остаётся без эффекта.
+        elif action_type == "create_draft":
+            from src.cognition.creative_catalog import perform_creative
+
+            mode, identifier, reason = creative_choice
+            draft = perform_creative(self, mode, identifier, reason)
+            verb = "оставил" if mode == "leave" else "создал" if mode == "new" else "продолжил"
+            action = f"Ответ: {verb} черновик «{draft['theme']}», версия {draft['revision']}"
+        elif action_type == "play":
+            from src.cognition.local_play import new_game, play_turn
+
+            state = getattr(self, "_local_play", None)
+            if state is None:
+                state = self._local_play = new_game()
+            turn = play_turn(state)
+            self._last_play_result = turn
+            action = f"Ответ: сыграл ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
+            if turn["result"] is not None:
+                action += f"; партия завершена: {turn['result']}"
         elif action_type == "explore":
             # Раньше «explore» ничего не делал: тип «default», энергия
             # списывалась, мир не менялся. Теперь это настоящая работа —
@@ -1618,6 +1643,8 @@ class DigitalBeing:
                 and not outcome.had_effect
             ):
                 actual_valence = min(actual_valence, -0.2)
+            if action_type == "create_draft" and creative_choice[0] == "leave":
+                actual_valence = 0.0
             self.motivation_system.on_action_result(action_type, success, actual_valence)
             get_logger().log(f"[ACT VALENCE] {action_type}: success={success}, valence={actual_valence:.3f}")
         elif hasattr(self, 'internal_motivation'):
@@ -1733,6 +1760,10 @@ class DigitalBeing:
         тело выполнить не могло. Дешевле не предлагать невозможное.
         """
         normalized = self._normalize_action(action)
+        if normalized == "create_draft":
+            from src.cognition.creative_draft import draft_available
+
+            return self._is_action_affordable(normalized) and draft_available(getattr(self, "_creative_draft", None))
         if normalized == "ask_user":
             return self._can_ask_now(self.cycle_count) and self._has_question_target()
         if normalized == "web_search":
@@ -1757,6 +1788,24 @@ class DigitalBeing:
 
         try:
             target = intention_target(candidate)
+            if self._normalize_action(candidate.get("action")) == "create_draft":
+                from src.cognition.creative_catalog import creative_request, catalog_for
+                from src.cognition.creative_draft import LIMIT, MAX_DRAFTS, draft_available
+
+                mode, identifier, _ = creative_request(candidate)
+                catalog = catalog_for(self)
+                if identifier is not None and identifier not in catalog:
+                    return False
+                if mode == "leave":
+                    selected = catalog.get(identifier) if identifier else getattr(self, "_creative_draft", None)
+                    return bool(selected and selected.get("status", "active") == "active"
+                                and self._is_action_affordable("create_draft"))
+                if mode == "new":
+                    return len(catalog) < MAX_DRAFTS and draft_available(None) and self._is_action_affordable("create_draft")
+                if identifier is not None and mode == "continue":
+                    selected = catalog[identifier]
+                    return (selected.get("status", "active") == "active" and selected["revision"] < LIMIT
+                            and self._is_action_affordable("create_draft"))
         except ValueError:
             return False
         action = self._normalize_action(candidate.get("action"))
@@ -2134,6 +2183,21 @@ class DigitalBeing:
         limit = max(10, int(getattr(LR_CONFIG, "EXPLORATION_HISTORY_SIZE", 200)))
         if len(history) > limit:
             del history[: len(history) - limit]
+
+    def leave_creative_draft(self, reason: str) -> Dict:
+        state = getattr(self, "_creative_draft", None)
+        if state is None:
+            return {"status": "not_found"}
+        from src.cognition.creative_catalog import perform_creative
+
+        perform_creative(self, "leave", state["id"], reason)
+        return {"status": "left", "draft_id": state["id"]}
+
+    def list_creative_drafts(self) -> List[Dict]:
+        from src.cognition.creative_catalog import catalog_for
+
+        catalog = catalog_for(self)
+        return [catalog[identifier] for identifier in sorted(catalog)]
 
     def _act_explore(self, target=None) -> Dict:
         """Исследование как работа, а не как счётчик.
@@ -3823,6 +3887,16 @@ class DigitalBeing:
         except Exception as e:
             get_logger().log(f"[BODY] throughput damping error: {e}")
 
+        from src.cognition.creative_choices import creative_choices
+
+        expanded_candidates = []
+        for candidate in candidates:
+            if self._normalize_action(candidate.get("action")) == "create_draft":
+                expanded_candidates.extend(creative_choices(self, candidate))
+            else:
+                expanded_candidates.append(candidate)
+        candidates = expanded_candidates
+
         # === ФИЛЬТР ДОСТУПНОСТИ ===
         # Не предлагаем арбитру то, что сейчас физически нельзя выполнить:
         # вопрос при кулдауне, поиск при выключенной сети, действие при
@@ -3982,7 +4056,7 @@ class DigitalBeing:
                     and chosen_action == experimental["action"]
                 )
                 selected_intention = result.get("arbitrator") or {}
-                if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user"} and selected_intention.get("params"):
+                if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "create_draft"} and selected_intention.get("params"):
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
                     action_result = self.act(chosen_action)
@@ -4014,6 +4088,9 @@ class DigitalBeing:
                         actual_valence = self.motivation_system.compute_actual_valence(
                             chosen_action, str(action_result), success, valence_context
                         )
+                        if (self._normalize_action(chosen_action) == "create_draft"
+                                and selected_intention.get("params", {}).get("draft_mode") == "leave"):
+                            actual_valence = 0.0
                         result["actual_valence"] = actual_valence
                         prediction_error = actual_valence - predicted_valence
                         result["valence_prediction_error"] = prediction_error

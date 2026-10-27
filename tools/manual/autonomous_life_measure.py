@@ -40,12 +40,16 @@ async def measure(cycles, seed):
     continuation_offers, continuation_choices, continuation_losses = Counter(), Counter(), Counter()
     continuation_traces = []
     restart = None
+    play_turns = 0
 
     def attach(current):
         original = current.autonomous_tick
 
         def observe():
+            nonlocal play_turns
             report = original()
+            if (report.get("autonomous_action") or {}).get("action") == "play":
+                play_turns += 1
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
@@ -112,6 +116,8 @@ async def measure(cycles, seed):
                 fatigue_before = agent.interoception.state.fatigue
                 last_check = getattr(agent, "_last_experiment_cycle", None)
                 history_before = list(getattr(agent, "_intention_history", []))
+                from copy import deepcopy
+                game_before = deepcopy(getattr(agent, "_local_play", None))
                 await runner.stop()
                 from src.core.subsystem_base import PluginRegistry
 
@@ -123,6 +129,7 @@ async def measure(cycles, seed):
                            "fatigue_identical": fatigue_before == agent.interoception.state.fatigue,
                            "cooldown_identical": last_check == getattr(agent, "_last_experiment_cycle", None)}
                 restart["intention_history_equal"] = history_before == getattr(agent, "_intention_history", [])
+                restart["game_equal"] = game_before == getattr(agent, "_local_play", None)
                 runner = attach(agent)
                 await runner.start()
     finally:
@@ -130,6 +137,7 @@ async def measure(cycles, seed):
     claims = {key: {**claim.conclusion(), "observations": len(claim.evidence_node.experiences)}
               for key, claim in agent.mental_models.claims.items()}
     return {"seed": seed, "cycles": cycles, "arbitrated_actions": dict(actions),
+            "play_turns": play_turns, "final_game": getattr(agent, "_local_play", None),
             "continuation_offers": dict(continuation_offers),
             "continuation_choices": dict(continuation_choices),
             "continuation_losses": dict(continuation_losses),
