@@ -136,6 +136,7 @@ async def main(
     bus = EventBus(max_queue_size=500, history_size=100)
     runner = AgentRunner(agent, bus, name="AccountingRunner")
     runner.set_speed("max")
+    runner.set_stimulus_mode("pool")
 
     tally = Tally()
     max_unanswered = 0

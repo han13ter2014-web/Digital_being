@@ -100,6 +100,7 @@ async def measure(cycles, seed):
         current.autonomous_tick = observe
         runner = AgentRunner(current, EventBus(), name="AutonomousMeasureRunner")
         runner.set_speed("max")
+        runner.set_stimulus_mode("pool")
         return runner
 
     runner = attach(agent)

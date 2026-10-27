@@ -27,6 +27,7 @@ async def measure(cycles, seed, burst=1, restart=False):
     agent, _ = create_agent(env, "AttentionMeasure", new=True)
     runner = AgentRunner(agent, EventBus())
     runner.set_speed("max")
+    runner.set_stimulus_mode("pool")
     counts = Counter()
     actions_per_tick = Counter()
     executed = 0
@@ -78,6 +79,7 @@ async def measure(cycles, seed, burst=1, restart=False):
                 agent.act = act
                 runner = AgentRunner(agent, EventBus())
                 runner.set_speed("max")
+                runner.set_stimulus_mode("pool")
                 await runner.start()
     finally:
         await runner.stop()

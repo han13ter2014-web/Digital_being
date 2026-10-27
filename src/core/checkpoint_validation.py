@@ -218,6 +218,15 @@ def validate_checkpoint_state(state) -> None:
             _convertible_int(goal["id"], f"{path}.id")
             if not isinstance(goal["title"], str):
                 _fail(f"{path}.title", "expected a string")
+            if "motivation_origin" in goal:
+                _dict(goal["motivation_origin"], f"{path}.motivation_origin")
+            if "activity" in goal:
+                activity = _dict(goal["activity"], f"{path}.activity")
+                expected = {"play": {"play_turn", "play_round"}, "create_draft": {"draft_revision"}}
+                if activity.get("action") not in expected or activity.get("criterion") not in expected[activity["action"]]:
+                    _fail(f"{path}.activity", "unsupported activity criterion")
+                if "steps" in activity:
+                    _integer(activity["steps"], f"{path}.activity.steps", nonnegative=True)
     active = state.get("active_goal")
     if active is not None:
         if not isinstance(active, str):

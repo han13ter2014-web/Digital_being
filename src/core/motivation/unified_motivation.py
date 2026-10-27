@@ -188,7 +188,7 @@ DEFAULT_NEEDS = {
         base_level=0.4, current_level=0.3, decay_rate=0.01,
         threshold=0.25, priority=0.8,
         related_concepts=["игра", "эксперимент", "попробовать", "творчество", "фантазия"],
-        related_actions=["play", "creative_act", "experiment", "synthesize"]
+        related_actions=["play", "creative_act"]
     ),
     "meaning": Need(
         name="meaning", label="Смысл / Понимание своего места",
@@ -296,7 +296,7 @@ DEFAULT_DRIVES = {
         name="creativity", label="Творчество / Самореализация",
         contributing_needs={"curiosity": 0.4, "autonomy": 0.3, "play": 0.3},
         activation_threshold=0.35,
-        goal_types=["creative", "exploration", "synthesis"]
+        goal_types=["creative_act", "play"]
     ),
     "mastery": Drive(
         name="mastery", label="Мастерство / Совершенствование",
@@ -351,9 +351,8 @@ NEED_GOAL_TEMPLATES = {
         {"title": "Поделиться знанием: {topic}", "type": "teaching", "action": "teach_other"},
     ],
     "play": [
-        {"title": "Эксперимент: {idea}", "type": "experiment", "action": "experiment"},
-        {"title": "Творческий акт: {domain}", "type": "creative", "action": "creative_act"},
-        {"title": "Исследовать для удовольствия: {topic}", "type": "exploration", "action": "explore"},
+        {"title": "Сыграть партию", "type": "play", "action": "play"},
+        {"title": "Создать текстовую композицию: {domain}", "type": "creative", "action": "creative_act"},
     ],
     "meaning": [
         {"title": "Найти смысл в: {activity}", "type": "reflection", "action": "reflect"},
@@ -369,8 +368,8 @@ NEED_GOAL_TEMPLATES = {
 
 DRIVE_GOAL_TEMPLATES = {
     "creativity": [
-        {"title": "Создать что-то новое: {domain}", "type": "creative", "action": "creative_act"},
-        {"title": "Синтезировать новую идею из: {concepts}", "type": "synthesis", "action": "synthesize"},
+        {"title": "Создать текстовую композицию: {domain}", "type": "creative", "action": "creative_act"},
+        {"title": "Поиграть с возможными ходами", "type": "play", "action": "play"},
     ],
     "mastery": [
         {"title": "Достичь мастерства в: {skill}", "type": "mastery", "action": "synthesize_understanding"},
@@ -408,10 +407,10 @@ ACTION_ALIASES: Dict[str, List[str]] = {
     "play": ["play"],
     "create_draft": ["creative_act"],
     # исследование и работа с материалом
-    "explore": ["explore", "experiment", "act", "creative_act", "practice"],
+    "explore": ["explore", "experiment", "act", "practice"],
     "hypothesis": ["hypothesis", "synthesize_understanding"],
     "decomposition": ["decompose_concept", "decomposition", "organize_knowledge", "think_decompose"],
-    "synthesis": ["synthesize", "synthesize_understanding", "creative_act", "teach_other"],
+    "synthesis": ["synthesize", "synthesize_understanding", "teach_other"],
     "know_answer": ["know_answer", "synthesize", "successful_action"],
     "search_miss": ["web_search", "search_miss"],
     # общение
@@ -427,10 +426,7 @@ ACTION_ALIASES: Dict[str, List[str]] = {
     "repair": ["repair", "organize_knowledge"],
     "deep_rest": ["deep_rest", "rest", "reduce_activity", "conserve_energy"],
     "checkpoint_now": ["checkpoint_now", "checkpoint"],
-    "default": [
-        "default", "explore", "act", "creative_act", "experiment", "reflect",
-        "self_reflect", "set_own_goal", "make_choice", "propose_alternative",
-    ],
+    "default": ["default"],
 }
 
 

@@ -96,6 +96,8 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
         action="store_true",
         help="Не восстанавливать из чекпоинта",
     )
+    parser.add_argument("--stimuli", choices=("quiet", "pool"), default="quiet",
+                        help="quiet — без искусственных вопросов; pool — лабораторный пул")
     # Совместимость с прежним main_tray.py
     parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
@@ -295,6 +297,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
 
     bus = EventBus(max_queue_size=500, history_size=300)
     runner = AgentRunner(agent, bus)
+    runner.set_stimulus_mode(getattr(args, "stimuli", "quiet"))
     # Контроллер жизни нужен во всех режимах: он же обрабатывает
     # команды /dream и /terminate из чата.
     LifeController(agent, bus)

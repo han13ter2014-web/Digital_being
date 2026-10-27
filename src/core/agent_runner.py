@@ -165,6 +165,7 @@ class AgentRunner:
         self._stop_requested = False
         self._tick_count = 0
         self._last_auto_save_ts = time.time()
+        self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
 
         # Дедупликация стимулов: не повторять один и тот же вопрос
@@ -655,12 +656,22 @@ class AgentRunner:
             self._save_state_safe()
             self._last_auto_save_ts = time.time()
 
+    def set_stimulus_mode(self, mode: str) -> None:
+        if mode not in {"quiet", "pool"}:
+            raise ValueError("stimulus mode должен быть quiet или pool")
+        self._stimulus_mode = mode
+
     def _next_stimulus(self) -> Optional[str]:
         """Следующий стимул с учётом кулдауна повторов.
 
         Returns:
             Текст стимула или ``None``, если всё «скучно» — тогда отдых.
         """
+        if self._stimulus_mode == "quiet":
+            self._loop_tick += 1
+            if getattr(self.agent, "_open_questions", None) and self.agent.has_open_questions():
+                return self.agent._consume_open_question() or None
+            return None
         cooldown = int(getattr(LR_CONFIG, "STIMULUS_COOLDOWN_TICKS", 0) or 0)
         if self._speed_mode == "max":
             # В режиме «лаборатория» кулдаун выключен: иначе после

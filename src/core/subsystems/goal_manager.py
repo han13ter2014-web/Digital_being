@@ -270,7 +270,7 @@ class GoalSubsystem:
                 goal["status"] = "completed"
                 goal["completed_at"] = datetime.now().isoformat()
                 self.completed_goals += 1
-                reward = goal["difficulty"] * 10
+                reward = 0 if goal.get("activity") is not None else goal["difficulty"] * 10
 
                 # Удовлетворяем потребность, если цель пришла из мотивации
                 if self._motivation and "drive" in goal:
