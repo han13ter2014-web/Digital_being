@@ -188,7 +188,7 @@ DEFAULT_NEEDS = {
         base_level=0.4, current_level=0.3, decay_rate=0.01,
         threshold=0.25, priority=0.8,
         related_concepts=["игра", "эксперимент", "попробовать", "творчество", "фантазия"],
-        related_actions=["explore", "creative_act", "experiment", "synthesize"]
+        related_actions=["play", "creative_act", "experiment", "synthesize"]
     ),
     "meaning": Need(
         name="meaning", label="Смысл / Понимание своего места",
@@ -405,6 +405,8 @@ DRIVE_GOAL_TEMPLATES = {
 # удовлетворял любопытство: потребность оставалась насущной, и агент
 # спрашивал снова и снова. Обратный мост был, прямого не было.
 ACTION_ALIASES: Dict[str, List[str]] = {
+    "play": ["play"],
+    "create_draft": ["creative_act"],
     # исследование и работа с материалом
     "explore": ["explore", "experiment", "act", "creative_act", "practice"],
     "hypothesis": ["hypothesis", "synthesize_understanding"],

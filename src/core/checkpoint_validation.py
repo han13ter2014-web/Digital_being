@@ -235,6 +235,18 @@ def validate_checkpoint_state(state) -> None:
             _hashables(matched if matched is not None else [], f"{path}.matched_concepts")
         else:
             _hashables(progress, path)
+    if "creative_catalog" in state:
+        from src.cognition.creative_catalog import validate_catalog
+
+        validate_catalog(state["creative_catalog"])
+    if state.get("creative_draft") is not None:
+        from src.cognition.creative_draft import validate_draft
+
+        validate_draft(state["creative_draft"])
+    if state.get("local_play") is not None:
+        from src.cognition.local_play import validate_game
+
+        validate_game(state["local_play"])
     if "waiting_intentions" in state:
         from src.cognition.intention_waiting import validate_waits
 

@@ -221,6 +221,9 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # Изученные темы: чтобы исследование продолжалось, а не начиналось
         # с той же концепции после перезапуска.
+        "creative_catalog": deepcopy(getattr(agent, "_creative_catalog", {})),
+        "creative_draft": deepcopy(getattr(agent, "_creative_draft", None)),
+        "local_play": deepcopy(getattr(agent, "_local_play", None)),
         "waiting_intentions": deepcopy(getattr(agent, "_waiting_intentions", {})),
         "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
         "pending_user_messages": list(getattr(agent, "_pending_message_texts", []) or []),
@@ -347,6 +350,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
     from src.cognition.intention_history import restore_history
 
+    agent._creative_catalog = deepcopy(state.get("creative_catalog", {}))
+    agent._creative_draft = deepcopy(state.get("creative_draft"))
+    agent._local_play = deepcopy(state.get("local_play"))
     agent._waiting_intentions = deepcopy(state.get("waiting_intentions", {}))
     agent._intention_history = restore_history(state.get("intention_history", []))
     agent._pending_message_texts = list(state.get("pending_user_messages", []))
