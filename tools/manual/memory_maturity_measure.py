@@ -184,6 +184,7 @@ async def main(
     bus = EventBus(max_queue_size=500, history_size=100)
     runner = AgentRunner(agent, bus, name="MemoryRunner")
     runner.set_speed("max")
+    runner.set_stimulus_mode("pool")
 
     samples = [Sample(0, snapshot(agent))]
     actions = {}

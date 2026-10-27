@@ -1,5 +1,9 @@
 # Ручные проверки
 
+Обычный AgentRunner теперь quiet. Исторические лабораторные memory/motivation/
+accounting/autonomous/attention измерители явно выбирают pool; main поддерживает
+`--stimuli pool`, независимо от `--interval`. Ускорение само пул не включает.
+
 `local_play_measure.py --report PATH` — игровой ход без роста знаний,
 энергетическая стоимость и контролируемая конкуренция занятий.
 [Результаты](../../docs/LOCAL_PLAY.md).

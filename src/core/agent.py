@@ -2645,6 +2645,19 @@ class DigitalBeing:
         действие ничего не делало. Цель — наблюдаемое изменение: она
         появляется в списке и начинает влиять на жизнь.
         """
+        motivation = getattr(self, "motivation_system", None)
+        play_need = motivation.needs.get("play") if motivation is not None else None
+        if play_need is not None and play_need.is_pressing():
+            activity = "play" if random.random() < 0.5 else "creative_act"
+            title = "Сыграть партию" if activity == "play" else "Создать текстовую композицию"
+            if any(g.get("title") == title and g.get("status") != "completed" for g in self.goals):
+                return {"text": f"Ответ: дело '{title}' уже есть"}
+            goal_id = self.set_goal(title, difficulty=1)
+            from src.cognition.activity_goals import attach_activity
+
+            attach_activity(self, goal_id, {"source": "self", "need": "play", "action_hint": activity})
+            self._record_will("goals_set", title, f"своё дело #{goal_id}")
+            return {"text": f"Ответ: выбрал дело '{title}' (#{goal_id})"}
         target = self._pick_exploration_target()
         if not target:
             return {"text": "Ответ: свою цель ставить не из чего"}
@@ -2992,14 +3005,15 @@ class DigitalBeing:
             goal["status"] = "completed"
             goal["completed_at"] = datetime.now().isoformat()
             self.completed_goals += 1
-            reward = goal.get("difficulty", 1) * 10
+            reward = 0 if goal.get("activity") is not None else goal.get("difficulty", 1) * 10
             if goal == self.active_goal:
                 self.active_goal = None
                 self._set_next_goal()
 
         difficulty = int(goal.get("difficulty", 1) or 1)
-        self.success_streak += difficulty
-        self.energy = min(LR_CONFIG.ENERGY_MAX, self.energy + reward // 2)
+        if goal.get("activity") is None:
+            self.success_streak += difficulty
+            self.energy = min(LR_CONFIG.ENERGY_MAX, self.energy + reward // 2)
         get_logger().flush_immediate(f"Цель завершена: {goal['title']}")
         return reward
 
@@ -3729,6 +3743,9 @@ class DigitalBeing:
                     difficulty=int(g.get("difficulty") or 1),
                     success_predicate=str(g.get("success_predicate") or ""),
                 )
+                from src.cognition.activity_goals import attach_activity
+
+                attach_activity(self, gid, g)
                 existing_titles.add(title)
                 get_logger().log(f"[MOTIVATION] Goal ingested: {title} (id={gid})")
             except Exception as e:
@@ -3773,6 +3790,12 @@ class DigitalBeing:
                     candidates.append({"source": "active_inference", "action": action_name, "strength": strength, "params": {}, "free_energy": fe})
             except Exception as e:
                 get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
+
+        from src.cognition.activity_goals import activity_candidate
+
+        own_activity = activity_candidate(self)
+        if own_activity is not None:
+            candidates.append(own_activity)
 
         pending_stimulus = getattr(self, "_attention_stimulus", None)
         if pending_stimulus is not None:
@@ -4056,10 +4079,20 @@ class DigitalBeing:
                     and chosen_action == experimental["action"]
                 )
                 selected_intention = result.get("arbitrator") or {}
+                from copy import deepcopy
+
+                activity_before = deepcopy(getattr(self, "_local_play", None) if chosen_action == "play"
+                                           else getattr(self, "_creative_draft", None))
                 if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "create_draft"} and selected_intention.get("params"):
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
                     action_result = self.act(chosen_action)
+                if self._normalize_action(chosen_action) in {"play", "create_draft"}:
+                    from src.cognition.activity_goals import record_activity_step
+
+                    activity_type = self._normalize_action(chosen_action)
+                    activity_after = getattr(self, "_local_play", None) if activity_type == "play" else getattr(self, "_creative_draft", None)
+                    record_activity_step(self, selected_intention, activity_type, activity_before, activity_after)
                 finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
                 from src.cognition.intention_evidence import finish_evidence_goal
 
@@ -4660,6 +4693,8 @@ class DigitalBeing:
         """
         result = {"pct": 0, "completed": False, "reward": 0}
         if not getattr(self, "active_goal", None):
+            return result
+        if self.active_goal.get("activity") is not None:
             return result
         if not getattr(LR_CONFIG, "GOAL_PROGRESS_ENABLED", True):
             return result
