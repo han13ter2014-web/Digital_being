@@ -380,7 +380,10 @@ def test_core_driven_pending_approval_survives_restart(
 
         approved = second.approve(restored.approval_id)
         assert approved["ok"] is True
-        final = second.effector.poll(request.request_id)
+        approved_state = second.effector.poll(request.request_id)
+        assert approved_state.status is EffectorStatus.QUEUED
+        final = second.effector.step(3)
+        assert final is not None
         assert final.status is EffectorStatus.SUCCEEDED
         assert final.ok is True
     finally:

@@ -8,6 +8,7 @@ failed step can be recorded and inspected instead of crashing the whole task.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from .memory import MemoryStore
@@ -146,6 +147,7 @@ class ActionRegistry:
             ListFilesAction(sandbox),
             ReadFileAction(sandbox),
             WriteFileAction(sandbox),
+            WriteCreativeDraftAction(Sandbox(sandbox.root / "creative", max_file_bytes=8192, max_results=32)),
             SearchFilesAction(sandbox),
             VerifyFileAction(sandbox),
             RememberFactAction(memory),
@@ -219,6 +221,25 @@ class WriteFileAction(Action):
         content = args["content"]
         overwrite = _bool_arg(args, "overwrite", True)
         return self.sandbox.write_text(path, content, overwrite=overwrite)
+
+
+class WriteCreativeDraftAction(Action):
+    spec = ActionSpec(
+        name="write_creative_draft",
+        description="Write a bounded creative artifact inside the creative workspace only.",
+        parameters={"path": "creative-relative .txt path", "content": "text", "overwrite": "boolean"},
+        dangerous=True,
+    )
+
+    def __init__(self, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+
+    def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
+        path = _text_arg(args, "path")
+        if Path(path).is_absolute() or ".." in Path(path).parts or path.startswith("creative/") or not path.lower().endswith(".txt"):
+            raise ActionError("creative artifact must be a relative .txt path")
+        content = _text_arg(args, "content")
+        return self.sandbox.write_text(path, content, overwrite=_bool_arg(args, "overwrite", True))
 
 
 class SearchFilesAction(Action):

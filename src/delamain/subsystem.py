@@ -697,6 +697,14 @@ class DelamainSubsystem(Subsystem):
             # regeneration the same decision can be attempted again.
             return blocked
 
+        if self.core_driven:
+            self._sync_bridge()
+            return {
+                "ok": True, "status": "approved", "approval_id": approval_id,
+                "goal_id": goal_id, "trigger": "approval",
+                "detail": {"execution": "deferred_to_core_effector"},
+            }
+
         result = runtime.run_approved(approval_id)
         if goal is not None:
             summary = self._finish_goal(
