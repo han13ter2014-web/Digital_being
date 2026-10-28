@@ -848,7 +848,30 @@ class DigitalBeing:
         driver = getattr(self, "effector_driver", None)
         if driver is not None:
             report["effector"] = driver.tick(cycle)
+            self._on_effector_result(report.get("effector"))
         return report
+
+    def _on_effector_result(self, result):
+        """Применить результат эффектора только после terminal status."""
+        if not result or result.get("status") not in {"succeeded", "failed", "rejected"}:
+            return
+        detail = result.get("detail") or {}
+        activity = detail.get("activity")
+        if activity != "creative":
+            return
+        metadata = detail.get("metadata") or {}
+        goal_id = metadata.get("activity_goal_id")
+        if result.get("status") == "succeeded" and goal_id is not None:
+            goal = next((item for item in self.goals if item.get("id") == goal_id), None)
+            if goal is not None and goal.get("activity", {}).get("criterion") == "draft_revision":
+                self.complete_goal(goal_id)
+        from src.cognition.method_preferences import observe
+
+        observe(self, "create_draft", outcome="performed" if result.get("status") == "succeeded" else "error",
+                had_effect=bool(result.get("ok")), emotional_valence=0.0)
+        if result.get("status") == "succeeded":
+            self._last_effector_activity_result = result
+
 
     # === Единый источник правды для энергии ===
     # self.energy теперь читается/пишется через energy_subsystem.

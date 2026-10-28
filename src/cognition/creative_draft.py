@@ -4,8 +4,7 @@ import hashlib
 import random
 from uuid import uuid4
 
-from src.core.paths import data_path
-from src.delamain.sandbox import Sandbox
+from src.core.activity_workspace import ActivityWorkspace
 
 
 LIMIT = 8
@@ -43,14 +42,13 @@ def draft_available(state=None):
         validate_draft(state)
         if state.get("status", "active") == "active" and state["revision"] < LIMIT:
             return True
-    from pathlib import Path
-
-    root = Path(data_path("delamain", "workspace", "creative"))
-    return not root.exists() or sum(1 for _ in root.iterdir()) < MAX_DRAFTS
+    workspace = ActivityWorkspace()
+    return len(workspace.list()) < MAX_DRAFTS
 
 
 def draft_step(state=None):
-    sandbox = Sandbox(data_path("delamain", "workspace", "creative"), max_file_bytes=8192)
+    workspace = ActivityWorkspace()
+    sandbox = workspace.sandbox
     if state is not None:
         validate_draft(state)
     if state is None or state["revision"] >= LIMIT or state.get("status") == "left":

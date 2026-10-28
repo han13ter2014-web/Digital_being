@@ -193,6 +193,11 @@ def test_approve_uses_budget_without_consuming_approval_on_denial(
         allowed = sub.approve(waiting.approval_id)
 
         assert allowed["ok"] is True
+        assert allowed.get("status") == "approved"
+        assert agent.energy == 16.0
+        result = sub.effector.step(2)
+        assert result is not None
+        assert result.status is EffectorStatus.SUCCEEDED
         assert agent.energy == 16.0
         assert (
             tmp_path / "workspace" / "notes" / "a.txt"
