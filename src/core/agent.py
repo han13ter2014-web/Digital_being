@@ -3791,6 +3791,9 @@ class DigitalBeing:
             except Exception as e:
                 get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
 
+        from src.cognition.method_preferences import apply as apply_method_preferences
+        candidates = apply_method_preferences(self, candidates)
+
         from src.cognition.activity_goals import activity_candidate
 
         own_activity = activity_candidate(self)
@@ -4087,7 +4090,24 @@ class DigitalBeing:
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
                     action_result = self.act(chosen_action)
-                if self._normalize_action(chosen_action) in {"play", "create_draft"}:
+                from src.cognition.method_preferences import observe as observe_method
+
+                last = getattr(self, "_last_action_outcome", None)
+                normalized_action = self._normalize_action(chosen_action)
+                if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft"}:
+                    generic_outcome = "performed"
+                    if last is not None and last.reason.startswith("denied:"):
+                        generic_outcome = "denied"
+                    observe_method(self, normalized_action, outcome=generic_outcome,
+                                   had_effect=bool(last and last.had_effect))
+                if normalized_action in {"play", "create_draft"}:
+                    activity_state = getattr(self, "_creative_draft", None) if normalized_action == "create_draft" else getattr(self, "_local_play", None)
+                    activity_outcome = "left" if activity_state and activity_state.get("status") == "left" else "performed"
+                    if last is not None and last.reason.startswith("denied:"):
+                        activity_outcome = "denied"
+                    observe_method(self, chosen_action, outcome=activity_outcome,
+                                   had_effect=bool(last and last.had_effect))
+                if normalized_action in {"play", "create_draft"}:
                     from src.cognition.activity_goals import record_activity_step
 
                     activity_type = self._normalize_action(chosen_action)
