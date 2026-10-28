@@ -4,6 +4,9 @@ from copy import deepcopy
 import json
 
 
+WAITING_LIMIT = 200
+
+
 def waiting_key(action, target):
     return json.dumps([action, target], ensure_ascii=False)
 
@@ -17,9 +20,13 @@ def remember_wait(agent, entry):
         states = agent._waiting_intentions = {}
     key = waiting_key(agent._normalize_action(entry["action"]), entry["target"])
     previous = states.get(key)
-    if previous and previous.get("resolution", {}).get("kind") in {"cancelled", "completed"}:
+    if previous and previous.get("resolution", {}).get("kind") in {"cancelled", "completed", "forgotten"}:
         return
     states[key] = deepcopy(entry)
+    if len(states) > WAITING_LIMIT:
+        oldest = next(iter(states))
+        if oldest != key:
+            del states[oldest]
 
 
 def reconcile_waits(agent):
@@ -35,8 +42,24 @@ def reconcile_waits(agent):
             goal["status"] = "satisfied"
 
 
+def start_new_intention(agent, action, target, *, reason):
+    """Явно начать новую попытку, не оживляя старую запись."""
+    if not isinstance(target, str) or not target.strip() or not isinstance(reason, str) or not reason.strip():
+        raise ValueError("Нужны тема и причина нового намерения")
+    key = waiting_key(agent._normalize_action(action), target.strip())
+    old = getattr(agent, "_waiting_intentions", {}).get(key)
+    if old is not None and not old.get("resolution"):
+        raise ValueError("По этой теме уже есть активное намерение")
+    from src.cognition.intention_history import begin_intention
+
+    entry = begin_intention(agent, {"action": action, "source": "new_interest",
+                                    "params": {"topic": target.strip(), "reason": reason.strip()}})
+    entry["new_interest"] = True
+    return entry
+
+
 def resolve_wait(agent, action, target, *, kind, reason):
-    if kind not in {"cancelled", "completed"} or not isinstance(reason, str) or not reason.strip():
+    if kind not in {"cancelled", "completed", "forgotten"} or not isinstance(reason, str) or not reason.strip():
         raise ValueError("Нужны вид решения и непустая причина")
     key = waiting_key(agent._normalize_action(action), target)
     entry = getattr(agent, "_waiting_intentions", {}).get(key)
@@ -54,14 +77,14 @@ def resolve_wait(agent, action, target, *, kind, reason):
 def validate_waits(states):
     from src.cognition.intention_history import validate_history
 
-    if not isinstance(states, dict):
-        raise ValueError("waiting_intentions: нужен словарь")
+    if not isinstance(states, dict) or len(states) > WAITING_LIMIT:
+        raise ValueError("waiting_intentions: нужен ограниченный словарь")
     for key, entry in states.items():
         validate_history([entry])
         resolution = entry.get("resolution")
         if resolution is not None:
             if (not isinstance(resolution, dict)
-                    or resolution.get("kind") not in {"cancelled", "completed"}
+                    or resolution.get("kind") not in {"cancelled", "completed", "forgotten"}
                     or not isinstance(resolution.get("reason"), str) or not resolution["reason"].strip()
                     or type(resolution.get("cycle")) is not int or resolution["cycle"] < 0):
                 raise ValueError("waiting_intentions.resolution")

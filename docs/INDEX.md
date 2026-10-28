@@ -19,6 +19,12 @@
 
 ## Текущее состояние и метрики
 
+[INTENTION_FORGETTING.md](INTENTION_FORGETTING.md) — forgotten освобождает
+внимание, а новый интерес создаёт независимое намерение.
+
+[INTENTION_FORGETTING.md](INTENTION_FORGETTING.md) — явное забывание
+ожидающего дела с сохранением урока и причины.
+
 [ACTIVITY_WORKSPACE.md](ACTIVITY_WORKSPACE.md) — граница собственной папки
 занятий поверх Sandbox, без новых внешних прав.
 
