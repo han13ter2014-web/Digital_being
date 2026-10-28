@@ -4099,14 +4099,16 @@ class DigitalBeing:
                     if last is not None and last.reason.startswith("denied:"):
                         generic_outcome = "denied"
                     observe_method(self, normalized_action, outcome=generic_outcome,
-                                   had_effect=bool(last and last.had_effect))
+                               had_effect=bool(last and last.had_effect),
+                               emotional_valence=result.get("actual_valence", 0.0))
                 if normalized_action in {"play", "create_draft"}:
                     activity_state = getattr(self, "_creative_draft", None) if normalized_action == "create_draft" else getattr(self, "_local_play", None)
                     activity_outcome = "left" if activity_state and activity_state.get("status") == "left" else "performed"
                     if last is not None and last.reason.startswith("denied:"):
                         activity_outcome = "denied"
                     observe_method(self, chosen_action, outcome=activity_outcome,
-                                   had_effect=bool(last and last.had_effect))
+                                   had_effect=bool(last and last.had_effect),
+                                   emotional_valence=result.get("actual_valence", 0.0))
                 if normalized_action in {"play", "create_draft"}:
                     from src.cognition.activity_goals import record_activity_step
 
