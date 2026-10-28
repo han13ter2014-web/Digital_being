@@ -405,6 +405,11 @@ class DelamainEffectorAdapter:
                 "attempts": metadata.get("attempts", 0),
                 "retry_scheduled": bool(metadata.get("retry_scheduled")),
                 "last_error": _short(metadata.get("last_error")),
+                "activity": metadata.get("activity"),
+                "metadata": dict(metadata),
+                "intention_id": metadata.get("intention_id"),
+                "target": metadata.get("target"),
+                "core_cycle": metadata.get("core_cycle"),
             },
         )
 
