@@ -260,6 +260,10 @@ def validate_checkpoint_state(state) -> None:
         from src.cognition.intention_waiting import validate_waits
 
         validate_waits(state["waiting_intentions"])
+    if "method_preferences" in state:
+        from src.cognition.method_preferences import validate
+
+        validate(state["method_preferences"])
     if "intention_history" in state:
         from src.cognition.intention_history import validate_history
 
