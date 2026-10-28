@@ -208,6 +208,7 @@ class DigitalBeing:
     # («exploration», «learning», «creative»), поэтому таблица шире, чем
     # список действий Active Inference.
     ACTION_ALIASES = {
+        "let_go": "let_go",
         # исследование — реальная работа с неизвестным
         "play": "play",
         "explore": "explore",
@@ -1501,6 +1502,14 @@ class DigitalBeing:
         # Обработчики действий вызываются через getattr: act() работает и в
         # лёгких объектах (тесты бюджета, заглушки), где их нет. Отсутствие
         # обработчика — не ошибка: действие остаётся без эффекта.
+        elif action_type == "let_go":
+            from src.cognition.intention_waiting import resolve_wait
+
+            params = intention or {}
+            values = params.get("params", {})
+            decision = resolve_wait(self, values.get("action", "explore"), values.get("topic", ""),
+                                    kind="forgotten", reason=values.get("reason", "сам решил отпустить"))
+            action = f"Ответ: отпустил намерение '{values.get('topic', '')}' ({decision['status']})"
         elif action_type == "create_draft":
             from src.cognition.creative_catalog import perform_creative
 
@@ -1783,6 +1792,8 @@ class DigitalBeing:
         тело выполнить не могло. Дешевле не предлагать невозможное.
         """
         normalized = self._normalize_action(action)
+        if normalized == "let_go":
+            return True
         if normalized == "create_draft":
             from src.cognition.creative_draft import draft_available
 
@@ -3909,6 +3920,23 @@ class DigitalBeing:
             candidates.append(continuation)
             result["continuation_proposal"] = continuation
 
+        from src.cognition.intention_fading import fading_assessment
+        from src.cognition.intention_waiting import waiting_key
+
+        for waiting in getattr(self, "_waiting_intentions", {}).values():
+            assessment = fading_assessment(self, waiting)
+            if assessment.get("eligible"):
+                candidates.append({
+                    "source": "self_fading",
+                    "action": "let_go",
+                    "strength": 0.4,
+                    "params": {"action": waiting["action"], "topic": waiting["target"],
+                               "reason": "повторные попытки без новых свидетельств",
+                               "waiting_key": waiting_key(waiting["action"], waiting["target"])},
+                })
+                result.setdefault("fading_proposals", []).append(waiting["target"])
+                break
+
         # === УСТАЛОСТЬ: тяжёлая работа хуже даётся ===
         # ``cognitive_throughput`` падает с усталостью (1 - 0.7*fatigue).
         # Раньше величина только считалась и сохранялась в чекпоинт —
@@ -4023,6 +4051,11 @@ class DigitalBeing:
             result["action_refused"] = {"action": chosen_action,
                                         "reason": result["arbitrator"].get("reasoning", "stop")}
             chosen_action = "wait"
+        if chosen_action == "let_go":
+            selected_intention = result.get("arbitrator") or {}
+            result["autonomous_action"] = {"action": chosen_action,
+                                            "result": self.act(chosen_action, intention=selected_intention)}
+            return result
         chosen_type = self._normalize_action(chosen_action)
         if chosen_action and self.loop_closer.is_stuck(chosen_type):
             stopped_types = {

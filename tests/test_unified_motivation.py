@@ -474,7 +474,7 @@ def test_every_agent_action_type_has_motivation_feedback():
     from src.core.motivation.unified_motivation import ACTION_ALIASES, DEFAULT_NEEDS
 
     # default означает нераспознанный акт, а не универсальный успех.
-    inert = {"rest", "wait", "deep_rest", "checkpoint_now", "default"}
+    inert = {"rest", "wait", "deep_rest", "checkpoint_now", "default", "let_go"}
     action_types = set(DigitalBeing.ACTION_ALIASES.values()) | {"default"}
 
     for action_type in sorted(action_types - inert):
