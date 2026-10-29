@@ -155,6 +155,35 @@ class OpenQuestionsManager:
         """Есть ли в очереди неотвеченные вопросы?"""
         return any(not q["answered"] for q in self.queue)
 
+    def answer(self, text: str) -> Dict:
+        """Принять обычный ответ пользователя на самый свежий вопрос.
+
+        Это отдельный путь от внутреннего ``record_exploration``: ответ
+        пользователя не является новой темой для обучения и не требует
+        команды. Берём последний неотвеченный вопрос, потому что именно он
+        был последним обращением сущности к человеку.
+        """
+        answer = str(text or "").strip()
+        if not answer:
+            return {"status": "rejected", "reason": "пустой ответ"}
+        for question in reversed(self.queue):
+            if question.get("answered"):
+                continue
+            question["answered"] = True
+            question["answer"] = answer[:1000]
+            question["answered_at"] = self._cycle()
+            question["answer_source"] = "user"
+            self._log(
+                f"[OpenQ] Получен ответ пользователя на "
+                f"'{question['text'][:50]}...'"
+            )
+            return {
+                "status": "answered",
+                "question": question["text"],
+                "answer": question["answer"],
+            }
+        return {"status": "not_found"}
+
     def consume(self) -> Optional[str]:
         """Взять следующий стимул для размышления.
 

@@ -259,6 +259,37 @@ class AgentRunner:
                 )
             return
 
+        # Если Core задал пользователю прямой вопрос, обычный ответ должен
+        # закрыть именно его, а не стать новой темой обучения.
+        interaction = getattr(self.agent, "user_interaction", None)
+        pending = interaction.get_pending_question() if interaction is not None else None
+        if pending is not None:
+            result = interaction.submit_answer(pending["id"], text)
+            response = self._format_user_answer_result(result)
+            if response:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="user_interaction",
+                    priority=1,
+                )
+            return
+
+        # Если Core задал пользователю открытый вопрос, обычный ответ должен
+        # закрыть этот вопрос, а не стать новой темой обучения.
+        answerer = getattr(self.agent, "answer_open_question", None)
+        if callable(answerer) and self.agent.has_open_questions():
+            result = answerer(text)
+            if result.get("status") == "answered":
+                response = f"Ответ записан к вопросу «{result['question']}»."
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="open_question",
+                    priority=1,
+                )
+                return
+
         # Ленивое создание очереди — сообщения, пришедшие до start(),
         # не теряются, а дожидаются первого тика.
         if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
@@ -268,6 +299,16 @@ class AgentRunner:
                 f"(до start()) — сообщение будет обработано."
             )
         await self._pending_user_messages.put(text)
+
+    @staticmethod
+    def _format_user_answer_result(result: Dict[str, Any]) -> str:
+        """Коротко подтвердить прямой ответ на вопрос Core."""
+        status = result.get("status")
+        if status == "answered":
+            return "Ответ записан."
+        if status == "next_question":
+            return "Ответ записан. Есть ещё один уточняющий вопрос."
+        return "Ответ получен."
 
     @staticmethod
     def _format_name_result(result: Dict[str, Any], proposed: str) -> str:

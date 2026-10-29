@@ -3749,6 +3749,12 @@ class DigitalBeing:
             return False
         return self._open_questions_manager.has_unanswered()
 
+    def answer_open_question(self, text: str) -> Dict:
+        """Фасад: принять обычный ответ пользователя на открытый вопрос."""
+        if not hasattr(self, "_open_questions_manager"):
+            return {"status": "not_found"}
+        return self._open_questions_manager.answer(text)
+
     def _consume_open_question(self) -> Optional[str]:
         """Фасад: взять следующий стимул для размышления над вопросом."""
         if not hasattr(self, "_open_questions_manager"):
