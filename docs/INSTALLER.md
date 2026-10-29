@@ -50,6 +50,10 @@ python build_installer.py      # installer_output/DigitalBeing_Setup.exe (50 MB)
 installer_output/DigitalBeing_Setup_v0.1.0.exe   # раздавать этот файл
 ```
 
+Для публичной раздачи также публикуйте SHA-256 рядом с файлом. Подпись
+сертификатом пока не выполняется, поэтому Windows SmartScreen может показать
+предупреждение для независимого раннего релиза.
+
 ---
 
 ## 🔧 Что происходит под капотом
