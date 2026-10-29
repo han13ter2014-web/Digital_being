@@ -1,4 +1,4 @@
-"""Каркас окна версии 1.0: страницы и рендер «Сейчас» без mainloop.
+"""Каркас окна версии 1.0: страницы, «Сейчас» и карта жизни без mainloop.
 
 Тест создаёт Tk в тестовом процессе (на Windows это работает), строит UI и
 проверяет связку. Если дисплея нет — тест пропускается, а не падает.
@@ -30,16 +30,23 @@ class RecordingBus:
 
 @pytest.fixture()
 def root():
-    try:
-        window = tk.Tk()
-    except Exception as exc:  # pragma: no cover - зависит от окружения
-        pytest.skip(f"нет дисплея: {exc}")
-    window.withdraw()
-    yield window
-    try:
-        window.destroy()
-    except Exception:
-        pass
+    last_error = None
+    # Tk на Windows изредка не находит tk.tcl при быстром пересоздании:
+    # одна повторная попытка убирает случайный пропуск, не скрывая поломку.
+    for _ in range(2):
+        try:
+            window = tk.Tk()
+        except Exception as exc:  # pragma: no cover - зависит от окружения
+            last_error = exc
+            continue
+        window.withdraw()
+        yield window
+        try:
+            window.destroy()
+        except Exception:
+            pass
+        return
+    pytest.skip(f"нет дисплея: {last_error}")
 
 
 def _window(root) -> MainWindow:
@@ -52,7 +59,7 @@ def _window(root) -> MainWindow:
 
 def test_shell_builds_and_switches_pages(root):
     win = _window(root)
-    assert set(win._pages) == {"now", "access", "dialog"}
+    assert set(win._pages) == {"now", "graph", "access", "dialog"}
     assert win._current_page == "now"
 
     win._show_page("access")
@@ -108,3 +115,69 @@ def test_life_data_arrives_through_the_queue(root):
     root.update()
 
     assert "память" in win._now_headline.cget("text")
+
+
+def test_life_map_renders_nodes_and_shows_real_details(root):
+    win = _window(root)
+    win._show_page("graph")
+    root.geometry("1100x700")
+    root.deiconify()
+    root.update()
+
+    graph = {
+        "nodes": [
+            {"id": "concept:память", "kind": "concept", "label": "память",
+             "weight": 0.62, "detail": {"уверенность": 0.62, "свидетельств": 3}},
+            {"id": "concept:внимание", "kind": "concept", "label": "внимание",
+             "weight": 0.4, "detail": {"уверенность": 0.4}},
+            {"id": "value:autonomy", "kind": "value", "label": "autonomy",
+             "weight": 0.5, "detail": {"ценность ядра": True}},
+        ],
+        "edges": [
+            {"source": "concept:память", "target": "concept:внимание",
+             "kind": "association", "label": "связано с", "weight": 0.7},
+        ],
+        "truncated": False,
+        "omitted": 0,
+    }
+    win.push_graph(graph)
+    win._poll_incoming()
+    root.update()
+
+    assert len(win._graph_tag_nodes) == 3
+    assert "узлов: 3" in win._graph_counter.cget("text")
+    assert "связей: 1" in win._graph_counter.cget("text")
+
+    win._show_node_detail(graph["nodes"][0])
+    detail = win._graph_detail.cget("text")
+    assert "память" in detail
+    assert "уверенность: 0.62" in detail
+    assert "свидетельств: 3" in detail
+
+    start = win._graph_positions["concept:память"]
+    end = win._graph_positions["concept:внимание"]
+    middle = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0)
+    edge = win._nearest_edge(*middle)
+    assert edge is not None
+    assert edge["kind"] == "association"
+
+    win._show_edge_detail(edge)
+    edge_text = win._graph_detail.cget("text")
+    assert "основание" in edge_text
+    assert "ментальной модели" in edge_text
+    # Далеко от связей клик не выбирает ничего.
+    assert win._nearest_edge(2, 2) is None
+
+
+def test_life_map_says_when_there_is_nothing_yet(root):
+    win = _window(root)
+    win._show_page("graph")
+    root.geometry("1100x700")
+    root.deiconify()
+    root.update()
+    win.push_graph({"nodes": [], "edges": [], "truncated": False, "omitted": 0})
+    win._poll_incoming()
+    root.update()
+
+    assert win._graph_tag_nodes == {}
+    assert "узлов: 0" in win._graph_counter.cget("text")

@@ -71,7 +71,7 @@ def life_state_label(state: Any) -> str:
     return _STATE_LABELS.get(text, text)
 
 
-def _action_phrase(action: str, target: Optional[str]) -> str:
+def action_phrase(action: str, target: Optional[str] = None) -> str:
     phrase = _ACTION_PHRASES.get(action, action or "занятие")
     if target and action in _ACTION_WITH_TOPIC:
         return f"{phrase} «{target}»"
@@ -91,7 +91,7 @@ def now_headline(snapshot: Dict[str, Any]) -> str:
 
     activity = (snapshot.get("now") or {}).get("activity")
     if activity:
-        return _action_phrase(str(activity.get("action") or ""), activity.get("target"))
+        return action_phrase(str(activity.get("action") or ""), activity.get("target"))
 
     waiting = (snapshot.get("intentions") or {}).get("waiting") or []
     if waiting:
@@ -148,7 +148,7 @@ def activity_rows(snapshot: Dict[str, Any]) -> List[Row]:
         return [("Занятие", "начатого дела пока нет")]
 
     action = str(activity.get("action") or "")
-    rows: List[Row] = [("Действие", _action_phrase(action, activity.get("target")))]
+    rows: List[Row] = [("Действие", action_phrase(action, activity.get("target")))]
     # Для черновика тему покажет сама карточка работы: не дублируем.
     if activity.get("target") and action != "create_draft":
         rows.append(("Тема", str(activity["target"])))
@@ -180,7 +180,7 @@ def choice_rows(snapshot: Dict[str, Any]) -> List[Row]:
 
     action = str(activity.get("action") or "")
     rows: List[Row] = [
-        ("Выбрано", _action_phrase(action, activity.get("target"))),
+        ("Выбрано", action_phrase(action, activity.get("target"))),
         ("Источник", str(activity.get("source") or "—")),
     ]
     reason = str(activity.get("reason") or "").strip()
