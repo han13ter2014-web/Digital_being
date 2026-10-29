@@ -37,7 +37,7 @@ import time
 from typing import Any, Dict, Optional
 
 from src.core.event_bus import Events
-from src.ui import graph_view, life_view, theme
+from src.ui import diary_view, graph_view, life_view, theme
 from src.ui.chat_window import _HAS_TK, ChatWindow
 
 if _HAS_TK:
@@ -109,6 +109,10 @@ class MainWindow(ChatWindow):
         self._now_activity = None
         self._now_choice = None
         self._now_influence = None
+        self._diary_list = None
+        self._diary_detail = None
+        self._activity_list = None
+        self._activity_detail = None
         self._access_card = None
         self._effector_card = None
         self._mono_font = None
@@ -117,6 +121,9 @@ class MainWindow(ChatWindow):
         self._graph_canvas = None
         self._graph_detail = None
         self._graph_counter = None
+        self._diary_entries = []
+        self._activity_entries = []
+        self._activity_game = None
         self._graph_data: Dict[str, Any] = {}
         self._graph_tag_nodes: Dict[str, Dict[str, Any]] = {}
         self._graph_positions: Dict[str, Any] = {}
@@ -261,6 +268,8 @@ class MainWindow(ChatWindow):
                 self._now_influence.configure(
                     text=self._rows_text(life_view.influence_rows(snap))
                 )
+            self._apply_diary_data(snap)
+            self._apply_activity_data(snap)
             if self._access_card is not None:
                 self._access_card.configure(text=self._rows_text(life_view.access_rows(snap)))
             if self._effector_card is not None:
@@ -378,7 +387,8 @@ class MainWindow(ChatWindow):
 
         self._nav_buttons = {}
         nav_section("ЖИЗНЬ")
-        navigation = (("now", "◉", "Сейчас"), ("graph", "✦", "Карта жизни"))
+        navigation = (("now", "◉", "Сейчас"), ("graph", "✦", "Карта жизни"),
+                      ("diary", "◌", "Дневник"), ("activities", "◇", "Занятия"))
         for key, marker, label in navigation:
             button = tk.Button(
                 sidebar, text=f"  {marker}  {label}", font=self._ui_font,
@@ -408,6 +418,8 @@ class MainWindow(ChatWindow):
         self._pages = {
             "now": self._build_page_now(content),
             "graph": self._build_page_graph(content),
+            "diary": self._build_page_diary(content),
+            "activities": self._build_page_activities(content),
             "access": self._build_page_access(content),
             "dialog": self._build_page_dialog(content),
         }
@@ -791,6 +803,116 @@ class MainWindow(ChatWindow):
             except Exception:
                 pass
         self._render_graph()
+
+    def _build_page_diary(self, parent):
+        """Дневник: лента автобиографических эпизодов из Delamain memory."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        self._page_heading(page, "Дневник", "только записанные события жизни, от новых к старым")
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
+        self._diary_list = tk.Listbox(
+            body, width=32, font=self._ui_font, bg=theme.BG_CENTER,
+            fg=theme.TEXT, selectbackground=theme.GLOW_CYAN,
+            selectforeground=theme.TEXT, relief=tk.FLAT, bd=0,
+            highlightthickness=1, highlightbackground=theme.BORDER,
+        )
+        self._diary_list.pack(side=tk.LEFT, fill=tk.Y)
+        self._diary_list.bind("<<ListboxSelect>>", self._on_diary_select)
+        self._diary_detail = self._detail_panel(body, "ЭПИЗОД")
+        return page
+
+    def _build_page_activities(self, parent):
+        """Каталог занятий: черновики и локальная партия, только чтение."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        self._page_heading(page, "Занятия", "работы и партии, которые Core действительно создал")
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
+        self._activity_list = tk.Listbox(
+            body, width=32, font=self._ui_font, bg=theme.BG_CENTER,
+            fg=theme.TEXT, selectbackground=theme.GLOW_AMBER,
+            selectforeground=theme.TEXT, relief=tk.FLAT, bd=0,
+            highlightthickness=1, highlightbackground=theme.BORDER,
+        )
+        self._activity_list.pack(side=tk.LEFT, fill=tk.Y)
+        self._activity_list.bind("<<ListboxSelect>>", self._on_activity_select)
+        self._activity_detail = self._detail_panel(body, "ЗАНЯТИЕ")
+        return page
+
+    def _page_heading(self, page, title, subtitle):
+        tk.Label(page, text=title, font=self._brand_font, bg=theme.BG_DEEP,
+                 fg=theme.TEXT, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
+                                                  pady=(theme.SPACING["md"], 0))
+        tk.Label(page, text=subtitle, font=self._ui_font, bg=theme.BG_DEEP,
+                 fg=theme.MUTED, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
+                                                   pady=(0, theme.SPACING["sm"]))
+
+    def _detail_panel(self, parent, title):
+        panel = tk.Frame(parent, bg=theme.SURFACE, width=400,
+                         highlightbackground=theme.BORDER, highlightthickness=1)
+        panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(theme.SPACING["md"], 0))
+        panel.pack_propagate(False)
+        tk.Label(panel, text=title, font=self._card_title_font, bg=theme.SURFACE,
+                 fg=theme.MUTED, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
+                                                   pady=(theme.SPACING["md"], theme.SPACING["sm"]))
+        label = tk.Label(panel, text="Выберите запись слева.", font=self._ui_font,
+                         bg=theme.SURFACE, fg=theme.TEXT, anchor="nw", justify=tk.LEFT,
+                         wraplength=500)
+        label.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
+        return label
+
+    def _apply_diary_data(self, snapshot):
+        if self._diary_list is None:
+            return
+        self._diary_entries = diary_view.diary_rows(snapshot)
+        self._diary_list.delete(0, tk.END)
+        for episode in self._diary_entries:
+            self._diary_list.insert(tk.END, diary_view.episode_title(episode))
+        if not self._diary_entries:
+            self._diary_list.insert(tk.END, "Записей пока нет")
+            self._diary_list.configure(state=tk.DISABLED)
+        else:
+            self._diary_list.configure(state=tk.NORMAL)
+
+    def _apply_activity_data(self, snapshot):
+        if self._activity_list is None:
+            return
+        self._activity_entries = diary_view.draft_rows(snapshot)
+        self._activity_list.delete(0, tk.END)
+        for draft in self._activity_entries:
+            self._activity_list.insert(tk.END, f"Черновик · {draft.get('theme', 'без темы')}")
+        game = (snapshot.get("activities") or {}).get("game")
+        self._activity_game = game if isinstance(game, dict) else None
+        if self._activity_game is not None:
+            self._activity_list.insert(tk.END, "Партия · крестики-нолики")
+        if not self._activity_entries and self._activity_game is None:
+            self._activity_list.insert(tk.END, "Занятий пока нет")
+            self._activity_list.configure(state=tk.DISABLED)
+        else:
+            self._activity_list.configure(state=tk.NORMAL)
+
+    def _on_diary_select(self, _event=None):
+        if self._diary_detail is None:
+            return
+        selection = self._diary_list.curselection()
+        if selection and selection[0] < len(self._diary_entries):
+            self._diary_detail.configure(text=diary_view.rows_text(
+                diary_view.episode_rows(self._diary_entries[selection[0]])
+            ))
+
+    def _on_activity_select(self, _event=None):
+        if self._activity_detail is None:
+            return
+        selection = self._activity_list.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if index < len(self._activity_entries):
+            rows = diary_view.draft_detail(self._activity_entries[index])
+        elif self._activity_game is not None and index == len(self._activity_entries):
+            rows = diary_view.game_detail(self._life_snapshot)
+        else:
+            return
+        self._activity_detail.configure(text=diary_view.rows_text(rows))
 
     def _build_page_access(self, parent):
         """Экран «Доступы»: что разрешено и что делает Effector."""

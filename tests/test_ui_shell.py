@@ -59,7 +59,9 @@ def _window(root) -> MainWindow:
 
 def test_shell_builds_and_switches_pages(root):
     win = _window(root)
-    assert set(win._pages) == {"now", "graph", "access", "dialog"}
+    assert set(win._pages) == {
+        "now", "graph", "diary", "activities", "access", "dialog"
+    }
     assert win._current_page == "now"
 
     win._show_page("access")
@@ -115,6 +117,29 @@ def test_life_data_arrives_through_the_queue(root):
     root.update()
 
     assert "память" in win._now_headline.cget("text")
+
+
+def test_diary_and_activities_render_real_snapshot(root):
+    win = _window(root)
+    snapshot = {
+        "diary": {"episodes": [{"action": "play", "args": {"target": "партия"},
+                                  "metadata": {"status": "performed"}}]},
+        "activities": {"creative": {"drafts": [{"theme": "тишина", "revision": 2,
+                                                     "status": "active"}]},
+                       "game": {"board": ["."] * 9, "turns": 0, "round": 1, "result": None}},
+    }
+    win._apply_life_data(snapshot)
+    root.update()
+
+    assert win._diary_list.get(0) == "партия «партия»"
+    assert win._activity_list.get(0) == "Черновик · тишина"
+    assert win._activity_list.get(1) == "Партия · крестики-нолики"
+    win._diary_list.selection_set(0)
+    win._on_diary_select()
+    assert "Статус: выполнено" in win._diary_detail.cget("text")
+    win._activity_list.selection_set(1)
+    win._on_activity_select()
+    assert "Ходов: 0" in win._activity_detail.cget("text")
 
 
 def test_life_map_renders_nodes_and_shows_real_details(root):

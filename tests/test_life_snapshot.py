@@ -123,3 +123,18 @@ def test_activity_catalog_matches_core_not_filesystem():
     assert snapshot["activities"]["creative"]["count"] == 0
     assert snapshot["activities"]["creative"]["drafts"] == []
     assert snapshot["activities"]["game"] is None
+    assert snapshot["diary"]["episodes"] == []
+
+
+def test_diary_snapshot_reads_episodes_without_mutating_core():
+    agent = _agent("DiaryCopies")
+    rows = [{"id": 1, "action": "play", "args": {"target": "партия"},
+             "metadata": {"status": "performed"}}]
+    agent.delamain = SimpleNamespace(runtime=SimpleNamespace(
+        memory=SimpleNamespace(recent_life_episodes=lambda **kwargs: rows)
+    ))
+    before = set(agent.__dict__)
+    snapshot = build_life_snapshot(agent)
+    snapshot["diary"]["episodes"][0]["args"]["target"] = "изменено"
+    assert rows[0]["args"]["target"] == "партия"
+    assert set(agent.__dict__) == before

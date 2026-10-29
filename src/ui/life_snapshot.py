@@ -184,6 +184,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     }
 
     current = _current_intention(history)
+    diary_episodes = recent_life_episodes(agent)
     return {
         "name": str(getattr(agent, "name", "?")),
         "life": {
@@ -213,6 +214,8 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
             "last_finished": _last_finished(history),
         },
         "activities": _activity_section(agent),
+        "diary": {"episodes": diary_episodes,
+                   "count": len(diary_episodes)},
         "preferences": preferences,
         "goals": goals_view,
         "access": _access_section(agent),
@@ -231,7 +234,9 @@ def recent_life_episodes(agent: Any, limit: int = RECENT_EPISODES) -> List[Dict[
     if not callable(reader):
         return []
     try:
-        return [dict(row) for row in reader(life_id=str(getattr(agent, "name", "?")),
-                                            limit=max(0, min(int(limit), RECENT_EPISODES)))]
+        return [deepcopy(dict(row)) for row in reader(
+            life_id=str(getattr(agent, "name", "?")),
+            limit=max(0, min(int(limit), RECENT_EPISODES))
+        )]
     except Exception:  # pragma: no cover - защита UI
         return []
