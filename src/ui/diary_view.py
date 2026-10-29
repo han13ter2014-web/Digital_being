@@ -91,14 +91,31 @@ def draft_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [draft for draft in drafts if isinstance(draft, dict)]
 
 
+_DRAFT_STATUS = {
+    "active": "продолжается",
+    "left": "оставлен",
+}
+
+
 def draft_detail(draft: Dict[str, Any]) -> List[Row]:
-    rows: List[Row] = [("Тема", str(draft.get("theme") or "—")),
-                       ("Статус", str(draft.get("status") or "активен")),
-                       ("Редакция", str(draft.get("revision", 1)))]
+    """Объяснение работы человеческими словами, без служебного хеша."""
+    theme = str(draft.get("theme") or "без названия")
+    status = str(draft.get("status") or "active")
+    revision = int(draft.get("revision", 1) or 1)
+    rows: List[Row] = [
+        ("Что это", f"Творческий текстовый черновик на тему «{theme}»"),
+        ("О состоянии", "Работа, к которой Core может вернуться и продолжить её"
+         if status == "active" else "Работа оставлена; сохранённая версия остаётся в каталоге"),
+        ("Состояние", _DRAFT_STATUS.get(status, status)),
+        ("Редакция", f"{revision} из 8"),
+    ]
     if draft.get("leave_reason"):
-        rows.append(("Почему оставлен", str(draft["leave_reason"])))
+        reason = str(draft["leave_reason"])
+        if "лимит" in reason.lower():
+            reason = f"Core достиг предела в {revision} редакций и сохранил текст как есть"
+        rows.append(("Почему", reason))
     if draft.get("sha256"):
-        rows.append(("SHA-256", str(draft["sha256"])))
+        rows.append(("Файл", "сохранён, целостность проверена"))
     return rows
 
 

@@ -265,6 +265,14 @@ class AgentRunner:
         pending = interaction.get_pending_question() if interaction is not None else None
         if pending is not None:
             result = interaction.submit_answer(pending["id"], text)
+            if isinstance(result, dict):
+                normalized_answer = " ".join(text.lower().strip().split())
+                unknown = normalized_answer.rstrip(".!?") in {
+                    "не знаю", "не уверен", "не уверена", "не могу сказать",
+                    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+                }
+                if unknown:
+                    result["answer_kind"] = "unknown"
             response = self._format_user_answer_result(result)
             if response:
                 await self.bus.publish(
@@ -305,6 +313,8 @@ class AgentRunner:
         """Коротко подтвердить прямой ответ на вопрос Core."""
         status = result.get("status")
         if status == "answered":
+            if result.get("answer_kind") == "unknown":
+                return "Понял: «не знаю» — я запомню это как твой ответ, а не как факт."
             return "Ответ записан."
         if status == "next_question":
             return "Ответ записан. Есть ещё один уточняющий вопрос."

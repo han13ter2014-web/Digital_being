@@ -199,6 +199,15 @@ class UserInteraction:
             if q["id"] == question_id and not q["answered"]:
                 q["answered"] = True
                 q["answer"] = answer
+                normalized_answer = " ".join(str(answer).lower().strip().split())
+                unknown_answers = {
+                    "не знаю", "не уверен", "не уверена", "не могу сказать",
+                    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+                }
+                q["answer_kind"] = (
+                    "unknown" if normalized_answer.rstrip(".!?") in unknown_answers
+                    else "user_answer"
+                )
 
                 self.question_history.append({
                     "question": q["question"],
