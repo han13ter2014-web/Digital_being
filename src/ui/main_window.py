@@ -32,11 +32,12 @@ import time
 from typing import Any, Dict, Optional
 
 from src.core.event_bus import Events
+from src.ui import life_view, theme
 from src.ui.chat_window import _HAS_TK, ChatWindow
 
 if _HAS_TK:
     import tkinter as tk
-    from tkinter import font
+    from tkinter import font, scrolledtext
 
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,22 @@ class MainWindow(ChatWindow):
         self._last_speed_mode: Optional[str] = None
         self._last_life_state: Optional[str] = None
 
+        # Новый каркас версии 1.0: страницы и карточки «Сейчас».
+        # Снимок жизни приходит отдельно от плоского снимка показателей.
+        self._life_snapshot: Dict[str, Any] = {}
+        self._pages: Dict[str, Any] = {}
+        self._nav_buttons: Dict[str, Any] = {}
+        self._current_page: Optional[str] = None
+        self._state_pill = None
+        self._now_headline = None
+        self._now_sub = None
+        self._now_activity = None
+        self._now_choice = None
+        self._now_influence = None
+        self._access_card = None
+        self._effector_card = None
+        self._mono_font = None
+
         self._subscribe_life_events()
 
     # ============================================================
@@ -126,8 +143,8 @@ class MainWindow(ChatWindow):
         self._incoming_queue.put(("__status__", dict(snapshot or {})))
 
     def push_life_status(self, snapshot: Dict[str, Any]) -> None:
-        """Потокобезопасно передать состояние жизни в окно."""
-        self._incoming_queue.put(("__status__", dict(snapshot or {})))
+        """Потокобезопасно передать снимок жизни в окно (экран «Сейчас»)."""
+        self._incoming_queue.put(("__life_data__", dict(snapshot or {})))
 
     # ============================================================
     # Обработка очереди
@@ -136,6 +153,8 @@ class MainWindow(ChatWindow):
     def _handle_incoming(self, kind: str, data) -> None:
         if kind == "__status__":
             self._apply_status(data)
+        elif kind == "__life_data__":
+            self._apply_life_data(data)
         elif kind == "__life_prompt__":
             self._apply_life_prompt(data)
         elif kind == "__life_result__":
@@ -178,6 +197,61 @@ class MainWindow(ChatWindow):
         if life_state and life_state != self._last_life_state:
             self._last_life_state = life_state
             self._refresh_life_buttons(life_state)
+            self._set_state_pill(life_state)
+
+    def _set_state_pill(self, life_state: Any) -> None:
+        """Пилюля состояния в шапке: слово берём из форматтера, не выдумываем."""
+        if self._state_pill is None:
+            return
+        colors = {
+            "alive": theme.CYAN,
+            "dormant": theme.VIOLET,
+            "terminated": theme.GREY,
+        }
+        try:
+            self._state_pill.configure(
+                text=life_view.life_state_label(life_state),
+                fg=colors.get(str(life_state), theme.MUTED),
+            )
+        except Exception:
+            pass
+
+    # ============================================================
+    # Экран «Сейчас»: рендер из снимка жизни
+    # ============================================================
+
+    def _apply_life_data(self, snapshot: Dict[str, Any]) -> None:
+        """Перерисовать карточки «Сейчас» и «Доступы» из снимка жизни.
+
+        Ошибка форматтера не должна рушить окно: показываем остальное.
+        """
+        self._life_snapshot = dict(snapshot or {})
+        if self._now_headline is None:
+            return
+        snap = self._life_snapshot
+        try:
+            self._now_headline.configure(text=life_view.now_headline(snap))
+            if self._now_sub is not None:
+                self._now_sub.configure(text=life_view.body_summary(snap))
+            self._now_activity.configure(text=self._rows_text(life_view.activity_rows(snap)))
+            self._now_choice.configure(text=self._rows_text(life_view.choice_rows(snap)))
+            if self._now_influence is not None:
+                self._now_influence.configure(
+                    text=self._rows_text(life_view.influence_rows(snap))
+                )
+            if self._access_card is not None:
+                self._access_card.configure(text=self._rows_text(life_view.access_rows(snap)))
+            if self._effector_card is not None:
+                text = self._rows_text(life_view.effector_rows(snap))
+                note = life_view.pending_effector_note(snap)
+                if note:
+                    text = f"{text}\n{note}"
+                self._effector_card.configure(text=text)
+            life_state = (snap.get("life") or {}).get("state")
+            if life_state:
+                self._set_state_pill(life_state)
+        except Exception as exc:
+            logger.debug("[MainWindow] life data: %s", exc)
 
     def _refresh_pause_button(self, paused: bool) -> None:
         if self._pause_button is None:
@@ -192,9 +266,10 @@ class MainWindow(ChatWindow):
     def _refresh_speed_buttons(self, mode: str) -> None:
         for key, button in self._speed_buttons.items():
             try:
+                active = key == mode
                 button.configure(
-                    relief=tk.SUNKEN if key == mode else tk.RAISED,
-                    fg="#ffffff" if key == mode else "#c0c0c0",
+                    bg=theme.BG_CENTER if active else theme.SURFACE,
+                    fg=theme.CYAN if active else theme.MUTED,
                 )
             except Exception:
                 pass
@@ -221,101 +296,214 @@ class MainWindow(ChatWindow):
     # ============================================================
 
     def _build_ui(self) -> None:  # noqa: D401 - переопределение родителя
+        """Современный каркас: шапка, навигация, страницы, панель управления.
+
+        Виджеты, которые нужны унаследованной логике, остаются на месте:
+        ``_text`` (лента), ``_input_var``/``_input_entry`` (ввод),
+        ``_status_text`` (технические подробности). Их переезд по страницам
+        не меняет поведение — только вид.
+        """
         root = self._root
+        root.configure(bg=theme.BG_DEEP)
 
-        mono = font.Font(
-            family="Consolas" if self._is_windows() else "Menlo", size=10
+        self._mono_font = font.Font(family=theme.mono_family(), size=10)
+        self._ui_font = font.Font(family=theme.font_family(), size=11)
+        self._card_title_font = font.Font(family=theme.font_family(), size=9)
+        self._card_body_font = font.Font(family=theme.font_family(), size=12)
+        self._headline_font = font.Font(
+            family=theme.font_family(), size=20, weight="bold"
         )
-        bold = font.Font(
-            family="Segoe UI" if self._is_windows() else "Helvetica",
-            size=10,
-            weight="bold",
+        self._brand_font = font.Font(
+            family=theme.font_family(), size=16, weight="bold"
         )
 
-        body = tk.Frame(root)
+        # --- Шапка: имя и состояние жизни ---
+        header = tk.Frame(root, bg=theme.BG_DEEP)
+        header.pack(fill=tk.X)
+        tk.Label(
+            header, text=self.agent_name, font=self._brand_font,
+            bg=theme.BG_DEEP, fg=theme.TEXT, anchor="w",
+        ).pack(side=tk.LEFT, padx=theme.SPACING["md"], pady=theme.SPACING["sm"])
+        self._state_pill = tk.Label(
+            header, text="жив", font=self._ui_font,
+            bg=theme.SURFACE, fg=theme.CYAN, padx=10, pady=3,
+        )
+        self._state_pill.pack(side=tk.LEFT)
+
+        body = tk.Frame(root, bg=theme.BG_DEEP)
         body.pack(fill=tk.BOTH, expand=True)
 
-        # === Левая панель: показатели ===
-        left = tk.Frame(body, bg="#181818", width=260)
-        left.pack(side=tk.LEFT, fill=tk.Y)
-        left.pack_propagate(False)
-
+        # --- Боковая навигация. Пока три реальные страницы; карта жизни,
+        # дневник и занятия появятся отдельными участками этапа 7. ---
+        sidebar = tk.Frame(body, bg=theme.SIDEBAR, width=190)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.pack_propagate(False)
         tk.Label(
-            left,
-            text="ПОКАЗАТЕЛИ",
-            bg="#181818",
-            fg="#7f7f7f",
-            font=bold,
-            anchor="w",
-        ).pack(fill=tk.X, padx=10, pady=(10, 4))
+            sidebar, text="ЯДРО", font=self._card_title_font, bg=theme.SIDEBAR,
+            fg=theme.DIMMED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["md"], theme.SPACING["sm"]))
+        self._nav_buttons = {}
+        for key, label in (("now", "Сейчас"), ("access", "Доступы"),
+                           ("dialog", "Диалог")):
+            button = tk.Button(
+                sidebar, text=label, font=self._ui_font, anchor="w",
+                command=lambda k=key: self._show_page(k),
+                bg=theme.SIDEBAR, fg=theme.MUTED,
+                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
+                relief=tk.FLAT, bd=0, padx=theme.SPACING["md"], pady=8,
+            )
+            button.pack(fill=tk.X)
+            self._nav_buttons[key] = button
 
+        # --- Страницы ---
+        content = tk.Frame(body, bg=theme.BG_DEEP)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._pages = {
+            "now": self._build_page_now(content),
+            "access": self._build_page_access(content),
+            "dialog": self._build_page_dialog(content),
+        }
+        self._show_page("now")
+
+        self._build_controls(root, self._mono_font)
+
+    # ------------------------------------------------------------------
+    # Страницы каркаса
+    # ------------------------------------------------------------------
+
+    def _make_card(self, parent, title: str):
+        """Карточка: тонкая рамка, приглушённый заголовок, светлое тело."""
+        frame = tk.Frame(
+            parent, bg=theme.SURFACE,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        frame.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
+        tk.Label(
+            frame, text=title, font=self._card_title_font, bg=theme.SURFACE,
+            fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["sm"], 2))
+        body = tk.Label(
+            frame, text="", font=self._card_body_font, bg=theme.SURFACE,
+            fg=theme.TEXT, anchor="w", justify=tk.LEFT, wraplength=680,
+        )
+        body.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
+        return body
+
+    def _build_page_now(self, parent):
+        """Экран «Сейчас»: живая фраза, занятие, причина выбора, влияния."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        self._now_headline = tk.Label(
+            page, text="…", font=self._headline_font, bg=theme.BG_DEEP,
+            fg=theme.TEXT, anchor="w", wraplength=760, justify=tk.LEFT,
+        )
+        self._now_headline.pack(fill=tk.X, padx=theme.SPACING["md"],
+                                pady=(theme.SPACING["md"], 0))
+        self._now_sub = tk.Label(
+            page, text="", font=self._ui_font, bg=theme.BG_DEEP,
+            fg=theme.MUTED, anchor="w",
+        )
+        self._now_sub.pack(fill=tk.X, padx=theme.SPACING["md"],
+                           pady=(2, theme.SPACING["sm"]))
+        self._now_activity = self._make_card(page, "ЧЕМ ЗАНЯТО")
+        self._now_choice = self._make_card(page, "ПОЧЕМУ ИМЕННО ЭТО")
+        self._now_influence = self._make_card(page, "ЧТО ВЛИЯЕТ НА ВЫБОР")
+        return page
+
+    def _build_page_access(self, parent):
+        """Экран «Доступы»: что разрешено и что делает Effector."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        self._access_card = self._make_card(page, "ЧТО РАЗРЕШЕНО")
+        self._effector_card = self._make_card(page, "ДЕЙСТВИЯ")
+
+        detail = tk.Frame(
+            page, bg=theme.SURFACE,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        detail.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
+                    pady=(0, theme.SPACING["md"]))
+        tk.Label(
+            detail, text="ПОДРОБНОСТИ", font=self._card_title_font,
+            bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["sm"], 2))
         self._status_text = tk.Text(
-            left,
-            width=30,
-            height=14,
-            font=mono,
-            bg="#181818",
-            fg="#e0e0e0",
-            relief=tk.FLAT,
-            state=tk.DISABLED,
-            wrap=tk.NONE,
+            detail, height=10, font=self._mono_font, bg=theme.SURFACE,
+            fg=theme.TEXT, relief=tk.FLAT, state=tk.DISABLED, wrap=tk.NONE,
         )
-        self._status_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 8))
+        self._status_text.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
+                               pady=(0, theme.SPACING["md"]))
+        return page
 
-        # === Правая часть: лента и ввод ===
-        right = tk.Frame(body)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    def _build_page_dialog(self, parent):
+        """Страница диалога: знакомая лента и поле ввода."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
 
-        self._text = tk.scrolledtext.ScrolledText(
-            right,
-            wrap=tk.WORD,
-            width=60,
-            height=20,
-            font=mono,
-            bg="#1e1e1e",
-            fg="#e0e0e0",
-            insertbackground="#e0e0e0",
-            state=tk.DISABLED,
+        self._text = scrolledtext.ScrolledText(
+            page, wrap=tk.WORD, width=60, height=20, font=self._mono_font,
+            bg=theme.BG_CENTER, fg=theme.TEXT, insertbackground=theme.TEXT,
+            relief=tk.FLAT, state=tk.DISABLED,
         )
-        self._text.pack(padx=8, pady=8, fill=tk.BOTH, expand=True)
+        self._text.pack(padx=theme.SPACING["sm"], pady=theme.SPACING["sm"],
+                        fill=tk.BOTH, expand=True)
         self._text.tag_config("user", foreground="#87ceeb")
         self._text.tag_config("agent", foreground="#98fb98")
-        self._text.tag_config("system", foreground="#888888", font=bold)
+        self._text.tag_config("system", foreground="#888888",
+                              font=self._card_body_font)
         self._text.tag_config("error", foreground="#ff6b6b")
-        self._text.tag_config("life", foreground="#ffd479", font=bold)
+        self._text.tag_config("life", foreground="#ffd479",
+                              font=self._card_body_font)
 
-        input_frame = tk.Frame(right)
-        input_frame.pack(padx=8, pady=(0, 6), fill=tk.X)
-
+        input_frame = tk.Frame(page, bg=theme.BG_DEEP)
+        input_frame.pack(padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]),
+                         fill=tk.X)
         self._input_var = tk.StringVar()
         self._input_entry = tk.Entry(
-            input_frame,
-            textvariable=self._input_var,
-            font=mono,
-            bg="#2a2a2a",
-            fg="#e0e0e0",
-            insertbackground="#e0e0e0",
+            input_frame, textvariable=self._input_var, font=self._mono_font,
+            bg=theme.SURFACE, fg=theme.TEXT, insertbackground=theme.TEXT,
+            relief=tk.FLAT, bd=0, highlightthickness=1,
+            highlightbackground=theme.BORDER, highlightcolor=theme.CYAN,
         )
-        self._input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
         self._input_entry.bind("<Return>", self._on_send)
         self._input_entry.bind("<Up>", self._on_history_up)
         self._input_entry.bind("<Down>", self._on_history_down)
         self._input_entry.focus_set()
-
         tk.Button(
-            input_frame,
-            text="Сказать",
-            command=self._on_send,
-            bg="#3a3a3a",
-            fg="#e0e0e0",
-            activebackground="#4a4a4a",
-            activeforeground="#ffffff",
+            input_frame, text="Сказать", command=self._on_send,
+            bg=theme.SURFACE, fg=theme.TEXT, activebackground=theme.BORDER,
+            activeforeground=theme.TEXT, relief=tk.FLAT,
         ).pack(side=tk.LEFT, padx=(4, 0))
 
         self._history = []
         self._history_idx = -1
+        return page
 
-        self._build_controls(root, mono)
+    def _show_page(self, key: str) -> None:
+        """Переключить страницу, не пересоздавая окно."""
+        if not self._pages:
+            return
+        for page in self._pages.values():
+            page.pack_forget()
+        page = self._pages.get(key)
+        if page is not None:
+            page.pack(fill=tk.BOTH, expand=True)
+        for name, button in self._nav_buttons.items():
+            active = name == key
+            try:
+                button.configure(
+                    bg=theme.SURFACE if active else theme.SIDEBAR,
+                    fg=theme.TEXT if active else theme.MUTED,
+                )
+            except Exception:
+                pass
+        self._current_page = key
+
+    @staticmethod
+    def _rows_text(rows) -> str:
+        """Строки карточки в один текст: «подпись: значение»."""
+        return "\n".join(f"{label}: {value}" for label, value in rows)
 
     # ------------------------------------------------------------------
     # Панель управления
@@ -325,22 +513,26 @@ class MainWindow(ChatWindow):
         if not self._enabled_controls:
             return
 
-        frame = tk.Frame(root, bg="#141414")
+        frame = tk.Frame(
+            root, bg=theme.BG_DEEP,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
         frame.pack(fill=tk.X, side=tk.BOTTOM)
         self._controls_frame = frame
 
-        def button(text, command, *, bg="#2f2f2f"):
+        def button(text, command, *, bg=theme.SURFACE, fg=theme.TEXT):
             widget = tk.Button(
                 frame,
                 text=text,
                 command=command,
                 bg=bg,
-                fg="#e0e0e0",
-                activebackground="#3f3f3f",
-                activeforeground="#ffffff",
-                relief=tk.RAISED,
-                padx=6,
-                pady=3,
+                fg=fg,
+                activebackground=theme.BORDER,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+                pady=5,
             )
             widget.pack(side=tk.LEFT, padx=3, pady=6)
             return widget
@@ -349,38 +541,41 @@ class MainWindow(ChatWindow):
 
         # Скорость жизни
         tk.Label(
-            frame, text="Темп:", bg="#141414", fg="#7f7f7f", font=mono
+            frame, text="Темп:", bg=theme.BG_DEEP, fg=theme.MUTED,
+            font=self._ui_font,
         ).pack(side=tk.LEFT, padx=(10, 2))
 
         for mode in ("live", "fast", "max"):
             self._speed_buttons[mode] = button(
                 SPEED_LABELS[mode],
                 lambda m=mode: self._action_set_speed(m),
-                bg="#243040",
+                bg=theme.BG_CENTER,
+                fg=theme.MUTED,
             )
 
         button("⏭ Шаг", self._action_step)
 
         tk.Label(
-            frame, text="│", bg="#141414", fg="#3f3f3f", font=mono
+            frame, text="│", bg=theme.BG_DEEP, fg=theme.BORDER,
+            font=self._ui_font,
         ).pack(side=tk.LEFT, padx=4)
 
         button("💾 Сохранить", self._action_save)
 
         # Кнопки ухода: отдельная группа, визуально отличается
-        self._sleep_button = button("🌙 Сон", self._action_request_dream,
-                                    bg="#3d3520")
+        self._sleep_button = button("🌙 Сон", self._action_request_dream)
         self._terminate_button = button(
             "🕯 Уйти без семени", self._action_request_termination,
-            bg="#402020",
+            fg=theme.DANGER,
         )
-        self._wake_button = button("☀ Разбудить", self._action_wake, bg="#204030")
+        self._wake_button = button("☀ Разбудить", self._action_wake,
+                                   fg=theme.GREEN)
         self._cancel_life_button = button(
-            "✖ Отменить запрос", self._action_cancel_life, bg="#303030"
+            "✖ Отменить запрос", self._action_cancel_life
         )
         self._cancel_life_button.pack_forget()  # появляется только при запросе
 
-        button("Выход", self._action_quit, bg="#2a2a2a")
+        button("Выход", self._action_quit)
 
         self._refresh_life_buttons("alive")
 
@@ -574,8 +769,8 @@ class MainWindow(ChatWindow):
         """Большое окно обсерватории — по центру экрана."""
         root = self._root
         root.update_idletasks()
-        width = 940
-        height = 560
+        width = 1040
+        height = 680
         screen_w = root.winfo_screenwidth()
         screen_h = root.winfo_screenheight()
         x = max(0, (screen_w - width) // 2)

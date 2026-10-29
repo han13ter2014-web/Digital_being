@@ -245,6 +245,7 @@ class Runtime:
     async def _status_loop(self) -> None:
         """Отдаёт окну снимок показателей дважды в секунду."""
         from src.app.status import build_status_snapshot
+        from src.ui.life_snapshot import build_life_snapshot
 
         while not self.shutdown.is_set():
             try:
@@ -253,6 +254,11 @@ class Runtime:
                         self.agent, self.runner, started_at=self.started_at
                     )
                 )
+                # Снимок жизни — отдельный поток данных для экрана «Сейчас»:
+                # он читает Core, но не меняет его.
+                push_life = getattr(self.window, "push_life_status", None)
+                if callable(push_life):
+                    push_life(build_life_snapshot(self.agent, self.runner))
             except Exception as exc:
                 logger.debug("status push: %s", exc)
             await asyncio.sleep(0.5)
