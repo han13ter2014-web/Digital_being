@@ -153,6 +153,7 @@ jobs:
           COVERAGE_FAIL_UNDER: "40"
         run: |
           python -m pytest tests/ -v --tb=short \
+            --ignore=tests/benchmarks \
             --cov=src --cov=config \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml \

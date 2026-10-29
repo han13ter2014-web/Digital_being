@@ -29,7 +29,7 @@ tray = [
     "Pillow>=10.0.0",
 ]
 dev = [
-    "pytest>=7.4.0",
+    "pytest>=7.4.0,<9",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-benchmark>=4.0.0",
@@ -47,7 +47,7 @@ all = [
     "plyer>=2.1.0",
     "Pillow>=10.0.0",
     "aiohttp>=3.9.0",
-    "pytest>=7.4.0",
+    "pytest>=7.4.0,<9",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-benchmark>=4.0.0",
@@ -111,6 +111,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Benchmarks используют отдельный совместимый запуск и не входят в обычный CI gate.
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -119,7 +120,7 @@ python_functions = ["test_*"]
 # --cov-* опции включают измерение покрытия, но не падают, если cov не установлен
 # (pytest-cov подхватывается плагином из [project.optional-dependencies] dev).
 # Запуск с отчётом покрытия: pytest --cov-report=term-missing
-addopts = "--tb=short"
+addopts = "--ignore=tests/benchmarks --tb=short"
 markers = [
     "slow: медленные тесты (исключаются через -m 'not slow')",
     "long_run: длинные сценарные тесты (отдельно в CI)",
