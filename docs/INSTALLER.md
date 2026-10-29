@@ -236,3 +236,4 @@ LZMA2 ultra64 даёт почти идеальное сжатие для уже 
 - [docs/BUILD.md](BUILD.md) — сборка `DigitalBeing.exe` через PyInstaller
 - [docs/USAGE.md](USAGE.md) — использование агента
 - [README.md](../README.md) — главная страница проекта
+- [GitHub](https://github.com/han13ter2014-web/Digital_being) — публичный репозиторий
