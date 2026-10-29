@@ -12,6 +12,7 @@
 | [AI_HANDOFF.md](AI_HANDOFF.md) | AI-разработчик | быстрое восстановление контекста и правила продолжения |
 | [LIFE_LETTER.md](LIFE_LETTER.md) | сама Digital Being | кто ты, твои границы, права и правила |
 | [DECISION_NO_LLM_LIFE.md](DECISION_NO_LLM_LIFE.md) | архитектурное решение | почему жизнь работает без LLM |
+| [FUNDING.md](FUNDING.md) | поддержка проекта | зачем нужны донаты и на что они идут |
 
 ## Практика
 
