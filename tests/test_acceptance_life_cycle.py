@@ -5,9 +5,7 @@ Ollama, GUI или рабочий профиль. Он проверяет не �
 а реальный безопасный круг уже существующих подсистем.
 """
 
-from types import SimpleNamespace
-
-from src.cognition.intention_history import begin_intention, finish_intention
+from src.cognition.intention_history import begin_intention
 from src.cognition.mental_models import ConceptNode
 from src.core.agent import DigitalBeing
 from src.core.workspace_request import creative_write_request
@@ -77,22 +75,12 @@ def test_full_life_cycle_from_choice_to_diary_and_graph(tmp_path):
         artifact = tmp_path / "workspace" / "creative" / "acceptance.txt"
         assert artifact.read_text(encoding="utf-8") == "Небольшая запись о памяти"
 
-        # Terminal result возвращается Core и завершает выбранное намерение.
-        finish_intention(intention, outcome=SimpleNamespace(
-            reason="",
-            as_dict=lambda: {
-                "action": "create_draft", "had_effect": True,
-                "effector_request_id": request.request_id,
-                "result_status": "succeeded",
-            },
-        ))
+        # Core автоматически замыкает явно связанный terminal result:
+        # intention → outcome → life episode.
         assert intention["status"] == "performed"
+        assert intention["outcome"]["result_status"] == "succeeded"
         assert agent._last_effector_activity_result["status"] == "succeeded"
         assert agent._method_preferences["create_draft"]["effects"] == 1
-
-        # Core сам записывает жизненный эпизод в подключённую память.
-        record_id = agent._record_core_life_episode(intention)
-        assert record_id is not None
 
         snapshot = build_life_snapshot(agent)
         assert snapshot["diary"]["episodes"]

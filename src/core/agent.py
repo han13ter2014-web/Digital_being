@@ -867,6 +867,53 @@ class DigitalBeing:
             get_logger().log(f"[LIFE_EPISODE] не записан: {exc}")
             return None
 
+    def _complete_effector_intention(self, payload):
+        """Замкнуть явно связанное intention после terminal Effector result.
+
+        Связь допустима только через сохранённый ``intention_id``. UI и
+        технический результат без этой связи не создают жизненный эпизод.
+        Повтор результата безопасен: завершённая запись не завершается и не
+        записывается в память второй раз.
+        """
+        metadata = dict((payload.get("detail") or {}).get("metadata") or {})
+        intention_id = metadata.get("intention_id")
+        if not isinstance(intention_id, str) or not intention_id:
+            return
+        history = getattr(self, "_intention_history", None)
+        if not isinstance(history, list):
+            return
+        entry = next((item for item in history if isinstance(item, dict)
+                      and item.get("id") == intention_id), None)
+        if entry is None or entry.get("status") != "started":
+            return
+
+        from types import SimpleNamespace
+        from src.cognition.intention_history import finish_intention
+
+        status = payload.get("status")
+        outcome = {
+            "action": entry.get("action"),
+            "had_effect": bool(payload.get("ok")),
+            "effector_request_id": payload.get("request_id"),
+            "result_status": status,
+        }
+        if status == "succeeded":
+            finish_intention(entry, outcome=SimpleNamespace(
+                reason="", as_dict=lambda: dict(outcome)
+            ))
+        elif status == "failed":
+            finish_intention(entry, error=RuntimeError(
+                str(payload.get("error") or "effector action failed")
+            ))
+        elif status == "rejected":
+            finish_intention(entry, outcome=SimpleNamespace(
+                reason=f"denied: {payload.get('error') or 'effector rejected'}",
+                as_dict=lambda: dict(outcome),
+            ))
+        else:
+            return
+        self._record_core_life_episode(entry)
+
     def _on_effector_result(self, result):
         """Применить результат эффектора только после terminal status."""
         payload = (result or {}).get("result") if isinstance(result, dict) else None
@@ -874,9 +921,10 @@ class DigitalBeing:
             payload = result
         if not payload:
             return
-        detail = payload.get("detail") or {}
         if payload.get("status") not in {"succeeded", "failed", "rejected"}:
             return
+        self._complete_effector_intention(payload)
+        detail = payload.get("detail") or {}
         activity = detail.get("activity")
         if activity != "creative":
             return

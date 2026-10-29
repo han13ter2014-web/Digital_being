@@ -58,7 +58,9 @@ Core создаёт intention `create_draft` с темой и причиной. 
 - до подтверждения файл не создаётся;
 - approval не запускает второй scheduler;
 - выполнение происходит через Core-owned `EffectorDriver`;
-- terminal result — `succeeded`.
+- terminal result — `succeeded`;
+- Core автоматически связывает результат с intention через явный
+  `intention_id` и записывает один life episode.
 
 ### Реальный результат
 
@@ -67,9 +69,10 @@ Core создаёт intention `create_draft` с темой и причиной. 
 
 ### Возврат результата в Core
 
-Core получает terminal result, обновляет опыт способа `create_draft`, после
-явного завершения intention записывает Core-owned life episode в Delamain
-SQLite.
+Core получает terminal result, обновляет опыт способа `create_draft`,
+находит связанное `intention_id`, автоматически завершает intention и
+записывает один Core-owned life episode в Delamain SQLite. Результат без
+явной связи не меняет жизненную историю.
 
 ### Наблюдаемость
 
@@ -101,10 +104,10 @@ SQLite.
    оставляем ограничение; фильтр/фокус — возможное улучшение v1.1.
 3. Дневник и каталог сначала показывают приглашение выбрать запись. Это
    намеренно read-only поведение; UI не выполняет действие сам.
-4. Связь terminal Effector result с когнитивным intention остаётся явным
-   Core-owned переходом `finish_intention()` →
-   `_record_core_life_episode()`. Автоматически угадывать такую связь не
-   следует без отдельного архитектурного решения.
+4. Связь terminal Effector result с когнитивным intention автоматизирована,
+   но остаётся явной и Core-owned: используется сохранённый
+   `metadata.intention_id`. Без этого идентификатора Core не создаёт
+   жизненный эпизод. Повторный terminal result безопасен и не создаёт дубль.
 
 ## Приёмочный вывод
 

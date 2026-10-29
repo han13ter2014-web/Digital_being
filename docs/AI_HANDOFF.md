@@ -24,7 +24,7 @@ git log --oneline -8
 python -m pytest -q --ignore=tests/benchmarks
 ```
 
-Последний известный полный результат: **1424 passed, 2 skipped**, без
+Последний известный полный результат: **1429 passed, 2 skipped**, без
 benchmarks.
 
 Последняя приёмка v1 зафиксирована в `docs/ACCEPTANCE_RESULT_2026-10-30.md`:
@@ -181,10 +181,11 @@ begin_intention()
 → build_life_graph()
 ```
 
-Важное ограничение: terminal Effector result сейчас не завершает когнитивное
-intention автоматически. В acceptance-тесте это сделано явным мостом через
-`finish_intention()` и `_record_core_life_episode()`. Не «исправлять» это
-автоматически без отдельного архитектурного решения.
+Terminal Effector result теперь автоматически замыкает когнитивное
+intention только при явном `detail.metadata.intention_id`. Core завершает
+только запись со статусом `started`, записывает один life episode и защищает
+повторный terminal result. Результат без `intention_id`, а также `queued` и
+`waiting_approval`, историю не меняют.
 
 ## Что делать дальше
 
