@@ -124,6 +124,22 @@ def test_queue_evicts_oldest_unanswered():
 
 # === Стратегии размышления (round_robin) ===
 
+def test_answer_marks_latest_question_without_creating_learning_data():
+    mgr = _make_mgr(cycle=12)
+    mgr.ask("ты понимаешь меня?", source="self")
+
+    result = mgr.answer("да, я стараюсь понять тебя")
+
+    assert result["status"] == "answered"
+    assert mgr.queue[0]["answered"] is True
+    assert mgr.queue[0]["answer_source"] == "user"
+    assert mgr.has_unanswered() is False
+
+
+def test_answer_without_pending_question_is_explicit():
+    assert _make_mgr().answer("ответ") == {"status": "not_found"}
+
+
 def test_consume_returns_first_unanswered_with_strategy():
     mgr = _make_mgr(cycle=1)
     mgr.ask("вопрос X")
