@@ -19,6 +19,8 @@ ProactiveCommunication — инициативная коммуникация а�
 если пользователь не разрешил.
 """
 
+from typing import Optional
+
 
 class ContextAwareness:
     """Определяет контекст пользователя — активное приложение."""
