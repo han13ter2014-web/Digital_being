@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `README.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/AI_HANDOFF.md` и
   `docs/LIFE_LETTER.md`. Остальные документы сохранены как практические
   руководства и история.
-* **Проверка** — полный прогон: 1424 passed, 2 skipped, без benchmarks;
+* **Проверка** — полный прогон: 1429 passed, 2 skipped, без benchmarks;
   адресный continuity-набор приёмки: 23 passed; визуально проверены
   «Сейчас», «Дневник», «Занятия» и «Карта жизни».
 * **Результат** — `docs/ACCEPTANCE_RESULT_2026-10-30.md`.
@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   использует Ollama, DeepSeek или другие LLM. Исторический этап 10 сохранён
   как legacy; текущий путь опирается на Core и детерминированные механизмы.
   Подробно — `docs/DECISION_NO_LLM_LIFE.md`.
+* **Core-owned result bridge** — terminal Effector result с явным
+  `intention_id` теперь автоматически завершает связанное intention и
+  записывает один life episode; queued, waiting, unlinked и duplicate
+  results историю не меняют.
 
 ### 2026-10-24 — Бюджет действия (этап 19)
 
