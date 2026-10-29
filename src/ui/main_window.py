@@ -1,21 +1,25 @@
 """MainWindow — окно наблюдения и общения с цифровой жизнью.
 
-Расширяет ``ChatWindow`` тремя вещами, которых не хватало:
+Каркас версии 1.0: шапка с состоянием жизни, боковая навигация
+(«Сейчас», «Карта жизни», «Доступы», «Диалог»), карточки из реального
+снимка Core и нижняя панель управления. Страницы:
 
-1. **Панель показателей** слева: цикл, энергия, интеллект, концепции,
-   цели, время жизни, память, режим скорости, состояние жизни.
-2. **Панель управления** снизу: пауза, шаг, скорость, сохранение,
-   сон, пробуждение, выход.
-3. **Подтверждение ухода.** Кнопки сна и ухода не убивают агента:
-   они создают запрос, а окно просит ввести точную фразу. Подробности —
-   ``src/core/life_guard.py``.
+1. **Сейчас** — живая фраза, занятие, причина выбора, влияния и тело.
+2. **Карта жизни** — Canvas с концепциями, намерениями, занятиями и
+   ценностями; связи только те, что записаны в Core.
+3. **Доступы** — реальные переключатели и счётчики Effector.
+4. **Диалог** — лента общения и ввод.
+
+Кнопки сна и ухода не убивают агента: они создают запрос, а окно просит
+ввести точную фразу. Подробности — ``src/core/life_guard.py``.
 
 Окно ничего не решает про жизнь само: оно публикует события, а
 обрабатывает их ``LifeController`` в потоке агента.
 
 Потокобезопасность: окно работает в потоке Tk. Данные приходят через
-очередь (``push_status``), действия уходят через ``bus.publish_sync``.
-Прямого доступа к объектам агента из потока Tk нет.
+очередь (``push_status``, ``push_life_status``, ``push_graph``), действия
+уходят через ``bus.publish_sync``. Прямого доступа к объектам агента из
+потока Tk нет.
 
 Известное ограничение: при выходе из процесса Windows может напечатать
 ``Tcl_AsyncDelete: async handler deleted by the wrong thread``. Это
@@ -28,11 +32,12 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Dict, Optional
 
 from src.core.event_bus import Events
-from src.ui import life_view, theme
+from src.ui import graph_view, life_view, theme
 from src.ui.chat_window import _HAS_TK, ChatWindow
 
 if _HAS_TK:
@@ -108,6 +113,17 @@ class MainWindow(ChatWindow):
         self._effector_card = None
         self._mono_font = None
 
+        # Карта жизни: данные приходят отдельным, более редким потоком.
+        self._graph_canvas = None
+        self._graph_detail = None
+        self._graph_counter = None
+        self._graph_data: Dict[str, Any] = {}
+        self._graph_tag_nodes: Dict[str, Dict[str, Any]] = {}
+        self._graph_positions: Dict[str, Any] = {}
+        self._graph_size = (0, 0)
+        self._graph_render_job = None
+        self._graph_selected: Optional[str] = None
+
         self._subscribe_life_events()
 
     # ============================================================
@@ -146,6 +162,10 @@ class MainWindow(ChatWindow):
         """Потокобезопасно передать снимок жизни в окно (экран «Сейчас»)."""
         self._incoming_queue.put(("__life_data__", dict(snapshot or {})))
 
+    def push_graph(self, graph: Dict[str, Any]) -> None:
+        """Потокобезопасно передать карту жизни (приходит реже снимка)."""
+        self._incoming_queue.put(("__graph__", dict(graph or {})))
+
     # ============================================================
     # Обработка очереди
     # ============================================================
@@ -155,6 +175,8 @@ class MainWindow(ChatWindow):
             self._apply_status(data)
         elif kind == "__life_data__":
             self._apply_life_data(data)
+        elif kind == "__graph__":
+            self._apply_graph_data(data)
         elif kind == "__life_prompt__":
             self._apply_life_prompt(data)
         elif kind == "__life_result__":
@@ -344,8 +366,8 @@ class MainWindow(ChatWindow):
         ).pack(fill=tk.X, padx=theme.SPACING["md"],
                pady=(theme.SPACING["md"], theme.SPACING["sm"]))
         self._nav_buttons = {}
-        for key, label in (("now", "Сейчас"), ("access", "Доступы"),
-                           ("dialog", "Диалог")):
+        for key, label in (("now", "Сейчас"), ("graph", "Карта жизни"),
+                           ("access", "Доступы"), ("dialog", "Диалог")):
             button = tk.Button(
                 sidebar, text=label, font=self._ui_font, anchor="w",
                 command=lambda k=key: self._show_page(k),
@@ -361,6 +383,7 @@ class MainWindow(ChatWindow):
         content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._pages = {
             "now": self._build_page_now(content),
+            "graph": self._build_page_graph(content),
             "access": self._build_page_access(content),
             "dialog": self._build_page_dialog(content),
         }
@@ -410,6 +433,324 @@ class MainWindow(ChatWindow):
         self._now_choice = self._make_card(page, "ПОЧЕМУ ИМЕННО ЭТО")
         self._now_influence = self._make_card(page, "ЧТО ВЛИЯЕТ НА ВЫБОР")
         return page
+
+    # ------------------------------------------------------------------
+    # Карта жизни
+    # ------------------------------------------------------------------
+
+    _NODE_TYPE_LABELS = {
+        "concept": "концепция",
+        "intention": "намерение",
+        "value": "ценность ядра",
+        "activity": "занятие",
+        "forgotten": "забытое намерение",
+        "topic": "тема",
+    }
+
+    _EDGE_BASIS = {
+        "association": "запись ментальной модели: концепции связаны по опыту",
+        "about": "намерение называет эту тему",
+        "uses": "намерение породило это занятие",
+    }
+
+    def _build_page_graph(self, parent):
+        """Экран «Карта жизни»: Canvas с реальными узлами и панель деталей."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        tk.Label(
+            page, text="Карта жизни", font=self._brand_font, bg=theme.BG_DEEP,
+            fg=theme.TEXT, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["md"], 0))
+        tk.Label(
+            page,
+            text="узлы — то, что ядро знает, хочет и пережило; связи — только записанные",
+            font=self._ui_font, bg=theme.BG_DEEP, fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
+
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
+                  pady=(0, theme.SPACING["md"]))
+
+        left = tk.Frame(body, bg=theme.BG_DEEP)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._graph_canvas = tk.Canvas(
+            left, bg=theme.BG_CENTER, highlightthickness=1,
+            highlightbackground=theme.BORDER, bd=0,
+        )
+        self._graph_canvas.pack(fill=tk.BOTH, expand=True)
+        self._graph_canvas.bind("<Configure>", self._on_graph_resize)
+        self._graph_canvas.bind("<Button-1>", self._on_graph_click)
+
+        legend = tk.Frame(left, bg=theme.BG_DEEP)
+        legend.pack(fill=tk.X, pady=(theme.SPACING["sm"], 0))
+        for kind in ("concept", "intention", "value", "activity", "forgotten"):
+            item = tk.Frame(legend, bg=theme.BG_DEEP)
+            item.pack(side=tk.LEFT, padx=(0, theme.SPACING["md"]))
+            swatch = tk.Canvas(
+                item, width=18, height=18, bg=theme.BG_DEEP,
+                highlightthickness=0,
+            )
+            swatch.pack(side=tk.LEFT)
+            self._draw_node_shape(swatch, 9, 9, 5, kind)
+            tk.Label(
+                item, text=self._NODE_TYPE_LABELS[kind], font=self._ui_font,
+                bg=theme.BG_DEEP, fg=theme.MUTED,
+            ).pack(side=tk.LEFT, padx=(4, 0))
+
+        detail = tk.Frame(
+            body, bg=theme.SURFACE, width=286,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        detail.pack(side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0))
+        detail.pack_propagate(False)
+        tk.Label(
+            detail, text="УЗЕЛ", font=self._card_title_font, bg=theme.SURFACE,
+            fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["sm"], 2))
+        self._graph_detail = tk.Label(
+            detail, text="Выберите узел на карте — покажу только то,\n"
+                        "что ядро действительно записало.",
+            font=self._ui_font, bg=theme.SURFACE, fg=theme.TEXT,
+            anchor="nw", justify=tk.LEFT, wraplength=250,
+        )
+        self._graph_detail.pack(fill=tk.BOTH, expand=True,
+                                padx=theme.SPACING["md"],
+                                pady=(0, theme.SPACING["sm"]))
+        self._graph_counter = tk.Label(
+            detail, text="узлов: 0 · связей: 0", font=self._card_title_font,
+            bg=theme.SURFACE, fg=theme.DIMMED, anchor="w",
+        )
+        self._graph_counter.pack(fill=tk.X, padx=theme.SPACING["md"],
+                                 pady=(0, theme.SPACING["sm"]))
+        return page
+
+    def _draw_node_shape(self, canvas, x, y, radius, kind, *, tags=()):
+        """Нарисовать узел формы и цвета, закреплённых за его типом."""
+        color = theme.node_color(kind)
+        shape = theme.node_shape(kind)
+        if shape == "diamond":
+            canvas.create_polygon(
+                x, y - radius, x + radius, y, x, y + radius, x - radius, y,
+                fill=color, outline=color, tags=tags,
+            )
+        elif shape == "hexagon":
+            points = []
+            for index in range(6):
+                angle = math.pi / 3.0 * index - math.pi / 6.0
+                points.extend((x + radius * math.cos(angle),
+                               y + radius * math.sin(angle)))
+            canvas.create_polygon(*points, fill=color, outline=color, tags=tags)
+        elif shape == "ring":
+            canvas.create_oval(
+                x - radius, y - radius, x + radius, y + radius,
+                fill=theme.BG_CENTER, outline=color, width=3, tags=tags,
+            )
+        elif shape == "outline":
+            canvas.create_oval(
+                x - radius, y - radius, x + radius, y + radius,
+                fill="", outline=color, width=1, tags=tags,
+            )
+        else:
+            canvas.create_oval(
+                x - radius, y - radius, x + radius, y + radius,
+                fill=color, outline=color, tags=tags,
+            )
+
+    def _on_graph_resize(self, event) -> None:
+        size = (int(event.width), int(event.height))
+        if size == self._graph_size:
+            return
+        self._graph_size = size
+        canvas = self._graph_canvas
+        if canvas is None:
+            return
+        # При перетаскивании окна Configure приходит десятки раз в секунду:
+        # перерисовываем один раз после паузы, а не на каждый пиксель.
+        if self._graph_render_job is not None:
+            try:
+                canvas.after_cancel(self._graph_render_job)
+            except Exception:
+                pass
+        self._graph_render_job = canvas.after(100, self._render_after_resize)
+
+    def _render_after_resize(self) -> None:
+        self._graph_render_job = None
+        self._render_graph()
+
+    def _on_graph_click(self, event) -> None:
+        canvas = self._graph_canvas
+        if canvas is None:
+            return
+        for item in canvas.find_withtag("current"):
+            for tag in canvas.gettags(item):
+                node = self._graph_tag_nodes.get(tag)
+                if node is not None:
+                    self._graph_selected = node.get("id")
+                    self._show_node_detail(node)
+                    self._render_graph()
+                    return
+        edge = self._nearest_edge(event.x, event.y)
+        if edge is not None:
+            self._graph_selected = None
+            self._show_edge_detail(edge)
+            self._render_graph()
+
+    @staticmethod
+    def _distance_to_segment(point_x, point_y, start, end) -> float:
+        """Расстояние от точки до отрезка — чтобы тонкую связь было легко поймать."""
+        start_x, start_y = start
+        end_x, end_y = end
+        delta_x, delta_y = end_x - start_x, end_y - start_y
+        length_sq = delta_x * delta_x + delta_y * delta_y
+        if length_sq <= 0:
+            return math.hypot(point_x - start_x, point_y - start_y)
+        t = max(0.0, min(1.0, (
+            (point_x - start_x) * delta_x + (point_y - start_y) * delta_y
+        ) / length_sq))
+        return math.hypot(
+            point_x - (start_x + t * delta_x),
+            point_y - (start_y + t * delta_y),
+        )
+
+    def _nearest_edge(self, x, y, *, max_distance: float = 7.0):
+        """Ближайшая реальная связь под курсором (или None)."""
+        best = None
+        best_distance = max_distance
+        for edge in self._graph_data.get("edges") or []:
+            start = self._graph_positions.get(edge.get("source"))
+            end = self._graph_positions.get(edge.get("target"))
+            if not start or not end:
+                continue
+            distance = self._distance_to_segment(x, y, start, end)
+            if distance <= best_distance:
+                best_distance = distance
+                best = edge
+        return best
+
+    def _show_edge_detail(self, edge: Dict[str, Any]) -> None:
+        """Карточка связи: что именно записано, без домыслов о смысле."""
+        if self._graph_detail is None:
+            return
+        nodes = {node.get("id"): node for node in self._graph_data.get("nodes") or []}
+        source = nodes.get(edge.get("source")) or {}
+        target = nodes.get(edge.get("target")) or {}
+        kind = str(edge.get("kind") or "")
+        lines = [
+            f"{source.get('label', '—')} → {target.get('label', '—')}",
+            "связь", "",
+            f"тип: {edge.get('label') or kind or '—'}",
+            f"основание: {self._EDGE_BASIS.get(kind, 'записано в Core')}",
+        ]
+        if kind == "association":
+            lines.append(f"вес связи: {float(edge.get('weight') or 0.0):.2f}")
+        self._graph_detail.configure(text="\n".join(lines))
+
+    def _show_node_detail(self, node: Dict[str, Any]) -> None:
+        """Показать карточку выбранного узла — только записанные поля."""
+        if self._graph_detail is None:
+            return
+        kind = str(node.get("kind") or "")
+        lines = [str(node.get("label") or "—"),
+                 self._NODE_TYPE_LABELS.get(kind, "узел"), ""]
+        detail = node.get("detail") or {}
+        for key, value in detail.items():
+            if isinstance(value, bool):
+                value = "да" if value else "нет"
+            elif value is None or value == "":
+                value = "—"
+            lines.append(f"{key}: {value}")
+        if not detail:
+            lines.append("Подробностей ядро пока не записало.")
+        elif kind == "concept":
+            lines.extend(["", "уверенность — мера доверия модели, а не факт."])
+        self._graph_detail.configure(text="\n".join(lines))
+
+    def _render_graph(self) -> None:
+        """Перерисовать карту. Ошибка рисунка не должна рушить окно."""
+        canvas = self._graph_canvas
+        if canvas is None:
+            return
+        try:
+            width = max(int(canvas.winfo_width()), 1)
+            height = max(int(canvas.winfo_height()), 1)
+            canvas.delete("all")
+            self._graph_tag_nodes = {}
+            if width < 80 or height < 80:
+                return
+
+            nodes = list(self._graph_data.get("nodes") or [])
+            if not nodes:
+                canvas.create_text(
+                    width / 2, height / 2,
+                    text="Пока нечего показать: ядро ещё не накопило\n"
+                         "знаний, намерений и занятий для карты.",
+                    fill=theme.MUTED, font=self._ui_font,
+                    width=max(160, width - 80), justify=tk.CENTER,
+                )
+                return
+
+            positions = graph_view.layout_nodes(nodes, width, height)
+            self._graph_positions = positions
+            for edge in self._graph_data.get("edges") or []:
+                start = positions.get(edge.get("source"))
+                end = positions.get(edge.get("target"))
+                if not start or not end:
+                    continue
+                canvas.create_line(
+                    start[0], start[1], end[0], end[1],
+                    fill=theme.EDGE, width=1, tags=("edge",),
+                )
+
+            labels = graph_view.layout_labels(nodes, positions, width, height)
+            for index, node in enumerate(nodes):
+                position = positions.get(node.get("id"))
+                if position is None:
+                    continue
+                x, y = position
+                kind = str(node.get("kind") or "")
+                weight = node.get("weight", 0.0)
+                radius = graph_view.node_radius(weight, kind)
+                tag = f"node-{index}"
+                self._graph_tag_nodes[tag] = node
+                tags = ("node", tag)
+                if node.get("id") == self._graph_selected:
+                    canvas.create_oval(
+                        x - radius - 6, y - radius - 6,
+                        x + radius + 6, y + radius + 6,
+                        outline=theme.TEXT, width=1, tags=tags,
+                    )
+                self._draw_node_shape(canvas, x, y, radius, kind, tags=tags)
+
+            for index, node in enumerate(nodes):
+                label = labels.get(node.get("id"))
+                if label is None:
+                    continue
+                label_x, label_y, anchor = label
+                canvas.create_text(
+                    label_x, label_y,
+                    text=graph_view.short_label(node.get("label")),
+                    anchor=anchor,
+                    fill=theme.MUTED if node.get("kind") == "forgotten" else theme.TEXT,
+                    font=self._ui_font, tags=("node", f"node-{index}"),
+                )
+        except Exception as exc:
+            logger.debug("[MainWindow] graph render: %s", exc)
+
+    def _apply_graph_data(self, graph: Dict[str, Any]) -> None:
+        self._graph_data = dict(graph or {})
+        nodes = self._graph_data.get("nodes") or []
+        edges = self._graph_data.get("edges") or []
+        if self._graph_counter is not None:
+            text = f"узлов: {len(nodes)} · связей: {len(edges)}"
+            if self._graph_data.get("truncated"):
+                text += " · показаны не все"
+            try:
+                self._graph_counter.configure(text=text)
+            except Exception:
+                pass
+        self._render_graph()
 
     def _build_page_access(self, parent):
         """Экран «Доступы»: что разрешено и что делает Effector."""
@@ -499,6 +840,8 @@ class MainWindow(ChatWindow):
             except Exception:
                 pass
         self._current_page = key
+        if key == "graph" and self._graph_canvas is not None:
+            self._render_graph()
 
     @staticmethod
     def _rows_text(rows) -> str:

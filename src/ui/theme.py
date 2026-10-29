@@ -19,6 +19,7 @@ BG_CENTER = "#141821"
 SIDEBAR = "#11151D"
 SURFACE = "#141821"
 BORDER = "#232A38"
+EDGE = "#2E4057"
 
 # --- Текст ---
 TEXT = "#E6E9EF"

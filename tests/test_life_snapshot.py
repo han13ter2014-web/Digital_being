@@ -106,7 +106,10 @@ def test_waiting_intentions_are_listed_only_while_unresolved():
 
     agent._waiting_intentions[next(iter(agent._waiting_intentions))]["resolution"] = {
         "kind": "forgotten", "reason": "источников нет", "cycle": agent.cycle_count}
-    assert build_life_snapshot(agent)["intentions"]["waiting"] == []
+    snapshot = build_life_snapshot(agent)
+    assert snapshot["intentions"]["waiting"] == []
+    # Забытое не исчезает: оно уходит в отдельный список для карты.
+    assert [row["id"] for row in snapshot["intentions"]["forgotten"]] == [entry["id"]]
 
 
 def test_life_episodes_are_empty_without_delamain():

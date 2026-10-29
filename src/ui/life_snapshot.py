@@ -142,6 +142,14 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     waiting_entries = [deepcopy(entry) for entry in waiting_all.values()
                        if isinstance(entry, dict) and not entry.get("resolution")]
     waiting_entries = waiting_entries[-RECENT_INTENTIONS:]
+    # Забытое не удаляется из опыта: показываем отдельным списком, чтобы
+    # карта могла приглушить узел, а не сделать вид, что его не было.
+    forgotten_entries = [
+        deepcopy(entry) for entry in waiting_all.values()
+        if isinstance(entry, dict)
+        and isinstance(entry.get("resolution"), dict)
+        and entry["resolution"].get("kind") == "forgotten"
+    ][-RECENT_INTENTIONS:]
 
     interoception = _status_of(_own(agent, "interoception", None))
     life_guard = _own(agent, "life_guard", None)
@@ -200,6 +208,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "intentions": {
             "active": current,
             "waiting": waiting_entries,
+            "forgotten": forgotten_entries,
             "recent": deepcopy(history[-RECENT_INTENTIONS:]),
             "last_finished": _last_finished(history),
         },

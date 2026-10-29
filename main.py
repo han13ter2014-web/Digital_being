@@ -243,10 +243,12 @@ class Runtime:
             pass
 
     async def _status_loop(self) -> None:
-        """Отдаёт окну снимок показателей дважды в секунду."""
+        """Отдаёт окну снимок показателей дважды в секунду, карту — реже."""
         from src.app.status import build_status_snapshot
+        from src.ui.graph_view import build_life_graph
         from src.ui.life_snapshot import build_life_snapshot
 
+        tick = 0
         while not self.shutdown.is_set():
             try:
                 self.window.push_status(
@@ -256,11 +258,19 @@ class Runtime:
                 )
                 # Снимок жизни — отдельный поток данных для экрана «Сейчас»:
                 # он читает Core, но не меняет его.
+                life = build_life_snapshot(self.agent, self.runner)
                 push_life = getattr(self.window, "push_life_status", None)
                 if callable(push_life):
-                    push_life(build_life_snapshot(self.agent, self.runner))
+                    push_life(life)
+                # Карта тяжелее карточек: раз в 10 тиков (≈5 с) достаточно,
+                # чтобы она выглядела живой, и не грузит поток Tk.
+                if tick % 10 == 0:
+                    push_graph = getattr(self.window, "push_graph", None)
+                    if callable(push_graph):
+                        push_graph(build_life_graph(self.agent, life))
             except Exception as exc:
                 logger.debug("status push: %s", exc)
+            tick += 1
             await asyncio.sleep(0.5)
 
     # --- управление из главного потока ---
