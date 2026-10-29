@@ -15,6 +15,7 @@ Pillow>=10.0.0         # генерация иконок (зависимость
 # Разработка и тестирование
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
 pytest-benchmark>=4.0.0  # автодетекция регрессий производительности
 pre-commit>=3.7.0         # pre-commit hooks
 
