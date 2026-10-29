@@ -74,25 +74,7 @@ jobs:
 
       - name: Import smoke test
         run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          # Базовые модули — все они должны импортироваться без ошибок
-          import config.settings
-          import config.simulation_config
-          import config.will_config
-          print('✅ Все config/* импортируются')
-          from src.core.subsystem_base import Subsystem, PluginRegistry
-          print('✅ subsystem_base импортируется')
-          from src.core.subsystems import (
-              GoalSubsystem, KnowledgeSubsystem, EnergySubsystem,
-              SleepCycle, EmbodimentController, MortalityAwareness,
-              WillRegistry, MindDream, SelfTermination, NurseryWatcher,
-          )
-          print('✅ Все подсистемы импортируются (включая NurseryWatcher)')
-          from src.ui.web_dashboard import WebDashboard, AIOHTTP_AVAILABLE
-          print(f'✅ web_dashboard импортируется (aiohttp={AIOHTTP_AVAILABLE})')
-          "
+          python -m pytest -q tests/test_ci_smoke.py --tb=short
 
       - name: pyflakes
         run: |
@@ -141,7 +123,7 @@ jobs:
           DIGITAL_BEING_DEBUG: "0"
         run: |
           mkdir -p data
-          python -m pytest tests/test_integration.py -v --tb=short -m "not slow and not long_run"
+          python -m pytest tests/test_integration.py tests/test_ci_smoke.py -v --tb=short -m "not slow and not long_run"
 
       - name: Run performance tests (только ubuntu — там быстрее)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
