@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   адресный continuity-набор приёмки: 23 passed; визуально проверены
   «Сейчас», «Дневник», «Занятия» и «Карта жизни».
 * **Результат** — `docs/ACCEPTANCE_RESULT_2026-10-30.md`.
+* **Архитектурное решение** — жизненный контур Digital Being намеренно не
+  использует Ollama, DeepSeek или другие LLM. Исторический этап 10 сохранён
+  как legacy; текущий путь опирается на Core и детерминированные механизмы.
+  Подробно — `docs/DECISION_NO_LLM_LIFE.md`.
 
 ### 2026-10-24 — Бюджет действия (этап 19)
 
