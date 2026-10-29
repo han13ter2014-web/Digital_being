@@ -29,7 +29,12 @@ def run() -> int:
         DeprecationWarning,
         stacklevel=2,
     )
-    return main(sys.argv[1:])
+    argv = list(sys.argv[1:])
+    # Старый tray-вход должен сохранить прежний смысл: один общий жизненный
+    # цикл в main.py, но режим tray по умолчанию.
+    if "--ui" not in argv and "--headless" not in argv and "--no-tray" not in argv:
+        argv[0:0] = ["--ui", "tray"]
+    return main(argv)
 
 
 if __name__ == "__main__":

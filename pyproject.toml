@@ -57,7 +57,7 @@ all = [
 
 [project.scripts]
 digital-being = "main:run_long_living_agent"
-digital-being-tray = "main_tray:main"
+digital-being-tray = "main_tray:run"
 
 [project.urls]
 Homepage = "https://github.com/han13ter2014-web/Digital_being"
