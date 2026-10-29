@@ -11,7 +11,7 @@
 ;   installer_output/DigitalBeing_Setup_v0.1.0.exe (~50 MB)
 
 #define MyAppName "Digital Being"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "Digital Being Team"
 #define MyAppURL "https://github.com/han13ter2014-web/Digital_being"
 #define MyAppExeName "DigitalBeing.exe"
