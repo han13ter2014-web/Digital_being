@@ -89,6 +89,7 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Core / Delamain / Effector;
 - [docs/STAGE7_UI.md](docs/STAGE7_UI.md) — оболочка v1;
 - [CHANGELOG.md](CHANGELOG.md) — подробная машинная хронология;
+- [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md) — восстановление контекста для AI-разработчика;
 - [docs/INDEX.md](docs/INDEX.md) — карта остальных документов.
 
 ## Статус
