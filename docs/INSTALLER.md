@@ -47,7 +47,7 @@ python build_installer.py      # installer_output/DigitalBeing_Setup.exe (50 MB)
 После сборки:
 
 ```bash
-installer_output/DigitalBeing_Setup_v0.1.0.exe   # раздавать этот файл
+installer_output/DigitalBeing_Setup_v0.1.1.exe   # раздавать этот файл
 ```
 
 Для публичной раздачи также публикуйте SHA-256 рядом с файлом. Подпись
@@ -63,7 +63,7 @@ installer_output/DigitalBeing_Setup_v0.1.0.exe   # раздавать этот �
 1. **Проверяет Inno Setup** — ищет `ISCC.exe` в стандартных путях.
 2. **Проверяет `dist/DigitalBeing.exe`** — должен быть собран через `python build.py`.
 3. **Запускает ISCC.exe** с файлом `inno_setup.iss`.
-4. **Результат** — `installer_output/DigitalBeing_Setup_v0.1.0.exe`.
+4. **Результат** — `installer_output/DigitalBeing_Setup_v0.1.1.exe`.
 
 ---
 
