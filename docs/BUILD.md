@@ -14,7 +14,10 @@ dist/
 └── DigitalBeing.exe    ~40-60 MB, onefile
 ```
 
-Файл самодостаточен — включает Python 3.14 + pystray + plyer + Pillow + tkinter.
+Файл самодостаточен: PyInstaller включает интерпретатор Python и нужные
+зависимости (pystray, plyer, Pillow, tkinter). Версия Python для исходного
+проекта — `>=3.10`; конкретная версия внутри `.exe` определяется окружением
+сборки.
 Пользователю достаточно:
 
 1. Скопировать `DigitalBeing.exe` на свой компьютер.

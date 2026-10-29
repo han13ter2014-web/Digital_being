@@ -35,10 +35,12 @@ a = Analysis(
         ('config', 'config'),
         # Знания агента по умолчанию
         ('data/knowledge_base.json', 'data'),
+        ('data/initial_knowledge.json', 'data'),
         # Локализации (i18n: src/metrics/i18n.py грузит data/i18n/{lang}.json)
         ('data/i18n', 'data/i18n'),
-        # База знаний (LongTermMemory может искать файлы в data/knowledge/)
-        ('data/knowledge', 'data/knowledge'),
+        # База знаний (каталог может отсутствовать в свежем clone; данные
+        # загружаются через knowledge_base.json, поэтому не делаем его
+        # обязательным source для PyInstaller.)
         # Иконка приложения (используется pystray при старте)
         ('assets/icon.ico', 'assets'),
     ],
