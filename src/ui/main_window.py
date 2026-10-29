@@ -355,27 +355,51 @@ class MainWindow(ChatWindow):
         body = tk.Frame(root, bg=theme.BG_DEEP)
         body.pack(fill=tk.BOTH, expand=True)
 
-        # --- Боковая навигация. Пока три реальные страницы; карта жизни,
-        # дневник и занятия появятся отдельными участками этапа 7. ---
-        sidebar = tk.Frame(body, bg=theme.SIDEBAR, width=190)
+        # --- Боковая навигация: жизнь отдельно от системных действий. ---
+        sidebar = tk.Frame(body, bg=theme.SIDEBAR, width=214)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
         tk.Label(
-            sidebar, text="ЯДРО", font=self._card_title_font, bg=theme.SIDEBAR,
-            fg=theme.DIMMED, anchor="w",
+            sidebar, text="ЯДРО", font=self._brand_font, bg=theme.SIDEBAR,
+            fg=theme.TEXT, anchor="w",
         ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["md"], theme.SPACING["sm"]))
+               pady=(theme.SPACING["lg"], 0))
+        tk.Label(
+            sidebar, text="живая карта", font=self._card_title_font,
+            bg=theme.SIDEBAR, fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["lg"]))
+
+        def nav_section(text):
+            tk.Label(
+                sidebar, text=text, font=self._card_title_font,
+                bg=theme.SIDEBAR, fg=theme.DIMMED, anchor="w",
+            ).pack(fill=tk.X, padx=theme.SPACING["md"],
+                   pady=(theme.SPACING["sm"], theme.SPACING["xs"]))
+
         self._nav_buttons = {}
-        for key, label in (("now", "Сейчас"), ("graph", "Карта жизни"),
-                           ("access", "Доступы"), ("dialog", "Диалог")):
+        nav_section("ЖИЗНЬ")
+        navigation = (("now", "◉", "Сейчас"), ("graph", "✦", "Карта жизни"))
+        for key, marker, label in navigation:
             button = tk.Button(
-                sidebar, text=label, font=self._ui_font, anchor="w",
-                command=lambda k=key: self._show_page(k),
+                sidebar, text=f"  {marker}  {label}", font=self._ui_font,
+                anchor="w", command=lambda k=key: self._show_page(k),
                 bg=theme.SIDEBAR, fg=theme.MUTED,
                 activebackground=theme.SURFACE, activeforeground=theme.TEXT,
-                relief=tk.FLAT, bd=0, padx=theme.SPACING["md"], pady=8,
+                relief=tk.FLAT, bd=0, padx=theme.SPACING["sm"], pady=9,
             )
-            button.pack(fill=tk.X)
+            button.pack(fill=tk.X, padx=theme.SPACING["sm"])
+            self._nav_buttons[key] = button
+
+        nav_section("СИСТЕМА")
+        for key, marker, label in (("access", "▣", "Доступы"), ("dialog", "◫", "Диалог")):
+            button = tk.Button(
+                sidebar, text=f"  {marker}  {label}", font=self._ui_font,
+                anchor="w", command=lambda k=key: self._show_page(k),
+                bg=theme.SIDEBAR, fg=theme.MUTED,
+                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
+                relief=tk.FLAT, bd=0, padx=theme.SPACING["sm"], pady=9,
+            )
+            button.pack(fill=tk.X, padx=theme.SPACING["sm"])
             self._nav_buttons[key] = button
 
         # --- Страницы ---
@@ -395,13 +419,21 @@ class MainWindow(ChatWindow):
     # Страницы каркаса
     # ------------------------------------------------------------------
 
-    def _make_card(self, parent, title: str):
+    def _make_card(self, parent, title: str, *, side=None, expand=False,
+                   wraplength=680):
         """Карточка: тонкая рамка, приглушённый заголовок, светлое тело."""
         frame = tk.Frame(
             parent, bg=theme.SURFACE,
             highlightbackground=theme.BORDER, highlightthickness=1,
         )
-        frame.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
+        options = {"fill": tk.BOTH if expand else tk.X,
+                   "padx": theme.SPACING["md"],
+                   "pady": (0, theme.SPACING["sm"])}
+        if side is not None:
+            options["side"] = side
+            options["padx"] = (0, theme.SPACING["sm"])
+            options["expand"] = expand
+        frame.pack(**options)
         tk.Label(
             frame, text=title, font=self._card_title_font, bg=theme.SURFACE,
             fg=theme.MUTED, anchor="w",
@@ -409,7 +441,7 @@ class MainWindow(ChatWindow):
                pady=(theme.SPACING["sm"], 2))
         body = tk.Label(
             frame, text="", font=self._card_body_font, bg=theme.SURFACE,
-            fg=theme.TEXT, anchor="w", justify=tk.LEFT, wraplength=680,
+            fg=theme.TEXT, anchor="w", justify=tk.LEFT, wraplength=wraplength,
         )
         body.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
         return body
@@ -429,9 +461,17 @@ class MainWindow(ChatWindow):
         )
         self._now_sub.pack(fill=tk.X, padx=theme.SPACING["md"],
                            pady=(2, theme.SPACING["sm"]))
-        self._now_activity = self._make_card(page, "ЧЕМ ЗАНЯТО")
-        self._now_choice = self._make_card(page, "ПОЧЕМУ ИМЕННО ЭТО")
-        self._now_influence = self._make_card(page, "ЧТО ВЛИЯЕТ НА ВЫБОР")
+        cards = tk.Frame(page, bg=theme.BG_DEEP)
+        cards.pack(fill=tk.X, padx=theme.SPACING["md"])
+        self._now_activity = self._make_card(
+            cards, "ЧЕМ ЗАНЯТО", side=tk.LEFT, expand=True, wraplength=330
+        )
+        self._now_choice = self._make_card(
+            cards, "ПОЧЕМУ ИМЕННО ЭТО", side=tk.LEFT, expand=True, wraplength=330
+        )
+        self._now_influence = self._make_card(
+            page, "ЧТО ВЛИЯЕТ НА ВЫБОР", wraplength=720
+        )
         return page
 
     # ------------------------------------------------------------------
@@ -499,7 +539,7 @@ class MainWindow(ChatWindow):
             ).pack(side=tk.LEFT, padx=(4, 0))
 
         detail = tk.Frame(
-            body, bg=theme.SURFACE, width=286,
+            body, bg=theme.SURFACE, width=310,
             highlightbackground=theme.BORDER, highlightthickness=1,
         )
         detail.pack(side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0))
@@ -513,7 +553,7 @@ class MainWindow(ChatWindow):
             detail, text="Выберите узел на карте — покажу только то,\n"
                         "что ядро действительно записало.",
             font=self._ui_font, bg=theme.SURFACE, fg=theme.TEXT,
-            anchor="nw", justify=tk.LEFT, wraplength=250,
+            anchor="nw", justify=tk.LEFT, wraplength=274,
         )
         self._graph_detail.pack(fill=tk.BOTH, expand=True,
                                 padx=theme.SPACING["md"],
@@ -863,7 +903,8 @@ class MainWindow(ChatWindow):
         frame.pack(fill=tk.X, side=tk.BOTTOM)
         self._controls_frame = frame
 
-        def button(text, command, *, bg=theme.SURFACE, fg=theme.TEXT):
+        def button(text, command, *, bg=theme.SURFACE, fg=theme.TEXT,
+                   padx=10):
             widget = tk.Button(
                 frame,
                 text=text,
@@ -874,7 +915,7 @@ class MainWindow(ChatWindow):
                 activeforeground=theme.TEXT,
                 relief=tk.FLAT,
                 bd=0,
-                padx=10,
+                padx=padx,
                 pady=5,
             )
             widget.pack(side=tk.LEFT, padx=3, pady=6)
@@ -903,22 +944,25 @@ class MainWindow(ChatWindow):
             font=self._ui_font,
         ).pack(side=tk.LEFT, padx=4)
 
-        button("💾 Сохранить", self._action_save)
+        button("Сохранить", self._action_save, padx=8)
 
-        # Кнопки ухода: отдельная группа, визуально отличается
-        self._sleep_button = button("🌙 Сон", self._action_request_dream)
+        tk.Label(
+            frame, text="  ЖИЗНЬ", bg=theme.BG_DEEP, fg=theme.DIMMED,
+            font=self._card_title_font,
+        ).pack(side=tk.LEFT, padx=(12, 2))
+        self._sleep_button = button("Сон", self._action_request_dream, padx=8)
         self._terminate_button = button(
-            "🕯 Уйти без семени", self._action_request_termination,
-            fg=theme.DANGER,
+            "Уйти", self._action_request_termination,
+            fg=theme.DANGER, padx=8,
         )
-        self._wake_button = button("☀ Разбудить", self._action_wake,
-                                   fg=theme.GREEN)
+        self._wake_button = button("Разбудить", self._action_wake,
+                                   fg=theme.GREEN, padx=8)
         self._cancel_life_button = button(
-            "✖ Отменить запрос", self._action_cancel_life
+            "Отменить запрос", self._action_cancel_life, padx=8
         )
         self._cancel_life_button.pack_forget()  # появляется только при запросе
 
-        button("Выход", self._action_quit)
+        button("Выход", self._action_quit, fg=theme.MUTED, padx=8)
 
         self._refresh_life_buttons("alive")
 
