@@ -77,6 +77,8 @@ class MemoryStore:
                 ON episodes(task_id, id);
             CREATE INDEX IF NOT EXISTS idx_episodes_ts
                 ON episodes(ts);
+            CREATE INDEX IF NOT EXISTS idx_episodes_life
+                ON episodes(task, json_extract(meta_json, '$.life_id'), id DESC);
 
             CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,6 +202,42 @@ class MemoryStore:
         )
         self._conn.commit()
         return int(cursor.lastrowid)
+
+    def record_life_episode(
+        self, *, life_id: str, intention_id: str, action: str,
+        target: str = "", status: str = "performed", outcome: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Append one Core-owned autobiographical event; never upsert it."""
+        if not all(isinstance(value, str) and value.strip() for value in (life_id, intention_id, action)):
+            raise ValueError("life episode requires life_id, intention_id and action")
+        if status not in {"started", "performed", "denied", "error", "interrupted", "unobserved"}:
+            raise ValueError("unknown life episode status")
+        return self.record_episode(
+            task_id=intention_id, task="digital_life", action=action,
+            args={"target": target}, ok=status == "performed", output=outcome,
+            metadata={"life_id": life_id, "intention_id": intention_id, "status": status},
+        )
+
+    def recent_life_episodes(self, *, life_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+        limit = max(0, min(int(limit), 200))
+        offset = max(0, int(offset))
+        if not limit:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM episodes WHERE task = 'digital_life' "
+            "AND json_extract(meta_json, '$.life_id') = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+            (str(life_id), limit, offset),
+        ).fetchall()
+        return [self._episode_dict(row) for row in rows]
+
+    def _episode_dict(self, row) -> Dict[str, Any]:
+        return {
+            "id": row["id"], "ts": row["ts"], "task_id": row["task_id"],
+            "task": row["task"], "action": row["action"],
+            "args": _loads(row["args_json"], {}), "ok": bool(row["ok"]),
+            "output": _loads(row["output_json"]), "error": row["error"],
+            "metadata": _loads(row["meta_json"], {}),
+        }
 
     def recent_episodes(
         self,

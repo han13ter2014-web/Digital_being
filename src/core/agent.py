@@ -852,6 +852,21 @@ class DigitalBeing:
             self._on_effector_result(report.get("effector"))
         return report
 
+    def _record_core_life_episode(self, entry):
+        memory = getattr(getattr(self, "delamain", None), "runtime", None)
+        memory = getattr(memory, "memory", None)
+        if memory is None:
+            return None
+        try:
+            return memory.record_life_episode(
+                life_id=self.name, intention_id=entry["id"], action=entry["action"],
+                target=entry.get("target") or "", status=entry.get("status", "unobserved"),
+                outcome=entry.get("outcome"),
+            )
+        except Exception as exc:
+            get_logger().log(f"[LIFE_EPISODE] не записан: {exc}")
+            return None
+
     def _on_effector_result(self, result):
         """Применить результат эффектора только после terminal status."""
         payload = (result or {}).get("result") if isinstance(result, dict) else None
@@ -4177,6 +4192,7 @@ class DigitalBeing:
                     activity_after = getattr(self, "_local_play", None) if activity_type == "play" else getattr(self, "_creative_draft", None)
                     record_activity_step(self, selected_intention, activity_type, activity_before, activity_after)
                 finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
+                self._record_core_life_episode(intention_entry)
                 from src.cognition.intention_evidence import finish_evidence_goal
 
                 finish_evidence_goal(self, intention_entry)
