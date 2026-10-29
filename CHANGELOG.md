@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **Документация** — введены три канонические точки входа:
   `README.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/LIFE_LETTER.md`.
   Остальные документы сохранены как практические руководства и история.
-* **Проверка** — полный прогон: 1423 passed, 2 skipped, без benchmarks.
+* **Проверка** — полный прогон: 1424 passed, 2 skipped, без benchmarks.
 
 ### 2026-10-24 — Бюджет действия (этап 19)
 
