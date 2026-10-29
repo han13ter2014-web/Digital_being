@@ -1,176 +1,62 @@
 # Индекс документации Digital Being
 
-Это карта документов проекта. Она отделяет **актуальные** руководства от
-**исторических** отчётов, чтобы не искать нужное по всему `docs/`.
+Документация разделена на три уровня. Начинайте с нужного вам документа,
+а не с полного архива.
 
-Текущий утверждённый план: [LIFE_V1_PLAN.md](LIFE_V1_PLAN.md) — обучение
-как следствие жизни, завершённая v1 вместо бесконечного расширения подсистем.
+## Три канонических документа
 
-План главного продуктового этапа: [STAGE7_UI.md](STAGE7_UI.md) — оболочка
-цифровой жизни (каркас окна, экран «Сейчас», карта жизни, дневник).
-Статус: черновик на утверждение; новые экраны не добавляются до решения.
-
-## С чего начать
-
-| Документ | Кому | О чём |
+| Документ | Для кого | Что отвечает |
 |---|---|---|
-| [README.md](../README.md) | всем | обзор, быстрый старт, текущее состояние |
-| [USAGE.md](USAGE.md) | пользователю | запуск, команды, настройки, трей-режим |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | разработчику / агенту | устройство ядра, подсистемы, цикл жизни |
-| [INTEGRATION.md](INTEGRATION.md) | разработчику / агенту | одно существо и один эффектор: контракт, бюджет действия, границы власти, дорожная карта 18–24 |
-| [WILL.md](WILL.md) | пользователю / агенту | свобода воли, права, этика |
-| [EVOLUTION.md](EVOLUTION.md) | разработчику / агенту | как агент может меняться |
+| [README.md](../README.md) | внешний человек | что это, как запустить, что уже есть |
+| [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) | разработчик | в какой версии и на каком этапе что добавлено |
+| [LIFE_LETTER.md](LIFE_LETTER.md) | сама Digital Being | кто ты, твои границы, права и правила |
 
-## Текущее состояние и метрики
+## Практика
 
-[INTENTION_FORGETTING.md](INTENTION_FORGETTING.md) — forgotten освобождает
-внимание, а новый интерес создаёт независимое намерение.
-
-[INTENTION_FORGETTING.md](INTENTION_FORGETTING.md) — явное забывание
-ожидающего дела с сохранением урока и причины.
-
-[ACTIVITY_WORKSPACE.md](ACTIVITY_WORKSPACE.md) — граница собственной папки
-занятий поверх Sandbox, без новых внешних прав.
-
-[ACTIVITY_FEEDBACK.md](ACTIVITY_FEEDBACK.md) — игра и черновик получают
-собственную обратную связь, исследование не подменяет их алиасами.
-
-[CREATIVE_DRAFT.md](CREATIVE_DRAFT.md) — небольшой шаблонный текстовый
-артефакт в отдельной рабочей папке, продолжение и контроль внешних правок.
-
-[LOCAL_PLAY.md](LOCAL_PLAY.md) — отдельная локальная игра вместо исследования
-темы «игра», сохранение партии и границы простой политики ходов.
-
-[INTENTION_RESOLUTION.md](INTENTION_RESOLUTION.md) — явные отмена/закрытие
-ожидания с причиной; отмена не считается успехом.
-
-[INTENTION_WAITING.md](INTENTION_WAITING.md) — сохранённое ожидание новых
-условий вне окна попыток; контроль вытеснения и длинной траектории.
-
-[NEW_EVIDENCE_OPPORTUNITY.md](NEW_EVIDENCE_OPPORTUNITY.md) — офлайн-контроль:
-новый ответ по теме удовлетворяет узкий критерий, посторонний — нет.
-
-[INTENTION_EVIDENCE.md](INTENTION_EVIDENCE.md) — узкий критерий нового
-свидетельства, обнаруженное зацикливание и ограниченная защита повторов.
-
-[INTENTION_CONTINUATION.md](INTENTION_CONTINUATION.md) — необязательный возврат
-к конкретной теме из истории попыток, без обхода защиты от тупика.
-
-[INTENTION_HISTORY.md](INTENTION_HISTORY.md) — ограниченное окно выбранных
-автономных попыток: причина, тема, исход и прерывание при перезапуске.
-
-[INTENTION_TARGET.md](INTENTION_TARGET.md) — этап 4: явная тема исследования
-доходит до обработчика без случайного переизбрания.
-
-[SOCIAL_EXPERIENCE.md](SOCIAL_EXPERIENCE.md) — этап 4: контакт по принятому
-ответу вместо вымышленной взаимности из ожидания.
-
-[CAUSAL_REFUSAL.md](CAUSAL_REFUSAL.md) — этап 4: stop исключает исполнение,
-границы отказа и поздней замены.
-
-[PERSONAL_CONTINUITY.md](PERSONAL_CONTINUITY.md) — этап 3: актуальные ценности,
-отношения, журнал воли и ограничения частоты после перезапуска.
-
-[UNIFIED_LIFE_TICK.md](UNIFIED_LIFE_TICK.md) — этап 2: время в тишине,
-однократное обновление и оставшиеся вопросы распределения внимания.
-
-Контракт текущей работы после общего обзора:
-[LIFE_CONTINUITY_CONTRACT.md](LIFE_CONTINUITY_CONTRACT.md) — этапы 0–1,
-безопасное восстановление и ещё не закрытые границы.
-
-| Документ | О чём |
+| Документ | Назначение |
 |---|---|
-| [BASELINE.md](BASELINE.md) | точка отсчёта: реальный лог, 693 362 действия, 0 целей |
-| [STAGE1_REPORT.md](STAGE1_REPORT.md) | ротация логов, декомпозиция, кламп энергии, кулдаун |
-| [STAGE2_REPORT.md](STAGE2_REPORT.md) | качество знаний и внешнего поиска |
-| [STAGE3_REPORT.md](STAGE3_REPORT.md) | изоляция данных тестов (`DIGITAL_BEING_DATA_DIR`) |
-| [STAGE4_REPORT.md](STAGE4_REPORT.md) | гигиена кода, мёртвый код, мелкие баги |
-| [STAGE5_REPORT.md](STAGE5_REPORT.md) | смысл и метрики: цели, типы действий, декомпозиция |
-| [STAGE6_REPORT.md](STAGE6_REPORT.md) | документация: индекс, ссылки, актуализация |
-| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальный контур: sandbox, действия, SQLite-память, runtime, подсистема, мост, authoring, backoff, replan, контекст ошибки, bounded repair, оценка возможностей, effector-контракт, core-driven шаг и бюджет действия |
-| [STAGE7_REPORT.md](STAGE7_REPORT.md) | первый замкнутый контур Delamain-local |
-| [STAGE8_REPORT.md](STAGE8_REPORT.md) | интеграция Delamain-local и цикл исполняемых целей |
-| [STAGE9_REPORT.md](STAGE9_REPORT.md) | навыки, повторные попытки и память-зависимый цикл |
-| [STAGE10_REPORT.md](STAGE10_REPORT.md) | опциональный локальный LLM-планировщик и fallback |
-| [STAGE11_REPORT.md](STAGE11_REPORT.md) | approval-политика для опасных действий и планов LLM |
-| [STAGE12_REPORT.md](STAGE12_REPORT.md) | мост когнитивных целей `GoalSubsystem` и исполняемых целей Delamain |
-| [STAGE13_REPORT.md](STAGE13_REPORT.md) | безопасный authoring payload: proposal, accept/reject, `/goals exec` |
-| [STAGE14_REPORT.md](STAGE14_REPORT.md) | bounded backoff и перепланирование после ошибки действия |
-| [STAGE15_REPORT.md](STAGE15_REPORT.md) | перепланирование с контекстом упавшего шага |
-| [STAGE16_REPORT.md](STAGE16_REPORT.md) | ограниченный repair внутри одной попытки, durable repair-approval |
-| [STAGE17_REPORT.md](STAGE17_REPORT.md) | детерминированная оценка возможностей: suite, метрики, CLI и ограничения |
-| [STAGE18_REPORT.md](STAGE18_REPORT.md) | core-owned effector contract: идемпотентный адаптер, restart, approval и ограничения 18A |
-| [STAGE18B_REPORT.md](STAGE18B_REPORT.md) | core-driven effector: один шаг за цикл ядра, пассивный tick, interval, legacy-goal isolation и ограничения 18B |
-| [STAGE19_REPORT.md](STAGE19_REPORT.md) | бюджет действия: одно решение на попытку, резерв, потолок стоимости, остановка, default-off и ограничения 19 |
-| [DEPTH_EXPERIMENT.md](DEPTH_EXPERIMENT.md) | проверка гипотезы глубины: 25 прогонов, коэффициент не повышен |
-| [EXPERIENCE_EPISTEMICS.md](EXPERIENCE_EPISTEMICS.md) | эмоция отдельно от свидетельства, гипотезы, происхождение и сохранение опыта |
-| [ACTION_EXPECTATIONS.md](ACTION_EXPECTATIONS.md) | ожидание до действия, собственное наблюдение и пересмотр представления о теле |
-| [RESTART_CONTINUITY.md](RESTART_CONTINUITY.md) | обычный перезапуск сохраняет опыт и следующее ожидание; атомарный чекпоинт |
-| [EMPIRICAL_CLAIMS.md](EMPIRICAL_CLAIMS.md) | отдельные утверждения об энергии и усталости: условия, независимые выводы, перезапуск |
-| [EXPERIMENT_CHOICE.md](EXPERIMENT_CHOICE.md) | проверка собственного утверждения как необязательный кандидат арбитру |
-| [AUTONOMOUS_LIFE_EXPERIMENT.md](AUTONOMOUS_LIFE_EXPERIMENT.md) | три естественные траектории с перезапуском; границы проверок и доминирование выхода из тупика |
-| [LOOP_ESCAPE_DIAGNOSTICS.md](LOOP_ESCAPE_DIAGNOSTICS.md) | причинный журнал: повторные предложения застрявших способов и замена отдыхом |
-| [METHOD_FEEDBACK.md](METHOD_FEEDBACK.md) | этап 1: бесплодный способ откладывается до арбитража, новые сведения допускают повтор |
-| [SQLITE_CHECKPOINTS.md](SQLITE_CHECKPOINTS.md) | opt-in SQLite: разделяемые блоки снимков, совместимость JSON, ограничения масштаба |
-| [ACCESS_AND_STORAGE_PLAN.md](ACCESS_AND_STORAGE_PLAN.md) | аудит доступов и порядок подключения собственной среды деятельности |
-| [CHANGELOG.md](../CHANGELOG.md) | история изменений |
+| [USAGE.md](USAGE.md) | запуск, команды, настройки, tray |
+| [ACCEPTANCE_DEMO.md](ACCEPTANCE_DEMO.md) | воспроизводимый жизненный цикл v1 |
+| [STAGE7_UI.md](STAGE7_UI.md) | принятый план и статус оболочки v1 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | устройство Core и подсистем |
+| [INTEGRATION.md](INTEGRATION.md) | граница Core / Delamain / Effector |
+| [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальная память и исполнение Delamain |
+| [WILL.md](WILL.md) | права, отказ, этические ограничения |
+| [EVOLUTION.md](EVOLUTION.md) | изменение агента и его состояния |
+| [LIFE_V1_PLAN.md](LIFE_V1_PLAN.md) | исходные границы целостной v1 |
 
-## Эксплуатация и сборка
+## Контракты и отдельные подсистемы
 
-| Документ | О чём |
-|---|---|
-| [BUILD.md](BUILD.md) | сборка `DigitalBeing.exe` через PyInstaller |
-| [INSTALLER.md](INSTALLER.md) | Windows-установщик, обновление, типичные проблемы |
+- `INTENTION_*.md` — намерения, продолжение, ожидание, свидетельства,
+  разрешение и забывание;
+- `ACTIVITY_*.md`, `CREATIVE_DRAFT.md`, `LOCAL_PLAY.md` — занятия;
+- `EXPERIENCE_EPISTEMICS.md`, `EMPIRICAL_CLAIMS.md` — знание, гипотеза,
+  свидетельство и ограничения выводов;
+- `ACCESS_AND_STORAGE_PLAN.md`, `SQLITE_CHECKPOINTS.md` — доступы и хранение;
+- `BUILD.md`, `INSTALLER.md` — сборка и установка.
 
-## Философия проекта
+## Исторические отчёты
 
-| Документ | О чём |
-|---|---|
-| [README_DIGITAL_LIFE.md](README_DIGITAL_LIFE.md) | цифровая жизнь, анатомия, три периода эволюции |
-| [digital_life_anatomy.md](digital_life_anatomy.md) | описание «анатомии» агента |
-| [anatomy_evaluation.md](anatomy_evaluation.md) | краткая оценка анатомической модели |
+`STAGE1_REPORT.md` … `STAGE19_REPORT.md`, `BASELINE.md`, `AUDIT_REPORT.md`,
+`ETAP3_ETAP4.md` и старые evaluation-документы сохранены как журнал истории.
+Они полезны для расследования решений, но не являются главным описанием
+текущего состояния. Для текущей сводки используйте
+[DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md).
 
-## Исторические материалы
+## Машинная хронология
 
-Эти документы полезны как контекст, но **не описывают текущее состояние**.
-Их цифры (число тестов, файлов, строк) относятся к датам внутри файлов.
+[CHANGELOG.md](../CHANGELOG.md) содержит подробную хронологию изменений,
+тесты, версии Delamain и ссылки на первичные отчёты. Он предназначен прежде
+всего для разработчика и ревью изменений.
 
-| Документ | Дата | Почему исторический |
-|---|---|---|
-| [AUDIT_REPORT.md](AUDIT_REPORT.md) | 24.06.2026 | аудит до ревизии этапов 0–6 |
-| [ETAP3_ETAP4.md](ETAP3_ETAP4.md) | июнь 2026 | ранняя нумерация этапов разработки |
-| [evaluation_self_developing_life_report.md](evaluation_self_developing_life_report.md) | 22.06.2026 | исследовательская оценка |
-| [final_evaluation_partnership_report.md](final_evaluation_partnership_report.md) | 23.06.2026 | исследовательская оценка |
-| [test_fic/](test_fic/) | июнь 2026 | архив консольных выводов и старых прогонов |
+## Правило актуальности
 
-## Про нумерацию этапов
+Если старый отчёт расходится с текущей реализацией, приоритет имеют:
 
-В проекте встречаются две разные нумерации:
+1. текущий код;
+2. тесты;
+3. `DEVELOPMENT_HISTORY.md`;
+4. затем исторический отчёт.
 
-* **Ревизия 2026-10** — отчёты `STAGE1`–`STAGE19` (безопасность и утечка,
-  данные и поиск, изоляция тестов, гигиена, смысл/метрики, документация,
-  первый контур действия/памяти Delamain-local, интеграция этого контура
-  с агентом, переиспользование навыков и повторы, опциональный локальный
-  LLM-планировщик, approval для опасных действий, мост когнитивных и
-  исполняемых целей, безопасный authoring executable-payload, bounded
-  backoff и перепланирование после ошибки, replan с контекстом упавшего
-  шага, bounded repair внутри одной попытки, детерминированная оценка
-  возможностей и CLI для неё, core-owned effector contract, core-driven
-  шаг эффектора для перехода от двух контуров к одному существу и единое
-  бюджетное решение поверх существующей энергии).
-  Это текущая линия работ. Этап 0 был подготовительным (инициализация git,
-  бэкап `data/`, удаление исходного лога) и отдельного отчёта не имеет —
-  его результат зафиксирован в [BASELINE.md](BASELINE.md).
-* **Ранняя разработка (июнь 2026)** — внутренние «Этап 3.5», «Этап 4.5»,
-  «Этап 5», «Этап 6» в [ARCHITECTURE.md](ARCHITECTURE.md) и
-  [ETAP3_ETAP4.md](ETAP3_ETAP4.md). Это про PluginRegistry, evolve-pipeline
-  и метрики, а не про текущую ревизию.
-
-При ссылке на «этап» уточняйте, какая нумерация имеется в виду.
-
-## Проверка ссылок
-
-Все относительные ссылки на `.md` в `README.md`, `CHANGELOG.md` и
-`docs/*.md` проверены скриптом: битых путей нет. Якоря (`#...`) не
-проверяются автоматически — при переименовании заголовков их нужно
-обновлять вручную.
+Исторические документы не удаляются автоматически: они объясняют, почему
+архитектура стала такой, какая она есть.

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-10-30 — UI v1, приёмка и каноническая документация
+
+* **Оболочка жизни** — завершены этапы 7.1–7.4: экран «Сейчас», карта
+  жизни, дневник, каталог занятий, доступы и диалог в едином Tk-интерфейсе.
+* **Честная карта** — Canvas показывает только реальные узлы и связи Core;
+  чтение UI read-only, `queued`/`waiting_approval` не выдаются за результат.
+* **Приёмка** — добавлен изолированный сценарий
+  `tests/test_acceptance_life_cycle.py`: Core → approval → Effector →
+  результат → life episode → дневник → граф.
+* **Документация** — введены три канонические точки входа:
+  `README.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/LIFE_LETTER.md`.
+  Остальные документы сохранены как практические руководства и история.
+* **Проверка** — полный прогон: 1423 passed, 2 skipped, без benchmarks.
+
 ### 2026-10-24 — Бюджет действия (этап 19)
 
 * **Единая политика** — новый `src/core/action_budget.py`: `ActionBudget`
