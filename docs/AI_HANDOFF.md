@@ -10,7 +10,9 @@
 
 Репозиторий: `C:\digital_being`
 
-Рабочая ветка: `life-safety`
+Публичный GitHub: `https://github.com/han13ter2014-web/Digital_being`
+
+Рабочая ветка: `main`
 
 Версия пакета: `0.1.0`
 
