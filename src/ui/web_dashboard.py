@@ -25,6 +25,8 @@ Web Dashboard — лёгкий aiohttp-сервер (Этап 3.1).
   это исключает race condition.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
