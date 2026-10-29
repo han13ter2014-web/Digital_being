@@ -126,6 +126,21 @@ def test_activity_catalog_matches_core_not_filesystem():
     assert snapshot["diary"]["episodes"] == []
 
 
+def test_diary_includes_finished_core_intention_without_delamain():
+    agent = _agent("CoreDiary")
+    entry = begin_intention(agent, {"action": "create_draft", "source": "activity",
+                                    "params": {"topic": "тишина", "reason": "интерес"}})
+    finish_intention(entry, outcome=SimpleNamespace(
+        reason="", as_dict=lambda: {"action": "create_draft", "had_effect": True}
+    ))
+
+    diary = build_life_snapshot(agent)["diary"]["episodes"]
+    assert len(diary) == 1
+    assert diary[0]["task_id"] == entry["id"]
+    assert diary[0]["metadata"]["source"] == "core_history"
+    assert diary[0]["metadata"]["status"] == "performed"
+
+
 def test_diary_snapshot_reads_episodes_without_mutating_core():
     agent = _agent("DiaryCopies")
     rows = [{"id": 1, "action": "play", "args": {"target": "партия"},

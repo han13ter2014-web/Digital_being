@@ -42,6 +42,15 @@ EXPLORATION_STRATEGIES: List[str] = [
 # мы фильтруем здесь, чтобы не считать «Не знаю» за ответ.
 _ANSWER_PREFILTER = ("Не знаю", "Новый концепт")
 _ANSWER_REQUIRED_MARKER = "[Ментальная модель]"
+_UNKNOWN_ANSWERS = {
+    "не знаю", "не уверен", "не уверена", "не могу сказать",
+    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+}
+
+
+def _is_unknown_answer(text: str) -> bool:
+    normalized = " ".join(str(text).lower().strip().split())
+    return normalized.rstrip(".!?") in _UNKNOWN_ANSWERS
 
 
 class OpenQuestionsManager:
@@ -169,10 +178,12 @@ class OpenQuestionsManager:
         for question in reversed(self.queue):
             if question.get("answered"):
                 continue
+            unknown = _is_unknown_answer(answer)
             question["answered"] = True
             question["answer"] = answer[:1000]
             question["answered_at"] = self._cycle()
             question["answer_source"] = "user"
+            question["answer_kind"] = "unknown" if unknown else "user_answer"
             self._log(
                 f"[OpenQ] Получен ответ пользователя на "
                 f"'{question['text'][:50]}...'"
@@ -181,6 +192,7 @@ class OpenQuestionsManager:
                 "status": "answered",
                 "question": question["text"],
                 "answer": question["answer"],
+                "answer_kind": question["answer_kind"],
             }
         return {"status": "not_found"}
 

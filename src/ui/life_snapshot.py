@@ -185,6 +185,32 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
 
     current = _current_intention(history)
     diary_episodes = recent_life_episodes(agent)
+    recorded_ids = {
+        str(item.get("task_id")) for item in diary_episodes
+        if isinstance(item, dict) and item.get("task_id")
+    }
+    # Автономные занятия принадлежат Core даже без подключённого Delamain.
+    # Представляем их в том же read-only формате, не создавая запись памяти
+    # из UI и не выдавая незавершённое намерение за событие.
+    for entry in reversed(history):
+        if (not isinstance(entry, dict)
+                or entry.get("status") == "started"
+                or str(entry.get("id")) in recorded_ids):
+            continue
+        outcome = entry.get("outcome")
+        diary_episodes.append({
+            "id": f"core:{entry.get('id')}",
+            "ts": entry.get("cycle"),
+            "task_id": entry.get("id"),
+            "task": "digital_life",
+            "action": entry.get("action"),
+            "args": {"target": entry.get("target")},
+            "ok": entry.get("status") == "performed",
+            "output": deepcopy(outcome),
+            "error": (outcome or {}).get("error") if isinstance(outcome, dict) else None,
+            "metadata": {"status": entry.get("status"), "source": "core_history"},
+        })
+    diary_episodes = diary_episodes[:RECENT_EPISODES]
     return {
         "name": str(getattr(agent, "name", "?")),
         "life": {
