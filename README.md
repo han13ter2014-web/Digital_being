@@ -76,6 +76,7 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 Описание сценария: [docs/ACCEPTANCE_DEMO.md](docs/ACCEPTANCE_DEMO.md).
 Результат последней приёмки: [docs/ACCEPTANCE_RESULT_2026-10-30.md](docs/ACCEPTANCE_RESULT_2026-10-30.md).
+Проверка установки публичного релиза: [docs/RELEASE_VERIFICATION_v0.1.0.md](docs/RELEASE_VERIFICATION_v0.1.0.md).
 
 ## Документация
 
