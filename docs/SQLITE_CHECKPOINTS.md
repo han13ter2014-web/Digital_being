@@ -73,6 +73,18 @@ WAL/SHM после закрытия отсутствовали; измерите
 Операции чтения/записи не стали O(новые записи). Миллиарды записей не
 поддержаны одним фактом использования SQLite.
 
+Первый срез этапа 6: Core теперь явно пишет завершённые intentions в
+существующий Delamain MemoryStore, если runtime подключён. Запись append-only,
+с life_id/intention_id/action/target/status/outcome; без runtime скрытая память
+не создаётся. Technical Effector episodes не превращаются автоматически
+в autobiographical events. Профильный core-life/delamain/effector набор: 25 passed. Общий прогон
+на границе минимального этапа 6: **1366 passed, 2 skipped**, без benchmarks,
+303,80 с. Exactly-once
+при аварии не заявляется. Добавлен индекс `idx_episodes_life` по task/life_id/id
+и hard-capped pagination recent_life_episodes; адресный memory/index/core
+набор: 10 passed. Это ограничивает retrieval page, но не решает retention,
+архив, инкрементальную запись всего опыта или рост общей таблицы.
+
 Следующие шаги: append-only журнал опыта, нормализованные сущности и индексы,
 инкрементальные dirty-записи, постраничное/ленивое чтение, горячий рабочий
 набор и холодный архив. Затем резервное копирование/восстановление и замеры
