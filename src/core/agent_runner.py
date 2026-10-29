@@ -238,6 +238,27 @@ class AgentRunner:
         if not text:
             return
         logger.info(f"[{self.name}] USER_MESSAGE: {text[:60]}")
+
+        # Имя — отдельный Core-owned диалог, а не обычная тема для обучения.
+        # После приветствия NamingDialogue ждёт естественный ответ пользователя
+        # без требования команды /name. Это должно происходить до помещения
+        # текста в очередь стимулов, иначе «Малютка» станет концептом, а имя
+        # агента останется прежним.
+        naming = getattr(self.agent, "naming_dialogue", None)
+        if naming is not None and getattr(naming, "phase", None) in {
+            "awaiting_name", "considering",
+        }:
+            result = self.agent.propose_name(text, cycle=self.agent.cycle_count)
+            response = self._format_name_result(result, text)
+            if response:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="naming_dialogue",
+                    priority=1,
+                )
+            return
+
         # Ленивое создание очереди — сообщения, пришедшие до start(),
         # не теряются, а дожидаются первого тика.
         if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
@@ -247,6 +268,23 @@ class AgentRunner:
                 f"(до start()) — сообщение будет обработано."
             )
         await self._pending_user_messages.put(text)
+
+    @staticmethod
+    def _format_name_result(result: Dict[str, Any], proposed: str) -> str:
+        """Сформировать ответ naming dialogue без генеративной модели."""
+        status = result.get("status", "ok")
+        if status == "accepted":
+            return f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."
+        if status == "rejected":
+            return f"🤔 Не подошло: {result.get('reason', 'неизвестная причина')}."
+        if status == "alternative_proposed":
+            alternative = result.get("agent_alternative") or result.get("alternative") or "другое имя"
+            return f"💭 Я бы предпочёл(ла) другое имя: «{alternative}». Согласен?"
+        if status == "alternative_accepted":
+            return f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
+        if status == "no_alternative_pending":
+            return "ℹ️ Сейчас нет ожидающего альтернативного имени."
+        return f"ℹ️ Результат диалога об имени: {result}"
 
     async def _on_user_command(self, event) -> None:
         """Команда из чата. Выполняется синхронно, ответ публикуется в чат."""
