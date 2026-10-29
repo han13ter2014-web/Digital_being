@@ -122,6 +122,7 @@ Core intention
 
 ## Где искать детали
 
+- восстановление AI-контекста: `docs/AI_HANDOFF.md`;
 - запуск: `docs/USAGE.md`;
 - архитектура: `docs/ARCHITECTURE.md`;
 - Core/Delamain boundary: `docs/INTEGRATION.md`;
