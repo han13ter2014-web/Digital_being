@@ -11,6 +11,8 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 вопросы/сообщения агента так же, как и терминальный режим через print().
 """
 
+from typing import Dict
+
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
 def _get_events_class():
     try:
