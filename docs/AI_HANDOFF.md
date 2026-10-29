@@ -27,6 +27,10 @@ python -m pytest -q --ignore=tests/benchmarks
 Последний известный полный результат: **1424 passed, 2 skipped**, без
 benchmarks.
 
+Последняя приёмка v1 зафиксирована в `docs/ACCEPTANCE_RESULT_2026-10-30.md`:
+адресный continuity-набор — 23 passed, визуально проверены экраны «Сейчас»,
+«Дневник», «Занятия» и «Карта жизни».
+
 Профильный UI/приёмочный набор:
 
 ```powershell

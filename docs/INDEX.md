@@ -18,6 +18,7 @@
 |---|---|
 | [USAGE.md](USAGE.md) | запуск, команды, настройки, tray |
 | [ACCEPTANCE_DEMO.md](ACCEPTANCE_DEMO.md) | воспроизводимый жизненный цикл v1 |
+| [ACCEPTANCE_RESULT_2026-10-30.md](ACCEPTANCE_RESULT_2026-10-30.md) | результат автоматической и визуальной приёмки v1 |
 | [STAGE7_UI.md](STAGE7_UI.md) | принятый план и статус оболочки v1 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | устройство Core и подсистем |
 | [INTEGRATION.md](INTEGRATION.md) | граница Core / Delamain / Effector |
