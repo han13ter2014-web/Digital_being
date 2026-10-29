@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `README.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/AI_HANDOFF.md` и
   `docs/LIFE_LETTER.md`. Остальные документы сохранены как практические
   руководства и история.
-* **Проверка** — полный прогон: 1424 passed, 2 skipped, без benchmarks.
+* **Проверка** — полный прогон: 1424 passed, 2 skipped, без benchmarks;
+  адресный continuity-набор приёмки: 23 passed; визуально проверены
+  «Сейчас», «Дневник», «Занятия» и «Карта жизни».
+* **Результат** — `docs/ACCEPTANCE_RESULT_2026-10-30.md`.
 
 ### 2026-10-24 — Бюджет действия (этап 19)
 
