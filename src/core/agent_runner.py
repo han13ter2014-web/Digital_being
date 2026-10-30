@@ -248,7 +248,20 @@ class AgentRunner:
         if naming is not None and getattr(naming, "phase", None) in {
             "awaiting_name", "considering",
         }:
-            result = self.agent.propose_name(text, cycle=self.agent.cycle_count)
+            from src.core.name_proposal import extract_name_proposal
+
+            proposed = extract_name_proposal(text)
+            if proposed is None:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": "Если ты предлагаешь имя, напиши его отдельно или так: «Пусть тебя зовут Омелла». Остальную речь я пока не умею разбирать свободно.",
+                     "cycle": self.agent.cycle_count},
+                    source="naming_dialogue", priority=1,
+                )
+                return
+            result = self.agent.propose_name(proposed, cycle=self.agent.cycle_count)
+            if result.get("status") == "accepted":
+                self._publish_name_changed(result)
             response = self._format_name_result(result, text)
             if response:
                 await self.bus.publish(
@@ -307,6 +320,20 @@ class AgentRunner:
                 f"(до start()) — сообщение будет обработано."
             )
         await self._pending_user_messages.put(text)
+
+    def _publish_name_changed(self, result: Dict[str, Any]) -> None:
+        """Уведомить UI и наблюдателей о принятом имени Core."""
+        self.name = str(result.get("new_name") or self.agent.name)
+        self.bus.publish_sync(
+            "agent_name_changed",
+            {
+                "old_name": result.get("old_name"),
+                "new_name": result.get("new_name"),
+                "cycle": self.agent.cycle_count,
+            },
+            source="naming_dialogue",
+            priority=1,
+        )
 
     @staticmethod
     def _format_user_answer_result(result: Dict[str, Any]) -> str:
@@ -520,6 +547,10 @@ class AgentRunner:
 
             if getattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite") != "sqlite":
                 self.agent.save_mental_models()
+            from src.app.active_profile import remember_active_name
+            from src.core.paths import data_dir
+
+            remember_active_name(data_dir(), self.agent.name)
             flush_logs()
             return True
         except Exception as e:
@@ -1166,6 +1197,8 @@ class AgentRunner:
             if not proposed:
                 return "Использование: /name <имя_которое_ты_хочешь_дать>"
             result = agent.propose_name(proposed, cycle=agent.cycle_count)
+            if result.get("status") == "accepted":
+                self._publish_name_changed(result)
             status = result.get("status", "ok")
             if status == "accepted":
                 return f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."

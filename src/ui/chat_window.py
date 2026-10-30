@@ -140,6 +140,7 @@ class ChatWindow:
         # событие, а не из перечисления Events.
         try:
             self.bus.subscribe("naming_initiated", self._on_naming_initiated)
+            self.bus.subscribe("agent_name_changed", self._on_agent_name_changed)
         except Exception:
             pass
 
@@ -181,6 +182,14 @@ class ChatWindow:
             f"Введите имя: >>> name <ваше_имя> (или просто имя в строке ввода)",
         ))
 
+    async def _on_agent_name_changed(self, event) -> None:
+        """Синхронизировать отображаемое имя после изменения Core."""
+        data = event.data or {}
+        new_name = str(data.get("new_name") or "").strip()
+        if not new_name:
+            return
+        self._incoming_queue.put(("__name_changed__", new_name))
+
     async def _on_agent_thought(self, event) -> None:
         text = (event.data or {}).get("text", "")
         if text:
@@ -201,14 +210,8 @@ class ChatWindow:
             self._incoming_queue.put(("agent", f"💚 {msg}"))
 
     async def _on_tick(self, event) -> None:
-        # Тики НЕ показываем в чате — слишком шумно
-        # Но можем показывать прогресс раз в N тиков
-        tick = (event.data or {}).get("tick", 0)
-        if tick > 0 and tick % 20 == 0:
-            energy = (event.data or {}).get("energy", 0)
-            self._incoming_queue.put(
-                ("system", f"[тик #{tick}] энергия: {energy:.0f}")
-            )
+        # Тело и цикл видны на экране «Сейчас», не засоряем ими диалог.
+        return
 
     # === Этап 2.5: вопросы и сообщения от агента к пользователю ===
 
@@ -242,27 +245,10 @@ class ChatWindow:
         В отличие от вопроса, не требует ответа, но показывается так же ярко.
         """
         data = event.data or {}
-        msg_type = data.get("msg_type", "statement")
         content = data.get("content", "")
-        urgency = data.get("urgency", 0.5)
 
-        prefix_map = {
-            "question": "?",
-            "statement": "*",
-            "reflection": "~",
-            "greeting": ">",
-            "farewell": "<",
-            "proposal": "+",
-            "alert": "!",
-            "poetry": "~",
-        }
-        prefix = prefix_map.get(msg_type, "*")
-
-        # Высокая urgency / alert / question → подсвечиваем как «агент говорит»
-        if urgency >= 0.7 or msg_type in ("alert", "question", "greeting"):
-            self._incoming_queue.put(("agent", f"{prefix} [{self.agent_name}]:\n   {content}"))
-        else:
-            self._incoming_queue.put(("system", f"{prefix} [{self.agent_name} → сообщение]:\n   {content}"))
+        if content:
+            self._incoming_queue.put(("agent", content))
 
     async def _on_agent_web_result(self, event) -> None:
         """Этап 2.5: агент нашёл ответ в интернете (Wikipedia).
@@ -407,7 +393,7 @@ class ChatWindow:
 
             # Приветствие
             self._append_agent(
-                f"Привет! Я {self.agent_name}. Я живу, пока открыто это окно.\n"
+                f"Привет! Я {self.agent_name}. Здесь можно поговорить со мной.\n"
                 "Введи сообщение или /help для команд."
             )
 
@@ -581,6 +567,10 @@ class ChatWindow:
             self._append_system(data)
         elif kind == "error":
             self._append_error(data)
+        elif kind == "__name_changed__":
+            self.agent_name = str(data)
+            if self._root is not None:
+                self._root.title(f"💬 {self.agent_name}")
 
     def _show_window(self) -> None:
         """Поднять и показать окно."""

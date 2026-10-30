@@ -104,6 +104,7 @@ class MainWindow(ChatWindow):
         self._nav_buttons: Dict[str, Any] = {}
         self._current_page: Optional[str] = None
         self._state_pill = None
+        self._display_name_label = None
         self._now_headline = None
         self._now_sub = None
         self._now_activity = None
@@ -259,6 +260,11 @@ class MainWindow(ChatWindow):
             return
         snap = self._life_snapshot
         try:
+            new_name = snap.get("name")
+            if isinstance(new_name, str) and new_name and new_name != self.agent_name:
+                self._handle_incoming("__name_changed__", new_name)
+            if self._display_name_label is not None:
+                self._display_name_label.configure(text=self.agent_name)
             self._now_headline.configure(text=life_view.now_headline(snap))
             if self._now_sub is not None:
                 self._now_sub.configure(text=life_view.body_summary(snap))
@@ -351,10 +357,11 @@ class MainWindow(ChatWindow):
         # --- Шапка: имя и состояние жизни ---
         header = tk.Frame(root, bg=theme.BG_DEEP)
         header.pack(fill=tk.X)
-        tk.Label(
+        self._display_name_label = tk.Label(
             header, text=self.agent_name, font=self._brand_font,
             bg=theme.BG_DEEP, fg=theme.TEXT, anchor="w",
-        ).pack(side=tk.LEFT, padx=theme.SPACING["md"], pady=theme.SPACING["sm"])
+        )
+        self._display_name_label.pack(side=tk.LEFT, padx=theme.SPACING["md"], pady=theme.SPACING["sm"])
         self._state_pill = tk.Label(
             header, text="жив", font=self._ui_font,
             bg=theme.SURFACE, fg=theme.CYAN, padx=10, pady=3,
@@ -944,7 +951,7 @@ class MainWindow(ChatWindow):
         page = tk.Frame(parent, bg=theme.BG_DEEP)
 
         self._text = scrolledtext.ScrolledText(
-            page, wrap=tk.WORD, width=60, height=20, font=self._mono_font,
+            page, wrap=tk.WORD, width=60, height=20, font=self._card_body_font,
             bg=theme.BG_CENTER, fg=theme.TEXT, insertbackground=theme.TEXT,
             relief=tk.FLAT, state=tk.DISABLED,
         )

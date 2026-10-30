@@ -302,7 +302,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
     from src.core.agent_runner import AgentRunner
     from src.core.event_bus import EventBus
 
-    name = args.name or _default_name()
+    from src.app.active_profile import active_name
+
+    name = args.name or (
+        _default_name() if args.new or args.seed or args.no_restore
+        else active_name(env.data_root, _default_name())
+    )
     agent, report = create_agent(
         env,
         name,

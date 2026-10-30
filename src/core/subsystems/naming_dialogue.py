@@ -183,6 +183,8 @@ class NamingDialogue:
                 "source": "user",
             })
             agent.name = name
+        if self.user_interaction is not None:
+            self.user_interaction.agent_name = name
 
         self.phase = self.PHASE_COMPLETED
         self.agent_name = name

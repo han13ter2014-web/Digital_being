@@ -23,7 +23,7 @@ async def test_user_message_during_naming_changes_core_name():
     runner = AgentRunner.__new__(AgentRunner)
     runner.name = "Alpha"
     runner.agent = agent
-    runner.bus = SimpleNamespace(publish=AsyncMock())
+    runner.bus = SimpleNamespace(publish=AsyncMock(), publish_sync=Mock())
 
     event = SimpleNamespace(data={"text": "Малютка"})
     await runner._on_user_message(event)

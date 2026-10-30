@@ -75,10 +75,12 @@ def test_json_explicit_backend_still_works(tmp_path):
     assert not (tmp_path / "life.sqlite3").exists()
 
 
-def test_sqlite_runner_does_not_export_mind(monkeypatch):
+def test_sqlite_runner_does_not_export_mind(tmp_path, monkeypatch):
     """SQLite checkpoints contain mind state; runner must not write a side export."""
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     calls = []
     agent = SimpleNamespace(
+        name="integration",
         save_state=lambda force=False: calls.append(("checkpoint", force)),
         save_mental_models=lambda: calls.append(("mind",)),
     )
@@ -90,3 +92,6 @@ def test_sqlite_runner_does_not_export_mind(monkeypatch):
 
     assert runner._save_state_safe() is True
     assert calls == [("checkpoint", True)]
+    assert json.loads((tmp_path / "active_profile.json").read_text(encoding="utf-8")) == {
+        "name": "integration"
+    }
