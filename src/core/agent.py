@@ -862,7 +862,7 @@ class DigitalBeing:
             return None
         try:
             return memory.record_life_episode(
-                life_id=self.name, intention_id=entry["id"], action=entry["action"],
+                life_id=self.life_id, intention_id=entry["id"], action=entry["action"],
                 target=entry.get("target") or "", status=entry.get("status", "unobserved"),
                 outcome=entry.get("outcome"),
             )

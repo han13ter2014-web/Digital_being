@@ -260,9 +260,20 @@ def recent_life_episodes(agent: Any, limit: int = RECENT_EPISODES) -> List[Dict[
     if not callable(reader):
         return []
     try:
-        return [deepcopy(dict(row)) for row in reader(
-            life_id=str(getattr(agent, "name", "?")),
-            limit=max(0, min(int(limit), RECENT_EPISODES))
+        bounded_limit = max(0, min(int(limit), RECENT_EPISODES))
+        episodes = [deepcopy(dict(row)) for row in reader(
+            life_id=str(getattr(agent, "life_id", getattr(agent, "name", "?"))),
+            limit=bounded_limit,
         )]
+        legacy_reader = getattr(memory, "legacy_life_episodes", None)
+        if callable(legacy_reader):
+            identifiers = [entry["id"] for entry in
+                           (_own(agent, "_intention_history", []) or [])
+                           if isinstance(entry, dict) and isinstance(entry.get("id"), str)]
+            episodes.extend(deepcopy(legacy_reader(
+                intention_ids=identifiers, limit=bounded_limit
+            )))
+        episodes.sort(key=lambda item: int(item.get("id", 0)), reverse=True)
+        return episodes[:bounded_limit]
     except Exception:  # pragma: no cover - защита UI
         return []
