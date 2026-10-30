@@ -230,6 +230,33 @@ class MemoryStore:
         ).fetchall()
         return [self._episode_dict(row) for row in rows]
 
+    def legacy_life_episodes(self, *, intention_ids, limit=20):
+        """Читать старые события только по ID намерений выбранного checkpoint.
+
+        Совпадение имени недостаточно: две жизни могут называться одинаково.
+        Метод не изменяет старые строки и не принимает UUID-записи другой жизни.
+        """
+        identifiers = list(dict.fromkeys(intention_ids))[:200]
+        limit = max(0, min(int(limit), 200))
+        if not identifiers or not limit:
+            return []
+        placeholders = ",".join("?" for _ in identifiers)
+        rows = self._conn.execute(
+            "SELECT * FROM episodes WHERE task = 'digital_life' "
+            f"AND task_id IN ({placeholders}) ORDER BY id DESC LIMIT ?",
+            (*identifiers, limit),
+        ).fetchall()
+        from src.core.life_identity import validate_life_id
+
+        result = []
+        for row in rows:
+            episode = self._episode_dict(row)
+            try:
+                validate_life_id(episode["metadata"].get("life_id"))
+            except (ValueError, TypeError):
+                result.append(episode)
+        return result
+
     def _episode_dict(self, row) -> Dict[str, Any]:
         return {
             "id": row["id"], "ts": row["ts"], "task_id": row["task_id"],

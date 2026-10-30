@@ -17,7 +17,7 @@ def test_core_records_finished_intention_only_when_memory_is_present():
     record = agent._record_core_life_episode(entry)
     assert record is not None
     kwargs = memory.record_life_episode.call_args.kwargs
-    assert kwargs["life_id"] == "CoreEpisode"
+    assert kwargs["life_id"] == agent.life_id
     assert kwargs["intention_id"] == entry["id"]
     assert kwargs["target"] == "партия"
     assert kwargs["status"] == "performed"

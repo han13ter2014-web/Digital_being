@@ -45,7 +45,7 @@
 
 ## Первый участок life_id — проверен, миграция не завершена
 
-Полный локальный прогон: **1473 passed, 2 skipped**, 303,42 с,
+Полный локальный прогон после UUID-дневника: **1474 passed, 2 skipped**, 305,61 с,
 без benchmarks. Два предупреждения — ожидаемые deprecation legacy tray-входа.
 
 - DigitalBeing создаёт UUID при рождении; изменение имени его не меняет.
@@ -60,6 +60,10 @@
 - Новые checkpoint сохраняются в `checkpoints/<life_id>/`, старые name-based
   файлы остаются доступными через legacy fallback.
 - Две жизни с одинаковым именем не смешиваются при выборе по UUID.
+
+- Новые Core life episodes записываются по UUID; UI читает тот же ключ.
+- Старые name-based episodes читаются только при доказуемом совпадении
+  intention_id с историей выбранной жизни.
 
 Ограничения: identity.json ещё не реализован. Delamain episodes, life_guard,
 long-term memory и seed lineage пока не переведены на UUID. Не считать
