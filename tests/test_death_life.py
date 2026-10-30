@@ -33,10 +33,10 @@ def temp_checkpoint_dir():
         
         original_data_path = paths_module.data_path
         
-        def mock_data_path(subdir: str = "") -> str:
-            if subdir == "checkpoints":
+        def mock_data_path(*parts: str) -> str:
+            if parts == ("checkpoints",):
                 return tmpdir
-            return original_data_path(subdir)
+            return original_data_path(*parts)
         
         # Патчим во всех модулях
         paths_module.data_path = mock_data_path
