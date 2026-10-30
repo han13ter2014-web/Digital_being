@@ -302,16 +302,30 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
     from src.core.agent_runner import AgentRunner
     from src.core.event_bus import EventBus
 
-    from src.app.active_profile import active_name
+    from src.app.active_profile import remember_active_name
+    from src.app.life_choice import resolve_startup_name
     from src.app.profile_identity import selected_life_id
+
+    interactive = getattr(args, "ui", "headless") in ("gui", "tray")
+    ask = None
+    if interactive:
+        from src.ui.life_choice import choose_life
+
+        ask = choose_life
 
     expected_life_id = (
         None if args.name or args.new or args.seed or args.no_restore
         else selected_life_id(env.data_root)
     )
-    name = args.name or (
-        _default_name() if args.new or args.seed or args.no_restore
-        else active_name(env.data_root, _default_name())
+    name = resolve_startup_name(
+        name=args.name,
+        new=args.new,
+        seed=args.seed,
+        no_restore=args.no_restore,
+        data_root=env.data_root,
+        default_name=_default_name(),
+        interactive=interactive,
+        ask=ask,
     )
     agent, report = create_agent(
         env,
@@ -321,6 +335,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         seed=args.seed,
         expected_life_id=expected_life_id,
     )
+    # Указатель пишется сразу, а не через минуты до первого сохранения:
+    # иначе следующий запуск снова искал бы жизнь по изменяемому имени.
+    try:
+        remember_active_name(env.data_root, agent.name, getattr(agent, "life_id", None))
+    except OSError as exc:
+        logger.warning("Не удалось записать выбранную жизнь: %s", exc)
 
     bus = EventBus(max_queue_size=500, history_size=300)
     runner = AgentRunner(agent, bus)
