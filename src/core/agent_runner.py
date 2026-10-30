@@ -550,7 +550,7 @@ class AgentRunner:
             from src.app.active_profile import remember_active_name
             from src.core.paths import data_dir
 
-            remember_active_name(data_dir(), self.agent.name)
+            remember_active_name(data_dir(), self.agent.name, getattr(self.agent, "life_id", None))
             flush_logs()
             return True
         except Exception as e:

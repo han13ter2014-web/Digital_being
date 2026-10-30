@@ -7,11 +7,16 @@ from pathlib import Path
 from src.app.legacy_profile import discover_legacy_name
 
 
-def remember_active_name(root, name):
+def remember_active_name(root, name, life_id=None):
     """Атомарно запомнить имя после успешного сохранения чекпоинта."""
     destination = Path(root) / "active_profile.json"
     temporary = destination.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"name": name}, ensure_ascii=False), encoding="utf-8")
+    payload = {"name": name}
+    if life_id is not None:
+        from src.core.life_identity import validate_life_id
+
+        payload["life_id"] = validate_life_id(life_id)
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     os.replace(temporary, destination)
 
 

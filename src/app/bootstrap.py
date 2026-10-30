@@ -222,6 +222,7 @@ def create_agent(
     new: bool = False,
     restore: bool = True,
     seed: Optional[str] = None,
+    expected_life_id: Optional[str] = None,
 ) -> Tuple[Any, Dict[str, Any]]:
     """Создаёт агента и приводит его к нужному стартовому состоянию.
 
@@ -281,6 +282,8 @@ def create_agent(
                 state = CheckpointSerializer().load(checkpoint)
                 if not isinstance(state, dict) or state.get("name") != name:
                     raise ValueError("Имя в снимке не соответствует выбранной жизни")
+                if expected_life_id is not None and state.get("life_id") != expected_life_id:
+                    raise RecoveryRequiredError("Идентификатор снимка не соответствует выбранной жизни")
                 if state.get("schema_version", 0) > SCHEMA_VERSION:
                     raise RecoveryRequiredError("Снимок создан более новой версией программы")
                 from src.core.checkpoint_validation import validate_checkpoint_state

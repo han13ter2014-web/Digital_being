@@ -186,6 +186,10 @@ def validate_checkpoint_state(state) -> None:
     modifies the input, constructs an agent, or applies saved hyperparameters.
     """
     _dict(state, "state")
+    if "life_id" in state:
+        from src.core.life_identity import validate_life_id
+
+        validate_life_id(state["life_id"])
     if state.get("active_inference") is not None:
         from src.cognition.inference_continuity import validate_inference
 
