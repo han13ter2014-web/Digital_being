@@ -5,14 +5,14 @@ from __future__ import annotations
 from src.app.life_choice import describe_life
 
 
-def choose_life(lives):
-    """Вернуть имя выбранной жизни или None, если человек закрыл окно.
+def build_life_choice(lives):
+    """Создать окно выбора, не запуская цикл событий.
 
-    Ничего не пишет на диск: решение сохранится только после успешного
-    восстановления и первого сохранения.
+    Возвращает ``(window, selected)``; после закрытия окна в ``selected``
+    лежит имя выбранной жизни или None. Отделено от ``choose_life``, чтобы
+    окно можно было показать в проверке интерфейса.
     """
     import tkinter as tk
-    from tkinter import ttk
 
     from src.ui import theme
 
@@ -81,16 +81,53 @@ def choose_life(lives):
         selected["name"] = None
         window.destroy()
 
-    continue_button = ttk.Button(buttons, text="Продолжить эту жизнь", command=confirm)
+    continue_button = tk.Button(
+        buttons,
+        text="Продолжить эту жизнь",
+        command=confirm,
+        bg=theme.GLOW_CYAN,
+        fg=theme.TEXT,
+        activebackground=theme.EDGE,
+        activeforeground=theme.TEXT,
+        relief=tk.FLAT,
+        bd=0,
+        padx=14,
+        pady=6,
+        font=(theme.font_family(), 10, "bold"),
+    )
     continue_button.pack(side="right")
-    ttk.Button(buttons, text="Не сейчас", command=cancel).pack(side="right", padx=(0, 8))
+    cancel_button = tk.Button(
+        buttons,
+        text="Не сейчас",
+        command=cancel,
+        bg=theme.SURFACE,
+        fg=theme.TEXT,
+        activebackground=theme.BORDER,
+        activeforeground=theme.TEXT,
+        relief=tk.FLAT,
+        bd=0,
+        padx=14,
+        pady=6,
+        font=(theme.font_family(), 10),
+    )
+    cancel_button.pack(side="right", padx=(0, 8))
     listbox.bind("<Double-Button-1>", confirm)
     window.bind("<Return>", confirm)
     window.protocol("WM_DELETE_WINDOW", cancel)
     window.update_idletasks()
     window.focus_force()
+    return window, selected
+
+
+def choose_life(lives):
+    """Вернуть имя выбранной жизни или None, если человек закрыл окно.
+
+    Ничего не пишет на диск: решение сохранится только после успешного
+    восстановления и первого сохранения.
+    """
+    window, selected = build_life_choice(lives)
     window.mainloop()
     return selected["name"]
 
 
-__all__ = ["choose_life"]
+__all__ = ["build_life_choice", "choose_life"]
