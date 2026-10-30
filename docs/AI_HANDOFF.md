@@ -21,7 +21,7 @@
 После опубликованного v0.1.1 исправляется понятность диалога и непрерывность
 после смены имени. Проверенный срез и оставшиеся ограничения:
 [PATCH_WORK_STATUS.md](PATCH_WORK_STATUS.md).
-Последний локальный прогон этого среза: **1469 passed, 2 skipped**.
+Последний локальный прогон этого среза: **1473 passed, 2 skipped**.
 Первый участок стабильного `life_id` реализован в checkpoint и active profile,
 но физические name-based namespaces и Delamain/life_guard storage ещё не
 мигрированы. См. `docs/PATCH_WORK_STATUS.md`.

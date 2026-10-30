@@ -1306,12 +1306,20 @@ class DigitalBeing:
             build_state_from_agent,
         )
         state = build_state_from_agent(self)
+        from pathlib import Path
+        from src.core.paths import data_path
+
+        directory = getattr(self, "checkpoint_dir", None)
+        storage_key = self.name
+        if getattr(self, "_profile_managed", False):
+            directory = str(Path(directory or data_path("checkpoints")) / self.life_id)
+            storage_key = self.life_id
         ser = CheckpointSerializer(
-            checkpoint_dir=getattr(self, "checkpoint_dir", None),
+            checkpoint_dir=directory,
             max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
             backend=getattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite"),
         )
-        filename = ser.save(state, self.name, self.cycle_count)
+        filename = ser.save(state, storage_key, self.cycle_count)
 
         self._last_saved_intelligence = self.intelligence
         return filename

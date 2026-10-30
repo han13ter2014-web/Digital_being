@@ -16,6 +16,19 @@ def discover_legacy_name(root, default):
         return default
     try:
         for path in directory.iterdir():
+            if path.is_dir():
+                from src.core.life_identity import validate_life_id
+
+                try:
+                    validate_life_id(path.name)
+                except ValueError:
+                    continue
+                # Namespace UUID сам по себе является свидетельством истории:
+                # не разрешаем тихую новую жизнь без указателя выбора.
+                raise RecoveryRequiredError(
+                    "Найден UUID-профиль без указателя активной жизни; "
+                    "нужно восстановить active_profile.json из резервной копии"
+                )
             match = re.fullmatch(r"(.+)_cycle_([0-9]+)\.json(?:\.gz)?", path.name)
             if path.is_file() and match:
                 names.add(match.group(1))

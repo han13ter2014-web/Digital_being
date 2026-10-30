@@ -37,6 +37,36 @@ def checkpoint_candidates(agent_name: str, checkpoint_dir: Optional[str] = None)
     if not os.path.isdir(directory):
         return []
     candidates = []
+    from pathlib import Path
+    from src.core.life_identity import validate_life_id
+
+    try:
+        requested_id = validate_life_id(agent_name)
+    except ValueError:
+        requested_id = None
+    for child in Path(directory).iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            identity = validate_life_id(child.name)
+        except ValueError:
+            continue
+        if requested_id is not None and identity != requested_id:
+            continue
+        scoped = checkpoint_candidates(identity, str(child))
+        if agent_name == identity:
+            candidates.extend(scoped)
+        elif scoped:
+            from src.core.checkpoint_serializer import CheckpointSerializer
+
+            try:
+                latest = CheckpointSerializer().load(scoped[0])
+            except Exception as exc:
+                raise RecoveryRequiredError(f"Не удалось прочитать профиль {identity}: {exc}") from exc
+            if latest.get("name") == agent_name:
+                if candidates:
+                    raise RecoveryRequiredError("Найдено несколько жизней с одинаковым именем; выберите UUID")
+                candidates.extend(scoped)
     database = os.path.join(directory, "life.sqlite3")
     if os.path.isfile(database):
         from pathlib import Path
@@ -235,6 +265,9 @@ def create_agent(
     logger.info("Создаю агента '%s'...", name)
     os.environ["DIGITAL_BEING_DATA_DIR"] = os.path.abspath(env.data_root)
     agent = DigitalBeing(name)
+    # Этот флаг отличает application composition root от legacy прямого
+    # использования DigitalBeing в инструментах и старых интеграциях.
+    agent._profile_managed = True
 
     # Пути к пользовательским данным: рядом с .exe их писать нельзя.
     knowledge_file = os.path.join(env.data_root, "knowledge_base.json")
@@ -275,13 +308,21 @@ def create_agent(
         from src.core.checkpoint_serializer import CheckpointSerializer
         from src.core.checkpoint_migrations import SCHEMA_VERSION, CheckpointMigrationError
 
-        candidates = checkpoint_candidates(name, agent.checkpoint_dir)
+        checkpoint_scope = expected_life_id or name
+        checkpoint_directory = agent.checkpoint_dir
+        if expected_life_id:
+            scoped_directory = os.path.join(agent.checkpoint_dir, expected_life_id)
+            if os.path.isdir(scoped_directory):
+                checkpoint_directory = scoped_directory
+        candidates = checkpoint_candidates(checkpoint_scope, checkpoint_directory)
         failures = []
         for checkpoint in candidates:
             try:
                 state = CheckpointSerializer().load(checkpoint)
-                if not isinstance(state, dict) or state.get("name") != name:
-                    raise ValueError("Имя в снимке не соответствует выбранной жизни")
+                if not isinstance(state, dict):
+                    raise ValueError("Некорректный снимок жизни")
+                if expected_life_id is None and state.get("name") != name:
+                    raise ValueError("Имя в старом снимке не соответствует выбранной жизни")
                 if expected_life_id is not None and state.get("life_id") != expected_life_id:
                     raise RecoveryRequiredError("Идентификатор снимка не соответствует выбранной жизни")
                 if state.get("schema_version", 0) > SCHEMA_VERSION:
@@ -308,6 +349,8 @@ def create_agent(
         else:
             if candidates:
                 raise RecoveryRequiredError(f"Ни один из {len(candidates)} снимков не читается; данные сохранены")
+            if expected_life_id is not None:
+                raise RecoveryRequiredError("Снимки выбранной жизни не найдены; новая жизнь не создана")
             logger.info("Чекпоинтов не найдено — стартуем новую жизнь")
 
     return agent, report

@@ -28,12 +28,13 @@ def active_name(root, default):
     if not path.exists():
         return discover_legacy_name(root, default)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))["name"]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        value = payload["name"]
         if not isinstance(value, str) or not value.strip():
             raise ValueError("пустое имя профиля")
         from src.app.bootstrap import checkpoint_candidates
 
-        if not checkpoint_candidates(value, str(Path(root) / "checkpoints")):
+        if not checkpoint_candidates(payload.get("life_id") or value, str(Path(root) / "checkpoints")):
             raise RecoveryRequiredError(
                 "Для выбранной жизни не найден чекпоинт; новая жизнь не создана"
             )
