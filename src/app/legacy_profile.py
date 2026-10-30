@@ -52,3 +52,51 @@ def discover_legacy_name(root, default):
             "данные не изменены. Профиль: " + str(Path(root).resolve())
         )
     return next(iter(names)) if names else default
+
+
+def legacy_lives(root):
+    """Описать старые жизни без изменения данных.
+
+    Нужно человеку для выбора: имя, номера циклов, число снимков и время
+    последнего изменения. Ничего не пишет и не выбирает за человека.
+    """
+    directory = Path(root) / "checkpoints"
+    if not directory.exists():
+        return []
+    lives = {}
+
+    def entry(name):
+        return lives.setdefault(
+            name,
+            {"name": name, "cycles": 0, "checkpoints": 0, "modified": 0.0},
+        )
+
+    for path in directory.iterdir():
+        if path.is_dir():
+            continue
+        match = re.fullmatch(r"(.+)_cycle_([0-9]+)\.json(?:\.gz)?", path.name)
+        if not match:
+            continue
+        item = entry(match.group(1))
+        item["cycles"] = max(item["cycles"], int(match.group(2)))
+        item["checkpoints"] += 1
+        item["modified"] = max(item["modified"], path.stat().st_mtime)
+
+    database = directory / "life.sqlite3"
+    if database.exists():
+        with closing(
+            sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            for name, cycle, count in connection.execute(
+                "SELECT agent_name, MAX(cycle), COUNT(*) FROM snapshots "
+                "GROUP BY agent_name"
+            ):
+                item = entry(str(name))
+                item["cycles"] = max(item["cycles"], int(cycle or 0))
+                item["checkpoints"] += int(count)
+
+    return sorted(
+        lives.values(),
+        key=lambda item: (item["cycles"], item["modified"]),
+        reverse=True,
+    )
