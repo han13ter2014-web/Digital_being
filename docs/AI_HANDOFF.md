@@ -21,10 +21,11 @@
 После опубликованного v0.1.1 исправляется понятность диалога и непрерывность
 после смены имени. Проверенный срез и оставшиеся ограничения:
 [PATCH_WORK_STATUS.md](PATCH_WORK_STATUS.md).
-Последний локальный прогон этого среза: **1474 passed, 2 skipped**.
-Первый участок стабильного `life_id` реализован в checkpoint и active profile,
-но физические name-based namespaces и Delamain/life_guard storage ещё не
-мигрированы. См. `docs/PATCH_WORK_STATUS.md`.
+Последний локальный прогон этого среза: **1485 passed, 2 skipped**.
+Стабильный `life_id` уже используется в checkpoint, active profile, дневнике
+Delamain, долговременной памяти и подтверждении ухода. Ещё не переведены
+seed lineage, выбор профиля в UI и общий на папку `life_state.json`.
+См. `docs/PATCH_WORK_STATUS.md`.
 Старые профили без указателя теперь обнаруживаются read-only: одна жизнь
 выбирается автоматически, несколько имён требуют явного выбора. UI выбора
 профиля пока нет; не заявлять полную готовность обновления.
@@ -41,7 +42,7 @@ git log --oneline -8
 python -m pytest -q --ignore=tests/benchmarks
 ```
 
-Последний известный полный результат: **1429 passed, 2 skipped**, без
+Последний известный полный результат: **1485 passed, 2 skipped**, без
 benchmarks.
 
 Последняя приёмка v1 зафиксирована в `docs/ACCEPTANCE_RESULT_2026-10-30.md`:

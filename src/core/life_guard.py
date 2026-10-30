@@ -241,6 +241,20 @@ class LifeGuard:
         default_factory=lambda: data_path("snapshots"), repr=False
     )
     max_snapshots: int = 10
+    # Источник текущего отображаемого имени. Имя — только подпись жизни,
+    # поэтому подтверждение должно следовать за ним, а не за именем при рождении.
+    name_provider: Any = field(default=None, repr=False)
+
+    def current_name(self) -> str:
+        """Текущее имя жизни; при смене имени фраза не должна устаревать."""
+        if callable(self.name_provider):
+            try:
+                value = self.name_provider()
+            except Exception:
+                value = None
+            if isinstance(value, str) and value.strip():
+                return value
+        return self.agent_name
 
     # ------------------------------------------------------------------
     # Состояние жизни
@@ -288,7 +302,7 @@ class LifeGuard:
             raise ValueError(f"недопустимое состояние: {state!r}")
         payload: Dict[str, Any] = {
             "state": state,
-            "agent_name": self.agent_name,
+            "agent_name": self.current_name(),
             "reason": reason,
             "changed_at": datetime.now().isoformat(timespec="seconds"),
             "seed_folder": seed_folder,
@@ -392,16 +406,7 @@ class LifeGuard:
             )
 
         now = self.clock()
-        name = agent_name or self.agent_name
-        request_id = f"{kind}-{int(now * 1000)}"
-        req = LifeRequest(
-            request_id=request_id,
-            kind=kind,
-            agent_name=name,
-            reason=reason,
-            created_at=now,
-            expires_at=now + policy.ttl_sec,
-        )
+        name = agent_name or self.current_name()
 
         requests = self._load_requests()
         # Чистим истёкшие, чтобы файл не рос.
@@ -410,6 +415,21 @@ class LifeGuard:
             for key, value in requests.items()
             if not value.is_expired(now)
         }
+        # Два запроса в одну миллисекунду не должны перезаписывать друг
+        # друга: иначе второй «теряется» и подтверждается чужой.
+        request_id = f"{kind}-{int(now * 1000)}"
+        suffix = 1
+        while request_id in requests:
+            request_id = f"{kind}-{int(now * 1000)}-{suffix}"
+            suffix += 1
+        req = LifeRequest(
+            request_id=request_id,
+            kind=kind,
+            agent_name=name,
+            reason=reason,
+            created_at=now,
+            expires_at=now + policy.ttl_sec,
+        )
         requests[request_id] = req
         self._save_requests(requests)
         self._log_event("requested", kind=kind, reason=reason,
@@ -456,7 +476,12 @@ class LifeGuard:
             )
 
         expected = policy.expected_phrase(req.agent_name)
-        if normalize_phrase(phrase) != normalize_phrase(expected):
+        entered = normalize_phrase(phrase)
+        # После смены имени запрос, созданный раньше, и новый диалог должны
+        # приниматься оба: жизнь одна, меняется только её подпись.
+        accepted = {normalize_phrase(expected),
+                    normalize_phrase(policy.expected_phrase(self.current_name()))}
+        if entered not in accepted:
             raise ConfirmationError(
                 f"Фраза не совпала. Нужно ввести точно: «{expected}»"
             )
@@ -614,7 +639,7 @@ class LifeGuard:
         record = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "event": event,
-            "agent": self.agent_name,
+            "agent": self.current_name(),
         }
         record.update(fields)
         try:

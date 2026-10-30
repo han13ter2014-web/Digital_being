@@ -44,7 +44,17 @@ def temp_checkpoint_dir():
         runner_module.data_path = mock_data_path
         agent_module.data_path = mock_data_path
         logger_module.data_path = mock_data_path
-        
+
+        # Состояние жизни хранится на папку данных: другой тест мог
+        # оставить там сон или уход. Начинаем с живой жизни.
+        import os as _os
+
+        for _name in ("life_state.json", "life_requests.json"):
+            try:
+                _os.unlink(original_data_path(_name))
+            except OSError:
+                pass
+
         yield tmpdir
         
         # Восстанавливаем

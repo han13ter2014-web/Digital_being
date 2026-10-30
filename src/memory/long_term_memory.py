@@ -85,7 +85,7 @@ class LongTermMemory:
     """Система долгосрочной памяти с экспоненциальным decay."""
 
     def __init__(self, agent_name: str, decay_rate: float = 0.95,
-                 consolidation_threshold: float = 0.7):
+                 consolidation_threshold: float = 0.7, life_id: str = None):
         """
         Args:
             agent_name: Имя агента для сохранения памяти
@@ -107,9 +107,66 @@ class LongTermMemory:
         self._consolidation_count = 0
         self._decay_events_count = 0
 
-        self.memory_file = data_path("memory", f"{agent_name}_long_term.json")
+        if life_id is not None:
+            from src.core.life_identity import validate_life_id
+
+            validate_life_id(life_id)
+        self.life_id = life_id
+        self.memory_file = data_path("memory", f"{life_id or agent_name}_long_term.json")
         os.makedirs(data_path("memory"), exist_ok=True)
 
+        self._load_from_disk()
+
+    def rebind(self, life_id):
+        """Переключить этот объект памяти на жизнь с другим UUID.
+
+        Ссылку на память уже держат sleep_cycle и другие подсистемы, поэтому
+        объект нельзя заменять: он сохраняется, меняется только хранилище.
+        """
+        from src.core.life_identity import validate_life_id
+
+        target = validate_life_id(life_id)
+        if self.life_id == target:
+            return
+        # Состояние в памяти могло прийти из файла другой (например, только что
+        # созданной при старте) жизни: авторитетен только файл целевого UUID.
+        self._short_term = {}
+        self._long_term = {}
+        self._episodic = []
+        self._access_patterns = {}
+        self._similarity_cache = {}
+        self._consolidation_count = 0
+        self._decay_events_count = 0
+        self.life_id = target
+        self.memory_file = data_path("memory", f"{target}_long_term.json")
+        self._load_from_disk()
+
+    def bind_legacy_file(self, legacy_name):
+        """Перенести выбранный legacy-файл без удаления оригинала."""
+        from pathlib import Path
+        import shutil
+
+        if not self.life_id or Path(self.memory_file).exists():
+            return
+        if Path(legacy_name).name != legacy_name or "/" in legacy_name or "\\" in legacy_name:
+            raise ValueError("Некорректное имя старого файла памяти")
+        source = Path(data_path("memory", f"{legacy_name}_long_term.json"))
+        if not source.exists():
+            return
+        # Сначала проверить все следы, чтобы повреждённый файл не стал пустой памятью.
+        data = json.loads(source.read_text(encoding="utf-8"))
+        for section in ("short_term", "long_term"):
+            for raw in data.get(section, {}).values():
+                MemoryTrace.from_dict(raw)
+        for raw in data.get("episodic", []):
+            MemoryTrace.from_dict(raw)
+        temporary = Path(self.memory_file + ".migrating")
+        try:
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, self.memory_file)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
         self._load_from_disk()
 
     def store(self, content: str, importance: float = 0.5, context: str = "",
@@ -411,6 +468,8 @@ class LongTermMemory:
             self._consolidation_count = metadata.get('consolidation_count', 0)
             self._decay_events_count = metadata.get('decay_events_count', 0)
         except Exception as e:
+            if self.life_id is not None:
+                raise ValueError("Не удалось прочитать UUID-память; файл не изменён") from e
             print(f"Ошибка загрузки памяти: {e}")
 
     def save(self):
