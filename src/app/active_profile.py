@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+from src.app.legacy_profile import discover_legacy_name
+
 
 def remember_active_name(root, name):
     """Атомарно запомнить имя после успешного сохранения чекпоинта."""
@@ -19,7 +21,7 @@ def active_name(root, default):
 
     path = Path(root) / "active_profile.json"
     if not path.exists():
-        return default
+        return discover_legacy_name(root, default)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))["name"]
         if not isinstance(value, str) or not value.strip():
