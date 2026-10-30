@@ -304,6 +304,18 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
 
     if "life_id" in state:
         agent.life_id = state["life_id"]
+        # Прямое legacy-использование DigitalBeing хранит память по имени:
+        # UUID в снимке не должен переключать её на другой файл.
+        if getattr(agent, "_profile_managed", False):
+            memory = getattr(agent, "long_term_memory", None)
+            if memory is None:
+                # Рождение само по себе память не теряет: None здесь значит,
+                # что чтение UUID-файла не удалось. Не выдаём это за пустоту.
+                raise ValueError("Память жизни недоступна; восстановление остановлено")
+            if getattr(memory, "life_id", None) != agent.life_id:
+                # Объект памяти не заменяем: на него уже ссылаются sleep_cycle
+                # и другие подсистемы, созданные при рождении агента.
+                memory.rebind(agent.life_id)
     if isinstance(state.get("name"), str):
         agent.name = state["name"]
     agent.energy = state.get("energy", 150)

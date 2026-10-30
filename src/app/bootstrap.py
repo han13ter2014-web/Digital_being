@@ -264,10 +264,7 @@ def create_agent(
 
     logger.info("Создаю агента '%s'...", name)
     os.environ["DIGITAL_BEING_DATA_DIR"] = os.path.abspath(env.data_root)
-    agent = DigitalBeing(name)
-    # Этот флаг отличает application composition root от legacy прямого
-    # использования DigitalBeing в инструментах и старых интеграциях.
-    agent._profile_managed = True
+    agent = DigitalBeing(name, profile_managed=True)
 
     # Пути к пользовательским данным: рядом с .exe их писать нельзя.
     knowledge_file = os.path.join(env.data_root, "knowledge_base.json")
@@ -342,6 +339,18 @@ def create_agent(
             # не пытаемся продолжить на частично изменённом объекте.
             if not agent.load_state(checkpoint):
                 raise RecoveryRequiredError(f"Не удалось применить снимок {checkpoint}; запуск остановлен")
+            if "life_id" not in state:
+                memory = getattr(agent, "long_term_memory", None)
+                if memory is None:
+                    raise RecoveryRequiredError(
+                        "Не удалось подготовить память жизни; запуск остановлен"
+                    )
+                try:
+                    memory.bind_legacy_file(state["name"])
+                except Exception as exc:
+                    raise RecoveryRequiredError(
+                        "Не удалось перенести старую долговременную память; оригинал сохранён"
+                    ) from exc
             report.update(source="checkpoint", checkpoint=os.path.basename(checkpoint),
                           cycle=agent.cycle_count, recovery_failures=failures,
                           recovered_from_older=bool(failures))

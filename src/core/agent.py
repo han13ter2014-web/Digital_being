@@ -265,11 +265,15 @@ class DigitalBeing:
         "none": "wait",
     }
 
-    def __init__(self, name="Lucy", life_id=None):
+    def __init__(self, name="Lucy", life_id=None, profile_managed=False):
         from src.core.life_identity import new_life_id, validate_life_id
 
         self.life_id = validate_life_id(life_id) if life_id else new_life_id()
         self.name = name
+        # Управляемая приложением жизнь хранит данные по UUID. Прямое
+        # использование DigitalBeing в старых инструментах остаётся
+        # name-based, чтобы не потерять уже существующие файлы.
+        self._profile_managed = bool(profile_managed)
         self.creation_time = datetime.now()
         # Инициализируем энергию ДО создания energy_subsystem.
         # Свойство self.energy читает/пишет через energy_subsystem, поэтому
@@ -567,7 +571,10 @@ class DigitalBeing:
         # === Пре-создание: long_term_memory (try/except) ===
         # LongTermMemory может упасть на legacy-импортах, оборачиваем в try.
         try:
-            self.long_term_memory = LongTermMemory(agent_name=name)
+            self.long_term_memory = LongTermMemory(
+                agent_name=name,
+                life_id=self.life_id if self._profile_managed else None,
+            )
         except Exception:
             self.long_term_memory = None
 
@@ -612,7 +619,9 @@ class DigitalBeing:
         # Защита жизни: единая точка решений о сне и уходе. Создаётся
         # ПЕРВОЙ, потому что состояние жизни читают и смысловые
         # подсистемы, и главный цикл.
-        self.life_guard = LifeGuard(agent_name=self.name)
+        self.life_guard = LifeGuard(
+            agent_name=self.name, name_provider=lambda: self.name
+        )
 
         # Замыкание петли: учёт наблюдаемых результатов действий.
         # max_no_effect=3: после трёх бесплодных повторов действие

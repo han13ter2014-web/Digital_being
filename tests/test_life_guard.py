@@ -280,3 +280,43 @@ def test_events_are_logged(guard):
 def test_normalize_phrase_collapses_spaces():
     assert normalize_phrase("  alpha    навсегда ") == "ALPHA НАВСЕГДА"
     assert normalize_phrase("Alpha") == "ALPHA"
+
+
+def test_confirmation_phrase_follows_display_name(tmp_path):
+    """Смена имени не должна блокировать подтверждение ухода."""
+    clock = FakeClock()
+    current = {"name": "Старое"}
+    guard = LifeGuard(
+        agent_name="Старое",
+        clock=clock,
+        name_provider=lambda: current["name"],
+        state_path=str(tmp_path / "life_state.json"),
+        requests_path=str(tmp_path / "life_requests.json"),
+        events_path=str(tmp_path / "life_events.log"),
+        snapshot_root=str(tmp_path / "snapshots"),
+    )
+    request = guard.request(KIND_DREAM)
+    pending = guard.request(KIND_DREAM)
+    current["name"] = "Новое"
+    clock.advance(11)
+    guard.confirm(request.request_id, "Новое")
+
+    # Запрос, созданный до смены имени, всё ещё принимает старую подпись:
+    # человек мог начать вводить фразу раньше.
+    guard.confirm(pending.request_id, "Старое")
+
+
+def test_agent_rename_updates_pending_phrase(tmp_path, monkeypatch):
+    from src.core.agent import DigitalBeing
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    agent = DigitalBeing("Старое")
+    clock = FakeClock()
+    agent.life_guard.clock = clock
+    agent.name = "Новое"
+
+    request = agent.request_dream("усталость")
+    assert request["phrase"] == "Новое"
+    clock.advance(11)
+    agent.life_guard.confirm(request["request_id"], "Новое")
+    assert agent.life_guard.load_state() == "alive"

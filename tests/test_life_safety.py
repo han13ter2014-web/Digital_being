@@ -45,7 +45,16 @@ def agent():
 
     a = DigitalBeing(name="GuardTest")
     a.life_guard.clock = FakeClock()
-    return a
+    try:
+        yield a
+    finally:
+        # Последний тест уходит в сон: без очистки состояние протекает
+        # в другие файлы тестов, которые читают ту же папку данных.
+        for name in ("life_state.json", "life_requests.json"):
+            try:
+                os.unlink(data_path(name))
+            except OSError:
+                pass
 
 
 # ============================================================
