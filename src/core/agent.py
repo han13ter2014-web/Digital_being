@@ -265,7 +265,10 @@ class DigitalBeing:
         "none": "wait",
     }
 
-    def __init__(self, name="Lucy"):
+    def __init__(self, name="Lucy", life_id=None):
+        from src.core.life_identity import new_life_id, validate_life_id
+
+        self.life_id = validate_life_id(life_id) if life_id else new_life_id()
         self.name = name
         self.creation_time = datetime.now()
         # Инициализируем энергию ДО создания energy_subsystem.

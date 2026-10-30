@@ -303,7 +303,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
     from src.core.event_bus import EventBus
 
     from src.app.active_profile import active_name
+    from src.app.profile_identity import selected_life_id
 
+    expected_life_id = (
+        None if args.name or args.new or args.seed or args.no_restore
+        else selected_life_id(env.data_root)
+    )
     name = args.name or (
         _default_name() if args.new or args.seed or args.no_restore
         else active_name(env.data_root, _default_name())
@@ -314,6 +319,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         new=args.new,
         restore=not args.no_restore,
         seed=args.seed,
+        expected_life_id=expected_life_id,
     )
 
     bus = EventBus(max_queue_size=500, history_size=300)

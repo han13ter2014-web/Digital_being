@@ -11,7 +11,8 @@ from uuid import uuid4
 
 
 DIRECTORIES = ("checkpoints", "mind", "memory", "nursery", "delamain")
-FILES = ("knowledge_base.json", "life_state.json", "life_requests.json", "life_events.log")
+FILES = ("knowledge_base.json", "life_state.json", "life_requests.json", "life_events.log",
+         "active_profile.json")
 
 
 def _digest(path):

@@ -95,6 +95,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "active_inference", None) is not None else None
         ),
         "schema_version": SCHEMA_VERSION,
+        **({"life_id": agent.life_id} if getattr(agent, "life_id", None) else {}),
         "name": agent.name,
         "energy": agent.energy,
         "cycle_count": agent.cycle_count,
@@ -301,6 +302,10 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
 
         agent.action_expectations = ActionExpectations()
 
+    if "life_id" in state:
+        agent.life_id = state["life_id"]
+    if isinstance(state.get("name"), str):
+        agent.name = state["name"]
     agent.energy = state.get("energy", 150)
     agent.cycle_count = state.get("cycle_count", 0)
     agent.knowledge_base.update(state.get("knowledge_base", {}))
