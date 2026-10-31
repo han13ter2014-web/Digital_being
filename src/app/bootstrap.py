@@ -362,6 +362,15 @@ def create_agent(
                 raise RecoveryRequiredError("Снимки выбранной жизни не найдены; новая жизнь не создана")
             logger.info("Чекпоинтов не найдено — стартуем новую жизнь")
 
+    # Разрешения, выбранные человеком, переживают перезапуск. Ошибка чтения
+    # файла не заменяет жизнь ошибкой: остаются настройки по умолчанию.
+    from src.app.access_control import apply_saved
+
+    access_report = apply_saved(agent, env.data_root)
+    report["access"] = access_report
+    if access_report.get("error"):
+        logger.warning("Разрешения не применены: %s", access_report["error"])
+
     return agent, report
 
 

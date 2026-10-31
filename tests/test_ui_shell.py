@@ -142,6 +142,48 @@ def test_diary_and_activities_render_real_snapshot(root):
     assert "Ходов: 0" in win._activity_detail.cget("text")
 
 
+def test_access_switches_reflect_real_state_and_publish_choice(root):
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha")
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+
+    win._apply_life_data({
+        "access": {
+            "network": {"enabled": True},
+            "delamain": {"enabled": False},
+            "effector": {"enabled": False},
+        },
+    })
+    assert win._access_vars["network"].get() is True
+    assert win._access_vars["delamain"].get() is False
+
+    # Переключатель не меняет Core напрямую: он отправляет решение агенту.
+    win._access_vars["network"].set(False)
+    win._on_access_toggle("network")
+    event, data = bus.published[-1]
+    assert data["command"] == "access network off"
+    assert event == "user_command"
+
+
+def test_graph_counter_reports_hidden_service_records(root):
+    win = _window(root)
+    win._graph_counter.configure(text="")
+    win._apply_graph_data({
+        "nodes": [
+            {"id": "concept:память", "kind": "concept", "label": "память",
+             "weight": 0.5, "detail": {}},
+        ],
+        "edges": [],
+        "truncated": False,
+        "omitted": 0,
+        "hidden_service": 4,
+    })
+    text = win._graph_counter.cget("text")
+    assert "служебных записей скрыто: 4" in text
+
+
 def test_life_map_renders_nodes_and_shows_real_details(root):
     win = _window(root)
     win._show_page("graph")

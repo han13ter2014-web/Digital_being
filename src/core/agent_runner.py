@@ -171,6 +171,8 @@ class AgentRunner:
         # Дедупликация стимулов: не повторять один и тот же вопрос
         # чаще, чем раз в STIMULUS_COOLDOWN_TICKS тиков (см. docs/BASELINE.md).
         self._recent_stimuli: dict = {}
+        # Одна и та же автономная мысль подряд — шум, а не событие.
+        self._recent_thoughts: Dict[str, int] = {}
         self._loop_tick = 0
         self._idle_ticks = 0
 
@@ -688,6 +690,23 @@ class AgentRunner:
         except Exception:
             return True
 
+    def _should_publish_thought(self, text: str, cycle: int) -> bool:
+        """Не показывать ту же автономную мысль снова слишком скоро."""
+        key = " ".join(str(text).casefold().split())[:200]
+        previous = self._recent_thoughts.get(key)
+        repeat_window = int(
+            getattr(LR_CONFIG, "RUNNER_THOUGHT_REPEAT_CYCLES", 40) or 40
+        )
+        if previous is not None and cycle - previous < repeat_window:
+            return False
+        self._recent_thoughts[key] = cycle
+        # Старые записи не нужны: окно повтора ограничено по циклам.
+        self._recent_thoughts = {
+            item: seen for item, seen in self._recent_thoughts.items()
+            if cycle - seen < repeat_window
+        }
+        return True
+
     def _pause_poll_sec(self) -> float:
         """Как часто проверять, не сняли ли паузу. Компромисс CPU/отзывчивость."""
         return 0.2
@@ -965,8 +984,14 @@ class AgentRunner:
         if is_open_question_stimulus:
             self.agent._record_open_question_exploration(stimulus, thought)
 
-        # Если мысль интересная — публикуем отдельно
-        if thought_str and not _is_boring_thought(thought_str):
+        # Если мысль интересная — публикуем отдельно. Повтор той же мысли
+        # в пределах THOUGHT_REPEAT_CYCLES не показываем: в чате это выглядит
+        # как заевшая пластинка, а не как новая мысль.
+        if (
+            thought_str
+            and not _is_boring_thought(thought_str)
+            and self._should_publish_thought(thought_str, self.agent.cycle_count)
+        ):
             self.bus.publish_sync(
                 Events.AGENT_THOUGHT,
                 {"text": thought_str[:300], "cycle": self.agent.cycle_count},
@@ -1123,6 +1148,9 @@ class AgentRunner:
             return "Использование: /ask <вопрос>"
         if cmd in ("questions", "q"):
             return self._format_open_questions()
+        # === Доступы: те же переключатели, что на экране «Доступы» ===
+        if cmd.startswith("access "):
+            return self._handle_access_command(cmd)
         # === Этап 2.5: /web — управление web-поиском ===
         if cmd in ("web on", "web_on"):
             ws = getattr(self.agent, "web_searcher", None)
@@ -1221,6 +1249,23 @@ class AgentRunner:
         if cmd == "delamain" or cmd.startswith("delamain "):
             return self._handle_delamain_command(cmd_raw)
         return f"❓ Неизвестная команда: /{cmd}. Введите /help."
+
+    def _handle_access_command(self, cmd: str) -> str:
+        """Включить или выключить разрешение из окна или командой."""
+        from src.app.access_control import describe_error, set_access
+        from src.core.paths import data_dir
+
+        parts = cmd.split()
+        if len(parts) != 3 or parts[2] not in ("on", "off"):
+            return "Использование: /access network|delamain|effector on|off"
+        key, value = parts[1], parts[2]
+        result = set_access(
+            self.agent, key, value == "on", root=data_dir()
+        )
+        if not result.get("ok"):
+            return "⚠️ " + describe_error(result)
+        label = str(result.get("label") or "Разрешение")
+        return f"{label}: {'включено' if value == 'on' else 'выключено'}."
 
     def _handle_delamain_command(self, cmd_raw: str) -> str:
         """Обработать /delamain ...; регистр задачи берём из ``cmd_raw``."""
@@ -1955,6 +2000,7 @@ class AgentRunner:
             "  /web on    — включить интернет-поиск\n"
             "  /web off   — выключить интернет-поиск\n"
             "  /web <запрос> — поиск в Wikipedia\n"
+            "  /access <network|delamain|effector> on|off — разрешение\n"
             "  /delamain  — статус локального слоя действий\n"
             "  /delamain on|off — включить/выключить Delamain-local\n"
             "  /delamain run <задача> — выполнить задачу сразу\n"
