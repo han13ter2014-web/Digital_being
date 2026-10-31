@@ -50,6 +50,7 @@ from src.core.watchdog import get_watchdog, Watchdog
 from src.core.buffered_logger import flush_logs
 from src.core.paths import data_path
 from src.core.agent import AgentDeadSignal
+from src.core.dialogue_acts import ACT_SOCIAL, classify_user_text
 
 
 logger = logging.getLogger(__name__)
@@ -274,12 +275,36 @@ class AgentRunner:
                 )
             return
 
-        # Если Core задал пользователю прямой вопрос, обычный ответ должен
-        # закрыть именно его, а не стать новой темой обучения.
         interaction = getattr(self.agent, "user_interaction", None)
         pending = interaction.get_pending_question() if interaction is not None else None
+
+        # === «Собеседник-1»: социальная речь — не ответ и не учебный материал ===
+        # Живой прогон 2026-11-01: «Я же уже отвечал тебе» уходило в
+        # «Ответ записан» или в изучение концептов («Не нашел файл для…»).
+        # Акт распознаётся до дверей ответов; настоящие ответы
+        # (ACT_ANSWER/ACT_UNKNOWN) идут по прежнему пути без изменений.
+        if classify_user_text(text).kind == ACT_SOCIAL:
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            response = self._format_social_reply(pending)
+            if response:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="dialogue_acts",
+                    priority=1,
+                )
+            return
+
+        # Если Core задал пользователю прямой вопрос, обычный ответ должен
+        # закрыть именно его, а не стать новой темой обучения.
         if pending is not None:
-            result = interaction.submit_answer(pending["id"], text)
+            result = interaction.submit_answer(
+                pending["id"], text, cycle=self.agent.cycle_count
+            )
             if isinstance(result, dict):
                 normalized_answer = " ".join(text.lower().strip().split())
                 unknown = normalized_answer.rstrip(".!?") in {
@@ -288,7 +313,22 @@ class AgentRunner:
                 }
                 if unknown:
                     result["answer_kind"] = "unknown"
-            response = self._format_user_answer_result(result)
+            topic = AgentRunner._topic_from_pending(pending)
+            answered = (
+                isinstance(result, dict)
+                and result.get("status") in {"answered", "next_question"}
+            )
+            if (
+                answered
+                and result.get("answer_kind") != "unknown"
+                and topic
+            ):
+                recorder = getattr(self.agent, "record_user_answer", None)
+                if callable(recorder):
+                    recorder(topic, text, self.agent.cycle_count)
+            response = self._format_user_answer_result(
+                result, topic=topic, answer_text=text
+            )
             if response:
                 await self.bus.publish(
                     Events.AGENT_THOUGHT,
@@ -338,12 +378,70 @@ class AgentRunner:
         )
 
     @staticmethod
-    def _format_user_answer_result(result: Dict[str, Any]) -> str:
-        """Коротко подтвердить прямой ответ на вопрос Core."""
+    def _topic_from_pending(pending) -> Optional[str]:
+        """Тема прямого вопроса сущности из контекста ``_act_ask_user``.
+
+        Контекст имеет вид «самостоятельный вопрос по теме: {target}».
+        Без узнанного префикса возвращает None — не привязываем ответ
+        к случайной строке.
+        """
+        if not pending:
+            return None
+        context = str(pending.get("context") or "")
+        prefix = "самостоятельный вопрос по теме: "
+        if context.startswith(prefix):
+            topic = context[len(prefix):].strip()
+            return topic or None
+        return None
+
+    @staticmethod
+    def _format_social_reply(pending) -> str:
+        """Честный отклик на социальный акт без выдуманного понимания.
+
+        Если у Core открыт прямой вопрос — сущность говорит, что вопрос
+        остаётся открытым; тема берётся из контекста, который кладёт
+        ``_act_ask_user``. Без темы — нейтральный отклик.
+        """
+        topic = AgentRunner._topic_from_pending(pending)
+        if topic:
+            return (
+                "Я слышу тебя. "
+                f"Вопрос про «{topic}» остаётся открытым — "
+                "ответишь, когда захочешь."
+            )
+        return "Я слышу тебя. Спасибо, что ты рядом."
+
+    @staticmethod
+    def _short_quote(text: str, limit: int = 80) -> str:
+        """Цитата из ответа пользователя не длиннее ``limit`` символов."""
+        quote = " ".join(str(text or "").split())
+        if len(quote) <= limit:
+            return quote
+        return quote[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _format_user_answer_result(
+        result: Dict[str, Any],
+        topic: Optional[str] = None,
+        answer_text: Optional[str] = None,
+    ) -> str:
+        """Коротко подтвердить прямой ответ на вопрос Core.
+
+        Если ответ стал знанием-свидетельством (тема известна), сущность
+        цитирует, что именно она записала: подтверждение должно быть
+        проверяемым для пользователя, а не безликим «Ответ записан».
+        """
         status = result.get("status")
         if status == "answered":
             if result.get("answer_kind") == "unknown":
                 return "Понял: «не знаю» — я запомню это как твой ответ, а не как факт."
+            if topic and answer_text:
+                quote = AgentRunner._short_quote(answer_text)
+                if quote:
+                    return (
+                        f"Записал про «{topic}»: «{quote}» — "
+                        "буду проверять на своём опыте."
+                    )
             return "Ответ записан."
         if status == "next_question":
             return "Ответ записан. Есть ещё один уточняющий вопрос."

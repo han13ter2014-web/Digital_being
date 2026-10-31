@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.core.motivation.unified_motivation import UnifiedMotivationSystem, Need, Drive, create_motivation_system
 from src.core.agent import DigitalBeing
 from src.core.checkpoint_serializer import build_state_from_agent, apply_state_to_agent, CheckpointSerializer
+from src.core.paths import data_path
 
 
 class MockAgent:
@@ -205,15 +206,15 @@ class TestMotivationIntegration:
     """Tests for motivation integration with DigitalBeing."""
 
     def setup_method(self):
-        # Clean up checkpoints
-        ckpt_dir = 'data/checkpoints'
+        # Clean up checkpoints (isolated data root from conftest, not the repo one)
+        ckpt_dir = data_path("checkpoints")
         if os.path.exists(ckpt_dir):
             import shutil
             shutil.rmtree(ckpt_dir)
 
     def teardown_method(self):
-        # Clean up checkpoints
-        ckpt_dir = 'data/checkpoints'
+        # Clean up checkpoints (isolated data root from conftest, not the repo one)
+        ckpt_dir = data_path("checkpoints")
         if os.path.exists(ckpt_dir):
             import shutil
             shutil.rmtree(ckpt_dir)

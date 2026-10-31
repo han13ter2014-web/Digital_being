@@ -186,7 +186,8 @@ class UserInteraction:
         return pending[0]
 
     def submit_answer(self, question_id: int, answer: str,
-                       on_synthesis_needed: callable = None) -> dict:
+                       on_synthesis_needed: callable = None,
+                       cycle: int = None) -> dict:
         """Отправляет ответ на вопрос.
 
         Args:
@@ -194,6 +195,10 @@ class UserInteraction:
             answer: Ответ пользователя.
             on_synthesis_needed: Callback, вызываемый когда все под-вопросы
                 сложного вопроса отвечены. Получает (complex_question, sub_answers).
+            cycle: Текущий цикл момента ответа. Без него счётчик контакта
+                получал цикл ВОПРОСА, и детектор тишины тревожился сразу
+                после ответа («давно тебя не слышу» через 6 циклов после
+                реплики человека — живой прогон 2026-11-01).
         """
         for q in self.pending_questions:
             if q["id"] == question_id and not q["answered"]:
@@ -225,7 +230,9 @@ class UserInteraction:
                 self.pending_questions = [qq for qq in self.pending_questions if qq["id"] != question_id]
 
                 # === НОВОЕ: отмечаем, что пользователь ответил ===
-                self._last_user_message_cycle = q["cycle"]
+                self._last_user_message_cycle = (
+                    cycle if cycle is not None else q["cycle"]
+                )
 
                 # === НОВОЕ: проверяем, есть ли еще под-вопросы для сложного вопроса ===
                 if complex_question and sub_questions:

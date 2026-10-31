@@ -35,6 +35,9 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# AI-инструментарий (локальные планы и состояние агента-разработчика)
+.rufp/
+
 # PyInstaller (сборка .exe)
 build/
 dist/
