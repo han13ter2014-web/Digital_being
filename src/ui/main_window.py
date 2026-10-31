@@ -571,9 +571,14 @@ class MainWindow(ChatWindow):
 
         legend = tk.Frame(left, bg=theme.BG_DEEP)
         legend.pack(fill=tk.X, pady=(theme.SPACING["sm"], 0))
-        for kind in ("concept", "intention", "value", "activity", "forgotten"):
+        for index, kind in enumerate(
+            ("concept", "intention", "value", "activity", "forgotten")
+        ):
+            # Три подписи в ряд: при узкой колонке легенда переносится,
+            # а не обрезается правым краем окна.
             item = tk.Frame(legend, bg=theme.BG_DEEP)
-            item.pack(side=tk.LEFT, padx=(0, theme.SPACING["md"]))
+            item.grid(row=index // 3, column=index % 3, sticky="w",
+                      padx=(0, theme.SPACING["md"]), pady=(0, 2))
             swatch = tk.Canvas(
                 item, width=18, height=18, bg=theme.BG_DEEP,
                 highlightthickness=0,
@@ -589,7 +594,8 @@ class MainWindow(ChatWindow):
             body, bg=theme.SURFACE, width=310,
             highlightbackground=theme.BORDER, highlightthickness=1,
         )
-        detail.pack(side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0))
+        detail.pack(side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0),
+                    before=left)
         detail.pack_propagate(False)
         tk.Label(
             detail, text="УЗЕЛ", font=self._card_title_font, bg=theme.SURFACE,
@@ -607,7 +613,8 @@ class MainWindow(ChatWindow):
                                 pady=(0, theme.SPACING["sm"]))
         self._graph_counter = tk.Label(
             detail, text="узлов: 0 · связей: 0", font=self._card_title_font,
-            bg=theme.SURFACE, fg=theme.DIMMED, anchor="w",
+            bg=theme.SURFACE, fg=theme.DIMMED, anchor="w", justify=tk.LEFT,
+            wraplength=274,
         )
         self._graph_counter.pack(fill=tk.X, padx=theme.SPACING["md"],
                                  pady=(0, theme.SPACING["sm"]))
@@ -833,9 +840,11 @@ class MainWindow(ChatWindow):
             text = f"узлов: {len(nodes)} · связей: {len(edges)}"
             hidden = int(self._graph_data.get("hidden_service") or 0)
             if hidden > 0:
-                text += f" · служебных записей скрыто: {hidden}"
+                # Узкая колонка подробностей: счётчик скрытых записей
+                # переносим на отдельную строку, иначе он обрезается.
+                text += f"\nслужебных записей скрыто: {hidden}"
             if self._graph_data.get("truncated"):
-                text += " · показаны не все"
+                text += "\nпоказаны не все"
             try:
                 self._graph_counter.configure(text=text)
             except Exception:
@@ -1353,10 +1362,13 @@ class MainWindow(ChatWindow):
         """Большое окно обсерватории — по центру экрана."""
         root = self._root
         root.update_idletasks()
-        width = 1040
-        height = 680
+        # Панель подробностей на карте занимает 310 px, поэтому окно уже
+        # ~1180 px обрезало бы её правым краем. На маленьком экране
+        # ужимаемся по доступному размеру, а не вылезаем за него.
         screen_w = root.winfo_screenwidth()
         screen_h = root.winfo_screenheight()
+        width = min(1200, max(900, screen_w - 80))
+        height = min(760, max(640, screen_h - 120))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 3)
         root.geometry(f"{width}x{height}+{x}+{y}")
