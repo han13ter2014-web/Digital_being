@@ -11,7 +11,7 @@ build_installer.py — one-command сборка Windows-установщика �
     - dist/DigitalBeing.exe (собран через `python build.py`)
 
 Результат:
-    installer_output/DigitalBeing_Setup_v0.1.1.exe (~50 MB)
+    installer_output/DigitalBeing_Setup_v0.1.2.exe (~50 MB)
 """
 
 import io
