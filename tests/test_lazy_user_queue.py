@@ -114,7 +114,11 @@ def _make_runner():
 # ============================================================
 @pytest.mark.asyncio
 async def test_message_before_start_is_not_lost():
-    """Сообщение, пришедшее ДО start(), не теряется (race-condition fix)."""
+    """Сообщение, пришедшее ДО start(), не теряется (race-condition fix).
+
+    Текст без речевых маркеров: «привет» с «Собеседником-1» — социальный
+    акт, он получает отклик и в очередь обучения не попадает.
+    """
     runner, agent, bus = _make_runner()
 
     # До start() — очереди НЕТ.
@@ -123,7 +127,7 @@ async def test_message_before_start_is_not_lost():
 
     # Имитируем получение user_message ДО start().
     event = MagicMock()
-    event.data = {"text": "привет"}
+    event.data = {"text": "анализ распределённых систем"}
     await runner._on_user_message(event)
 
     # Очередь создалась лениво, сообщение внутри.
@@ -131,7 +135,7 @@ async def test_message_before_start_is_not_lost():
     assert not runner._pending_user_messages.empty()
     # Правильный текст.
     msg = await runner._pending_user_messages.get()
-    assert msg == "привет"
+    assert msg == "анализ распределённых систем"
 
 
 @pytest.mark.asyncio

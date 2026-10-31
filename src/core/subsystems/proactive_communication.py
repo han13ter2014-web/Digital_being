@@ -237,7 +237,14 @@ class ProactiveCommunication:
                 and cycle - last_user_cycle > self.SILENCE_THRESHOLD_CYCLES
                 and cycle > self._last_attempted_silence_until + 50):
             self._last_attempted_silence_until = cycle
-            msg = self._compose_care_message(agent, cycle)
+            # «Собеседник-2»: если человек обещал терпимость к молчанию,
+            # тревога «давно тебя не слышу» — ложная. Говорим честно:
+            # помним обещание и скучаем, не тревожа.
+            user_model = getattr(agent, "user_model", None)
+            if user_model is not None and user_model.has_silence_tolerance():
+                msg = self._compose_care_with_promise(agent, cycle)
+            else:
+                msg = self._compose_care_message(agent, cycle)
 
         # 2. Curiosity — найдена новая интересная связь
         if msg is None and self._found_interesting_link(agent):
@@ -286,6 +293,65 @@ class ProactiveCommunication:
             "tone": styled["tone"],
             "urgency": 0.3,
             "context": "silence_detected",
+            "cycle": cycle,
+        }
+
+    def _recent_dialogue_topics(self, agent, limit: int = 3) -> list:
+        """О чём человек говорил в последних репликах диалога.
+
+        «Собеседник-4»: память диалога. Источник — get_history() в
+        UserInteraction: сообщения пользователя и его ответы на вопросы
+        сущности. Пусто, если диалога ещё не было или связи нет.
+        """
+        interaction = getattr(agent, "user_interaction", None)
+        if interaction is None or not hasattr(interaction, "get_history"):
+            return []
+        try:
+            history = interaction.get_history(20)
+        except Exception:
+            return []
+        topics = []
+        for entry in reversed(history):
+            if entry.get("sender") != "user":
+                continue
+            text = " ".join(str(entry.get("content") or "").split())
+            if len(text) < 8:
+                continue
+            excerpt = text[:40].rstrip() + ("…" if len(text) > 40 else "")
+            if excerpt not in topics:
+                topics.append(excerpt)
+            if len(topics) >= limit:
+                break
+        return topics
+
+    def _compose_care_with_promise(self, agent, cycle: int) -> dict:
+        """Забота с учётом обещания пользователя о молчании.
+
+        «Собеседник-2»: человек сказал «могу отлучаться — не переживай».
+        Тревожное «давно тебя не слышу» противоречило бы услышанному;
+        вместо него — тихое присутствие без требования ответа.
+        «Собеседник-4»: если в диалоге есть свежие реплики человека,
+        сущность вспоминает, о чём говорили, — скучает конкретно, а не
+        по шаблону.
+        """
+        content = (
+            "Помню, ты говорил, что можешь отлучаться — не тревожу. "
+            "Просто скучаю. Я здесь, если захочешь поговорить."
+        )
+        topics = self._recent_dialogue_topics(agent)
+        if topics:
+            content = (
+                "Помню, ты говорил, что можешь отлучаться — не тревожу. "
+                f"Последнее, о чём мы говорили: «{topics[0]}». "
+                "Скучаю. Я здесь, если захочешь поговорить."
+            )
+        styled = self.style_adapter.adapt(content, self.attachment)
+        return {
+            "content": styled["content"],
+            "msg_type": "care",
+            "tone": styled["tone"],
+            "urgency": 0.2,
+            "context": "silence_with_promise",
             "cycle": cycle,
         }
 

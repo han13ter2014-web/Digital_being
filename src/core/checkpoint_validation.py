@@ -287,6 +287,40 @@ def validate_checkpoint_state(state) -> None:
             _list(state[field], field)
     if state.get("naming_dialogue_phase") is not None and not isinstance(state["naming_dialogue_phase"], str):
         _fail("naming_dialogue_phase", "expected a string")
+    if state.get("user_model") is not None:
+        user_model = _dict(state["user_model"], "user_model")
+        promises = _dict(user_model.get("promises", {}), "user_model.promises")
+        for kind, entry in promises.items():
+            entry_path = f"user_model.promises.{kind}"
+            entry_dict = _dict(entry, entry_path)
+            if not isinstance(entry_dict.get("text"), str):
+                _fail(f"{entry_path}.text", "expected a string")
+            if "cycle" in entry_dict:
+                _integer(entry_dict["cycle"], f"{entry_path}.cycle", nonnegative=True)
+        traits = _dict(user_model.get("traits", {}), "user_model.traits")
+        for marker, text in traits.items():
+            if not isinstance(text, str):
+                _fail(f"user_model.traits.{marker}", "expected a string")
+        if user_model.get("last_contact_cycle") is not None:
+            _integer(
+                user_model["last_contact_cycle"],
+                "user_model.last_contact_cycle",
+                nonnegative=True,
+            )
+    if state.get("user_explained_topics") is not None:
+        explained = _dict(
+            state["user_explained_topics"], "user_explained_topics"
+        )
+        for topic, cycle in explained.items():
+            if not isinstance(topic, str):
+                _fail("user_explained_topics", "expected string keys")
+            _integer(cycle, f"user_explained_topics.{topic}", nonnegative=True)
+    if state.get("shared_topics") is not None:
+        shared = _dict(state["shared_topics"], "shared_topics")
+        for topic, cycle in shared.items():
+            if not isinstance(topic, str):
+                _fail("shared_topics", "expected string keys")
+            _integer(cycle, f"shared_topics.{topic}", nonnegative=True)
     if state.get("open_questions") is not None:
         for index, question in enumerate(_list(state["open_questions"], "open_questions")):
             path = f"open_questions[{index}]"

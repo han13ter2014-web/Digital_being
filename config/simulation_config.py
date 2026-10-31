@@ -165,6 +165,9 @@ class LongRunningConfig:
     USER_QUESTION_INTERVAL = 100          # Минимальный интервал между вопросами (циклы)
     USER_MAX_PENDING_QUESTIONS = 3        # Максимум ожидающих вопросов
     USER_COOLDOWN_AFTER_ANSWER = 20       # Пауза после получения ответа (циклы)
+    # Сколько циклов после ответа человека тема не переспрашивается:
+    # свидетельство пользователя — уже знание, повторный вопрос — шум.
+    USER_EXPLAINED_COOLDOWN_CYCLES = 200
     
     # === Генерация гипотез ===
     HYPOTHESIS_GENERATION_ENABLED = True   # Включить генерацию гипотез

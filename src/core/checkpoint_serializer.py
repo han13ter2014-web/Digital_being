@@ -143,6 +143,22 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             }
             for q in getattr(agent, "_open_questions", [])
         ],
+        # «Собеседник-2»: убеждения о человеке. Без них после рестарта
+        # сущность забывает обещания («не переживай, если молчу»).
+        "user_model": (
+            agent.user_model.to_dict()
+            if getattr(agent, "user_model", None) is not None else None
+        ),
+        # «Собеседник-3»: штампы «тема объяснена пользователем в цикле N».
+        # После рестарта сущность не переспрашивает объяснённое.
+        "user_explained_topics": dict(
+            getattr(agent, "_user_explained_topics", {}) or {}
+        ),
+        # «Собеседник-4»: темы, уже рассказанные человеку, — после
+        # рестарта сущность не начинает повторяться.
+        "shared_topics": dict(
+            getattr(agent, "_shared_topics", {}) or {}
+        ),
         # NEW: Интероцепция
         "interoception": getattr(agent, 'interoception', None) and {
             "glucose": agent.interoception.state.glucose,
@@ -421,6 +437,35 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         if saved_history:
             existing = list(getattr(agent.naming_dialogue, "_name_history", []))
             agent.naming_dialogue._name_history = list(saved_history) + existing
+
+    # «Собеседник-2»: убеждения о человеке переживают рестарт —
+    # обещания («не переживай, если молчу») не забываются.
+    saved_user_model = state.get("user_model")
+    if (
+        isinstance(saved_user_model, dict)
+        and getattr(agent, "user_model", None) is not None
+    ):
+        agent.user_model.load_from(saved_user_model)
+
+    # «Собеседник-3»: штампы объяснённых тем переживают рестарт.
+    saved_explained = state.get("user_explained_topics")
+    if isinstance(saved_explained, dict) and hasattr(
+        agent, "_user_explained_topics"
+    ):
+        restored = {}
+        for topic, cycle in list(saved_explained.items())[:50]:
+            if isinstance(cycle, (int, float)) and not isinstance(cycle, bool):
+                restored[str(topic)] = int(cycle)
+        agent._user_explained_topics = restored
+
+    # «Собеседник-4»: память «что уже рассказано» переживает рестарт.
+    saved_shared = state.get("shared_topics")
+    if isinstance(saved_shared, dict) and hasattr(agent, "_shared_topics"):
+        restored_shared = {}
+        for topic, cycle in list(saved_shared.items())[:50]:
+            if isinstance(cycle, (int, float)) and not isinstance(cycle, bool):
+                restored_shared[str(topic)] = int(cycle)
+        agent._shared_topics = restored_shared
 
     # История попыток нужна для продолжения стратегии, а не нового старта.
     saved_questions = state.get("open_questions") or []

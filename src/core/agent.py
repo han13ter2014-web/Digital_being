@@ -403,6 +403,7 @@ class DigitalBeing:
             log_info=lambda msg: get_logger().log(msg),
             max_size=10,
             default_max_explorations=5,
+            on_user_answer=self._on_user_answered_open_question,
         )
         # Алиасы (для кода, который использует старые имена).
         self._open_questions_max = self._open_questions_manager.max_size
@@ -410,6 +411,24 @@ class DigitalBeing:
             self._open_questions_manager.default_max_explorations
         )
         self._open_questions_strategy = "round_robin"
+
+        # === «Собеседник-2»: убеждения о человеке ===
+        # Факты о пользователе (обещания, привычки, последний контакт).
+        # Сериализуется в чекпоинт: обещания не забываются после рестарта.
+        # Граница субъектности: сюда не пишутся ценности и мотивация.
+        from src.core.user_model import UserModel
+
+        self.user_model = UserModel()
+
+        # === «Собеседник-3»: свидетельство пользователя — знание ===
+        # {тема: cycle_count} — когда человек в последний раз объяснил тему.
+        # Штамп не даёт переспрашивать объяснённое; сериализуется в чекпоинт.
+        self._user_explained_topics: Dict[str, int] = {}
+
+        # === «Собеседник-4»: память диалога ===
+        # {тема: cycle_count} — что уже рассказано человеку. Повтор одного
+        # и того же — не общение, а шум; сериализуется в чекпоинт.
+        self._shared_topics: Dict[str, int] = {}
 
         os.makedirs(data_path('checkpoints'), exist_ok=True)
         os.makedirs(data_path('logs'), exist_ok=True)
@@ -2104,6 +2123,24 @@ class DigitalBeing:
             return False
         return True
 
+    def _recently_explained_by_user(self, topic: str) -> bool:
+        """Тема, объяснённая человеком недавно, не переспрашивается.
+
+        Ответ пользователя записан как свидетельство — знание уже есть.
+        «Ты же спрашивал про это» после собственного объяснения — то, что
+        живой прогон 2026-11-01 показал на сущности Тэсс.
+        """
+        stamps = getattr(self, "_user_explained_topics", None)
+        if not isinstance(stamps, dict) or not stamps:
+            return False
+        stamped = stamps.get(str(topic or "").strip())
+        if stamped is None:
+            return False
+        cooldown = float(
+            getattr(LR_CONFIG, "USER_EXPLAINED_COOLDOWN_CYCLES", 200) or 0
+        )
+        return cooldown > 0 and (self.cycle_count - stamped) < cooldown
+
     def _pick_shallow_concept(self, concepts: Dict) -> Optional[str]:
         """Неуверенная тема вне текущего круга: формулировка ещё не знание.
 
@@ -2116,6 +2153,8 @@ class DigitalBeing:
         candidates = []
         for name, node in concepts.items():
             if not self._is_learnable(name) or name in recently:
+                continue
+            if self._recently_explained_by_user(name):
                 continue
             experiences = len(getattr(node, "experiences", []) or [])
             confidence = float(getattr(node, "confidence", 0.0))
@@ -2205,6 +2244,7 @@ class DigitalBeing:
             for name in concepts
             if name not in recently
             and self._is_learnable(name)
+            and not self._recently_explained_by_user(name)
             and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
         ]
         if not fresh:
@@ -2215,6 +2255,7 @@ class DigitalBeing:
                 name
                 for name in concepts
                 if self._is_learnable(name)
+                and not self._recently_explained_by_user(name)
                 and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
             ]
         if not fresh:
@@ -2561,6 +2602,14 @@ class DigitalBeing:
         if not target or not self._is_learnable(target):
             return {"text": "Ответ: не о чем спрашивать — всё понятно"}
 
+        if self._recently_explained_by_user(target):
+            return {
+                "text": (
+                    f"Ответ: человек недавно объяснил '{target}' — "
+                    f"не переспрашиваю"
+                )
+            }
+
         question = (
             f"Я разбираюсь с темой «{target}» и пока не уверен, "
             f"что понимаю её правильно. Можешь объяснить своими словами?"
@@ -2599,7 +2648,7 @@ class DigitalBeing:
         if interaction is None:
             return {"text": "Ответ: рассказать некому — нет связи с человеком"}
 
-        message = self._compose_share_message()
+        message = self._compose_share_message(record=True)
         if not message:
             return {"text": "Ответ: нечего рассказать — нет новостей"}
 
@@ -2620,15 +2669,24 @@ class DigitalBeing:
         self._last_share_cycle = self.cycle_count
         return {"text": f"Ответ: рассказал человеку: {message[:60]}"}
 
-    def _compose_share_message(self) -> str:
+    def _compose_share_message(self, record: bool = False) -> str:
         """Текст сообщения: о самом свежем или самом слабом знании.
 
         Берём то, что агент недавно узнал и в чём уже уверен: делиться
         догадкой, которую сам не проверил, — нечестно.
+
+        «Собеседник-4»: уже рассказанное не повторяется (_shared_topics).
+        При ``record=True`` выбранная тема помечается рассказанной; проверка
+        без записи (гейт кандидатов в social_scan) не сжигает тему.
         """
         concepts = getattr(self.mental_models, "concepts", None)
         if not isinstance(concepts, dict) or not concepts:
             return ""
+
+        shared = getattr(self, "_shared_topics", None)
+        if not isinstance(shared, dict):
+            shared = {}
+            self._shared_topics = shared
 
         # Предпочитаем концепции с собственной формулировкой.
         candidates = [
@@ -2636,6 +2694,7 @@ class DigitalBeing:
             for name, node in concepts.items()
             if len(str(getattr(node, "definition_hypothesis", "") or "")) > 10
             and not name.startswith(("_", "убеждение_"))
+            and name not in shared
         ]
         if not candidates:
             return ""
@@ -2647,8 +2706,23 @@ class DigitalBeing:
         )
         if not name:
             return ""
+        if record:
+            self._remember_shared_topic(name)
         definition = str(getattr(node, "definition_hypothesis", ""))[:200]
         return f"Я разобрался с темой «{name}»: {definition}"
+
+    def _remember_shared_topic(self, topic: str) -> None:
+        """Запомнить, что тему уже рассказали человеку (шапка 50)."""
+        shared = getattr(self, "_shared_topics", None)
+        if not isinstance(shared, dict):
+            shared = {}
+            self._shared_topics = shared
+        shared[str(topic)] = int(self.cycle_count)
+        if len(shared) > 50:
+            for old_topic, _stamp in sorted(
+                shared.items(), key=lambda item: item[1]
+            )[: len(shared) - 50]:
+                shared.pop(old_topic, None)
 
     def _act_web_search(self) -> Dict:
         """Найти в сети то, чего нет в своей памяти.
@@ -3774,6 +3848,70 @@ class DigitalBeing:
         if not hasattr(self, "_open_questions_manager"):
             return {"status": "not_found"}
         return self._open_questions_manager.answer(text)
+
+    def _on_user_answered_open_question(
+        self, question_text: str, answer_text: str
+    ) -> None:
+        """Мост «Собеседник-3»: ответ на открытый вопрос → знание о теме.
+
+        Ошибки моста не должны ломать приём ответа: свидетельство —
+        обогащение, а не условие работы очереди.
+        """
+        from src.core.open_questions import _topic_from_question
+
+        topic = _topic_from_question(question_text)
+        if not topic:
+            return
+        try:
+            self.record_user_answer(topic, answer_text, self.cycle_count)
+        except Exception as exc:
+            get_logger().log(f"[KNOWLEDGE] свидетельство не записано: {exc}")
+
+    def record_user_answer(
+        self, topic: str, answer: str, cycle: int = 0
+    ) -> Optional[str]:
+        """Записать объяснение пользователя как знание-свидетельство.
+
+        Ответ человека на вопрос сущности становится опытом концепта
+        (kind=testimony, source="user", сила 0.4: доверие взрослому
+        собеседнику, но не собственное наблюдение) — и штампом цикла,
+        чтобы тема не переспрашивалась (USER_EXPLAINED_COOLDOWN_CYCLES).
+
+        Граница субъектности: слова человека не становятся ценностями
+        или мотивацией — только факт «человек так это объяснил».
+
+        Returns:
+            Нормализованная тема или None, если записывать нечего.
+        """
+        normalized = " ".join(str(topic or "").split())
+        if not normalized or not self._is_learnable(normalized):
+            return None
+        answer_text = " ".join(str(answer or "").split())
+        if not answer_text:
+            return None
+
+        stamps = self._user_explained_topics
+        stamps[normalized] = int(cycle)
+        if len(stamps) > 50:
+            for old_topic, _stamp in sorted(
+                stamps.items(), key=lambda item: item[1]
+            )[: len(stamps) - 50]:
+                stamps.pop(old_topic, None)
+
+        if hasattr(self, "mental_models"):
+            self.mental_models.encounter_concept(
+                normalized,
+                context=f"объяснение пользователя (цикл {int(cycle)})",
+                outcome=answer_text[:300],
+                evidence_strength=0.4,
+                evidence_kind="testimony",
+                source="user",
+            )
+            get_logger().log(
+                f"[KNOWLEDGE] свидетельство пользователя о «{normalized}»: "
+                f"{answer_text[:60]}"
+            )
+        return normalized
 
     def _consume_open_question(self) -> Optional[str]:
         """Фасад: взять следующий стимул для размышления над вопросом."""

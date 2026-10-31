@@ -24,6 +24,7 @@ DigitalBeing всё ещё предоставляет высокоуровнев
 """
 from __future__ import annotations
 
+import re
 from typing import Callable, Dict, List, Optional
 
 
@@ -53,6 +54,41 @@ def _is_unknown_answer(text: str) -> bool:
     return normalized.rstrip(".!?") in _UNKNOWN_ANSWERS
 
 
+# Паттерны извлечения темы из текста вопроса. Нужны мосту
+# «ответ пользователя → знание»: свидетельство привязывается к теме,
+# а не к формулировке вопроса целиком.
+_TOPIC_PATTERNS = (
+    re.compile(r"^что\s+такое\s+(?P<topic>.+?)\s*\?*\s*$", re.IGNORECASE),
+    re.compile(r"тем\w*\s*[«\"](?P<topic>.+?)[»\"]", re.IGNORECASE),
+)
+
+
+def _topic_from_question(question_text: str) -> Optional[str]:
+    """Выделить тему вопроса: «что такое X» → X, «тему «X»» → X.
+
+    Регистр сохраняется, пунктуация и кавычки срезаются. Если формулировка
+    не узнана, возвращается None — тогда свидетельство не записывается,
+    вместо того чтобы привязывать его к случайному слову.
+    """
+    text = " ".join(str(question_text or "").split())
+    if not text:
+        return None
+    for pattern in _TOPIC_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        topic = (
+            match.group("topic")
+            .strip()
+            .strip("«»\"'")
+            .rstrip(".!?…")
+            .strip()
+        )
+        if topic:
+            return topic
+    return None
+
+
 class OpenQuestionsManager:
     """Менеджер очереди открытых вопросов.
 
@@ -66,6 +102,9 @@ class OpenQuestionsManager:
         cycle_provider: Callable[[], int] — функция, возвращающая
             текущий cycle_count агента. По умолчанию ленивая лямбда.
         log_info: Callable[[str], None] — логгер. По умолчанию no-op.
+        on_user_answer: Optional[Callable[[str, str], None]] — мост
+            «ответ пользователя → знание»: вызывается с (текст вопроса,
+            ответ) для каждого содержательного ответа (не «не знаю»).
     """
 
     def __init__(
@@ -74,11 +113,13 @@ class OpenQuestionsManager:
         log_info: Optional[Callable[[str], None]] = None,
         max_size: int = 10,
         default_max_explorations: int = 5,
+        on_user_answer: Optional[Callable[[str, str], None]] = None,
     ) -> None:
         self.queue: List[dict] = []
         self.max_size = max_size
         self.default_max_explorations = default_max_explorations
         self.strategy_order: List[str] = list(EXPLORATION_STRATEGIES)
+        self.on_user_answer = on_user_answer
         # Lazy-доступ к cycle_count (не нужен на момент __init__).
         self._cycle = cycle_provider or (lambda: 0)
         self._log = log_info or (lambda msg: None)
@@ -188,6 +229,11 @@ class OpenQuestionsManager:
                 f"[OpenQ] Получен ответ пользователя на "
                 f"'{question['text'][:50]}...'"
             )
+            if self.on_user_answer is not None and not unknown:
+                try:
+                    self.on_user_answer(question["text"], answer)
+                except Exception as exc:
+                    self._log(f"[OpenQ] колбэк ответа упал: {exc}")
             return {
                 "status": "answered",
                 "question": question["text"],
