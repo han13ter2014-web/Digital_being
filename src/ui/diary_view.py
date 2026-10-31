@@ -115,7 +115,7 @@ def draft_detail(draft: Dict[str, Any]) -> List[Row]:
             reason = f"Core достиг предела в {revision} редакций и сохранил текст как есть"
         rows.append(("Почему", reason))
     if draft.get("sha256"):
-        rows.append(("Файл", "сохранён, целостность проверена"))
+        rows.append(("Файл", "сохранён; отпечаток файла записан"))
     return rows
 
 

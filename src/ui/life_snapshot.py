@@ -80,15 +80,21 @@ def _last_finished(history: List[Dict]) -> Optional[Dict]:
 
 def _access_section(agent: Any) -> Dict[str, Any]:
     """Текущие доступы. Не описываем то, чего у Core нет."""
+    from src.app.access_control import LABELS
+
     network = getattr(getattr(agent, "web_searcher", None), "is_enabled", False)
-    delamain = getattr(_own(agent, "delamain", None), "enabled", False)
+    delamain_subsystem = _own(agent, "delamain", None)
+    delamain = getattr(delamain_subsystem, "enabled", False)
     effector = getattr(_own(agent, "delamain_effector", None), "enabled", False)
+    workspace = getattr(delamain_subsystem, "workspace", None)
     return {
-        "network": {"enabled": bool(network), "label": "Интернет-поиск"},
-        "delamain": {"enabled": bool(delamain), "label": "Delamain (эффектор)"},
-        "effector": {"enabled": bool(effector), "label": "Выполнение действий"},
-        "workspace": {"path": "profile/delamain/workspace/creative",
-                      "label": "Творческая рабочая область"},
+        "network": {"enabled": bool(network), "label": LABELS["network"]},
+        "delamain": {"enabled": bool(delamain), "label": LABELS["delamain"]},
+        "effector": {"enabled": bool(effector), "label": LABELS["effector"]},
+        "workspace": {
+            "path": str(workspace) if workspace else "—",
+            "label": "Творческая рабочая область",
+        },
     }
 
 

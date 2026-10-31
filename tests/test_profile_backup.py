@@ -21,6 +21,7 @@ def test_live_wal_backup_and_restore(tmp_path):
         connection.execute("INSERT INTO events VALUES ('remembered')")
         connection.commit()
         (profile / "life_state.json").write_text('{"state":"alive"}')
+        (profile / "access_settings.json").write_text('{"network": false}')
         backup = tmp_path / "backup"
         create_backup(profile, backup)
         manifest = verify_backup(backup)
@@ -31,6 +32,9 @@ def test_live_wal_backup_and_restore(tmp_path):
         with sqlite3.connect(restored / "delamain" / "memory.sqlite3") as conn:
             assert conn.execute("SELECT value FROM events").fetchall() == [("remembered",)]
         assert (restored / "life_state.json").is_file()
+        # Выбор доступов — часть профиля: после восстановления не должен
+        # молча вернуться к умолчаниям.
+        assert (restored / "access_settings.json").read_text() == '{"network": false}'
     finally:
         connection.close()
 

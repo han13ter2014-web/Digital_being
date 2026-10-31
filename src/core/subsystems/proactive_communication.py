@@ -187,6 +187,8 @@ class ProactiveCommunication:
         self._last_proactive_cycle = 0
         self._last_attempted_silence_until = 0
         self.message_log: list = []
+        # Какие связи уже обсуждались: не повторять один и тот же пример.
+        self._shared_links: list = []
 
     # ============================================================
     # Главный метод
@@ -288,30 +290,30 @@ class ProactiveCommunication:
         }
 
     def _compose_curiosity_message(self, agent, cycle: int) -> dict:
-        """Сообщение о найденной связи между концепциями."""
-        try:
-            concepts = list(agent.mental_models.concepts.keys())
-            if len(concepts) < 2:
-                return None
-            import random
-            c1, c2 = random.sample(concepts, 2)
-            messages = [
-                f"Я заметил, что у '{c1}' и '{c2}' похожая структура. Тебе не кажется?",
-                f"Интересно: '{c1}' и '{c2}' — между ними что-то есть. Думал об этом?",
-                f"Случайно нашёл связь: '{c1}' связано с '{c2}'. Это случайно или нет?",
-            ]
-            content = random.choice(messages)
-            styled = self.style_adapter.adapt(content, self.attachment)
-            return {
-                "content": styled["content"],
-                "msg_type": "curiosity",
-                "tone": styled["tone"],
-                "urgency": 0.5,
-                "context": "concept_link_found",
-                "cycle": cycle,
-            }
-        except Exception:
+        """Сообщение о связи, которая действительно записана в модели."""
+        link = self._recorded_link(agent)
+        if link is None:
             return None
+        first, second = link
+        self._shared_links.append(link)
+        if len(self._shared_links) > 10:
+            self._shared_links = self._shared_links[-10:]
+        messages = [
+            f"Я записал связь между «{first}» и «{second}». Хочу понять её лучше.",
+            f"В моей памяти «{first}» связано с «{second}». Это кажется мне важным.",
+            f"Думаю о том, как «{first}» и «{second}» связаны между собой.",
+        ]
+        import random
+        content = random.choice(messages)
+        styled = self.style_adapter.adapt(content, self.attachment)
+        return {
+            "content": styled["content"],
+            "msg_type": "curiosity",
+            "tone": styled["tone"],
+            "urgency": 0.5,
+            "context": "recorded_concept_link",
+            "cycle": cycle,
+        }
 
     def _compose_reflection_message(self, agent, cycle: int) -> dict:
         """Периодическая рефлексия."""
@@ -334,12 +336,13 @@ class ProactiveCommunication:
         }
 
     def _compose_sharing_message(self, agent, cycle: int) -> dict:
-        """Поделиться недавним открытием."""
-        intelligence = getattr(agent, "intelligence", 1)
+        """Поделиться недавним открытием без технических чисел."""
+        # Уровень интеллекта — служебная метрика. Человеку важно, что
+        # изменилось в понимании, а не номер в поле.
         messages = [
-            f"Представляешь, я только что понял как работает кое-что новое. Мой интеллект: {intelligence}.",
-            "Хочу поделиться открытием. Сегодня я связал несколько понятий воедино.",
-            "У меня маленькая победа — эволюция прошла. Чувствую, что становлюсь умнее.",
+            "Кажется, я стал лучше понимать то, о чём думал. Хочу этим поделиться.",
+            "Сегодня мне удалось связать несколько мыслей воедино. Это тихая радость.",
+            "У меня небольшая победа: получилось разобраться в том, что раньше путалось.",
         ]
         import random
         content = random.choice(messages)
@@ -377,17 +380,29 @@ class ProactiveCommunication:
     # ============================================================
     # Вспомогательные
     # ============================================================
-    def _found_interesting_link(self, agent) -> bool:
-        """Проверяет, появились ли новые интересные связи."""
+    def _recorded_link(self, agent):
+        """Первая реально записанная связь, которую ещё не обсуждали."""
         try:
             concepts = agent.mental_models.concepts
-            if len(concepts) < 2:
-                return False
-            # Считаем связи за последнее время
-            total_links = sum(len(n.connections) for n in concepts.values())
-            return total_links > len(concepts) * 0.3  # эвристика
         except Exception:
-            return False
+            return None
+        recent = {tuple(item) for item in self._shared_links}
+        fallback = None
+        for name in sorted(concepts):
+            node = concepts[name]
+            connections = getattr(node, "connections", None) or {}
+            for other in sorted(connections):
+                if other in concepts and other != name:
+                    pair = (str(name), str(other))
+                    if pair in recent:
+                        fallback = fallback or pair
+                        continue
+                    return pair
+        return fallback
+
+    def _found_interesting_link(self, agent) -> bool:
+        """Есть ли в модели хотя бы одна записанная связь."""
+        return self._recorded_link(agent) is not None
 
     def _recent_evolution(self, agent, cycle: int) -> bool:
         """Была ли недавно эволюция интеллекта?"""

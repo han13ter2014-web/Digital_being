@@ -14,6 +14,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.ui import life_view
+from src.ui.concept_filter import split_service_concepts
 
 MAX_NODES = 200
 MAX_EDGES = 500
@@ -130,8 +131,9 @@ def build_life_graph(
     # --- Концепции: только те, что реально есть в ментальной модели ---
     mental_models = getattr(agent, "mental_models", None)
     concepts = getattr(mental_models, "concepts", {}) or {}
+    visible, hidden_service = split_service_concepts(concepts.items())
     ordered = sorted(
-        concepts.items(),
+        visible,
         key=lambda item: (
             float(getattr(item[1], "confidence", 0.0) or 0.0),
             len(getattr(item[1], "experiences", []) or []),
@@ -139,7 +141,7 @@ def build_life_graph(
         reverse=True,
     )
     kept = ordered[:MAX_CONCEPTS]
-    omitted = max(0, len(concepts) - len(kept))
+    omitted = max(0, len(visible) - len(kept))
     for name, node in kept:
         add_node(f"concept:{name}", "concept", name,
                  getattr(node, "confidence", 0.1), _concept_detail(node))
@@ -216,6 +218,10 @@ def build_life_graph(
         "edges": edges,
         "truncated": omitted > 0 or len(nodes) >= limit,
         "omitted": omitted,
+        # Скрытые служебные записи не удалены из Core: счётчик нужен,
+        # чтобы человек видел, что карта показывает не всё, но не читал
+        # технические метки как знание.
+        "hidden_service": hidden_service,
     }
 
 

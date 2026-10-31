@@ -44,8 +44,10 @@ def test_draft_detail_explains_work_in_human_words():
     assert rows["О состоянии"].startswith("Работа, к которой")
     assert rows["Состояние"] == "продолжается"
     assert rows["Редакция"] == "3 из 8"
-    assert rows["Файл"] == "сохранён, целостность проверена"
+    assert rows["Файл"] == "сохранён; отпечаток файла записан"
     assert "SHA" not in " ".join(rows)
+    # Наличие отпечатка не доказывает повторную проверку файла на диске.
+    assert "целостность проверена" not in rows["Файл"]
 
 
 def test_game_detail_shows_real_board_and_result():

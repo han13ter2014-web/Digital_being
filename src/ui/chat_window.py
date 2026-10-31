@@ -223,17 +223,15 @@ class ChatWindow:
         вопрос легко пропустить.
         """
         data = event.data or {}
-        qid = data.get("id", "?")
         question = data.get("question", "")
         context = data.get("context", "")
-        priority = data.get("priority", "medium")
 
-        lines = [f"❓ [{self.agent_name}] спрашивает (#{qid}, {priority}):"]
+        lines = [f"❓ {self.agent_name} спрашивает:"]
         lines.append(f"   {question}")
         if context:
-            lines.append(f"   (контекст: {context})")
+            lines.append(f"   Почему спрашиваю: {context}")
         lines.append("")
-        lines.append(f"   Ответь в чате — например: «{question[:30]}… — …»")
+        lines.append("   Ответь в чате одним сообщением.")
 
         self._incoming_queue.put(("agent", "\n".join(lines)))
         # Подсветить окно: пользователь должен увидеть вопрос
@@ -261,21 +259,20 @@ class ChatWindow:
         title = data.get("title", "")
         extract = data.get("extract", "")
         url = data.get("url", "")
-        lang = data.get("lang", "ru")
 
         # Обрезаем extract для чата (до 400 символов).
         if len(extract) > 400:
             extract = extract[:400].rsplit(" ", 1)[0] + "…"
 
         lines = [
-            f"🌐 [{self.agent_name}] нашёл в интернете (Wikipedia/{lang}):",
+            f"🌐 {self.agent_name} нашёл в интернете:",
             f"   Тема: {concept}",
             f"   Статья: {title}",
             "",
             f"   {extract}",
             "",
             f"   Источник: {url}",
-            "   ✓ Сохранил в свою базу знаний",
+            "   ✓ Записал в свою базу знаний",
         ]
 
         self._incoming_queue.put(("agent", "\n".join(lines)))
@@ -687,9 +684,6 @@ class ChatWindow:
         if cmd.startswith("/name ") or cmd.startswith("name "):
             proposed = text.split(" ", 1)[1].strip() if " " in text else ""
             if proposed:
-                self._append_system(
-                    f"Отправляю агенту предложение имени: '{proposed}'"
-                )
                 self.bus.publish_sync(
                     Events.USER_COMMAND,
                     {"command": f"propose_name {proposed}"},
@@ -709,7 +703,8 @@ class ChatWindow:
                 {"command": cmd.lstrip("/")},
                 source="chat",
             )
-            self._append_system(f"Команда {cmd} отправлена агенту.")
+            # Ответ придёт от Core обычным сообщением. Служебная строка
+            # «команда отправлена» только засоряла разговор.
             return
 
         # === ask <вопрос> — открытый вопрос (свобода воли) ===

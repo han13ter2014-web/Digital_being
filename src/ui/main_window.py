@@ -116,6 +116,7 @@ class MainWindow(ChatWindow):
         self._activity_detail = None
         self._access_card = None
         self._effector_card = None
+        self._access_vars: Dict[str, Any] = {}
         self._mono_font = None
 
         # Карта жизни: данные приходят отдельным, более редким потоком.
@@ -250,6 +251,32 @@ class MainWindow(ChatWindow):
     # Экран «Сейчас»: рендер из снимка жизни
     # ============================================================
 
+    def _on_access_toggle(self, key: str) -> None:
+        """Переключатель не меняет Core сам: решение исполняет поток агента."""
+        var = self._access_vars.get(key)
+        if var is None:
+            return
+        state = "on" if bool(var.get()) else "off"
+        try:
+            self.bus.publish_sync(
+                Events.USER_COMMAND,
+                {"command": f"access {key} {state}"},
+                source="access",
+            )
+        except Exception as exc:
+            logger.debug("[MainWindow] access toggle: %s", exc)
+
+    def _refresh_access_switches(self, snapshot: Dict[str, Any]) -> None:
+        """Показывать реальное состояние, даже если его изменили командой."""
+        access = snapshot.get("access") or {}
+        for key, var in self._access_vars.items():
+            item = access.get(key)
+            if not isinstance(item, dict):
+                continue
+            actual = bool(item.get("enabled"))
+            if bool(var.get()) != actual:
+                var.set(actual)
+
     def _apply_life_data(self, snapshot: Dict[str, Any]) -> None:
         """Перерисовать карточки «Сейчас» и «Доступы» из снимка жизни.
 
@@ -276,6 +303,7 @@ class MainWindow(ChatWindow):
                 )
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
+            self._refresh_access_switches(snap)
             if self._access_card is not None:
                 self._access_card.configure(text=self._rows_text(life_view.access_rows(snap)))
             if self._effector_card is not None:
@@ -803,6 +831,9 @@ class MainWindow(ChatWindow):
         edges = self._graph_data.get("edges") or []
         if self._graph_counter is not None:
             text = f"узлов: {len(nodes)} · связей: {len(edges)}"
+            hidden = int(self._graph_data.get("hidden_service") or 0)
+            if hidden > 0:
+                text += f" · служебных записей скрыто: {hidden}"
             if self._graph_data.get("truncated"):
                 text += " · показаны не все"
             try:
@@ -922,9 +953,46 @@ class MainWindow(ChatWindow):
         self._activity_detail.configure(text=diary_view.rows_text(rows))
 
     def _build_page_access(self, parent):
-        """Экран «Доступы»: что разрешено и что делает Effector."""
+        """Экран «Доступы»: живые переключатели и что делает Effector."""
+        from src.app.access_control import HINTS, LABELS
+
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._access_card = self._make_card(page, "ЧТО РАЗРЕШЕНО")
+        self._page_heading(
+            page, "Доступы",
+            "человек сам решает, что ядру разрешено; выключение ничего не стирает",
+        )
+
+        switches = tk.Frame(
+            page, bg=theme.SURFACE,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        switches.pack(fill=tk.X, padx=theme.SPACING["md"],
+                      pady=(0, theme.SPACING["sm"]))
+        tk.Label(
+            switches, text="РАЗРЕШЕНИЯ", font=self._card_title_font,
+            bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"],
+               pady=(theme.SPACING["sm"], 2))
+        for key in ("network", "delamain", "effector"):
+            var = tk.BooleanVar(value=False)
+            self._access_vars[key] = var
+            row = tk.Frame(switches, bg=theme.SURFACE)
+            row.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, 2))
+            check = tk.Checkbutton(
+                row, text=LABELS[key], variable=var,
+                command=lambda name=key: self._on_access_toggle(name),
+                bg=theme.SURFACE, fg=theme.TEXT,
+                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
+                selectcolor=theme.BG_CENTER, highlightthickness=0,
+                bd=0, anchor="w", font=self._ui_font,
+            )
+            check.pack(anchor="w")
+            tk.Label(
+                row, text=HINTS[key], font=self._card_title_font,
+                bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
+            ).pack(anchor="w", padx=(24, 0))
+
+        self._access_card = self._make_card(page, "ЧТО РАЗРЕШЕНО СЕЙЧАС")
         self._effector_card = self._make_card(page, "ДЕЙСТВИЯ")
 
         detail = tk.Frame(
