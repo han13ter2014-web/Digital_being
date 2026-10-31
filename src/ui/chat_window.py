@@ -91,6 +91,12 @@ class ChatWindow:
         self._thread: Optional[threading.Thread] = None
         self._is_visible = False
         self._poll_running = False
+        # NamingDialogue: после naming_initiated «просто имя» в строке
+        # ввода маршрутизируется в propose_name (а не в USER_MESSAGE),
+        # иначе подсказка агента вводит пользователя в заблуждение.
+        # Снимается событием agent_name_changed; решение по имени
+        # по-прежнему принимает Core.
+        self._awaiting_name = False
 
         # Виджеты создаются позже, в потоке Tk. До этого они None:
         # событие может прийти раньше, чем окно построено (агент живёт
@@ -157,6 +163,7 @@ class ChatWindow:
             }
         """
         agent_name = (event.data or {}).get("agent_name", self.agent_name)
+        self._awaiting_name = True
         # Попробуем достать последнее сообщение naming из user_interaction.
         msg_text = None
         try:
@@ -184,6 +191,7 @@ class ChatWindow:
 
     async def _on_agent_name_changed(self, event) -> None:
         """Синхронизировать отображаемое имя после изменения Core."""
+        self._awaiting_name = False
         data = event.data or {}
         new_name = str(data.get("new_name") or "").strip()
         if not new_name:
@@ -304,17 +312,14 @@ class ChatWindow:
         self._incoming_queue.put(("__close__", None))
 
     def stop(self) -> None:
-        """Остановить UI-поток."""
-        self._poll_running = False
-        if self._root is not None:
-            try:
-                # Уничтожаем окно ВНУТРИ потока Tk. Если этого не сделать,
-                # Tk-объекты доживают до выхода из процесса и уничтожаются
-                # в главном потоке: «Tcl_AsyncDelete: async handler deleted
-                # by the wrong thread».
-                self._root.after(0, self._destroy_root)
-            except Exception:
-                pass
+        """Остановить UI-поток.
+
+        Уничтожение окна выполняется ВНУТРИ потока Tk через очередь
+        (``request_close``): вызывать Tk API (``after``) из потока
+        жизни небезопасно — «Tcl_AsyncDelete: async handler deleted
+        by the wrong thread».
+        """
+        self.request_close()
 
     def _destroy_root(self) -> None:
         """Уничтожить окно и отпустить Tk-переменные в потоке Tk."""
@@ -628,6 +633,18 @@ class ChatWindow:
         # Команда?
         if text.startswith("/"):
             self._handle_command(text)
+            return
+
+        # NamingDialogue: агент ждёт имя — «просто имя» уходит в
+        # propose_name, как и обещает подсказка. Принять или отклонить
+        # решает Core (AgentRunner.handle_command).
+        if self._awaiting_name:
+            self._append_user(text)
+            self.bus.publish_sync(
+                Events.USER_COMMAND,
+                {"command": f"propose_name {text}"},
+                source="chat",
+            )
             return
 
         # Обычное сообщение → EventBus
