@@ -46,6 +46,7 @@ import gzip
 import json
 import logging
 import os
+import threading
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -548,6 +549,11 @@ class CheckpointSerializer:
     - Старые ``.json`` файлы читаются без изменений (обратная совместимость).
     """
 
+    # Процессный lock на сохранение: два параллельных save (например,
+    # завершающий runner.stop() и повторный при выходе) не должны
+    # гоняться за один и тот же tmp/replace и прунинг старых чекпоинтов.
+    _save_lock = threading.Lock()
+
     def __init__(
         self,
         checkpoint_dir: str = None,
@@ -584,6 +590,11 @@ class CheckpointSerializer:
         Returns:
             Полный путь к сохранённому файлу.
         """
+        with CheckpointSerializer._save_lock:
+            return self._save_locked(state, agent_name, cycle_count)
+
+    def _save_locked(self, state: Dict[str, Any], agent_name: str, cycle_count: int) -> str:
+        """Тело ``save()`` под процессным lock (см. ``_save_lock``)."""
         if self.backend == "sqlite":
             from src.memory.checkpoint_store import SQLiteCheckpointStore
 

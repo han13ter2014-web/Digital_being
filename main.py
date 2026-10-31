@@ -295,6 +295,36 @@ class Runtime:
 # ============================================================
 
 
+def graceful_exit_save(runtime: Runtime, *, wait_timeout: float = 5.0) -> bool:
+    """Сохранить жизнь на выходе, никогда не сохраняя из чужого потока.
+
+    Пока поток жизни работает, его состояние непрерывно мутирует:
+    параллельный ``save_state`` из главного потока роняет сериализацию
+    («dictionary changed size during iteration») и может оставить
+    повреждённый чекпоинт — прямая угроза непрерывности личности.
+    Поэтому: мягкая остановка → ограниченное ожидание → повторное
+    сохранение только если поток завершился и сам сохранить не смог.
+    """
+    if not runtime.finished.is_set():
+        logger.warning("Поток жизни не завершился; запрашиваем остановку")
+        try:
+            runtime.request_shutdown()
+        except Exception:
+            pass
+        if not runtime.wait(timeout=wait_timeout):
+            logger.error(
+                "Поток жизни не завершился; сохранение из чужого потока отменено"
+            )
+            return False
+    if getattr(runtime, "saved_on_stop", False):
+        return True
+    try:
+        runtime.agent.save_state(force=True)
+        return True
+    except Exception:
+        return False
+
+
 def build_runtime(args: argparse.Namespace, env) -> Runtime:
     """Создаёт агента, шину, раннер, контроллер и (если нужно) окно."""
     from src.app.bootstrap import create_agent, start_naming_dialogue
@@ -402,7 +432,9 @@ def run_gui(runtime: Runtime, args: argparse.Namespace) -> int:
     speed = resolve_speed(args.interval)
     runtime.start(speed)
 
-    # Ждём, пока шина поднимется: publish_sync до start() отбрасывается.
+    # События, опубликованные до start(), буферизуются шиной
+    # (_pending_pre_start) и доставляются после drain_pre_start().
+    # Ждём, чтобы ранние publish_sync гарантированно попали в очередь.
     for _ in range(100):
         if runtime.bus._running:  # noqa: SLF001 - проверка готовности
             break
@@ -595,11 +627,7 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     def atexit_save() -> None:
-        try:
-            if not runtime.finished.is_set():
-                runtime.agent.save_state(force=True)
-        except Exception:
-            pass
+        graceful_exit_save(runtime)
 
     atexit.register(atexit_save)
 

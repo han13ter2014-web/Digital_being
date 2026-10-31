@@ -771,11 +771,18 @@ class AgentRunner:
         if stimulus is None:
             # Все стимулы на кулдауне: лучше отдохнуть, чем 13 000 раз
             # повторить один и тот же вопрос (см. docs/BASELINE.md).
-            self._rest_tick()
+            await asyncio.to_thread(self._rest_tick)
         else:
             try:
-                self._do_one_agent_cycle(
-                    stimulus, user_initiated=user_initiated
+                # Цикл агента уходит в worker-поток: синхронные сетевые
+                # паузы (Wikipedia timeout + rate-limit) не должны
+                # замораживать event loop, иначе замирают EventBus,
+                # StatusLoop и откладываются tick_will/tick_communication.
+                # publish_sync() потокобезопасен (см. event_bus.py).
+                await asyncio.to_thread(
+                    self._do_one_agent_cycle,
+                    stimulus,
+                    user_initiated=user_initiated,
                 )
             except Exception as e:
                 logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
@@ -1197,7 +1204,7 @@ class AgentRunner:
             return (
                 f"🌐 Интернет-поиск: {state}\n"
                 f"   Язык: {ws.lang}\n"
-                f"   Кэш: {len(ws._cache)} записей\n"
+                f"   Кэш: {ws.cache_size()} записей\n"
                 f"   HTTP-вызовов: {stats['network_calls']}, "
                 f"найдено: {stats['found']}, ошибок: {stats['errors']}"
             )
