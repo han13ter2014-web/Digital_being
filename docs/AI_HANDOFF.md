@@ -22,7 +22,7 @@
 карта без служебных записей, без повторов автономных мыслей, рабочие
 переключатели доступов. Проверенный срез и оставшиеся ограничения:
 [PATCH_WORK_STATUS.md](PATCH_WORK_STATUS.md).
-Последний локальный прогон этого среза: **1518 passed, 2 skipped**, 302,89 с.
+Последний локальный прогон этого среза: **1519 passed, 2 skipped**, 301,27 с.
 Стабильный `life_id` уже используется в checkpoint, active profile, дневнике
 Delamain, долговременной памяти и подтверждении ухода. Ещё не переведены
 seed lineage, Delamain goal bridge и общий на папку `life_state.json`.
@@ -45,7 +45,7 @@ git log --oneline -8
 python -m pytest -q --ignore=tests/benchmarks
 ```
 
-Последний известный полный результат: **1518 passed, 2 skipped**, без
+Последний известный полный результат: **1519 passed, 2 skipped**, без
 benchmarks.
 
 Последняя приёмка v1 зафиксирована в `docs/ACCEPTANCE_RESULT_2026-10-30.md`:

@@ -184,6 +184,31 @@ def test_graph_counter_reports_hidden_service_records(root):
     assert "служебных записей скрыто: 4" in text
 
 
+def test_graph_detail_panel_fits_inside_the_window(root):
+    """Панель подробностей и счётчик не должны уезжать за правый край."""
+    win = _window(root)
+    win._show_page("graph")
+    root.geometry("1040x680")
+    root.deiconify()
+    root.update()
+    win._apply_graph_data({
+        "nodes": [
+            {"id": "concept:память", "kind": "concept", "label": "память",
+             "weight": 0.5, "detail": {}},
+        ],
+        "edges": [],
+        "truncated": False,
+        "hidden_service": 14,
+    })
+    root.update()
+
+    panel = win._graph_counter.master
+    window_right = root.winfo_rootx() + root.winfo_width()
+    assert panel.winfo_rootx() + panel.winfo_width() <= window_right
+    # Счётчик переносится на две строки, а не обрезается.
+    assert win._graph_counter.winfo_height() > 20
+
+
 def test_life_map_renders_nodes_and_shows_real_details(root):
     win = _window(root)
     win._show_page("graph")
