@@ -10,10 +10,12 @@
 import pytest
 
 from src.core.dialogue_acts import (
+    ACT_ASK_ABOUT_SELF,
     ACT_ANSWER,
     ACT_SOCIAL,
     ACT_UNKNOWN,
     classify_user_text,
+    extract_definition,
 )
 
 
@@ -41,7 +43,13 @@ from src.core.dialogue_acts import (
         ("Здравствуй, как дела?", ACT_SOCIAL),
         ("Доброе утро!", ACT_SOCIAL),
         ("Как настроение?", ACT_SOCIAL),
-        ("Чем занимаешься?", ACT_SOCIAL),
+        # === вопросы о самой сущности: не smalltalk, честный ответ ===
+        ("Как тебя зовут?", ACT_ASK_ABOUT_SELF),
+        ("Кто ты такая?", ACT_ASK_ABOUT_SELF),
+        ("Что ты знаешь обо мне?", ACT_ASK_ABOUT_SELF),
+        ("Чем занимаешься?", ACT_ASK_ABOUT_SELF),
+        ("Чем ты занята?", ACT_ASK_ABOUT_SELF),
+        ("Чем занята?", ACT_ASK_ABOUT_SELF),
         # === тепло ===
         ("Скучаю по тебе.", ACT_SOCIAL),
         ("Спасибо тебе за разговор.", ACT_SOCIAL),
@@ -51,6 +59,8 @@ from src.core.dialogue_acts import (
         ("Ответ: теория информации.", ACT_ANSWER),
         # приоритет: явная формула бьёт социальные слова внутри текста
         ("мой ответ: я рядом и всё хорошо", ACT_ANSWER),
+        # и вопросы о сущности: формула ответа всё равно главнее
+        ("мой ответ: чем занимаешься — учёбой", ACT_ANSWER),
         # === настоящие ответы без формул — unknown (старый путь) ===
         ("Спокойно и тепло. А что тебя самого сейчас занимает?", ACT_UNKNOWN),
         ("Тишина и покой, много отдыха.", ACT_UNKNOWN),
@@ -80,3 +90,50 @@ def test_unknown_has_no_marker():
 def test_whitespace_and_case_are_normalized():
     assert classify_user_text("   ПРИВЕТ!   ").kind == ACT_SOCIAL
     assert classify_user_text("не   переживай").kind == ACT_SOCIAL
+
+
+# ============================================================
+# «Собеседник-5»: формула «X — это Y»
+# ============================================================
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (
+            "Git — это система контроля версий",
+            ("Git", "система контроля версий"),
+        ),
+        ("любовь — это забота и внимание", ("любовь", "забота и внимание")),
+        ("«диалог» — это обмен репликами.", ("диалог", "обмен репликами")),
+        (
+            "Python - это интерпретируемый язык!",
+            ("Python", "интерпретируемый язык"),
+        ),
+    ],
+)
+def test_extract_definition_positive(text, expected):
+    assert extract_definition(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "А что это за город?",  # нет тире перед «это»
+        "Git это система контроля версий",  # тире обязательно
+        "это важно",
+        "— это определение без темы",
+        "Git — это",  # пустое определение
+        "",
+        "   ",
+        None,
+    ],
+)
+def test_extract_definition_rejects_non_definitions(text):
+    assert extract_definition(text) is None
+
+
+def test_extract_definition_topic_limit():
+    long_topic = "т" * 61
+    assert extract_definition(f"{long_topic} — это тест") is None
+    ok_topic = "т" * 60
+    assert extract_definition(f"{ok_topic} — это тест") == (ok_topic, "тест")

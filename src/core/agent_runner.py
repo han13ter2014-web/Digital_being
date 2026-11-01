@@ -50,10 +50,31 @@ from src.core.watchdog import get_watchdog, Watchdog
 from src.core.buffered_logger import flush_logs
 from src.core.paths import data_path
 from src.core.agent import AgentDeadSignal
-from src.core.dialogue_acts import ACT_SOCIAL, classify_user_text
+from src.core.dialogue_acts import (
+    ACT_ASK_ABOUT_SELF,
+    ACT_SOCIAL,
+    classify_user_text,
+    extract_definition,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+# «Собеседник-5»: подмножество социальных маркеров, которое означает
+# протест на ПОВТОР вопроса. Только при открытом pending-вопросе: без
+# него «уже отвечал» — обычная социальная реплика, а не команда mute.
+# «я же» сознательно не входит: «я же рядом» — присутствие, не протест.
+_REPEAT_PROTEST_MARKERS = (
+    "уже отвечал",
+    "уже отвечала",
+    "уже говорил",
+    "уже говорила",
+    "повторяешь",
+    "снова спрашиваешь",
+    "тот же вопрос",
+    "зачем снова",
+)
 
 
 # ============================================================
@@ -278,18 +299,44 @@ class AgentRunner:
         interaction = getattr(self.agent, "user_interaction", None)
         pending = interaction.get_pending_question() if interaction is not None else None
 
-        # === «Собеседник-1»: социальная речь — не ответ и не учебный материал ===
+        # === «Собеседник-1/5»: акт распознаётся один раз до дверей ===
         # Живой прогон 2026-11-01: «Я же уже отвечал тебе» уходило в
         # «Ответ записан» или в изучение концептов («Не нашел файл для…»).
-        # Акт распознаётся до дверей ответов; настоящие ответы
-        # (ACT_ANSWER/ACT_UNKNOWN) идут по прежнему пути без изменений.
-        if classify_user_text(text).kind == ACT_SOCIAL:
+        # Настоящие ответы (ACT_ANSWER/ACT_UNKNOWN) идут прежним путём
+        # без изменений — безопасный fallback сохранён.
+        act = classify_user_text(text)
+
+        # Вопрос о самой сущности — честный ответ из read-only Core.
+        if act.kind == ACT_ASK_ABOUT_SELF:
             if interaction is not None:
                 interaction.receive_user_message(text, cycle=self.agent.cycle_count)
             user_model = getattr(self.agent, "user_model", None)
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
-            response = self._format_social_reply(pending)
+            response = self._format_about_self_reply()
+            if response:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="dialogue_acts",
+                    priority=1,
+                )
+            return
+
+        # Социальная речь — не ответ и не учебный материал.
+        if act.kind == ACT_SOCIAL:
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            if (
+                pending is not None
+                and act.matched_marker in _REPEAT_PROTEST_MARKERS
+            ):
+                response = self._handle_repeat_protest(pending, interaction)
+            else:
+                response = self._format_social_reply(pending)
             if response:
                 await self.bus.publish(
                     Events.AGENT_THOUGHT,
@@ -353,6 +400,33 @@ class AgentRunner:
                 )
                 return
 
+        # === «Собеседник-5»: «X — это Y» — свидетельство без вопроса ===
+        # Человек объясняет тему по своей инициативе; раньше такое уходило
+        # в очередь стимулов и изучалось как «файл». Записываем как
+        # знание-свидетельство (record_user_answer) со штампом «не
+        # переспрашивать». Не записалось — текст идёт старым путём.
+        definition = extract_definition(text)
+        if definition is not None:
+            topic, body = definition
+            recorder = getattr(self.agent, "record_user_answer", None)
+            saved = (
+                recorder(topic, f"{topic} — это {body}", self.agent.cycle_count)
+                if callable(recorder)
+                else None
+            )
+            if saved:
+                response = (
+                    f"Записал: «{saved} — это {body}». "
+                    "Теперь я знаю это от тебя — переспрашивать не буду."
+                )
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="dialogue_acts",
+                    priority=1,
+                )
+                return
+
         # Ленивое создание очереди — сообщения, пришедшие до start(),
         # не теряются, а дожидаются первого тика.
         if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
@@ -410,6 +484,84 @@ class AgentRunner:
                 "ответишь, когда захочешь."
             )
         return "Я слышу тебя. Спасибо, что ты рядом."
+
+    def _handle_repeat_protest(self, pending, interaction) -> str:
+        """«Уже отвечал» — вопрос снимается, тема замолкает.
+
+        «Собеседник-5»: повторять вопрос после протеста человека — то,
+        что живой прогон показал на сущности Тэсс. Вопрос закрывается
+        как отклонённый (не как ответ: в историю ответов не попадает),
+        а тема получает mute-штамп — сам к ней сущность не вернётся.
+        """
+        topic = AgentRunner._topic_from_pending(pending)
+        # Mute ДО decline: штамп подтверждается тем, что вопрос ещё
+        # висит в ожидании; после decline подтверждения уже нет.
+        muted = None
+        mute = getattr(self.agent, "mute_topic", None)
+        if callable(mute) and topic:
+            muted = mute(topic, self.agent.cycle_count)
+        interaction.decline_question(
+            pending["id"], cycle=self.agent.cycle_count
+        )
+        if muted:
+            return (
+                f"Ты прав — я спрашивал об этом, вопрос снимаю. "
+                f"К теме «{muted}» сам больше не вернусь."
+            )
+        return "Ты прав — вопрос снимаю и сам к нему больше не вернусь."
+
+    def _format_about_self_reply(self) -> str:
+        """Честный рассказ о себе из read-only Core — без выдумки.
+
+        «Собеседник-5»: на «чем занимаешься?» сущность отвечает только
+        тем, что действительно есть в её состоянии: имя, возраст в
+        циклах, последняя тема исследования, объём опыта, что она помнит
+        о человеке. Ничего из этого не придумывается и не улучшается.
+        """
+        agent = self.agent
+        concepts = getattr(
+            getattr(agent, "mental_models", None), "concepts", None
+        )
+        known = 0
+        if isinstance(concepts, dict):
+            known = sum(1 for name in concepts if agent._is_learnable(name))
+        history = getattr(agent, "_exploration_history", None)
+        occupation = ""
+        if isinstance(history, list) and history:
+            last = str(history[-1] or "").strip()
+            if last and agent._is_learnable(last):
+                occupation = last
+        if occupation:
+            parts = [
+                f"Меня зовут {agent.name}. Я живу уже {agent.cycle_count} "
+                f"циклов, сейчас разбираюсь с темой «{occupation}»."
+            ]
+        else:
+            parts = [
+                f"Меня зовут {agent.name}. Я живу уже {agent.cycle_count} "
+                "циклов и изучаю мир вокруг — по чуть-чуть за цикл."
+            ]
+        if known:
+            parts.append(
+                f"О {known} темах у меня уже есть хоть какой-то "
+                "собственный опыт."
+            )
+        user_model = getattr(agent, "user_model", None)
+        if user_model is not None:
+            promise = user_model.silence_promise()
+            if promise:
+                parts.append(
+                    "И я помню: ты говорил, что можешь отлучаться — "
+                    "не тревожу."
+                )
+            traits = getattr(user_model, "traits", None)
+            if isinstance(traits, dict) and traits:
+                first_trait = next(iter(traits.values()))
+                parts.append(
+                    "Про тебя я записал: "
+                    f"«{self._short_quote(first_trait, 100)}»."
+                )
+        return " ".join(parts)
 
     @staticmethod
     def _short_quote(text: str, limit: int = 80) -> str:

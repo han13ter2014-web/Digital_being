@@ -420,9 +420,11 @@ class DigitalBeing:
 
         self.user_model = UserModel()
 
-        # === «Собеседник-3»: свидетельство пользователя — знание ===
-        # {тема: cycle_count} — когда человек в последний раз объяснил тему.
-        # Штамп не даёт переспрашивать объяснённое; сериализуется в чекпоинт.
+        # === «Собеседник-3/5»: свидетельство пользователя — знание ===
+        # {тема: cycle_count} — когда тема в последний раз закрыта
+        # человеком: он объяснил её или попросил не переспрашивать
+        # («уже отвечал»). Штамп не даёт возвращаться к теме; падает
+        # в чекпоинт.
         self._user_explained_topics: Dict[str, int] = {}
 
         # === «Собеседник-4»: память диалога ===
@@ -2123,6 +2125,31 @@ class DigitalBeing:
             return False
         return True
 
+    # Метаслова диалога (сингуляр и множественное число): узнанные
+    # пайплайном «Собеседника» слова о самом разговоре. Фильтруются
+    # ТОЛЬКО при выборе целей исследования — не в ``_is_learnable``,
+    # чтобы свидетельство человека о метаслове («диалог — это обмен
+    # репликами») по-прежнему записывалось.
+    _META_TOPIC_WORDS = frozenset({
+        "вопрос", "вопросы",
+        "тема", "темы",
+        "ответ", "ответы",
+        "сообщение", "сообщения",
+        "диалог", "диалоги",
+        "разговор", "разговоры",
+    })
+
+    def _is_meta_topic(self, name: str) -> bool:
+        """Тема состоит из метаслов диалога, а не из содержания мира?
+
+        Проверка по целым словам: «ответственный» — обычная тема,
+        «вопрос» и «открытый вопрос» — метаслово.
+        """
+        text = str(name or "").strip().lower()
+        if not text:
+            return True
+        return any(word in text.split() for word in self._META_TOPIC_WORDS)
+
     def _recently_explained_by_user(self, topic: str) -> bool:
         """Тема, объяснённая человеком недавно, не переспрашивается.
 
@@ -2152,7 +2179,9 @@ class DigitalBeing:
         recently = set(getattr(self, "_exploration_history", []) or [])
         candidates = []
         for name, node in concepts.items():
-            if not self._is_learnable(name) or name in recently:
+            if not self._is_learnable(name) or self._is_meta_topic(name):
+                continue
+            if name in recently:
                 continue
             if self._recently_explained_by_user(name):
                 continue
@@ -2244,6 +2273,7 @@ class DigitalBeing:
             for name in concepts
             if name not in recently
             and self._is_learnable(name)
+            and not self._is_meta_topic(name)
             and not self._recently_explained_by_user(name)
             and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
         ]
@@ -2255,6 +2285,7 @@ class DigitalBeing:
                 name
                 for name in concepts
                 if self._is_learnable(name)
+                and not self._is_meta_topic(name)
                 and not self._recently_explained_by_user(name)
                 and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
             ]
@@ -3911,6 +3942,50 @@ class DigitalBeing:
                 f"[KNOWLEDGE] свидетельство пользователя о «{normalized}»: "
                 f"{answer_text[:60]}"
             )
+        return normalized
+
+    def mute_topic(self, topic: str, cycle: int = 0) -> Optional[str]:
+        """Человек попросил не возвращаться к теме («ты повторяешься»).
+
+        «Собеседник-5»: только штамп цикла в ``_user_explained_topics`` —
+        БЕЗ записи концепта и без свидетельства: объяснения не было,
+        было требование тишины. Граница: замолкает лишь тема, которую
+        сущность действительно спрашивала (в истории вопросов или
+        сейчас в ожидании); случайная строка из протеста не мьютится.
+
+        Returns:
+            Нормализованная тема или None, если мьютить нечего.
+        """
+        normalized = " ".join(str(topic or "").split())
+        if not normalized or not self._is_learnable(normalized):
+            return None
+        lower = normalized.lower()
+        interaction = getattr(self, "user_interaction", None)
+        asked_before = False
+        if interaction is not None:
+            for entry in getattr(interaction, "question_history", []) or []:
+                question = " ".join(
+                    str(entry.get("question") or "").lower().split()
+                )
+                if lower in question:
+                    asked_before = True
+                    break
+            if not asked_before:
+                for pending in getattr(
+                    interaction, "pending_questions", []
+                ) or []:
+                    question = " ".join(
+                        str(pending.get("question") or "").lower().split()
+                    )
+                    if lower in question:
+                        asked_before = True
+                        break
+        if not asked_before:
+            return None
+        self._user_explained_topics[normalized] = int(cycle)
+        get_logger().log(
+            f"[MUTE] человек попросил не возвращаться к «{normalized}»"
+        )
         return normalized
 
     def _consume_open_question(self) -> Optional[str]:
