@@ -98,6 +98,54 @@ def test_meta_topic_still_learnable_from_user():
     ] == "testimony"
 
 
+def test_ask_user_replaces_bare_meta_word_with_real_topic(monkeypatch):
+    """«вопрос» параметром намерения — не тема для вопроса человеку.
+
+    Живой прогон 2026-11-01 (Омелла, v0.1.3): curiosity-потребность
+    отдаёт первое слово related_concepts («вопрос») параметром concept,
+    и намерение доходит до _act_ask_user мимо селекторов тем.
+    Метаслово заменяется реальной целью исследования.
+    """
+    monkeypatch.setattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.0)
+    monkeypatch.setattr(LR_CONFIG, "STIMULI_POOL", [])
+    agent = DigitalBeing(name="HY")
+    _strip_bootstrap(agent)
+    weak = SimpleNamespace(experiences=[1], confidence=0.3)
+    agent.mental_models.concepts["кот"] = weak
+
+    result = agent._act_ask_user(target="вопрос")
+
+    assert result.get("target") == "кот"
+    pending = agent.user_interaction.pending_questions
+    assert len(pending) == 1
+    assert "кот" in pending[0]["question"]
+
+
+def test_ask_user_bare_meta_word_without_topics_not_asked(monkeypatch):
+    """Нет реальной темы — вопрос не задаётся, а не уходит в «вопрос»."""
+    monkeypatch.setattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.0)
+    monkeypatch.setattr(LR_CONFIG, "STIMULI_POOL", [])
+    agent = DigitalBeing(name="HY")
+    _strip_bootstrap(agent)
+
+    result = agent._act_ask_user(target="вопрос")
+
+    assert "не о чем спрашивать" in result.get("text", "")
+    assert agent.user_interaction.pending_questions == []
+
+
+def test_motivation_concept_skips_meta_words():
+    """curiosity.related_concepts начинается с «вопрос» — выбирается не он."""
+    from src.core.motivation.unified_motivation import UnifiedMotivationSystem
+
+    system = UnifiedMotivationSystem(DigitalBeing(name="HY"))
+
+    assert system._pick_relevant_concept(
+        ["вопрос", "понимать", "знать", "обучение"]
+    ) == "понимать"
+    assert system._pick_relevant_concept(["вопрос"]) == "вопрос"
+
+
 # ============================================================
 # Mute: «ты повторяешься» закрывает реально заданную тему
 # ============================================================

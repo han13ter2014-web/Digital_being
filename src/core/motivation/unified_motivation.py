@@ -806,13 +806,19 @@ class UnifiedMotivationSystem:
     def _pick_relevant_concept(self, related_concepts: List[str]) -> str:
         if not related_concepts:
             return "неизвестная область"
-        for concept in related_concepts:
+        is_meta = getattr(self.agent, "_is_meta_topic", None)
+        candidates = related_concepts
+        if callable(is_meta):
+            filtered = [c for c in related_concepts if not is_meta(c)]
+            if filtered:
+                candidates = filtered
+        for concept in candidates:
             if concept in self.agent.knowledge_base:
                 return concept
-        for concept in related_concepts:
+        for concept in candidates:
             if concept in getattr(self.agent, 'beliefs', {}):
                 return concept
-        return related_concepts[0]
+        return candidates[0]
     
     def get_status(self) -> dict:
         pressing = [n for n in self.needs.values() if n.is_pressing()]
