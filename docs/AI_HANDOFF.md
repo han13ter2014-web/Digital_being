@@ -62,6 +62,36 @@ importability) и cdbaee1 (core audit batch: deferred-stimulus retry cap,
 live will-rights wiring, KB snapshot restore, two-phase checkpoint apply,
 cancel-safe watchdog cycle end; +36 regression tests). CI на main
 зелёный. Для следующего релиза (v0.1.4) учесть обе партии.
+Оформление публичного репозитория (2026-11-01): README.md обновлён фактами
+v0.1.3, установлены description и topics репо, добавлены FUNDING.yml
+(DonationAlerts) и docs/RELEASE_VERIFICATION_v0.1.3.md (коммит cd4956d).
+Добавлены переводы README.en.md и README.zh-CN.md с оглаской о
+русскоязычности приложения, переключатель языков в README.md и секции
+скриншотов во все три README (коммиты e31e023 — PNG, 24c5822 — переводы
+и вставки). Реальные скриншоты Tk сняты скриптом из временного каталога —
+см. «Оформление публичного репозитория» ниже.
+
+## Оформление публичного репозитория (2026-11-01)
+
+- gh CLI 2.103.3: `C:\Users\GamePK\AppData\Local\gh-cli\bin` (в user PATH),
+  авторизация han13ter2014-web (device flow; надёжный запуск фонового
+  процесса — через WMI `Invoke-CimMethod Win32_Process Create`). GitHub MCP
+  для агента не подключён (403 на анонимную проверку, OAuth не прошёл).
+- Метаданные репо установлены через gh: description и topics
+  (artificial-life, autonomous-agents, digital-life, life-simulation,
+  python, simulation, tkinter, windows).
+- Скриншоты `docs/screenshots/01…06` — реальные снимки Tk-оболочки
+  (страницы now/graph/diary/activities/access/dialog). Съёмка: скрипт
+  `%TEMP%\rufp\ui_screenshots.py`, env `SHOT_DATA/SHOT_OUT/SHOT_PAGES/
+  SHOT_NEW`, изоляция данных `DIGITAL_BEING_DATA_DIR`, тестовая жизнь
+  «Саженец» в `%TEMP%\rufp\shots_data`, подмена `MainWindow._tk_mainloop`,
+  снимки PIL ImageGrab c `-topmost`. Урок: системная панель Task View
+  попадает в кадр (утечка приватности) — кадры 02/03 пересняты в
+  resume-режиме с Esc-очисткой оверлеев и без `focus_force`; после съёмки
+  кадры визуально проверять.
+- Переводы `README.en.md`, `README.zh-CN.md` с разделом об огласке
+  (приложение русскоязычное, переводы — задел на будущее, проект делает
+  один человек с помощью ИИ); переключатель языков в начале каждого README.
 
 ## Участок «Собеседник», ступень 1 (2026-11-01)
 
@@ -666,6 +696,9 @@ v1 и этап 7 закрыты. Следующий разумный шаг — 
 - для теста отсутствующего Effector явно делать
   `agent.delamain_effector = None`;
 - Tk-скриншот на Windows требует `root.attributes("-topmost", True)`;
+- ImageGrab может захватить системную панель Task View — после съёмки
+  визуально проверять кадры на системные оверлеи, пересъёмка в
+  resume-режиме с Esc-очисткой оверлеев;
 - полный набор без benchmarks занимает около 5 минут — не запускать его
   после каждого пробного редактирования, сначала использовать профильный набор.
 
