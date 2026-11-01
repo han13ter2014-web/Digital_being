@@ -32,8 +32,13 @@
 (мьют-окно, персистентность диалога, честный отказ, naming-фикс)
 выполнена и закоммичена (d254784, в origin/main).
 Установщик v0.1.3 собран: `installer_output/DigitalBeing_Setup_v0.1.3.exe`
-(34,2 MB, SHA-256 F850AAB181A2FE7002CAEF1E6739285783A1C801A4B840D714044048B21E2F13),
-ждёт ручного теста пользователя перед релизом. В бандл идёт чистый стартовый
+(34,2 MB, SHA-256 F850AAB181A2FE7002CAEF1E6739285783A1C801A4B840D714044048B21E2F13).
+Релиз v0.1.3 ОПУБЛИКОВАН на GitHub: Release «Digital Being v0.1.3» (Latest,
+2026-11-01 16:17 UTC, target main, asset DigitalBeing_Setup_v0.1.3.exe,
+release-notes в релизе). Ручная приёмка на реальной машине ВЫПОЛНЕНА
+пользователем 2026-11-01: установка поверх v0.1.1, выбор «Малютки»,
+переименование в «Омеллу», сверка знаний/вопросов/занятий.
+В бандл идёт чистый стартовый
 сид `data_bootstrap/knowledge_base.json` (47 статей, байт-идентичен версии
 bfcd6f1), а НЕ живой runtime-файл data/ рабочего агента; guard-тест
 `test_bundled_bootstrap_seed_exists_and_is_clean` в tests/test_stage2_knowledge.py.
@@ -49,10 +54,14 @@ seed lineage, Delamain goal bridge и общий на папку `life_state.jso
 `installer_output/DigitalBeing_Setup_v0.1.2.exe` (SHA-256
 `7FACC0113AD7078C5080F511047E984D42714AB7AF9047390E0BCD4306347F5D`;
 этот артефакт удалён при сборке v0.1.3 — актуальный установщик см. выше).
-Установка поверх v0.1.1 на реальной машине ещё не выполнена; после неё нужно
-выбрать «Малютку», переименовать в «Омеллу» и сверить знания, вопросы,
-занятия. Не выпускать установщик шире текущей проверки до этой приёмки
-(требование действует и для v0.1.3).
+Приёмка поверх v0.1.1 выполнена 2026-11-01 (см. выше); требование «не
+выпускать установщик шире текущей проверки» снято — релиз опубликован
+и принят. После релиза в main ушли два коммита, не вошедшие в v0.1.3:
+414ce72 (tray regression restore-check matches real pystray
+importability) и cdbaee1 (core audit batch: deferred-stimulus retry cap,
+live will-rights wiring, KB snapshot restore, two-phase checkpoint apply,
+cancel-safe watchdog cycle end; +36 regression tests). CI на main
+зелёный. Для следующего релиза (v0.1.4) учесть обе партии.
 
 ## Участок «Собеседник», ступень 1 (2026-11-01)
 
@@ -461,8 +470,9 @@ git log --oneline -8
 python -m pytest -q --ignore=tests/benchmarks
 ```
 
-Последний известный полный результат: **1610 passed, 2 skipped**, без
-benchmarks.
+Последний известный полный результат: **1735 passed, 2 skipped**, без
+benchmarks — до core audit cdbaee1 (его +36 тестов в счётчик не входят;
+пересчитать при следующем полном прогоне).
 
 Последняя приёмка v1 зафиксирована в `docs/ACCEPTANCE_RESULT_2026-10-30.md`:
 адресный continuity-набор — 23 passed, визуально проверены экраны «Сейчас»,
