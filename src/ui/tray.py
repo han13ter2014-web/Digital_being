@@ -36,9 +36,13 @@ try:
     import pystray
     from PIL import Image, ImageDraw, ImageFont
     _HAS_PYSTRAY = True
-except ImportError:
+except Exception as exc:
     _HAS_PYSTRAY = False
-    logger.warning("pystray недоступен — трей будет работать в режиме заглушки")
+    logger.warning(
+        "pystray недоступен (%s: %s) — трей будет работать в режиме заглушки",
+        type(exc).__name__,
+        exc,
+    )
 
 
 # ============================================================
