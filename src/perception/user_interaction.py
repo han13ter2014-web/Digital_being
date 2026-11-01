@@ -120,8 +120,15 @@ class UserInteraction:
         if not self.can_ask_question(cycle):
             return {"status": "failed", "reason": "Не могу задать вопрос сейчас (перезагрузка)"}
 
+        # id = максимум среди живых вопросов + 1, а не len(pending)+1:
+        # после восстановления из чекпоинта в очереди могут быть
+        # вопросы с большими id, и len-схема выдавала дубликаты — ответ
+        # попадал в чужой вопрос.
+        question_id = max(
+            (q["id"] for q in self.pending_questions), default=0
+        ) + 1
         question_entry = {
-            "id": len(self.pending_questions) + 1,
+            "id": question_id,
             "question": question,
             "context": context,
             "answered": False,
@@ -510,6 +517,115 @@ class UserInteraction:
             "acknowledged": True,
         })
         return {"status": "received", "cycle": cycle}
+
+    # ============================================================
+    # Персистентность: снапшот диалогового состояния для чекпоинта
+    # ============================================================
+
+    def to_checkpoint_dict(self) -> dict:
+        """Снапшот диалогового состояния: разговор переживает рестарт.
+
+        Сохраняется история вопросов-ответов и все ожидающие вопросы с
+        полями цепочек сложных вопросов (complex/sub) — иначе после
+        рестарта сущность забывала разговор, а синтез цепочки ломался
+        на середине. Плюс оба маркера цикла: кулдаун вопросов и «когда
+        пользователь писал последний раз» (детектор тишины).
+        """
+        return {
+            "question_history": [
+                dict(entry) for entry in self.question_history[-50:]
+            ],
+            "pending_questions": [
+                {
+                    "id": q["id"],
+                    "question": q["question"],
+                    "context": q.get("context", ""),
+                    "cycle": int(q.get("cycle", 0)),
+                    "priority": q.get("priority", "medium"),
+                    "complex_question": q.get("complex_question"),
+                    "sub_questions": list(q.get("sub_questions") or []),
+                    "sub_question_index": int(q.get("sub_question_index", 0)),
+                    "sub_answers": dict(q.get("sub_answers") or {}),
+                }
+                for q in self.pending_questions
+            ],
+            "last_question_cycle": int(self.last_question_cycle),
+            "last_user_message_cycle": (
+                int(self._last_user_message_cycle)
+                if self._last_user_message_cycle is not None else None
+            ),
+        }
+
+    def restore_from_checkpoint(self, data) -> None:
+        """Восстановить диалоговое состояние из снапшота чекпоинта.
+
+        Битые записи пропускаются, отвечённые ожидающие вопросы не
+        восстанавливаются. История и очередь заменяются целиком:
+        восстановление идёт в свежий агент.
+        """
+        if not isinstance(data, dict):
+            return
+
+        saved_history = data.get("question_history")
+        if isinstance(saved_history, list):
+            restored = []
+            for entry in saved_history[-50:]:
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                if not question:
+                    continue
+                cycle = entry.get("cycle", 0)
+                restored.append({
+                    "question": question,
+                    "answer": entry.get("answer"),
+                    "context": str(entry.get("context") or ""),
+                    "cycle": int(cycle) if isinstance(cycle, (int, float)) and not isinstance(cycle, bool) else 0,
+                    "priority": str(entry.get("priority") or "medium"),
+                })
+            self.question_history = restored
+
+        saved_pending = data.get("pending_questions")
+        if isinstance(saved_pending, list):
+            restored_pending = []
+            for entry in saved_pending:
+                if not isinstance(entry, dict):
+                    continue
+                question = str(entry.get("question") or "").strip()
+                if not question or entry.get("answered"):
+                    continue
+                raw_id = entry.get("id")
+                cycle = entry.get("cycle", 0)
+                restored_pending.append({
+                    "id": (
+                        int(raw_id)
+                        if isinstance(raw_id, (int, float))
+                        and not isinstance(raw_id, bool)
+                        else max(
+                            (q["id"] for q in restored_pending), default=0
+                        ) + 1
+                    ),
+                    "question": question,
+                    "context": str(entry.get("context") or ""),
+                    "answered": False,
+                    "answer": None,
+                    "cycle": int(cycle) if isinstance(cycle, (int, float)) and not isinstance(cycle, bool) else 0,
+                    "priority": str(entry.get("priority") or "medium"),
+                    "complex_question": entry.get("complex_question"),
+                    "sub_questions": list(entry.get("sub_questions") or []),
+                    "sub_question_index": int(entry.get("sub_question_index") or 0),
+                    "sub_answers": dict(entry.get("sub_answers") or {}),
+                })
+            if restored_pending:
+                self.pending_questions = restored_pending
+
+        last_question = data.get("last_question_cycle")
+        if isinstance(last_question, (int, float)) and not isinstance(last_question, bool):
+            self.last_question_cycle = int(last_question)
+
+        last_message = data.get("last_user_message_cycle")
+        if isinstance(last_message, (int, float)) and not isinstance(last_message, bool):
+            self._last_user_message_cycle = int(last_message)
 
     # ============================================================
     # НОВОЕ: Quiet Hours — настройки «не беспокоить в ...»

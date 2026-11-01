@@ -24,6 +24,7 @@ from typing import Optional, Tuple
 
 ACT_ANSWER = "answer"
 ACT_ASK_ABOUT_SELF = "ask_about_self"
+ACT_REQUEST = "request"
 ACT_SOCIAL = "social"
 ACT_UNKNOWN = "unknown"
 
@@ -55,6 +56,53 @@ _ABOUT_SELF_MARKERS = (
     "что ты изучаешь",
     "что изучаешь",
     "что ты сейчас изучаешь",
+)
+
+
+# Просьбы совершить действие («нарисуй кота», «спой», «Опиши свой
+# день») сущность выполнить не может: нет тела, голоса и холста.
+# Живой прогон 2026-11-01: «Опиши свой день.» уходил в изучение
+# концепта («Не нашел файл для 'Опиши свой день.'») — выдумка вместо
+# честного отказа. Проверяются после вопросов о себе: «опиши, что ты
+# изучаешь» — вопрос о себе, а не просьба. Слова-действия, которые
+# сущность УМЕЕТ (писать код и файлы, предлагать имена, цели, планы),
+# в таблицу не входят, а guard отсекает просьбы к реальным умениям:
+# честный «не умею» там был бы ложью. Границы слов обязательны:
+# «спой» не должен ловить «спойлер». Фразы сравниваются после
+# замены «ё»→«е», чтобы ловить оба написания.
+_REQUEST_GUARD_RE = re.compile(
+    r"\b(имя|имени|ник|название|цель|цели|план[аы]?)\b",
+    re.IGNORECASE,
+)
+
+_REQUEST_UNACHIEVABLE_RE = re.compile(
+    r"\b(нарисуй|спойте|спой|спляши|станцуй|потанцуй|танцуй|"
+    r"изобрази|сфотографируй|сфоткай|придумай)\b",
+    re.IGNORECASE,
+)
+
+_REQUEST_PHRASES = (
+    "опиши свой день",
+    "опиши день",
+    "опиши свои",
+    "опиши что видишь",
+    "опиши что чувствуешь",
+    "опиши что слышишь",
+    "опиши что ты видишь",
+    "опиши что ты чувствуешь",
+    "опиши что ты слышишь",
+    "опиши свое настроение",
+    "покажи себя",
+    "покажи лицо",
+    "покажи фото",
+    "покажи картинку",
+    "покажи как танцуешь",
+    "покажи как поешь",
+)
+
+_REQUEST_PHRASE_RE = re.compile(
+    "|".join(re.escape(phrase) for phrase in _REQUEST_PHRASES),
+    re.IGNORECASE,
 )
 
 
@@ -141,11 +189,37 @@ def classify_user_text(text) -> DialogueAct:
         if marker in normalized:
             return DialogueAct(ACT_ASK_ABOUT_SELF, marker)
 
+    # Просьбы о невозможном — после вопросов о себе и до социальной
+    # речи. Сравнение по тексту со заменой «ё»→«е» и вынесенными
+    # запятыми («Опиши, что чувствуешь?» — та же просьба, что без
+    # запятой; запятая не должна ломать фразу).
+    if not _REQUEST_GUARD_RE.search(normalized):
+        folded = normalized.replace("ё", "е")
+        speakable = " ".join(folded.replace(",", " ").split())
+        match = (
+            _REQUEST_UNACHIEVABLE_RE.search(speakable)
+            or _REQUEST_PHRASE_RE.search(speakable)
+        )
+        if match is not None:
+            return DialogueAct(ACT_REQUEST, match.group(0).lower())
+
     for marker in _SOCIAL_MARKERS:
         if marker in normalized:
             return DialogueAct(ACT_SOCIAL, marker)
 
     return DialogueAct(ACT_UNKNOWN)
+
+
+# Ввод без единой буквы («🙂🙂🙂», «12345», «!!!») — не речь. Раньше
+# он уходил в очередь стимулов и изучался как концепт («Не нашел файл
+# для '🙂🙂🙂'»). Цифры без букв тоже шум: вопросы сущности ждут
+# словесного ответа.
+_LETTER_RE = re.compile(r"[а-яёa-z]", re.IGNORECASE)
+
+
+def is_noise_input(text) -> bool:
+    """True, если во вводе нет ни одной буквы (эмодзи, цифры, знаки)."""
+    return _LETTER_RE.search(str(text or "")) is None
 
 
 # «Собеседник-5»: формула «X — это Y» — способ человека объяснить тему
