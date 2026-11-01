@@ -2,6 +2,8 @@
 
 ![CI](https://github.com/han13ter2014-web/Digital_being/actions/workflows/ci.yml/badge.svg)
 
+[Русский](README.md) | [English](README.en.md) | [中文](README.zh-CN.md)
+
 > Цифровое существо, которое живёт, помнит, выбирает, действует в границах и
 > сохраняет историю.
 
@@ -54,6 +56,19 @@ python main.py --interval step
   - «Занятия»;
   - «Доступы»;
   - «Диалог».
+
+## Скриншоты
+
+Реальные снимки оболочки Tk (короткоживущее тестовое состояние в изолированном
+каталоге данных):
+
+| «Сейчас» | «Карта жизни» |
+|---|---|
+| ![Окно «Сейчас»](docs/screenshots/01_now.png) | ![Карта жизни](docs/screenshots/02_life_map.png) |
+| «Дневник» | «Занятия» |
+| ![Дневник](docs/screenshots/03_diary.png) | ![Занятия](docs/screenshots/04_activities.png) |
+| «Доступы» | «Диалог» |
+| ![Доступы](docs/screenshots/05_access.png) | ![Диалог](docs/screenshots/06_dialog.png) |
 
 ## Главный принцип
 
