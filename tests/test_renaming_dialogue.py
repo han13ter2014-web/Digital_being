@@ -345,6 +345,60 @@ async def test_gate_completed_renames_only_on_real_proposal():
     assert nd.phase == NamingDialogue.PHASE_RENAMING_PENDING
 
 
+@pytest.mark.asyncio
+async def test_gate_completed_request_is_not_a_name_proposal():
+    """«Спой песню!» в фазе completed — не имя: текст идёт обычными дверями.
+
+    Живой прогон 2026-11-01: короткий императив эвристика принимала за
+    предложение имени, и сущность предлагала переименовать себя вместо
+    честного отказа.
+    """
+    nd = _completed_dialogue()
+    agent = _NamingAgent(
+        name="Тэсс", cycle_count=7, attachment=None, naming_dialogue=nd,
+    )
+    runner = _runner(agent)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Спой песню!"})
+    )
+
+    assert agent.name == "Тэсс"
+    assert nd.phase == NamingDialogue.PHASE_COMPLETED
+    texts = [
+        call.args[1].get("text", "")
+        for call in runner.bus.publish.call_args_list
+    ]
+    assert any("не умею" in t for t in texts)
+    assert not any("переименовать" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_gate_renaming_pending_request_cancels_and_refuses():
+    """Просьба при переспросе имени снимает кандидат и получает отказ."""
+    nd = _completed_dialogue()
+    nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
+    nd._rename_candidate = "Омелла"
+    agent = _NamingAgent(
+        name="Тэсс", cycle_count=8, attachment=None, naming_dialogue=nd,
+    )
+    runner = _runner(agent)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Нарисуй кота"})
+    )
+
+    assert agent.name == "Тэсс"
+    assert nd.phase == NamingDialogue.PHASE_COMPLETED
+    assert not nd._rename_candidate
+    texts = [
+        call.args[1].get("text", "")
+        for call in runner.bus.publish.call_args_list
+    ]
+    assert any("не умею" in t for t in texts)
+    assert not any("переименовать" in t for t in texts)
+
+
 async def agent_naming_gate(agent, text):
     runner = _runner(agent)
     return await runner._handle_naming_phase(agent.naming_dialogue, text)

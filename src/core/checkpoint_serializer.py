@@ -26,6 +26,7 @@ checkpoint_serializer.py — сериализация/десериализаци
       "naming_dialogue_phase": <str>,
       "naming_dialogue_history": <list>,
       "open_questions": <list>,
+      "user_interaction": <dict | None>,  # история и ожидающие вопросы диалога
     }
 
 Использование:
@@ -158,6 +159,15 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         # рестарта сущность не начинает повторяться.
         "shared_topics": dict(
             getattr(agent, "_shared_topics", {}) or {}
+        ),
+        # «Собеседник»: диалоговое состояние — история вопросов-ответов
+        # и ожидающие вопросы с полями цепочек сложных вопросов. Без
+        # них после рестарта сущность забывает разговор, а синтез
+        # цепочки ломается на середине.
+        "user_interaction": (
+            agent.user_interaction.to_checkpoint_dict()
+            if getattr(agent, "user_interaction", None) is not None
+            else None
         ),
         # NEW: Интероцепция
         "interoception": getattr(agent, 'interoception', None) and {
@@ -466,6 +476,16 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             if isinstance(cycle, (int, float)) and not isinstance(cycle, bool):
                 restored_shared[str(topic)] = int(cycle)
         agent._shared_topics = restored_shared
+
+    # «Собеседник»: диалоговое состояние переживает рестарт — сущность
+    # помнит разговор, ожидающие вопросы дожидаются ответа, а цепочка
+    # сложного вопроса продолжается с места остановки.
+    saved_interaction = state.get("user_interaction")
+    if (
+        isinstance(saved_interaction, dict)
+        and getattr(agent, "user_interaction", None) is not None
+    ):
+        agent.user_interaction.restore_from_checkpoint(saved_interaction)
 
     # История попыток нужна для продолжения стратегии, а не нового старта.
     saved_questions = state.get("open_questions") or []

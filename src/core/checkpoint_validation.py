@@ -321,6 +321,41 @@ def validate_checkpoint_state(state) -> None:
             if not isinstance(topic, str):
                 _fail("shared_topics", "expected string keys")
             _integer(cycle, f"shared_topics.{topic}", nonnegative=True)
+    if state.get("user_interaction") is not None:
+        interaction = _dict(state["user_interaction"], "user_interaction")
+        for index, entry in enumerate(
+            _list(
+                interaction.get("question_history", []),
+                "user_interaction.question_history",
+            )
+        ):
+            path = f"user_interaction.question_history[{index}]"
+            _dict(entry, path)
+            for field in ("question", "answer"):
+                if not isinstance(entry.get(field), str):
+                    _fail(f"{path}.{field}", "expected a string")
+            if "cycle" in entry:
+                _integer(entry["cycle"], f"{path}.cycle", nonnegative=True)
+        for index, question in enumerate(
+            _list(
+                interaction.get("pending_questions", []),
+                "user_interaction.pending_questions",
+            )
+        ):
+            path = f"user_interaction.pending_questions[{index}]"
+            _dict(question, path)
+            if not isinstance(question.get("question"), str):
+                _fail(f"{path}.question", "expected a string")
+            if "id" in question:
+                _convertible_int(question["id"], f"{path}.id")
+            for field in ("cycle", "sub_question_index"):
+                if field in question:
+                    _integer(question[field], f"{path}.{field}", nonnegative=True)
+            if "sub_answers" in question:
+                _dict(question["sub_answers"], f"{path}.sub_answers")
+        for field in ("last_question_cycle", "last_user_message_cycle"):
+            if interaction.get(field) is not None:
+                _integer(interaction[field], f"user_interaction.{field}")
     if state.get("open_questions") is not None:
         for index, question in enumerate(_list(state["open_questions"], "open_questions")):
             path = f"open_questions[{index}]"

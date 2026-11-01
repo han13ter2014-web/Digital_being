@@ -52,9 +52,11 @@ from src.core.paths import data_path
 from src.core.agent import AgentDeadSignal
 from src.core.dialogue_acts import (
     ACT_ASK_ABOUT_SELF,
+    ACT_REQUEST,
     ACT_SOCIAL,
     classify_user_text,
     extract_definition,
+    is_noise_input,
 )
 
 
@@ -299,6 +301,45 @@ class AgentRunner:
                 )
             return
 
+        # Просьбы о невозможном («нарисуй», «спой», «Опиши свой день») —
+        # честный отказ вместо выдумки или изучения концепта.
+        if act.kind == ACT_REQUEST:
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            response = self._format_request_refusal()
+            if response:
+                await self.bus.publish(
+                    Events.AGENT_THOUGHT,
+                    {"text": response, "cycle": self.agent.cycle_count},
+                    source="dialogue_acts",
+                    priority=1,
+                )
+            return
+
+        # Ввод без букв («🙂🙂🙂», «!!!») — не речь: не ответ и не
+        # материал. Короткий честный ответ, вопрос сущности остаётся
+        # открытым.
+        if is_noise_input(text):
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            response = (
+                "В твоём сообщении нет букв — я умею читать только слова. "
+                "Напиши текстом, и я отвечу."
+            )
+            await self.bus.publish(
+                Events.AGENT_THOUGHT,
+                {"text": response, "cycle": self.agent.cycle_count},
+                source="dialogue_acts",
+                priority=1,
+            )
+            return
+
         # Социальная речь — не ответ и не учебный материал.
         if act.kind == ACT_SOCIAL:
             if interaction is not None:
@@ -435,6 +476,21 @@ class AgentRunner:
                 priority=1,
             )
 
+    def _extract_name_proposal_guarded(self, text: str):
+        """Имя из реплики, если это предложение имени — не просьба.
+
+        Живой прогон 2026-11-01: «Спой песню!» (2 слова) эвристика
+        именования принимала за предложение имени — сущность предлагала
+        переименовать себя вместо честного отказа на просьбу. Просьбы
+        (ACT_REQUEST) именем не являются; остальные акты, включая
+        «пусть тебя зовут X», работают как раньше.
+        """
+        from src.core.name_proposal import extract_name_proposal
+
+        if classify_user_text(text).kind == ACT_REQUEST:
+            return None
+        return extract_name_proposal(text)
+
     async def _handle_naming_phase(self, naming, text: str) -> bool:
         """Пропустить текст через NamingDialogue по фазе.
 
@@ -443,7 +499,6 @@ class AgentRunner:
         имени (осознанное переименование): остальная речь — и ответы
         «да/нет/хорошо» без активного диалога — идёт обычными дверями.
         """
-        from src.core.name_proposal import extract_name_proposal
         from src.core.subsystems.naming_dialogue import classify_confirmation
 
         phase = getattr(naming, "phase", None)
@@ -452,7 +507,7 @@ class AgentRunner:
         if phase == "completed":
             if classify_confirmation(text) != "unknown":
                 return False
-            proposed = extract_name_proposal(text)
+            proposed = self._extract_name_proposal_guarded(text)
             if proposed is None:
                 return False
             result = self.agent.propose_name(proposed, cycle=cycle)
@@ -472,7 +527,7 @@ class AgentRunner:
                 result = naming.cancel_rename(agent=self.agent, cycle=cycle)
                 await self._publish_naming_result(result, text)
                 return True
-            proposed = extract_name_proposal(text)
+            proposed = self._extract_name_proposal_guarded(text)
             if proposed is not None:
                 result = self.agent.propose_name(proposed, cycle=cycle)
                 await self._publish_naming_result(result, proposed)
@@ -493,7 +548,7 @@ class AgentRunner:
                 await self._publish_naming_result(result, text)
                 return True
 
-        proposed = extract_name_proposal(text)
+        proposed = self._extract_name_proposal_guarded(text)
         if proposed is not None:
             result = self.agent.propose_name(proposed, cycle=cycle)
             await self._publish_naming_result(result, proposed)
@@ -590,6 +645,20 @@ class AgentRunner:
                 f"К теме «{muted}» сам больше не вернусь."
             )
         return "Ты прав — вопрос снимаю и сам к нему больше не вернусь."
+
+    def _format_request_refusal(self) -> str:
+        """Честный отказ на просьбу о невозможном — без выдуманных умений.
+
+        «Собеседник» (верификация 2026-11-01): «Опиши свой день.» и
+        «нарисуй» раньше уходили в изучение концептов («Не нашел файл
+        для…»). Сущность не рисует, не поёт и не танцует — и говорит
+        об этом прямо, предлагая то, что действительно умеет.
+        """
+        return (
+            "Честно: этого я не умею. У меня нет тела, голоса и холста — "
+            "только циклы, память и наши тексты. Могу ответить о себе, "
+            "выучить то, что ты расскажешь, и задать вопрос в ответ."
+        )
 
     def _format_about_self_reply(self) -> str:
         """Честный рассказ о себе из read-only Core — без выдумки.

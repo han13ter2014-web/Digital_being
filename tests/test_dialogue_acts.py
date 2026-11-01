@@ -12,10 +12,12 @@ import pytest
 from src.core.dialogue_acts import (
     ACT_ASK_ABOUT_SELF,
     ACT_ANSWER,
+    ACT_REQUEST,
     ACT_SOCIAL,
     ACT_UNKNOWN,
     classify_user_text,
     extract_definition,
+    is_noise_input,
 )
 
 
@@ -57,6 +59,21 @@ from src.core.dialogue_acts import (
         # === тепло ===
         ("Скучаю по тебе.", ACT_SOCIAL),
         ("Спасибо тебе за разговор.", ACT_SOCIAL),
+        # === просьбы о невозможном: честный отказ, не материал ===
+        # живой прогон 2026-11-01: «Опиши свой день.» уходил в концепт
+        ("Опиши свой день.", ACT_REQUEST),
+        ("Нарисуй кота, пожалуйста.", ACT_REQUEST),
+        ("Спой песню!", ACT_REQUEST),
+        ("Спойте что-нибудь.", ACT_REQUEST),
+        ("Станцуй для меня.", ACT_REQUEST),
+        ("Потанцуй со мной.", ACT_REQUEST),
+        ("Изобрази дракона.", ACT_REQUEST),
+        ("Покажи себя.", ACT_REQUEST),
+        ("Придумай сказку.", ACT_REQUEST),
+        ("Опиши, что ты чувствуешь?", ACT_REQUEST),
+        # ё/е оба написания
+        ("Опиши своё настроение.", ACT_REQUEST),
+        ("Опиши свое настроение.", ACT_REQUEST),
         # === явные ответные формулы ===
         ("Мой ответ: тишина и покой.", ACT_ANSWER),
         ("ответ такой: данные важнее скорости", ACT_ANSWER),
@@ -83,6 +100,51 @@ def test_matched_marker_is_reported():
     assert act.kind == ACT_SOCIAL
     # первым в таблице стоит более длинный маркер — он и отчёжается
     assert act.matched_marker == "уже отвечал"
+
+
+def test_request_boundaries():
+    """Ф4: таблица просьб не ловит реальные умения и чужие слова.
+
+    Сущность умеет писать код и файлы, предлагать имена/цели/планы —
+    честный «не умею» там был бы ложью. «Спой» не должен ловить
+    «спойлер», а «опиши» без невозможного объекта — уходить в старый
+    путь (из вопроса может вырасти честный ответ из знаний).
+    """
+    assert classify_user_text("Спойлер к фильму!").kind == ACT_UNKNOWN
+    assert classify_user_text("Опиши тумелость.").kind == ACT_UNKNOWN
+    assert classify_user_text("Напиши функцию сортировки.").kind == ACT_UNKNOWN
+    assert classify_user_text("Придумай имя получше.").kind == ACT_UNKNOWN
+    assert classify_user_text("Придумай план на день.").kind == ACT_UNKNOWN
+    assert (
+        classify_user_text("Опиши, что ты сейчас изучаешь.").kind
+        == ACT_ASK_ABOUT_SELF
+    )
+
+
+def test_request_matched_marker_is_word():
+    act = classify_user_text("Нарисуй кота!")
+    assert act.kind == ACT_REQUEST
+    assert act.matched_marker == "нарисуй"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("🙂🙂🙂", True),
+        ("!!!", True),
+        ("12345", True),
+        ("...", True),
+        ("   ", True),
+        ("", True),
+        (None, True),
+        ("Привет!", False),
+        ("hello, how are you?", False),
+        ("42 — ответ", False),
+    ],
+)
+def test_is_noise_input(text, expected):
+    """Без букв — шум: раньше «🙂🙂🙂» изучался как концепт."""
+    assert is_noise_input(text) is expected
 
 
 def test_unknown_has_no_marker():

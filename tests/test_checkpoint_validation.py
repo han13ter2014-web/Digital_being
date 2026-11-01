@@ -14,7 +14,12 @@ from src.core.checkpoint_validation import validate_checkpoint_state
     "active_goal": "existing agent goal",
 }, {"meta_learning": {"best_config": None, "best_fitness": None}}, {
     "meta_learning": {"best_fitness": float("-inf")},
-}])
+}, {"user_interaction": {
+    "question_history": [{"question": "Q", "answer": "A", "cycle": 5}],
+    "pending_questions": [{"id": 1, "question": "Q2"}],
+    "last_question_cycle": -50,
+    "last_user_message_cycle": None,
+}}])
 def test_legacy_omissions_and_sentinels_are_valid(state):
     assert validate_checkpoint_state(state) is None
 
@@ -69,6 +74,14 @@ def test_legacy_omissions_and_sentinels_are_valid(state):
     ({"motivation": {"drives": {"exploration": {"activation_count": "bad"}}}}, "motivation.drives.exploration.activation_count"),
     ({"motivation": {"goal_history": {}}}, "motivation.goal_history"),
     ({"open_questions": [None]}, "open_questions[0]"),
+    ({"user_interaction": {"question_history": [{"question": 1, "answer": "A"}]}}, "user_interaction.question_history[0].question"),
+    ({"user_interaction": {"question_history": [{"question": "Q", "answer": None}]}}, "user_interaction.question_history[0].answer"),
+    ({"user_interaction": {"question_history": [{"question": "Q", "answer": "A", "cycle": -1}]}}, "user_interaction.question_history[0].cycle"),
+    ({"user_interaction": {"pending_questions": [{"id": "x", "question": "Q"}]}}, "user_interaction.pending_questions[0].id"),
+    ({"user_interaction": {"pending_questions": [{"question": "Q", "cycle": 1.5}]}}, "user_interaction.pending_questions[0].cycle"),
+    ({"user_interaction": {"pending_questions": [{"question": "Q", "sub_answers": []}]}}, "user_interaction.pending_questions[0].sub_answers"),
+    ({"user_interaction": {"last_question_cycle": 1.5}}, "user_interaction.last_question_cycle"),
+    ({"user_interaction": {"last_user_message_cycle": False}}, "user_interaction.last_user_message_cycle"),
 ])
 def test_invalid_fields_report_their_path(state, path):
     with pytest.raises(ValueError) as error:

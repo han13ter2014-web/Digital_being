@@ -273,3 +273,60 @@ async def test_social_door_respects_naming_phase_priority(monkeypatch):
     )
 
     assert agent.name == "Мелория"
+
+
+@pytest.mark.asyncio
+async def test_request_gets_honest_refusal_not_learning_material():
+    """Ф4: «Нарисуй кота» — честное «не умею», не концепт и не выдумка."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Нарисуй кота, пожалуйста."})
+    )
+
+    assert ui.get_last_user_message_cycle() == agent.cycle_count
+    queue = getattr(runner, "_pending_user_messages", None)
+    assert queue is None or queue.qsize() == 0
+    texts = [d.get("text", "") for d in _thoughts(bus)]
+    reply = next(t for t in texts if "не умею" in t)
+    assert "тела" in reply
+    assert "Не нашел файл" not in reply
+
+
+@pytest.mark.asyncio
+async def test_request_with_pending_keeps_question_open():
+    """Ф4: просьба о невозможном не закрывает вопрос сущности."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Спой песню!"})
+    )
+
+    assert ui.get_pending_question() is not None
+    assert agent._user_explained_topics == {}
+    texts = [d.get("text", "") for d in _thoughts(bus)]
+    assert any("не умею" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_noise_input_gets_honest_reply_not_learning_material():
+    """Ф4: «🙂🙂🙂» — честный ответ «нет букв», не материал для изучения."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "🙂🙂🙂"})
+    )
+
+    # вопрос сущности остаётся открытым — эмодзи не ответ
+    assert ui.get_pending_question() is not None
+    assert ui.get_last_user_message_cycle() == agent.cycle_count
+    queue = getattr(runner, "_pending_user_messages", None)
+    assert queue is None or queue.qsize() == 0
+    texts = [d.get("text", "") for d in _thoughts(bus)]
+    reply = next(t for t in texts if "нет букв" in t)
+    assert "Напиши текстом" in reply
