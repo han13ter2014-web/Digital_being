@@ -147,3 +147,59 @@ def test_restore_ignores_non_dict_payload():
     ui.restore_from_checkpoint("мусор")
     assert ui.question_history == []
     assert ui.pending_questions == []
+
+
+def test_ask_user_skips_identical_pending_question():
+    """Идентичный неотвеченный вопрос не встаёт в очередь дважды:
+    возвращается duplicate с id уже висящего вопроса. После ответа
+    тот же вопрос можно задать заново."""
+    ui = DigitalBeing(name="DD").user_interaction
+    context = "самостоятельный вопрос по теме: понимать"
+    question = "Я разбираюсь с темой «понимать» — объяснишь?"
+
+    first = ui.ask_user(question, context=context, cycle=10)
+    assert first["status"] == "queued"
+
+    second = ui.ask_user(question, context=context, cycle=100)
+    assert second["status"] == "duplicate"
+    assert second["id"] == first["id"]
+    assert len(ui.pending_questions) == 1
+
+    ui.submit_answer(first["id"], "Понимать — это постигать смысл", cycle=101)
+    third = ui.ask_user(question, context=context, cycle=200)
+    assert third["status"] == "queued"
+
+
+def test_restore_drops_meta_topic_and_duplicate_pending():
+    """Миграция: самостоятельные вопросы про метаслова диалога
+    («вопрос», «темы»...) и идентичные дубликаты не восстанавливаются
+    — не напоминают вечно после рестарта. Обычные темы живут, проверка
+    по целым словам: «ответственный» метасловом не считается."""
+    ui = DigitalBeing(name="DM").user_interaction
+    ui.restore_from_checkpoint({
+        "pending_questions": [
+            {"id": 1, "question": "Расскажи про «вопрос»?",
+             "context": "самостоятельный вопрос по теме: вопрос",
+             "cycle": 900},
+            {"id": 2, "question": "Расскажи про «вопрос»?",
+             "context": "самостоятельный вопрос по теме: вопрос",
+             "cycle": 950},
+            {"id": 3, "question": "Расскажи про «темы»?",
+             "context": "самостоятельный вопрос по теме: темы",
+             "cycle": 1000},
+            {"id": 4, "question": "Я разбираюсь с темой «понимать»...",
+             "context": "самостоятельный вопрос по теме: понимать",
+             "cycle": 1100},
+            {"id": 5, "question": "Я разбираюсь с темой «понимать»...",
+             "context": "самостоятельный вопрос по теме: понимать",
+             "cycle": 1150},
+            {"id": 6, "question": "Что значит ответственный?",
+             "context": "самостоятельный вопрос по теме: ответственный",
+             "cycle": 1200},
+        ],
+    })
+
+    assert [q["id"] for q in ui.pending_questions] == [4, 6]
+    assert ui.get_pending_question()["question"].startswith(
+        "Я разбираюсь с темой «понимать»"
+    )
