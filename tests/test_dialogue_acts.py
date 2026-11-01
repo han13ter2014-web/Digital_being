@@ -50,6 +50,10 @@ from src.core.dialogue_acts import (
         ("Чем занимаешься?", ACT_ASK_ABOUT_SELF),
         ("Чем ты занята?", ACT_ASK_ABOUT_SELF),
         ("Чем занята?", ACT_ASK_ABOUT_SELF),
+        # живой прогон 2026-11-01: без маркера вопрос уходил в концепт
+        ("Что ты сейчас изучаешь?", ACT_ASK_ABOUT_SELF),
+        ("Что ты изучаешь?", ACT_ASK_ABOUT_SELF),
+        ("Что изучаешь?", ACT_ASK_ABOUT_SELF),
         # === тепло ===
         ("Скучаю по тебе.", ACT_SOCIAL),
         ("Спасибо тебе за разговор.", ACT_SOCIAL),
