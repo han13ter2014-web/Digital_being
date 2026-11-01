@@ -13,6 +13,7 @@
 | [LIFE_LETTER.md](LIFE_LETTER.md) | сама Digital Being | кто ты, твои границы, права и правила |
 | [DECISION_NO_LLM_LIFE.md](DECISION_NO_LLM_LIFE.md) | архитектурное решение | почему жизнь работает без LLM |
 | [FUNDING.md](FUNDING.md) | поддержка проекта | зачем нужны донаты и на что они идут |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | участники проекта | архитектурные границы, процесс и команды проверок |
 
 ## Практика
 

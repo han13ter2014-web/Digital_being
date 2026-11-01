@@ -49,6 +49,15 @@ python main.py --interval step
 
 Run details, commands and settings: [docs/USAGE.md](docs/USAGE.md) (Russian).
 
+## System requirements
+
+- Windows 10 or newer (the installer is built with 10.0 as the minimum
+  version);
+- Python 3.10+ to run from source (CI checks 3.10–3.12);
+- Tkinter — included in the standard Python installer for Windows;
+- no network required: accesses are off by default, and the acceptance
+  scenario runs offline.
+
 ## What exists today
 
 - life cycles, energy, and safe resource boundaries;
@@ -90,6 +99,13 @@ described in [docs/DECISION_NO_LLM_LIFE.md](docs/DECISION_NO_LLM_LIFE.md) (Russi
 The interface does not draw invented connections, does not present waiting
 as finished work, and does not turn hypotheses into knowledge.
 
+## How this differs
+
+- the life loop is deterministic: no language models inside;
+- the shell only reads state: the UI cannot change the life;
+- actions toward the outside pass policy, approval, and sandbox;
+- claims are checkable: acceptance demos and 1700+ tests instead of promises.
+
 ## Acceptance demo
 
 An isolated end-to-end scenario lives in the project:
@@ -130,12 +146,49 @@ installed and verified on a real machine
 v1 is closed in the agreed limited scope; development continues with the
 "Interlocutor" track: honest dialogue, conversation memory, honest refusals.
 
+Near-term plans:
+
+- stage 1 of the "Interlocutor" was closed on 2026-11-01 with a 4/4
+  acceptance run;
+- stages 2–3 are already in the repository and await their acceptance runs;
+- v0.1.4 will bundle these post-release batches into a new installer.
+
 Last full test run: **1735 passed, 2 skipped**, no benchmarks
 (36 more regression tests were added afterwards; CI on `main` is green).
 
 The project does not claim to have proven consciousness or subjectivity. It
 builds a verifiable model of state, memory, choice, experience, and bounded
 action.
+
+## FAQ
+
+**Is this a wrapper around a language model?**
+No. The life loop runs without an LLM: state, choices, and actions are
+produced by a deterministic core.
+
+**Can it harm my system?**
+The executive loop is bounded: an action passes policy and approval, and
+the sandbox limits the effect. Accesses are off by default, and the shell
+is read-only.
+
+**Is this consciousness or AGI?**
+No, and it is not claimed. The project builds a verifiable model of state,
+memory, choice, and bounded action.
+
+**Does it need the internet?**
+No. The core lives locally; network accesses are off by default.
+
+**Why are the interface and documentation in Russian?**
+One person builds the project with AI assistants; the interface, dialogue,
+and deeper documents are Russian for now. The README is translated into
+English and Chinese.
+
+## Contributing
+
+Contributions are welcome. Architectural boundaries, the process, and check
+commands are described in [CONTRIBUTING.md](CONTRIBUTING.md) (Russian).
+Bugs and proposals — via
+[GitHub Issues](https://github.com/han13ter2014-web/Digital_being/issues).
 
 ## Support
 
