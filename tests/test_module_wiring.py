@@ -43,7 +43,10 @@ def test_all_src_modules_import():
 def test_tray_import_survives_broken_pystray(caplog):
     """pystray, падающий при импорте с НЕ-ImportError (на headless Linux
     бэкенд xorg бросает Xlib.error.DisplayNameError ещё на import
-    модуля), переводит трей в режим заглушки, а не роняет src.ui.tray."""
+    модуля), переводит трей в режим заглушки, а не роняет src.ui.tray.
+    После снятия поломки состояние модуля обязано совпасть с реальной
+    импортируемостью pystray в этом окружении (на headless-машинах
+    pystray остаётся недоступен — это норма, а не ошибка восстановления)."""
     import builtins
     import logging
 
@@ -69,7 +72,12 @@ def test_tray_import_survives_broken_pystray(caplog):
         builtins.__import__ = real_import
         importlib.reload(tray)
 
-    assert tray._HAS_PYSTRAY is True
+    try:
+        import pystray  # noqa: F401
+        _pystray_importable = True
+    except Exception:  # noqa: BLE001 — тот же класс отказа, что ловит guard
+        _pystray_importable = False
+    assert tray._HAS_PYSTRAY is _pystray_importable
 
 
 class _WiringRuntime:
