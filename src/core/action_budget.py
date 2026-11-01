@@ -229,6 +229,37 @@ class ActionBudget:
             capped=capped,
         )
 
+    def refund(self, amount: float, *, source: str = "refund") -> BudgetDecision:
+        """Вернуть часть списания (например, «урок» права на ошибку).
+
+        Энергия по-прежнему одна: возврат идёт через тот же сеттер
+        энергии с клампом в [0, max_energy]. Учёт списаний уменьшается
+        на фактически применённую сумму, чтобы статус не расходился
+        с энергией. Возврат не кэшируется и не считается «решением
+        о списании».
+        """
+        try:
+            requested = float(amount)
+        except (TypeError, ValueError):
+            requested = 0.0
+        if not math.isfinite(requested) or requested < 0.0:
+            requested = 0.0
+        before = self._read_energy()
+        after = max(0.0, min(self.max_energy, before + requested))
+        applied = after - before
+        if applied > 0.0:
+            self._write_energy(after)
+            self._spent_total = max(0.0, self._spent_total - applied)
+        return BudgetDecision(
+            allowed=True,
+            action_type="refund",
+            cost=applied,
+            energy_before=before,
+            energy_after=after,
+            reason="refund",
+            source=source,
+        )
+
     def status(self) -> Dict[str, Any]:
         """Снимок политики без побочных эффектов."""
 

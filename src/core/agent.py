@@ -11,6 +11,7 @@ from src.cognition.reflection_engine import ReflectionEngine
 from src.cognition.mental_models import MentalModel
 from src.cognition.thinking_pipeline import ThinkingPipeline
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
+from config.will_config import WILL_CONFIG
 from src.core.buffered_logger import get_logger
 from src.core.action_budget import ActionBudget
 from src.core.subsystems import (
@@ -299,6 +300,8 @@ class DigitalBeing:
         self.goals = []
         self.completed_goals = 0
         self.active_goal = None
+        # Стоимость последнего оплаченного действия (для права на ошибку).
+        self._last_action_cost = 0.0
         self.reflection_engine = ReflectionEngine()
         
         # === Загрузка родовых знаний (bootstrap) ===
@@ -1576,8 +1579,11 @@ class DigitalBeing:
                     f"Ответ: Бюджет не разрешает {action_type}: "
                     f"{decision.reason}"
                 )
+            # Стоимость реально списана — запоминаем для права на ошибку.
+            self._last_action_cost = float(decision.cost)
         else:
             self.energy -= cost
+            self._last_action_cost = float(cost)
 
         expectation_trial = None
         expectations = None
@@ -3429,6 +3435,128 @@ class DigitalBeing:
             value, reason, cycle=self.cycle_count
         )
 
+    # Способ действия → ценность, которую он может заработать.
+    # Ценность добавляется не по желанию, а когда собственный опыт
+    # агента реально подтвердил силу этого способа.
+    _METHOD_VALUE_MAP = {
+        "explore": "Исследование",
+        "decomposition": "Анализ",
+        "synthesis": "Синтез",
+        "know_answer": "Знание",
+        "ask_user": "Диалог",
+        "create_draft": "Творчество",
+        "play": "Игра",
+    }
+
+    def _absorb_action_failure(self, action: str, error: str) -> Optional[Dict]:
+        """Право на ошибку: часть оплаченной стоимости возвращается как урок.
+
+        Вызывается из autonomous_tick при неудачном действии. Возвращает
+        None, если оплачивать было нечего (и тогда журнальной записи
+        тоже нет: прощать нечего — не событие воли).
+        """
+        if not hasattr(self, "right_to_fail"):
+            return None
+        penalty = float(getattr(self, "_last_action_cost", 0.0) or 0.0)
+        if penalty <= 0:
+            return None
+        outcome = self.right_to_fail.normalize_failure(
+            str(action), str(error), penalty, cycle=self.cycle_count
+        )
+        forgiven = float(outcome.get("forgiven", 0.0) or 0.0)
+        if forgiven > 0:
+            budget = getattr(self, "action_budget", None)
+            if budget is not None:
+                budget.refund(forgiven, source="will_right_to_fail")
+            else:
+                self.energy = self.energy + forgiven
+        if hasattr(self, "will_registry"):
+            self.will_registry.record(
+                "fail_as_experience",
+                str(action),
+                str(outcome.get("lesson") or "ошибка засчитана как опыт"),
+                outcome="absorbed",
+                cycle=self.cycle_count,
+                meta={"penalty": penalty, "forgiven": forgiven},
+            )
+        return outcome
+
+    def _consider_will_risk(self, action: str, reason: str) -> Optional[Dict]:
+        """Воля к риску: значимая цель плюс запас энергии вопреки «stop».
+
+        Возвращает dict волевого акта или None, если риск неуместен
+        (нет значимой цели, тело не в запасе, кулдаун не прошёл).
+        """
+        if not hasattr(self, "will_to_risk") or not hasattr(self, "will_registry"):
+            return None
+        goal = getattr(self, "active_goal", None)
+        priority = (
+            str(goal.get("priority", "normal")).lower()
+            if isinstance(goal, dict) else "normal"
+        )
+        significance = {"high": 1.0, "normal": 0.6, "low": 0.3}.get(
+            priority, 0.6
+        )
+        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200) or 200)
+        ratio = (float(self.energy) / max_energy) if max_energy > 0 else 0.0
+        if not self.will_to_risk.should_take_risk(significance, ratio):
+            return None
+        raw_last_risk = getattr(self.will_registry, "_last_risk_cycle", -1)
+        last_risk = -1 if raw_last_risk is None else int(raw_last_risk)
+        if (
+            last_risk >= 0
+            and self.cycle_count - last_risk
+            < int(getattr(WILL_CONFIG, "MIN_CYCLES_BETWEEN_RISKS", 50))
+        ):
+            return None
+        entry = self.will_to_risk.take_risk(
+            str(action),
+            f"арбитр против («{reason}»), но цель значима, а тело в запасе",
+            cycle=self.cycle_count,
+        )
+        return {"action": str(action), "entry": entry}
+
+    def _maybe_evolve_values(self, cycle_count: int) -> Optional[Dict]:
+        """Эволюция ценностей: подтверждённый опытом способ — в ценности.
+
+        Порог и кулдауны: VALUE_FROM_EXPERIENCE_* (сила и число попыток
+        из method_preferences) и MIN_TIME_BETWEEN_VALUE_CHANGES (реестр).
+        """
+        if not hasattr(self, "value_evolution"):
+            return None
+        if not self.value_evolution.can_evolve(cycle_count):
+            return None
+        from src.cognition.method_preferences import strength as method_strength
+
+        history = getattr(self, "_method_preferences", {}) or {}
+        min_attempts = int(
+            getattr(WILL_CONFIG, "VALUE_FROM_EXPERIENCE_MIN_ATTEMPTS", 20)
+        )
+        min_strength = float(
+            getattr(WILL_CONFIG, "VALUE_FROM_EXPERIENCE_MIN_STRENGTH", 1.15)
+        )
+        best = None
+        for action, value in self._METHOD_VALUE_MAP.items():
+            entry = history.get(action)
+            if not isinstance(entry, dict):
+                continue
+            if int(entry.get("attempts", 0) or 0) < min_attempts:
+                continue
+            score = float(method_strength(self, action))
+            if score < min_strength:
+                continue
+            if best is None or score > best[0]:
+                best = (score, action, value)
+        if best is None:
+            return None
+        _, action, value = best
+        if value in self.value_evolution.current_values:
+            return None
+        return self.add_value(
+            value,
+            reason=f"опыт подтвердил: «{action}» — мой сильный способ действовать",
+        )
+
     def propose_dream(self, reason: str = "усталость") -> Dict:
         """Инициирует Сон разума — через диалог с пользователем.
 
@@ -3722,6 +3850,12 @@ class DigitalBeing:
                 result["warning"] = (
                     self.self_termination.get_warning_message()
                 )
+
+        # 5. Эволюция ценностей: способ, подтверждённый собственным
+        # опытом, может стать ценностью (критерий «изменение ценностей»
+        # становится достижимым живым путём, а не только вручную).
+        if hasattr(self, "value_evolution"):
+            result["value_evolution"] = self._maybe_evolve_values(cycle_count)
 
         return result
 
@@ -4375,10 +4509,32 @@ class DigitalBeing:
         # арбитр — «explore». Без нормализации проверка тупика смотрела бы
         # на другое имя и никогда не срабатывала.
         result["initial_arbitration"] = dict(result.get("arbitrator") or {})
-        if (result.get("arbitrator") or {}).get("verdict") == "stop":
-            result["action_refused"] = {"action": chosen_action,
-                                        "reason": result["arbitrator"].get("reasoning", "stop")}
-            chosen_action = "wait"
+        arbitrator_data = result.get("arbitrator") or {}
+        if arbitrator_data.get("verdict") == "stop":
+            # Воля вместо молчания: либо осознанный риск ради значимой
+            # цели, либо собственный отказ с записью в журнал воли.
+            # Legacy-путь («нет арбитра») — состояние системы, а не воля,
+            # поэтому он не порождает волевых актов.
+            risk_entry = None
+            will_applies = bool(chosen_action) and (
+                arbitrator_data.get("source") != "legacy_active_inference"
+            )
+            if will_applies:
+                risk_entry = self._consider_will_risk(
+                    chosen_action,
+                    str(arbitrator_data.get("reasoning", "stop")),
+                )
+            if risk_entry is not None:
+                result["will_risk_taken"] = risk_entry
+            else:
+                result["action_refused"] = {"action": chosen_action,
+                                            "reason": arbitrator_data.get("reasoning", "stop")}
+                if will_applies:
+                    result["will_refusal"] = self.defend_refusal(
+                        topic=str(chosen_action),
+                        reason=str(arbitrator_data.get("reasoning", "stop")),
+                    )
+                chosen_action = "wait"
         if chosen_action == "let_go":
             selected_intention = result.get("arbitrator") or {}
             result["autonomous_action"] = {"action": chosen_action,
@@ -4459,6 +4615,9 @@ class DigitalBeing:
             history_selection["action"] = chosen_action
             intention_entry = begin_intention(self, history_selection)
             self._last_action_outcome = None
+            # Прошлая стоимость не должна простить чужую ошибку: если
+            # исключение случится до списания, прощать будет нечего.
+            self._last_action_cost = 0.0
             try:
                 experiment_selected = (
                     result.get("arbitrator", {}).get("source") == "self_experiment"
@@ -4522,6 +4681,13 @@ class DigitalBeing:
                 success = True
                 if "error" in str(action_result).lower() or "fail" in str(action_result).lower():
                     success = False
+                if not success:
+                    # Право на ошибку: часть оплаченной стоимости — урок.
+                    absolution = self._absorb_action_failure(
+                        chosen_action, str(action_result)[:160]
+                    )
+                    if absolution:
+                        result["will_fail_absolution"] = absolution
                 
                 if hasattr(self, "motivation_system"):
                     try:
@@ -4553,6 +4719,9 @@ class DigitalBeing:
                 finish_intention(intention_entry, error=e)
                 get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
                 result["autonomous_action"] = {"action": chosen_action, "error": str(e)}
+                absolution = self._absorb_action_failure(chosen_action, str(e))
+                if absolution:
+                    result["will_fail_absolution"] = absolution
                 
                 # P1.2: Failed action - negative valence
                 if hasattr(self, "motivation_system"):
