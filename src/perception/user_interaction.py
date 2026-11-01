@@ -22,6 +22,42 @@ def _get_events_class():
         return None
 
 
+# Метаслова диалога — зеркало DigitalBeing._META_TOPIC_WORDS
+# (src/core/agent.py). Дублировано локально: perception не импортирует
+# core. При изменении множества в agent.py синхронизировать здесь —
+# на него опирается миграция чекпоинтов.
+_META_TOPIC_WORDS = frozenset({
+    "вопрос", "вопросы",
+    "тема", "темы",
+    "ответ", "ответы",
+    "сообщение", "сообщения",
+    "диалог", "диалоги",
+    "разговор", "разговоры",
+})
+
+_SELF_QUESTION_TOPIC_PREFIX = "самостоятельный вопрос по теме: "
+
+
+def _self_question_topic(context: str) -> str:
+    """Тема из контекста «самостоятельный вопрос по теме: {тема}»."""
+    text = str(context or "")
+    if _SELF_QUESTION_TOPIC_PREFIX in text:
+        return text.split(_SELF_QUESTION_TOPIC_PREFIX, 1)[1].strip()
+    return ""
+
+
+def _is_meta_topic_context(context: str) -> bool:
+    """Самостоятельный вопрос задан про метаслово диалога, а не про мир?
+
+    Проверка по целым словам, как agent._is_meta_topic: тема
+    «ответственный» — обычная, «вопрос» и «открытый вопрос» — метаслово.
+    """
+    topic = _self_question_topic(context)
+    if not topic:
+        return False
+    return any(word in topic.split() for word in _META_TOPIC_WORDS)
+
+
 class UserInteraction:
     """Обрабатывает взаимодействие между пользователем и агентом."""
 
@@ -117,6 +153,15 @@ class UserInteraction:
                 Передаётся по цепочке, чтобы синтез получил ровно ответы
                 этого сложного вопроса (без сканирования общей истории).
         """
+        # Идентичный неотвеченный вопрос уже в очереди — второй не
+        # добавляем. Старые сборки накапливали дубликаты (каждый
+        # кулдаун — новая запись), и после рестарта они вечно
+        # напоминали о себе, перехватывая светские реплики.
+        normalized_question = str(question).strip()
+        for existing in self.pending_questions:
+            if str(existing.get("question", "")).strip() == normalized_question:
+                return {"status": "duplicate", "id": existing["id"]}
+
         if not self.can_ask_question(cycle):
             return {"status": "failed", "reason": "Не могу задать вопрос сейчас (перезагрузка)"}
 
@@ -560,7 +605,9 @@ class UserInteraction:
         """Восстановить диалоговое состояние из снапшота чекпоинта.
 
         Битые записи пропускаются, отвечённые ожидающие вопросы не
-        восстанавливаются. История и очередь заменяются целиком:
+        восстанавливаются. Вопросы про метаслова диалога и идентичные
+        дубликаты отбрасываются (миграция после бага с накоплением).
+        История и очередь заменяются целиком:
         восстановление идёт в свежий агент.
         """
         if not isinstance(data, dict):
@@ -594,6 +641,18 @@ class UserInteraction:
                 question = str(entry.get("question") or "").strip()
                 if not question or entry.get("answered"):
                     continue
+                context = str(entry.get("context") or "")
+                # Миграция: старые сборки накапливали самостоятельные
+                # вопросы про метаслова диалога («вопрос», «тема», ...)
+                # и идентичные дубликаты. Такие записи не восстанавливаем,
+                # иначе после рестарта они вечно напоминают о себе.
+                if _is_meta_topic_context(context):
+                    continue
+                if any(
+                    str(q["question"]).strip() == question
+                    for q in restored_pending
+                ):
+                    continue
                 raw_id = entry.get("id")
                 cycle = entry.get("cycle", 0)
                 restored_pending.append({
@@ -606,7 +665,7 @@ class UserInteraction:
                         ) + 1
                     ),
                     "question": question,
-                    "context": str(entry.get("context") or ""),
+                    "context": context,
                     "answered": False,
                     "answer": None,
                     "cycle": int(cycle) if isinstance(cycle, (int, float)) and not isinstance(cycle, bool) else 0,
