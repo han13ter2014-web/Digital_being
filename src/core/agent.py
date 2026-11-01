@@ -2643,6 +2643,13 @@ class DigitalBeing:
         if interaction is None:
             return {"text": "Ответ: спросить некого — нет связи с человеком"}
 
+        if (
+            target is not None
+            and not self._recently_explained_by_user(target)
+            and str(target).strip().lower() in self._META_TOPIC_WORDS
+        ):
+            target = None
+
         target = target if target is not None else self._pick_exploration_target()
         if not target or not self._is_learnable(target):
             return {"text": "Ответ: не о чем спрашивать — всё понятно"}
