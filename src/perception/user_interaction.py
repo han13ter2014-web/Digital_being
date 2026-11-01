@@ -102,7 +102,8 @@ class UserInteraction:
 
     def ask_user(self, question: str, context: str = "", cycle: int = 0,
                    complex_question: str = None, sub_questions: list = None,
-                   sub_question_index: int = 0) -> dict:
+                   sub_question_index: int = 0,
+                   sub_answers: dict = None) -> dict:
         """Добавляет вопрос в очередь ожидающих.
 
         Args:
@@ -112,6 +113,9 @@ class UserInteraction:
             complex_question: Оригинальный сложный вопрос (если это под-вопрос).
             sub_questions: Список всех под-вопросов для синтеза.
             sub_question_index: Индекс текущего под-вопроса в списке.
+            sub_answers: Уже собранные ответы цепочки {под-вопрос: ответ}.
+                Передаётся по цепочке, чтобы синтез получил ровно ответы
+                этого сложного вопроса (без сканирования общей истории).
         """
         if not self.can_ask_question(cycle):
             return {"status": "failed", "reason": "Не могу задать вопрос сейчас (перезагрузка)"}
@@ -128,6 +132,7 @@ class UserInteraction:
             "complex_question": complex_question,
             "sub_questions": sub_questions or [],
             "sub_question_index": sub_question_index,
+            "sub_answers": dict(sub_answers) if sub_answers else {},
         }
 
         self.pending_questions.append(question_entry)
@@ -234,8 +239,23 @@ class UserInteraction:
                     cycle if cycle is not None else q["cycle"]
                 )
 
-                # === НОВОЕ: проверяем, есть ли еще под-вопросы для сложного вопроса ===
+                # === Проверяем, есть ли еще под-вопросы для сложного вопроса ===
                 if complex_question and sub_questions:
+                    idx = min(sub_question_index, len(sub_questions) - 1)
+                    # Точный накопитель ответов этой цепочки (ключ — текст
+                    # под-вопроса, как его ждёт синтез). Для цепочек,
+                    # восстановленных из старых чекпоинтов без накопителя,
+                    # остаётся фолбэк на контекст в общей истории.
+                    accumulated = dict(q.get("sub_answers") or {})
+                    if not accumulated and sub_question_index > 0:
+                        for hist in self.question_history:
+                            if (
+                                complex_question in hist.get("context", "")
+                                and hist.get("question") != q["question"]
+                            ):
+                                accumulated[hist["question"]] = hist["answer"]
+                    accumulated[sub_questions[idx]] = answer
+
                     next_index = sub_question_index + 1
                     if next_index < len(sub_questions):
                         # Есть следующий под-вопрос — задаем его
@@ -248,20 +268,15 @@ class UserInteraction:
                             cycle=next_cycle,
                             complex_question=complex_question,
                             sub_questions=sub_questions,
-                            sub_question_index=next_index
+                            sub_question_index=next_index,
+                            sub_answers=accumulated,
                         )
                         return {"status": "answered", "question_id": question_id,
                                 "next_sub_question": True}
                     else:
                         # Все под-вопросы отвечены — нужен синтез!
                         if on_synthesis_needed:
-                            # Собираем все ответы под-вопросов
-                            sub_answers = {}
-                            for hist in self.question_history:
-                                # Ищем ответы, связанные с этим сложным вопросом
-                                if complex_question in hist.get("context", ""):
-                                    sub_answers[hist["question"]] = hist["answer"]
-                            on_synthesis_needed(complex_question, sub_answers)
+                            on_synthesis_needed(complex_question, accumulated)
 
                         return {"status": "answered", "question_id": question_id,
                                 "synthesis_needed": True,
