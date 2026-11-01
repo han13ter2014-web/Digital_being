@@ -1,5 +1,7 @@
 # Digital Being — цифровая жизнь
 
+![CI](https://github.com/han13ter2014-web/Digital_being/actions/workflows/ci.yml/badge.svg)
+
 > Цифровое существо, которое живёт, помнит, выбирает, действует в границах и
 > сохраняет историю.
 
@@ -10,7 +12,17 @@ read-only оболочка, где можно увидеть, что реаль�
 
 ## Быстрый старт
 
+Готовый установщик для Windows — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
+
+```text
+DigitalBeing_Setup_v0.1.3.exe
+SHA-256: F850AAB181A2FE7002CAEF1E6739285783A1C801A4B840D714044048B21E2F13
+```
+
+Запуск из исходников (Python 3.10+):
+
 ```bash
+pip install .
 python main.py
 ```
 
@@ -76,7 +88,8 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 Описание сценария: [docs/ACCEPTANCE_DEMO.md](docs/ACCEPTANCE_DEMO.md).
 Результат последней приёмки: [docs/ACCEPTANCE_RESULT_2026-10-30.md](docs/ACCEPTANCE_RESULT_2026-10-30.md).
-Проверка установки публичного релиза: [docs/RELEASE_VERIFICATION_v0.1.0.md](docs/RELEASE_VERIFICATION_v0.1.0.md).
+Проверка установки публичных релизов: [docs/RELEASE_VERIFICATION_v0.1.0.md](docs/RELEASE_VERIFICATION_v0.1.0.md),
+[docs/RELEASE_VERIFICATION_v0.1.3.md](docs/RELEASE_VERIFICATION_v0.1.3.md).
 
 ## Документация
 
@@ -100,11 +113,15 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 ## Статус
 
-Текущая версия пакета: **0.1.0**.
+Текущая версия пакета: **0.1.3** — [релиз v0.1.3](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.3),
+установлен и проверен на реальной машине
+([отчёт приёмки](docs/RELEASE_VERIFICATION_v0.1.3.md)).
 
-v1 закрыта в согласованном ограниченном объёме.
+v1 закрыта в согласованном ограниченном объёме; развитие продолжается участком
+«Собеседник»: честный диалог, память разговоров, честные отказы.
 
-Последний полный прогон: **1429 passed, 2 skipped**, без benchmarks.
+Последний полный прогон: **1735 passed, 2 skipped**, без benchmarks
+(после него добавлено ещё 36 регрессионных тестов; CI на `main` зелёный).
 
 Проект не утверждает, что доказал сознание или субъективность. Он строит
 проверяемую модель состояния, памяти, выбора, опыта и ограниченного действия.
