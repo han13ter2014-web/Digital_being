@@ -238,8 +238,6 @@ class ChatWindow:
         lines.append(f"   {question}")
         if context:
             lines.append(f"   Почему спрашиваю: {context}")
-        lines.append("")
-        lines.append("   Ответь в чате одним сообщением.")
 
         self._incoming_queue.put(("agent", "\n".join(lines)))
         # Подсветить окно: пользователь должен увидеть вопрос

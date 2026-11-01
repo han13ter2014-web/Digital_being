@@ -10,6 +10,8 @@
 всегда пустым и вес связи оставался 0.1 навсегда.
 """
 
+import re
+
 import pytest
 
 from src.core.agent import DigitalBeing
@@ -156,6 +158,72 @@ def test_consolidation_refines_definition_from_links():
     assert report["refined"] >= 1
     assert "порядок" in node.definition_hypothesis
     assert "хаос" in node.definition_hypothesis
+
+
+def test_refinement_excludes_reflexive_concepts():
+    """«'X' связано с я, ты» — шум общего контекста рождения, не знание.
+
+    На живом стенде это дало формулировку «'следствие' связано с
+    причина, я, ты»: рефлексивные примитивы получили связи с темой
+    только за общую встречу при рождении, сон их усилил, и они
+    затесались в определение наравне с настоящим соседом «причина».
+    """
+    model = MentalModel()
+    for name in ("следствие", "причина", "время", "я", "ты"):
+        model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
+    node = model.concepts["следствие"]
+    model.encounter_concept(
+        "следствие", "ctx2", "результат причины", 0.5,
+        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+    )
+    node.definition_hypothesis = "По опыту (2 встреч): 'следствие' — результат причины"
+    node.connections["причина"] = 0.6
+    node.connections["время"] = 0.5
+    node.connections["я"] = 0.9
+    node.connections["ты"] = 0.5
+
+    report = model.consolidate()
+
+    assert report["refined"] >= 1
+    words = set(re.findall(r"\w+", node.definition_hypothesis.lower()))
+    assert {"причина", "время"} <= words
+    assert not words & {"я", "ты", "мы"}
+
+
+def test_refinement_lists_links_after_colon():
+    """Список соседей стоит после двоеточия: «с» не управляет падежом."""
+
+    model = MentalModel()
+    for name in ("время", "память"):
+        model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
+    node = model.concepts["время"]
+    model.encounter_concept(
+        "время", "ctx2", "идёт вперёд", 0.5,
+        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+    )
+    node.definition_hypothesis = "По опыту (2 встреч): 'время' — идёт вперёд"
+    node.connections["память"] = 0.6
+    node.connections["порядок"] = 0.5
+    model.encounter_concept("порядок", "ctx_порядок", "встреча", 0.0)
+
+    model.consolidate()
+
+    assert "связано с: " in node.definition_hypothesis
+
+
+def test_synthesized_definition_lists_outcomes_after_colon():
+    """Формулировка из сырых результатов тоже перечисляет после двоеточия."""
+    model = MentalModel()
+    model.encounter_concept("память", "встреча", "запомнила шаг", 0.5,
+                            evidence_kind="hypothesis", source="self:hypothesis")
+    model.encounter_concept("память", "встреча", "воспроизвела шаг", 0.5,
+                            evidence_kind="hypothesis", source="self:hypothesis")
+    node = model.concepts["память"]
+    node.definition_hypothesis = ""
+
+    model.consolidate()
+
+    assert "связано с:" in node.definition_hypothesis
 
 
 def test_refinement_needs_evidence():
