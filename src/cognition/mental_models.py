@@ -46,6 +46,9 @@ def _mentions(text_lower: str, name_lower: str) -> bool:
     return False
 
 
+_REFLEXIVE_CONCEPTS = frozenset({"я", "ты", "мы"})
+
+
 # ============================================================
 # Уверенность как функция свидетельств
 # ============================================================
@@ -432,6 +435,9 @@ class MentalModel:
 
         Ничего не выдумывается: в текст попадают только концепции, с
         которыми уже есть подкреплённая связь (вес ≥ ``min_weight``).
+        Рефлексивные примитивы («я», «ты», «мы») исключаются: их связь
+        с произвольной темой — общий контекст встречи при рождении, а
+        не смысл, и в формулировке они выглядят как «связано с я, ты».
         """
         if len(node.experiences) < 2 or not any(
             exp.get("evidence_kind") in {"hypothesis", "observation", "testimony", "innate"}
@@ -444,12 +450,13 @@ class MentalModel:
                 node.connections.items(), key=lambda item: item[1], reverse=True
             )
             if weight >= min_weight and other in self.concepts
+            and str(other).strip().lower() not in _REFLEXIVE_CONCEPTS
         ][:3]
         if len(strong) < 2:
             return 0
         text = (
             f"По опыту ({len(node.experiences)} встреч): "
-            f"'{name}' связано с {', '.join(strong)}"
+            f"'{name}' связано с: {', '.join(strong)}"
         )
         if text == node.definition_hypothesis:
             return 0
@@ -696,7 +703,7 @@ class MentalModel:
             if len(most_frequent) > 0:
                 hypothesis_parts = [p[0] for p in most_frequent if p[1] >= 1]
                 if hypothesis_parts:
-                    node.definition_hypothesis = f"По опыту ({len(node.experiences)} встреч): '{concept_name}' связано с {' -> '.join(hypothesis_parts[:3])}"
+                    node.definition_hypothesis = f"По опыту ({len(node.experiences)} встреч): '{concept_name}' связано с: {' -> '.join(hypothesis_parts[:3])}"
         else:
             # Контексты у разных встреч могут не пересекаться (например,
             # «гипотеза_цикл_12» и «гипотеза_цикл_57»). Раньше в этом

@@ -103,3 +103,4 @@ def test_agent_question_has_no_service_code():
     assert "Омелла спрашивает" in text
     assert "#q-42" not in text
     assert "high" not in text
+    assert "одним сообщением" not in text
