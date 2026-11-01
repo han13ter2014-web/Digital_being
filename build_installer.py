@@ -11,7 +11,7 @@ build_installer.py — one-command сборка Windows-установщика �
     - dist/DigitalBeing.exe (собран через `python build.py`)
 
 Результат:
-    installer_output/DigitalBeing_Setup_v0.1.2.exe (~50 MB)
+    installer_output/DigitalBeing_Setup_v0.1.3.exe (~50 MB)
 """
 
 import io
@@ -34,6 +34,19 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ISS_FILE = os.path.join(PROJECT_ROOT, "inno_setup.iss")
 INSTALLER_OUTPUT = os.path.join(PROJECT_ROOT, "installer_output")
 DIST_EXE = os.path.join(PROJECT_ROOT, "dist", "DigitalBeing.exe")
+
+
+def read_version() -> str:
+    """Достаёт MyAppVersion из inno_setup.iss."""
+    with open(ISS_FILE, encoding="utf-8") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if stripped.startswith("#define MyAppVersion"):
+                parts = stripped.split('"')
+                if len(parts) >= 2 and parts[1]:
+                    return parts[1]
+    print(f"❌ Не нашёл #define MyAppVersion в {ISS_FILE}")
+    sys.exit(1)
 
 
 def find_iscc() -> str | None:
@@ -100,20 +113,16 @@ def build() -> None:
     os.makedirs(INSTALLER_OUTPUT, exist_ok=True)
     run([iscc, ISS_FILE])
 
-    # Ищем результат (имя файла задаётся в .iss через OutputBaseFilename)
-    setup_exe = None
-    for f in os.listdir(INSTALLER_OUTPUT):
-        if f.lower().endswith(".exe") and "Setup" in f:
-            setup_exe = os.path.join(INSTALLER_OUTPUT, f)
-            break
-    if setup_exe:
-        size_mb = os.path.getsize(setup_exe) / (1024 * 1024)
-        print(f"\n✅ Готово! {setup_exe} ({size_mb:.1f} MB)")
-        print(f"   Раздавайте этот файл — пользователи получат визард установки.")
-        print(f"   Двойной клик на setup.exe → мастер установки → ярлык на рабочем столе.")
-    else:
-        print(f"\n❌ Сборка прошла, но setup.exe не найден в {INSTALLER_OUTPUT}/")
+    # Имя файла задаётся в .iss через OutputBaseFilename с версией
+    version = read_version()
+    setup_exe = os.path.join(INSTALLER_OUTPUT, f"DigitalBeing_Setup_v{version}.exe")
+    if not os.path.isfile(setup_exe):
+        print(f"\n❌ Сборка прошла, но {setup_exe} не найден в {INSTALLER_OUTPUT}/")
         sys.exit(1)
+    size_mb = os.path.getsize(setup_exe) / (1024 * 1024)
+    print(f"\n✅ Готово! {setup_exe} ({size_mb:.1f} MB)")
+    print(f"   Раздавайте этот файл — пользователи получат визард установки.")
+    print(f"   Двойной клик на setup.exe → мастер установки → ярлык на рабочем столе.")
 
 
 def main() -> None:
