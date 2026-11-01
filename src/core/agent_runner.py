@@ -78,6 +78,13 @@ _REPEAT_PROTEST_MARKERS = (
     "зачем снова",
 )
 
+# Сколько раз раннер повторит стимул, обработка которого падает
+# (perceive/think/act/evolve), прежде чем честно отпустить его.
+# Без лимита «отравленный» стимул ретраился бы вечно: deferred не
+# очищался, cycle_count замирал, чат блокировался, чекпоинты по
+# CHECKPOINT_INTERVAL прекращались.
+MAX_STIMULUS_RETRIES = 3
+
 
 # ============================================================
 # Загрузка/сохранение состояния (вынесено из main.py для переиспользования)
@@ -199,6 +206,8 @@ class AgentRunner:
         self._recent_thoughts: Dict[str, int] = {}
         self._loop_tick = 0
         self._idle_ticks = 0
+        # Неудачные попытки обработать текущий отложенный стимул подряд.
+        self._deferred_fail_count = 0
 
         # === Скорость жизни (этап C) ===
         # Интервал между циклами — параметр рантайма. Раньше он был
@@ -1148,76 +1157,81 @@ class AgentRunner:
         # === Watchdog на цикл ===
         self.watchdog.on_cycle_start()
 
-        cycle_start_ts = time.time()
-        stimulus = None
-        user_initiated = False
-        deferred = getattr(self.agent, "_deferred_stimulus", None)
-        if deferred is not None:
-            stimulus = deferred["text"]
-            user_initiated = deferred["user_initiated"]
-
-        # Пока отложенный стимул не обработан, новые остаются в очереди.
-        if deferred is not None:
-            pass
-        elif wait_for_user:
-            timeout = self.current_interval_sec()
-            try:
-                if timeout <= 0:
-                    message = self._pending_user_messages.get_nowait()
-                else:
-                    message = await asyncio.wait_for(
-                        self._pending_user_messages.get(),
-                        timeout=timeout,
-                    )
-                stimulus = message
-                user_initiated = True
-            except asyncio.TimeoutError:
-                stimulus = None
-            except asyncio.QueueEmpty:
-                stimulus = None
-            except asyncio.CancelledError:
-                self.watchdog.on_cycle_end()
-                raise
-        else:
-            try:
-                stimulus = self._pending_user_messages.get_nowait()
-                user_initiated = True
-            except asyncio.QueueEmpty:
-                stimulus = None
-
-        if stimulus is None:
-            stimulus = self._next_stimulus()
+        # on_cycle_end должен прозвучать независимо от того, чем
+        # закончился цикл. CancelledError — BaseException: «except
+        # Exception» рядом его не ловил, и отмена на середине цикла
+        # (пауза, остановка, закрытие приложения) оставляла watchdog
+        # с незакрытым циклом: отметка старта становилась мёртвой, а
+        # следующий on_cycle_end считал время от неё и рождал ложные
+        # slow_cycle-алерты.
+        try:
+            cycle_start_ts = time.time()
+            stimulus = None
             user_initiated = False
+            deferred = getattr(self.agent, "_deferred_stimulus", None)
+            if deferred is not None:
+                stimulus = deferred["text"]
+                user_initiated = deferred["user_initiated"]
 
-        # === Восстановить энергию за время ожидания ===
-        elapsed = time.time() - cycle_start_ts
-        self.energy_policy.regenerate(elapsed)
+            # Пока отложенный стимул не обработан, новые остаются в очереди.
+            if deferred is not None:
+                pass
+            elif wait_for_user:
+                timeout = self.current_interval_sec()
+                try:
+                    if timeout <= 0:
+                        message = self._pending_user_messages.get_nowait()
+                    else:
+                        message = await asyncio.wait_for(
+                            self._pending_user_messages.get(),
+                            timeout=timeout,
+                        )
+                    stimulus = message
+                    user_initiated = True
+                except asyncio.TimeoutError:
+                    stimulus = None
+                except asyncio.QueueEmpty:
+                    stimulus = None
+            else:
+                try:
+                    stimulus = self._pending_user_messages.get_nowait()
+                    user_initiated = True
+                except asyncio.QueueEmpty:
+                    stimulus = None
 
-        # === Собственно один «цикл жизни» агента ===
-        if stimulus is None:
-            # Все стимулы на кулдауне: лучше отдохнуть, чем 13 000 раз
-            # повторить один и тот же вопрос (см. docs/BASELINE.md).
-            await asyncio.to_thread(self._rest_tick)
-        else:
-            try:
-                # Цикл агента уходит в worker-поток: синхронные сетевые
-                # паузы (Wikipedia timeout + rate-limit) не должны
-                # замораживать event loop, иначе замирают EventBus,
-                # StatusLoop и откладываются tick_will/tick_communication.
-                # publish_sync() потокобезопасен (см. event_bus.py).
-                await asyncio.to_thread(
-                    self._do_one_agent_cycle,
-                    stimulus,
-                    user_initiated=user_initiated,
-                )
-            except Exception as e:
-                logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
+            if stimulus is None:
+                stimulus = self._next_stimulus()
+                user_initiated = False
 
-        if self._speed_mode == "max":
-            self._accelerated_cycles += 1
+            # === Восстановить энергию за время ожидания ===
+            elapsed = time.time() - cycle_start_ts
+            self.energy_policy.regenerate(elapsed)
 
-        # === Watchdog: конец цикла ===
-        self.watchdog.on_cycle_end()
+            # === Собственно один «цикл жизни» агента ===
+            if stimulus is None:
+                # Все стимулы на кулдауне: лучше отдохнуть, чем 13 000 раз
+                # повторить один и тот же вопрос (см. docs/BASELINE.md).
+                await asyncio.to_thread(self._rest_tick)
+            else:
+                try:
+                    # Цикл агента уходит в worker-поток: синхронные сетевые
+                    # паузы (Wikipedia timeout + rate-limit) не должны
+                    # замораживать event loop, иначе замирают EventBus,
+                    # StatusLoop и откладываются tick_will/tick_communication.
+                    # publish_sync() потокобезопасен (см. event_bus.py).
+                    await asyncio.to_thread(
+                        self._do_one_agent_cycle,
+                        stimulus,
+                        user_initiated=user_initiated,
+                    )
+                except Exception as e:
+                    logger.exception(f"[{self.name}] Ошибка в цикле агента: {e}")
+
+            if self._speed_mode == "max":
+                self._accelerated_cycles += 1
+        finally:
+            # === Watchdog: конец цикла — в любой развилке ===
+            self.watchdog.on_cycle_end()
 
         # === Проверить health + энергетические события ===
         await self._check_energy_transitions()
@@ -1300,6 +1314,40 @@ class AgentRunner:
         finally:
             self._last_tick_ledger.update(cycle_after=self.agent.cycle_count, energy_after=self.agent.energy)
 
+    def _register_deferred_failure(self, stimulus: str, stage: str,
+                                   error: Exception) -> None:
+        """Учесть неудачную попытку обработать отложенный стимул.
+
+        После ``MAX_STIMULUS_RETRIES`` неудач стимул отпускается честно:
+        пользователь получает объяснение, очередь сообщений
+        разблокируется, жизнь продолжается. Вызывается из worker-потока,
+        поэтому публикация только через потокобезопасный publish_sync.
+        """
+        self._deferred_fail_count += 1
+        if self._deferred_fail_count < MAX_STIMULUS_RETRIES:
+            return
+        self._deferred_fail_count = 0
+        self.agent._deferred_stimulus = None
+        text = str(stimulus or "")
+        preview = text[:60] + ("…" if len(text) > 60 else "")
+        logger.error(
+            f"[{self.name}] Стимул отпущен после {MAX_STIMULUS_RETRIES} "
+            f"неудач (этап {stage}): {error}"
+        )
+        self.bus.publish_sync(
+            Events.AGENT_THOUGHT,
+            {
+                "text": (
+                    f"Я {MAX_STIMULUS_RETRIES} раза пытался разобрать "
+                    f"«{preview}» и не смог — отпускаю это. "
+                    "Если это было твоё сообщение, напиши его ещё раз."
+                ),
+                "cycle": self.agent.cycle_count,
+            },
+            source="runner",
+            priority=1,
+        )
+
     def _do_one_agent_cycle(self, stimulus: str, user_initiated: bool = False) -> None:
         """Один полный цикл агента: perceive → think → act → evolve.
 
@@ -1358,27 +1406,32 @@ class AgentRunner:
             perceived = self.agent.perceive(stimulus)
         except Exception as e:
             logger.exception(f"perceive failed: {e}")
+            self._register_deferred_failure(stimulus, "perceive", e)
             return
 
         try:
             thought = self.agent.think(perceived)
         except Exception as e:
             logger.exception(f"think failed: {e}")
+            self._register_deferred_failure(stimulus, "think", e)
             return
 
         try:
             action = self.agent.act(thought)
         except Exception as e:
             logger.exception(f"act failed: {e}")
+            self._register_deferred_failure(stimulus, "act", e)
             return
 
         try:
             self.agent.evolve()
         except Exception as e:
             logger.exception(f"evolve failed: {e}")
+            self._register_deferred_failure(stimulus, "evolve", e)
             return
 
         self.agent._deferred_stimulus = None
+        self._deferred_fail_count = 0
         self._last_tick_ledger = {"kind": "stimulus_processed", "completed": True,
                                   "autonomous_action": selected, "stimulus_action": str(action),
                                   "user_initiated": user_initiated}

@@ -414,8 +414,18 @@ class KnowledgeSubsystem:
         }
 
     def restore_from_checkpoint(self, state: Dict) -> None:
-        self.knowledge_base.update(state.get("knowledge_base", {}))
-        self._known_definitions.update(state.get("_known_definitions", {}))
+        # Snapshot-семантика: база после восстановления равна снимку.
+        # update() воскрешал записи, удалённые при жизни (clean/prune).
+        # clear() перед update() сохраняет сами объекты словарей —
+        # алиасы agent <-> subsystem продолжают работать.
+        saved_kb = state.get("knowledge_base")
+        if isinstance(saved_kb, dict):
+            self.knowledge_base.clear()
+            self.knowledge_base.update(saved_kb)
+        saved_defs = state.get("_known_definitions")
+        if isinstance(saved_defs, dict):
+            self._known_definitions.clear()
+            self._known_definitions.update(saved_defs)
 
     def __len__(self) -> int:
         return len(self.knowledge_base)

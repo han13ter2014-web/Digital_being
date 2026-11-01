@@ -43,6 +43,10 @@ class WillRegistry:
             "goals_set": 0,
         }
         self._last_value_change_cycle = 0
+        # -1 — «ещё не рисковал»: кулдаун не должен блокировать первый
+        # в жизни волевой риск (иначе 0 - 0 < 50 запрещал бы его навсегда
+        # в цикле 0 и после рестарта с обнулённым полем).
+        self._last_risk_cycle = -1
 
     def record(self, will_type: str, topic: str, reason: str,
                 outcome: str = "executed", cycle: int = 0,
@@ -63,6 +67,8 @@ class WillRegistry:
 
         if will_type == "value_changes":
             self._last_value_change_cycle = cycle
+        if will_type == "risk_taken":
+            self._last_risk_cycle = cycle
         return entry
 
     def can_change_values(self, cycle: int, min_distance: int = 50) -> bool:
@@ -85,6 +91,7 @@ class WillRegistry:
             "entries": list(self.entries),
             "counters": dict(self._counters),
             "last_value_change_cycle": self._last_value_change_cycle,
+            "last_risk_cycle": self._last_risk_cycle,
         }
 
     @classmethod
@@ -94,4 +101,8 @@ class WillRegistry:
         registry.entries = [dict(e) for e in (data.get("entries") or [])]
         registry._counters = dict(data.get("counters") or {})
         registry._last_value_change_cycle = int(data.get("last_value_change_cycle") or 0)
+        raw_last_risk = data.get("last_risk_cycle", -1)
+        registry._last_risk_cycle = (
+            -1 if raw_last_risk is None else int(raw_last_risk)
+        )
         return registry

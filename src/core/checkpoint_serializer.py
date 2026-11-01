@@ -281,12 +281,28 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
 def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     """Восстановить состояние агента из state-словаря.
 
+    Применение двухфазное. Фаза 1 разбирает и валидирует всё, что
+    может упасть (модели памяти, preference-правила, историю намерений,
+    прогресс целей, вопросы, социальные модели, мотивацию, доступность
+    памяти жизни) — не трогая агента. Фаза 2 только присваивает
+    готовые значения. Повреждённый чекпоинт падает в фазе 1 и
+    оставляет существо нетронутым, а не наполовину восстановленным.
+
+    Граница честности: restore-методы отдельных подсистем
+    (user_interaction, interoception, meta_learner, death_risk,
+    continuous_time, user_model, personal_state) меняют свои объекты
+    на месте и остаются в фазе 2 — их собственную транзакционность
+    фаза 1 не покрывает.
+
     Args:
         agent: экземпляр DigitalBeing.
         state: словарь, полученный из ``build_state_from_agent``.
     """
     from src.core.checkpoint_validation import validate_checkpoint_state
 
+    # ================================================================
+    # Фаза 1: разбор и валидация. Ни одного присваивания агенту.
+    # ================================================================
     validate_checkpoint_state(state)
     inference_data = state.get("active_inference")
     if inference_data is not None:
@@ -296,11 +312,11 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             raise ValueError("active_inference: подсистема недоступна для восстановления")
         validate_inference(inference_data, agent.active_inference)
     saved_models = state.get("mental_models")
+    restored_nodes = None
+    restored_claims = None
     if saved_models is not None and getattr(agent, "mental_models", None) is not None:
         from src.cognition.mental_models import ConceptNode
 
-        # Сначала разобрать всё; повреждённая секция не должна частично
-        # подменить память уже созданного существа.
         restored_nodes = {
             name: ConceptNode.from_dict({**raw, "name": name})
             for name, raw in saved_models["concepts"].items()
@@ -311,14 +327,95 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             key: EmpiricalClaim.from_dict(raw)
             for key, raw in (saved_models.get("claims") or {}).items()
         }
-        model = agent.mental_models
-        model.claims = restored_claims
-        model.concepts = restored_nodes
-        model.name = saved_models.get("name", model.name)
-        model.metadata = dict(saved_models.get("metadata") or {})
-        model.association_memory = list(saved_models.get("recent_associations") or [])
-        model._related_cache.clear()
-        model._cycle_counter = state.get("cycle_count", 0)
+
+    # Жизнь без памяти не восстанавливается. Проверяем до любых
+    # мутаций: отказ не должен оставлять существо наполовину
+    # переписанным (раньше маркеры, ожидания и модели памяти уже
+    # были бы заменены к этому моменту).
+    if "life_id" in state and getattr(agent, "_profile_managed", False):
+        if getattr(agent, "long_term_memory", None) is None:
+            raise ValueError("Память жизни недоступна; восстановление остановлено")
+
+    from src.cognition.method_preferences import validate as validate_method_preferences
+
+    validate_method_preferences(state.get("method_preferences", {}))
+    staged_method_preferences = deepcopy(state.get("method_preferences", {}))
+
+    from src.cognition.intention_history import restore_history
+
+    staged_intention_history = restore_history(state.get("intention_history", []))
+
+    # Прогресс целей разбираем заранее: int() на мусорной записи
+    # уронит фазу 1, а не агента с уже заменённой базой знаний.
+    default_cycle = state.get("cycle_count", getattr(agent, "cycle_count", 0))
+    staged_goal_progress = {}
+    for k, v in (state.get("_goal_progress", {}) or {}).items():
+        goal_id = int(k) if isinstance(k, str) else k
+        if isinstance(v, dict):
+            matched = v.get("matched_concepts", [])
+            percentage = int(v.get("percentage", 0))
+            last_update_cycle = int(v.get("last_update_cycle", default_cycle))
+        else:
+            # Старый формат: только список совпавших тем.
+            matched = v
+            percentage = 0
+            last_update_cycle = default_cycle
+        staged_goal_progress[goal_id] = {
+            "matched_concepts": set(matched or []),
+            "percentage": percentage,
+            "last_update_cycle": last_update_cycle,
+        }
+
+    # Открытые вопросы: структура проверяется разбором, не присваиванием.
+    staged_questions = None
+    if "open_questions" in state and hasattr(agent, "_open_questions"):
+        staged_questions = []
+        for q_data in state.get("open_questions") or []:
+            staged_questions.append({
+                "text": q_data.get("text", ""),
+                "source": q_data.get("source", "user"),
+                "started_at": q_data.get("started_at", default_cycle),
+                "last_explored_at": q_data.get("last_explored_at", default_cycle),
+                "explorations": [dict(entry) for entry in q_data.get("explorations", [])],
+                "max_explorations": q_data.get("max_explorations", 5),
+                "hint": q_data.get("hint"),
+                "answered": q_data.get("answered", False),
+                "answer": q_data.get("answer"),
+            })
+
+    # Социальная клеточка: ToMLevel может не принять мусорное значение —
+    # строим все модели до мутаций.
+    sc_state = state.get("social_cell", {})
+    staged_social_models = None
+    staged_social_tom = None
+    if sc_state and hasattr(agent, 'social_cell') and agent.social_cell:
+        from src.core.social_cell import AgentModel, ToMLevel
+
+        staged_social_models = {}
+        for agent_id, model_data in sc_state.get("agent_models", {}).items():
+            model = AgentModel(agent_id=model_data.get("agent_id", agent_id))
+            model.tom_level = ToMLevel(model_data.get("tom_level", 1))
+            model.believed_goals = model_data.get("believed_goals", {})
+            model.believed_beliefs = model_data.get("believed_beliefs", {})
+            model.believed_intentions = model_data.get("believed_intentions", {})
+            model.believed_emotional_state = model_data.get("believed_emotional_state", {})
+            model.believed_model_of_self = model_data.get("believed_model_of_self", {})
+            model.model_precision = model_data.get("model_precision", 0.5)
+            model.interaction_history = deque(model_data.get("interaction_history", []), maxlen=200)
+            staged_social_models[agent_id] = model
+        staged_social_tom = ToMLevel(sc_state.get("current_tom_level", 2))
+
+    # Мотивация: собираем новый объект заранее — сборка может упасть.
+    mot_state = state.get("motivation", {})
+    staged_motivation = None
+    if mot_state and hasattr(agent, 'motivation_system') and agent.motivation_system:
+        from src.core.motivation.unified_motivation import UnifiedMotivationSystem
+
+        staged_motivation = UnifiedMotivationSystem.from_checkpoint_dict(agent, mot_state)
+
+    # ================================================================
+    # Фаза 2: применение. Только присваивания и in-place restore.
+    # ================================================================
     for marker in ("_last_soul_tick_cycle", "_last_will_tick_cycle", "_last_communication_tick_cycle"):
         if hasattr(agent, marker):
             setattr(agent, marker, None)
@@ -329,25 +426,38 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
 
         agent.action_expectations = ActionExpectations()
 
+    if restored_nodes is not None and getattr(agent, "mental_models", None) is not None:
+        model = agent.mental_models
+        model.claims = restored_claims
+        model.concepts = restored_nodes
+        model.name = saved_models.get("name", model.name)
+        model.metadata = dict(saved_models.get("metadata") or {})
+        model.association_memory = list(saved_models.get("recent_associations") or [])
+        model._related_cache.clear()
+        model._cycle_counter = state.get("cycle_count", 0)
+
     if "life_id" in state:
         agent.life_id = state["life_id"]
         # Прямое legacy-использование DigitalBeing хранит память по имени:
         # UUID в снимке не должен переключать её на другой файл.
         if getattr(agent, "_profile_managed", False):
-            memory = getattr(agent, "long_term_memory", None)
-            if memory is None:
-                # Рождение само по себе память не теряет: None здесь значит,
-                # что чтение UUID-файла не удалось. Не выдаём это за пустоту.
-                raise ValueError("Память жизни недоступна; восстановление остановлено")
-            if getattr(memory, "life_id", None) != agent.life_id:
-                # Объект памяти не заменяем: на него уже ссылаются sleep_cycle
-                # и другие подсистемы, созданные при рождении агента.
-                memory.rebind(agent.life_id)
+            # Объект памяти не заменяем: на него уже ссылаются sleep_cycle
+            # и другие подсистемы, созданные при рождении агента.
+            if getattr(agent.long_term_memory, "life_id", None) != agent.life_id:
+                agent.long_term_memory.rebind(agent.life_id)
     if isinstance(state.get("name"), str):
         agent.name = state["name"]
     agent.energy = state.get("energy", 150)
     agent.cycle_count = state.get("cycle_count", 0)
-    agent.knowledge_base.update(state.get("knowledge_base", {}))
+    # Snapshot-семантика: база после рестарта равна снимку, а не
+    # надмножеству. update() воскрешал записи, удалённые при жизни
+    # (чистка мусора, прунинг, забытие тем). clear() перед update()
+    # сохраняет сам объект словаря — алиасы agent <-> knowledge_subsystem
+    # не рвутся. Повреждённая секция не применяется частично.
+    saved_kb = state.get("knowledge_base")
+    if isinstance(saved_kb, dict):
+        agent.knowledge_base.clear()
+        agent.knowledge_base.update(saved_kb)
     agent.intelligence = state.get("intelligence", 1)
     agent.completed_goals = state.get("completed_goals", 0)
     agent.goals = state.get("goals", agent.goals)
@@ -360,24 +470,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
                 agent.active_goal = goal
                 break
 
-    # Восстанавливаем прогресс по целям
-    gp_data = state.get("_goal_progress", {})
-    for k, v in gp_data.items():
-        goal_id = int(k) if isinstance(k, str) else k
-        if isinstance(v, dict):
-            matched = v.get("matched_concepts", [])
-            percentage = int(v.get("percentage", 0))
-            last_cycle = int(v.get("last_update_cycle", agent.cycle_count))
-        else:
-            # Старый формат: только список совпавших тем.
-            matched = v
-            percentage = 0
-            last_cycle = agent.cycle_count
-        agent._goal_progress[goal_id] = {
-            "matched_concepts": set(matched or []),
-            "percentage": percentage,
-            "last_update_cycle": last_cycle,
-        }
+    # Восстанавливаем прогресс по целям (разобран в фазе 1)
+    for goal_id, entry in staged_goal_progress.items():
+        agent._goal_progress[goal_id] = entry
 
     # GoalSubsystem хранит те же цели/прогресс. После загрузки чекпоинта
     # списки могли разъехаться — синхронизируем, иначе complete_goal()
@@ -399,11 +494,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent._creative_draft = deepcopy(state.get("creative_draft"))
     agent._local_play = deepcopy(state.get("local_play"))
     agent._waiting_intentions = deepcopy(state.get("waiting_intentions", {}))
-    from src.cognition.method_preferences import validate as validate_method_preferences
-
-    validate_method_preferences(state.get("method_preferences", {}))
-    agent._method_preferences = deepcopy(state.get("method_preferences", {}))
-    agent._intention_history = restore_history(state.get("intention_history", []))
+    # Правила и история разобраны и проверены в фазе 1.
+    agent._method_preferences = staged_method_preferences
+    agent._intention_history = staged_intention_history
     agent._pending_message_texts = list(state.get("pending_user_messages", []))
     agent._deferred_stimulus = state.get("deferred_stimulus")
     agent._method_information_context = state.get("method_information_context")
@@ -436,7 +529,10 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent._birth_values = [str(item) for item in saved_birth_values]
 
     agent._learned_facts = set(state.get("_learned_facts", []))
-    agent._known_definitions.update(state.get("_known_definitions", {}))
+    saved_defs = state.get("_known_definitions")
+    if isinstance(saved_defs, dict):
+        agent._known_definitions.clear()
+        agent._known_definitions.update(saved_defs)
 
     # Восстанавливаем фазу naming-диалога
     if hasattr(agent, "naming_dialogue"):
@@ -488,23 +584,11 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.user_interaction.restore_from_checkpoint(saved_interaction)
 
     # История попыток нужна для продолжения стратегии, а не нового старта.
-    saved_questions = state.get("open_questions") or []
-    if "open_questions" in state and hasattr(agent, "_open_questions"):
+    # Структура разобрана в фазе 1 — здесь только присваивание.
+    if staged_questions is not None:
         agent._open_questions.clear()
-        for q_data in saved_questions:
-            agent._open_questions.append({
-                "text": q_data.get("text", ""),
-                "source": q_data.get("source", "user"),
-                "started_at": q_data.get("started_at", agent.cycle_count),
-                "last_explored_at": q_data.get(
-                    "last_explored_at", agent.cycle_count
-                ),
-                "explorations": [dict(entry) for entry in q_data.get("explorations", [])],
-                "max_explorations": q_data.get("max_explorations", 5),
-                "hint": q_data.get("hint"),
-                "answered": q_data.get("answered", False),
-                "answer": q_data.get("answer"),
-            })
+        for question in staged_questions:
+            agent._open_questions.append(question)
         if agent._open_questions:
             get_logger().flush_immediate(
                 f"[OpenQ] Восстановлено {len(agent._open_questions)} открытых вопросов"
@@ -548,24 +632,11 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.meta_learner.population = ml_state.get("population", agent.meta_learner.population)
         agent.meta_learner.cycle_counter = ml_state.get("cycle_counter", agent.meta_learner.cycle_counter)
     
-    # NEW: Восстанавливаем Социальную клеточку
-    sc_state = state.get("social_cell", {})
-    if sc_state and hasattr(agent, 'social_cell') and agent.social_cell:
-        from src.core.social_cell import AgentModel, ToMLevel
-        for agent_id, model_data in sc_state.get("agent_models", {}).items():
-            model = AgentModel(agent_id=model_data.get("agent_id", agent_id))
-            model.tom_level = ToMLevel(model_data.get("tom_level", 1))
-            model.believed_goals = model_data.get("believed_goals", {})
-            model.believed_beliefs = model_data.get("believed_beliefs", {})
-            model.believed_intentions = model_data.get("believed_intentions", {})
-            model.believed_emotional_state = model_data.get("believed_emotional_state", {})
-            model.believed_model_of_self = model_data.get("believed_model_of_self", {})
-            model.model_precision = model_data.get("model_precision", 0.5)
-            model.interaction_history = deque(model_data.get("interaction_history", []), maxlen=200)
-            agent.social_cell.agent_models[agent_id] = model
-        
+    # NEW: Восстанавливаем Социальную клеточку (модели собраны в фазе 1)
+    if staged_social_models is not None:
+        agent.social_cell.agent_models = staged_social_models
         agent.social_cell.self_model_as_seen_by_others = sc_state.get("self_model_as_seen_by_others", {})
-        agent.social_cell.current_tom_level = ToMLevel(sc_state.get("current_tom_level", 2))
+        agent.social_cell.current_tom_level = staged_social_tom
     
     # NEW: Восстанавливаем Риск смерти
     dr_state = state.get("death_risk", {})
@@ -582,11 +653,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         # Они будут пересозданы при следующих шагах
 
 
-    # NEW: Unified Motivation (needs + drives)
-    mot_state = state.get("motivation", {})
-    if mot_state and hasattr(agent, 'motivation_system') and agent.motivation_system:
-        from src.core.motivation.unified_motivation import UnifiedMotivationSystem
-        agent.motivation_system = UnifiedMotivationSystem.from_checkpoint_dict(agent, mot_state)
+    # NEW: Unified Motivation (needs + drives) — объект собран в фазе 1
+    if staged_motivation is not None:
+        agent.motivation_system = staged_motivation
 
     if inference_data is not None:
         from src.cognition.inference_continuity import restore_inference
