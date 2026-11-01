@@ -18,9 +18,12 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from typing import Optional, Tuple
 
 ACT_ANSWER = "answer"
+ACT_ASK_ABOUT_SELF = "ask_about_self"
 ACT_SOCIAL = "social"
 ACT_UNKNOWN = "unknown"
 
@@ -33,6 +36,20 @@ _ANSWER_MARKERS = (
     "ответ:",
     "отвечаю:",
     "если коротко",
+)
+
+
+# Вопросы о самой сущности: честный ответ приходит из read-only Core
+# (имя, возраст в циклах, текущая тема, что помнит о человеке), а не из
+# выдумки. Проверяются после явных ответных формул и раньше социальной
+# речи: «чем занимаешься?» — вопрос, а не smalltalk.
+_ABOUT_SELF_MARKERS = (
+    "как тебя зовут",
+    "кто ты",
+    "что ты знаешь",
+    "чем занимаешься",
+    "чем ты занята",
+    "чем занята",
 )
 
 
@@ -73,7 +90,6 @@ _SOCIAL_MARKERS = (
     "как дела",
     "как ты",
     "как настроение",
-    "чем занимаешься",
     # тепло
     "скучаю",
     "люблю тебя",
@@ -99,8 +115,9 @@ class DialogueAct:
 def classify_user_text(text) -> DialogueAct:
     """Определить речевой акт пользователя по таблице маркеров.
 
-    Приоритет: явная ответная формула → ACT_ANSWER; социальная фраза →
-    ACT_SOCIAL; иначе ACT_UNKNOWN (старая маршрутизация без изменений).
+    Приоритет: явная ответная формула → ACT_ANSWER; вопрос о сущности →
+    ACT_ASK_ABOUT_SELF; социальная фраза → ACT_SOCIAL; иначе
+    ACT_UNKNOWN (старая маршрутизация без изменений).
 
     Сравнение идёт по нормализованному тексту: нижний регистр, сжатые
     пробелы. Пунктуация не вырезается — маркеры в таблицах уже содержат
@@ -115,8 +132,44 @@ def classify_user_text(text) -> DialogueAct:
         if marker in normalized:
             return DialogueAct(ACT_ANSWER, marker)
 
+    for marker in _ABOUT_SELF_MARKERS:
+        if marker in normalized:
+            return DialogueAct(ACT_ASK_ABOUT_SELF, marker)
+
     for marker in _SOCIAL_MARKERS:
         if marker in normalized:
             return DialogueAct(ACT_SOCIAL, marker)
 
     return DialogueAct(ACT_UNKNOWN)
+
+
+# «Собеседник-5»: формула «X — это Y» — способ человека объяснить тему
+# без прямого вопроса сущности. Тире обязательно: без него «а что это
+# за город» и «это важно» ловились бы как определения.
+_DEFINITION_RE = re.compile(
+    r"^(?P<topic>.{1,60}?)\s*[—–-]\s*это\s+(?P<body>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+_QUOTE_CHARS = "\"«»„““”"
+
+
+def extract_definition(text) -> Optional[Tuple[str, str]]:
+    """Разобрать «X — это Y» в пару (тема, определение) или None.
+
+    Тема обрезается до 60 символов (regex), кавычки и хвостовая
+    пунктуация снимаются. Возвращает None, если формула не узнана или
+    одна из частей пуста: нераспознанный текст уходит в старую
+    маршрутизацию.
+    """
+    normalized = " ".join(str(text or "").split())
+    if not normalized:
+        return None
+    match = _DEFINITION_RE.match(normalized)
+    if match is None:
+        return None
+    topic = match.group("topic").strip().strip(_QUOTE_CHARS).strip()
+    body = match.group("body").strip().rstrip(".!?").strip()
+    if not topic or not body:
+        return None
+    return topic, body

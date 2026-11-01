@@ -271,6 +271,29 @@ class UserInteraction:
 
         return {"status": "not_found", "reason": f"Вопрос #{question_id} не найден или уже отвечен"}
 
+    def decline_question(self, question_id: int, cycle: int = None) -> dict:
+        """Снять вопрос без ответа: человек попросил не повторяться.
+
+        «Собеседник-5»: «уже отвечал» — не ответ и не новая тема.
+        Вопрос закрывается с answer_kind="declined" и удаляется из
+        очереди ожидания, но в question_history НЕ попадает — история
+        ответов остаётся правдивой: отклонённого вопроса там нет.
+        Контакт фиксируется: реплика человека — это контакт, детектор
+        тишины не должен тревожиться сразу после протеста.
+        """
+        for q in self.pending_questions:
+            if q["id"] == question_id and not q["answered"]:
+                q["answered"] = True
+                q["answer_kind"] = "declined"
+                self.pending_questions = [
+                    qq for qq in self.pending_questions
+                    if qq["id"] != question_id
+                ]
+                if cycle is not None:
+                    self._last_user_message_cycle = cycle
+                return {"status": "declined", "question_id": question_id}
+        return {"status": "not_found", "reason": f"Вопрос #{question_id} не найден или уже отвечен"}
+
     def get_user_prompts(self) -> str:
         """Получает ввод от пользователя (неблокирующий)."""
         try:

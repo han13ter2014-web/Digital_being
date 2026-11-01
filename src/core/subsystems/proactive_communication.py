@@ -21,6 +21,8 @@ ProactiveCommunication — инициативная коммуникация а�
 
 from typing import Optional
 
+from src.core.dialogue_acts import ACT_UNKNOWN, classify_user_text
+
 
 class ContextAwareness:
     """Определяет контекст пользователя — активное приложение."""
@@ -302,6 +304,10 @@ class ProactiveCommunication:
         «Собеседник-4»: память диалога. Источник — get_history() в
         UserInteraction: сообщения пользователя и его ответы на вопросы
         сущности. Пусто, если диалога ещё не было или связи нет.
+
+        «Собеседник-5»: реплики-акты («привет», «уже отвечал», «я
+        рядом») — не темы: «скучаю по разговору про "привет"» — шум.
+        Остаётся только неузнанный содержательный текст.
         """
         interaction = getattr(agent, "user_interaction", None)
         if interaction is None or not hasattr(interaction, "get_history"):
@@ -316,6 +322,8 @@ class ProactiveCommunication:
                 continue
             text = " ".join(str(entry.get("content") or "").split())
             if len(text) < 8:
+                continue
+            if classify_user_text(text).kind != ACT_UNKNOWN:
                 continue
             excerpt = text[:40].rstrip() + ("…" if len(text) > 40 else "")
             if excerpt not in topics:
