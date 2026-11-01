@@ -269,31 +269,7 @@ class AgentRunner:
         # текста в очередь стимулов, иначе «Малютка» станет концептом, а имя
         # агента останется прежним.
         naming = getattr(self.agent, "naming_dialogue", None)
-        if naming is not None and getattr(naming, "phase", None) in {
-            "awaiting_name", "considering",
-        }:
-            from src.core.name_proposal import extract_name_proposal
-
-            proposed = extract_name_proposal(text)
-            if proposed is None:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": "Если ты предлагаешь имя, напиши его отдельно или так: «Пусть тебя зовут Омелла». Остальную речь я пока не умею разбирать свободно.",
-                     "cycle": self.agent.cycle_count},
-                    source="naming_dialogue", priority=1,
-                )
-                return
-            result = self.agent.propose_name(proposed, cycle=self.agent.cycle_count)
-            if result.get("status") == "accepted":
-                self._publish_name_changed(result)
-            response = self._format_name_result(result, text)
-            if response:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="naming_dialogue",
-                    priority=1,
-                )
+        if naming is not None and await self._handle_naming_phase(naming, text):
             return
 
         interaction = getattr(self.agent, "user_interaction", None)
@@ -349,8 +325,16 @@ class AgentRunner:
         # Если Core задал пользователю прямой вопрос, обычный ответ должен
         # закрыть именно его, а не стать новой темой обучения.
         if pending is not None:
+            # Синтез сложного вопроса: когда все под-вопросы отвечены,
+            # submit_answer вызывает колбэк. Живой путь раньше шёл без
+            # него — синтез существовал только во внутреннем контуре.
+            synthesizer = getattr(self.agent, "synthesize_complex_question", None)
             result = interaction.submit_answer(
-                pending["id"], text, cycle=self.agent.cycle_count
+                pending["id"], text,
+                on_synthesis_needed=(
+                    synthesizer if callable(synthesizer) else None
+                ),
+                cycle=self.agent.cycle_count,
             )
             if isinstance(result, dict):
                 normalized_answer = " ".join(text.lower().strip().split())
@@ -436,6 +420,103 @@ class AgentRunner:
                 f"(до start()) — сообщение будет обработано."
             )
         await self._pending_user_messages.put(text)
+
+    async def _publish_naming_result(self, result: Dict[str, Any],
+                                     proposed: str) -> None:
+        """Опубликовать ответ диалога об имени; при смене имени — событие Core."""
+        if result.get("status") in {"accepted", "alternative_accepted"}:
+            self._publish_name_changed(result)
+        response = self._format_name_result(result, proposed)
+        if response:
+            await self.bus.publish(
+                Events.AGENT_THOUGHT,
+                {"text": response, "cycle": self.agent.cycle_count},
+                source="naming_dialogue",
+                priority=1,
+            )
+
+    async def _handle_naming_phase(self, naming, text: str) -> bool:
+        """Пропустить текст через NamingDialogue по фазе.
+
+        Возвращает True, если сообщение полностью обработано именем.
+        В фазе ``completed`` перехватываем только реальные предложения
+        имени (осознанное переименование): остальная речь — и ответы
+        «да/нет/хорошо» без активного диалога — идёт обычными дверями.
+        """
+        from src.core.name_proposal import extract_name_proposal
+        from src.core.subsystems.naming_dialogue import classify_confirmation
+
+        phase = getattr(naming, "phase", None)
+        cycle = self.agent.cycle_count
+
+        if phase == "completed":
+            if classify_confirmation(text) != "unknown":
+                return False
+            proposed = extract_name_proposal(text)
+            if proposed is None:
+                return False
+            result = self.agent.propose_name(proposed, cycle=cycle)
+            await self._publish_naming_result(result, proposed)
+            return True
+
+        if phase not in {"awaiting_name", "considering", "renaming_pending"}:
+            return False
+
+        if phase == "renaming_pending":
+            decision = classify_confirmation(text)
+            if decision == "affirmative":
+                result = naming.confirm_rename(agent=self.agent, cycle=cycle)
+                await self._publish_naming_result(result, text)
+                return True
+            if decision == "negative":
+                result = naming.cancel_rename(agent=self.agent, cycle=cycle)
+                await self._publish_naming_result(result, text)
+                return True
+            proposed = extract_name_proposal(text)
+            if proposed is not None:
+                result = self.agent.propose_name(proposed, cycle=cycle)
+                await self._publish_naming_result(result, proposed)
+                return True
+            # Пользователь ушёл в другую тему — тихо отменяем переспрос
+            # и обрабатываем сообщение обычными дверями.
+            naming.cancel_rename(agent=self.agent, cycle=cycle, notify=False)
+            return False
+
+        if phase == "considering":
+            decision = classify_confirmation(text)
+            if decision == "affirmative":
+                result = naming.accept_alternative(agent=self.agent, cycle=cycle)
+                await self._publish_naming_result(result, text)
+                return True
+            if decision == "negative":
+                result = naming.decline_alternative(agent=self.agent, cycle=cycle)
+                await self._publish_naming_result(result, text)
+                return True
+
+        proposed = extract_name_proposal(text)
+        if proposed is not None:
+            result = self.agent.propose_name(proposed, cycle=cycle)
+            await self._publish_naming_result(result, proposed)
+            return True
+
+        if phase == "considering":
+            alt = getattr(naming, "_alternative_name", "") or "другое имя"
+            hint = (
+                f"Я предложил(а) «{alt}». Скажи «да» или «нет» — "
+                "или напиши другое имя отдельно."
+            )
+        else:
+            hint = (
+                "Если ты предлагаешь имя, напиши его отдельно или так: "
+                "«Пусть тебя зовут Омелла». "
+                "Остальную речь я пока не умею разбирать свободно."
+            )
+        await self.bus.publish(
+            Events.AGENT_THOUGHT,
+            {"text": hint, "cycle": cycle},
+            source="naming_dialogue", priority=1,
+        )
+        return True
 
     def _publish_name_changed(self, result: Dict[str, Any]) -> None:
         """Уведомить UI и наблюдателей о принятом имени Core."""
@@ -594,6 +675,13 @@ class AgentRunner:
                         f"Записал про «{topic}»: «{quote}» — "
                         "буду проверять на своём опыте."
                     )
+            if result.get("synthesis_needed"):
+                return (
+                    "Ответ записан. Части сложены в целое — "
+                    f"я свёл воедино «{result.get('complex_question', '')}»."
+                )
+            if result.get("next_sub_question"):
+                return "Ответ записан. Есть ещё один уточняющий вопрос."
             return "Ответ записан."
         if status == "next_question":
             return "Ответ записан. Есть ещё один уточняющий вопрос."
@@ -612,8 +700,27 @@ class AgentRunner:
             return f"💭 Я бы предпочёл(ла) другое имя: «{alternative}». Согласен?"
         if status == "alternative_accepted":
             return f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
+        if status == "rename_confirmation":
+            return (
+                f"💭 Сейчас я «{result.get('current_name', '')}». "
+                f"Хочешь переименовать меня в «{result.get('candidate', proposed)}»? "
+                "Скажи «да» или «нет»."
+            )
+        if status == "rename_declined":
+            return (
+                f"🧭 Я остаюсь «{result.get('kept_name', '')}». "
+                f"«{result.get('candidate', '')}» — в другой раз."
+            )
+        if status == "rename_cancelled":
+            return f"🧭 Хорошо, остаюсь «{result.get('kept_name', '')}»."
+        if status == "no_rename_pending":
+            return "ℹ️ Сейчас нет ожидающего переименования."
         if status == "no_alternative_pending":
             return "ℹ️ Сейчас нет ожидающего альтернативного имени."
+        if status == "no_naming_dialogue":
+            return "⚠️ Диалог об имени сейчас недоступен."
+        if status == "no_op":
+            return f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
         return f"ℹ️ Результат диалога об имени: {result}"
 
     async def _on_user_command(self, event) -> None:
@@ -1482,26 +1589,11 @@ class AgentRunner:
             if not proposed:
                 return "Использование: /name <имя_которое_ты_хочешь_дать>"
             result = agent.propose_name(proposed, cycle=agent.cycle_count)
-            if result.get("status") == "accepted":
+            if result.get("status") in {"accepted", "alternative_accepted"}:
                 self._publish_name_changed(result)
-            status = result.get("status", "ok")
-            if status == "accepted":
-                return f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."
-            if status == "rejected":
-                reason = result.get("reason", "неизвестная причина")
-                return f"🤔 Не подошло: {reason}."
-            if status == "alternative_proposed":
-                alt = result.get("alternative") or result.get("user_suggested") or "?"
-                return f"💭 Я бы предпочёл(ла) другое имя: «{alt}». Согласен?"
-            if status == "alternative_accepted":
-                return f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
-            if status == "no_alternative_pending":
-                return "ℹ️ Сейчас нет ожидающего альтернативного имени."
-            if status == "no_naming_dialogue":
-                return "⚠️ Диалог об имени сейчас недоступен."
-            if status == "no_op":
-                return f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
-            return f"ℹ️ Результат: {result}"
+            # Единый форматтер с USER_MESSAGE-дверью (включая переспрос
+            # переименования и no_op/no_naming_dialogue).
+            return self._format_name_result(result, proposed)
         # === Delamain-local: детерминированный слой действий ===
         if cmd == "delamain" or cmd.startswith("delamain "):
             return self._handle_delamain_command(cmd_raw)

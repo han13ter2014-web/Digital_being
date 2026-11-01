@@ -437,7 +437,13 @@ class ThinkingPipeline:
                     sub_concepts[concept_key] = definition
                     get_logger().log(f"[СИНТЕЗ] Найдено определение '{concept_key}': {definition[:80]}...")
                 else:
-                    get_logger().log(f"[СИНТЕЗ] Концепт '{concept_key}' не найден в ментальных моделях")
+                    # Живой путь не заводит узел на каждый под-ответ —
+                    # буквальный ответ пользователя и есть определение.
+                    if answer:
+                        sub_concepts[concept_key] = str(answer)
+                        get_logger().log(f"[СИНТЕЗ] Узла нет, беру ответ пользователя для '{concept_key}': {str(answer)[:80]}...")
+                    else:
+                        get_logger().log(f"[СИНТЕЗ] Концепт '{concept_key}' не найден в ментальных моделях")
             else:
                 get_logger().log(f"[СИНТЕЗ] Не удалось извлечь концепт из под-вопроса: {sub_q[:80]}")
 

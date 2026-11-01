@@ -1288,6 +1288,20 @@ class DigitalBeing:
         """Backward-compat: делегирует в ThinkingPipeline."""
         return self.thinking._process_user_answer(answer_text)
 
+    def synthesize_complex_question(self, complex_question, sub_answers):
+        """Синтез сложного вопроса из под-ответов (ThinkingPipeline).
+
+        Живой путь (AgentRunner -> UserInteraction.submit_answer) передаёт
+        этот метод как on_synthesis_needed: раньше callback существовал
+        только во внутреннем пути _process_user_answer, и синтез в живом
+        режиме не запускался никогда.
+        """
+        if not hasattr(self, "thinking"):
+            return None
+        return self.thinking._synthesize_complex_question(
+            complex_question, sub_answers
+        )
+
     def _register_unknown_concept(self, clean_data, original_data):
         """Backward-compat: делегирует в ThinkingPipeline."""
         return self.thinking._register_unknown_concept(clean_data, original_data)
