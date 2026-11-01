@@ -87,6 +87,18 @@ def test_tracked_knowledge_base_is_clean():
     assert removed == {}, f"В KB остался мусор: {removed}"
 
 
+def test_bundled_bootstrap_seed_exists_and_is_clean():
+    """Сид, бандлящийся в сборку (digital_being.spec), чист и не содержит
+    следов живого самообучения рабочего агента."""
+    path = PROJECT_ROOT / "data_bootstrap" / "knowledge_base.json"
+    assert path.is_file(), "Нет стартового сида для бандла"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data, "Стартовый сид пуст"
+    cleaned, removed = clean_knowledge_base(data)
+    assert removed == {}, f"В сиде мусор: {removed}"
+    assert len(cleaned) == len(data)
+
+
 def test_normalize_concept_name_still_available():
     assert normalize_concept_name("что такое счастье") == "счастье"
 

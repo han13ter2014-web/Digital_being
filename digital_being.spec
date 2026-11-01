@@ -33,8 +33,11 @@ a = Analysis(
     datas=[
         # Конфигурация (LR_CONFIG и пр.)
         ('config', 'config'),
-        # Знания агента по умолчанию
-        ('data/knowledge_base.json', 'data'),
+        # Знания агента по умолчанию: чистый стартовый сид, а НЕ живой
+        # runtime-файл data/knowledge_base.json (в dev data/ — рабочий каталог
+        # агента, в него попадают следы самообучения; bootstrap.py при первом
+        # запуске копирует бандлный сид в каталог данных пользователя).
+        ('data_bootstrap/knowledge_base.json', 'data'),
         ('data/initial_knowledge.json', 'data'),
         # Локализации (i18n: src/metrics/i18n.py грузит data/i18n/{lang}.json)
         ('data/i18n', 'data/i18n'),
