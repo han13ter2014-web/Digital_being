@@ -40,6 +40,38 @@ def test_all_src_modules_import():
     assert not failures, "Битые импорты:\n" + "\n".join(failures)
 
 
+def test_tray_import_survives_broken_pystray(caplog):
+    """pystray, падающий при импорте с НЕ-ImportError (на headless Linux
+    бэкенд xorg бросает Xlib.error.DisplayNameError ещё на import
+    модуля), переводит трей в режим заглушки, а не роняет src.ui.tray."""
+    import builtins
+    import logging
+
+    import src.ui.tray as tray
+
+    real_import = builtins.__import__
+
+    class _DisplayNameError(RuntimeError):
+        pass
+
+    def _broken_import(name, *args, **kwargs):
+        if name == "pystray" or name.startswith("pystray."):
+            raise _DisplayNameError("Xlib: cannot open display ''")
+        return real_import(name, *args, **kwargs)
+
+    try:
+        builtins.__import__ = _broken_import
+        with caplog.at_level(logging.WARNING, logger="src.ui.tray"):
+            importlib.reload(tray)
+        assert tray._HAS_PYSTRAY is False
+        assert "заглушки" in caplog.text
+    finally:
+        builtins.__import__ = real_import
+        importlib.reload(tray)
+
+    assert tray._HAS_PYSTRAY is True
+
+
 class _WiringRuntime:
     """Headless-сборка настоящего рантайма (та же, что у main.py)."""
 
