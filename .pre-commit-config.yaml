@@ -32,7 +32,7 @@ repos:
       - id: check-toml
       - id: check-json
       - id: check-merge-conflict
-      - id: debug-logger
+      - id: debug-statements
       - id: detect-private-key
       - id: fix-byte-order-marker
       - id: mixed-line-ending
@@ -43,7 +43,7 @@ repos:
     rev: 1.7.8
     hooks:
       - id: bandit
-        args: [-r, src, -ll, --skip=B101,B601]
+        args: [-ll, "--skip=B101,B601"]
         exclude: tests/
 
 # Конфигурация для CI: fail fast на первых ошибках

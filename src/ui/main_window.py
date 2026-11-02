@@ -34,7 +34,8 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Any, Dict, Optional
+import urllib.parse
+from typing import Any, Dict, List, Optional
 
 from src.core.event_bus import Events
 from src.ui import diary_view, graph_view, life_view, theme
@@ -110,21 +111,34 @@ class MainWindow(ChatWindow):
         self._now_activity = None
         self._now_choice = None
         self._now_influence = None
-        self._diary_list = None
         self._diary_detail = None
         self._activity_list = None
         self._activity_detail = None
         self._access_card = None
         self._effector_card = None
         self._access_vars: Dict[str, Any] = {}
+        self._access_switches: Dict[str, Any] = {}
         self._mono_font = None
+
+        # Дневник: серии подряд одинаковых эпизодов и раскрытые группы.
+        self._diary_entries: List[Dict[str, Any]] = []
+        self._diary_groups: List[List[Dict[str, Any]]] = []
+        self._diary_rows_view: List[Dict[str, Any]] = []
+        self._diary_row_frames: List[Any] = []
+        self._diary_selected: Optional[int] = None
+        self._diary_expanded: set = set()
+        self._diary_canvas = None
+        self._diary_inner = None
+
+        # Карточки источников в диалоге и их состояние «развёрнуто».
+        self._web_cards: Dict[str, Dict[str, Any]] = {}
+        self._web_card_counter = 0
 
         # Карта жизни: данные приходят отдельным, более редким потоком.
         self._graph_canvas = None
         self._graph_detail = None
         self._graph_counter = None
-        self._diary_entries = []
-        self._activity_entries = []
+        self._activity_entries: List[Dict[str, Any]] = []
         self._activity_game = None
         self._graph_data: Dict[str, Any] = {}
         self._graph_tag_nodes: Dict[str, Dict[str, Any]] = {}
@@ -132,6 +146,15 @@ class MainWindow(ChatWindow):
         self._graph_size = (0, 0)
         self._graph_render_job = None
         self._graph_selected: Optional[str] = None
+        self._graph_filter: Optional[set] = None
+        self._graph_filter_buttons: Dict[str, Any] = {}
+        self._graph_zoom = 1.0
+        self._graph_offset = (0.0, 0.0)
+        self._graph_pan: Dict[str, Any] = {
+            "moved": False,
+            "start": (0, 0),
+            "origin": (0.0, 0.0),
+        }
 
         self._subscribe_life_events()
 
@@ -158,6 +181,10 @@ class MainWindow(ChatWindow):
     async def _on_life_result(self, event) -> None:
         data = dict(event.data or {})
         self._incoming_queue.put(("__life_result__", data))
+
+    async def _on_agent_web_result(self, event) -> None:
+        """Результат web-поиска: карточка источника, а не сырые строки."""
+        self._incoming_queue.put(("__web_card__", dict(event.data or {})))
 
     # ============================================================
     # Приём снимка показателей (из потока агента)
@@ -190,6 +217,8 @@ class MainWindow(ChatWindow):
             self._apply_life_prompt(data)
         elif kind == "__life_result__":
             self._apply_life_result(data)
+        elif kind == "__web_card__":
+            self._render_web_card(data)
         else:
             super()._handle_incoming(kind, data)
 
@@ -266,6 +295,52 @@ class MainWindow(ChatWindow):
         except Exception as exc:
             logger.debug("[MainWindow] access toggle: %s", exc)
 
+    def _build_access_switch(self, parent, key: str, var) -> None:
+        """Переключатель доступа в палитре оболочки — без нативного чекбокса."""
+        canvas = tk.Canvas(
+            parent,
+            width=40,
+            height=20,
+            bg=theme.SURFACE,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        canvas.pack(side=tk.LEFT)
+        self._access_switches[key] = canvas
+        canvas.bind(
+            "<Button-1>", lambda _event, name=key: self._toggle_access_var(name)
+        )
+        # Внешнее изменение переменной (командой агенту) тоже перерисовывает.
+        var.trace_add("write", lambda *_args, name=key: self._draw_access_switch(name))
+        self._draw_access_switch(key)
+
+    def _toggle_access_var(self, key: str) -> None:
+        """Клик меняет переменную; решение об доступе исполняет поток агента."""
+        var = self._access_vars.get(key)
+        if var is None:
+            return
+        var.set(not bool(var.get()))
+        self._on_access_toggle(key)
+
+    def _draw_access_switch(self, key: str) -> None:
+        canvas = self._access_switches.get(key)
+        var = self._access_vars.get(key)
+        if canvas is None or var is None:
+            return
+        on = bool(var.get())
+        canvas.delete("all")
+        track = theme.GLOW_CYAN if on else theme.BORDER
+        canvas.create_oval(2, 3, 38, 17, fill=track, outline=track)
+        knob_x = 28 if on else 12
+        canvas.create_oval(
+            knob_x - 5,
+            5,
+            knob_x + 5,
+            15,
+            fill=theme.CYAN if on else theme.DIMMED,
+            outline="",
+        )
+
     def _refresh_access_switches(self, snapshot: Dict[str, Any]) -> None:
         """Показывать реальное состояние, даже если его изменили командой."""
         access = snapshot.get("access") or {}
@@ -295,8 +370,12 @@ class MainWindow(ChatWindow):
             self._now_headline.configure(text=life_view.now_headline(snap))
             if self._now_sub is not None:
                 self._now_sub.configure(text=life_view.body_summary(snap))
-            self._now_activity.configure(text=self._rows_text(life_view.activity_rows(snap)))
-            self._now_choice.configure(text=self._rows_text(life_view.choice_rows(snap)))
+            self._now_activity.configure(
+                text=self._rows_text(life_view.activity_rows(snap))
+            )
+            self._now_choice.configure(
+                text=self._rows_text(life_view.choice_rows(snap))
+            )
             if self._now_influence is not None:
                 self._now_influence.configure(
                     text=self._rows_text(life_view.influence_rows(snap))
@@ -305,7 +384,9 @@ class MainWindow(ChatWindow):
             self._apply_activity_data(snap)
             self._refresh_access_switches(snap)
             if self._access_card is not None:
-                self._access_card.configure(text=self._rows_text(life_view.access_rows(snap)))
+                self._access_card.configure(
+                    text=self._rows_text(life_view.access_rows(snap))
+                )
             if self._effector_card is not None:
                 text = self._rows_text(life_view.effector_rows(snap))
                 note = life_view.pending_effector_note(snap)
@@ -322,9 +403,7 @@ class MainWindow(ChatWindow):
         if self._pause_button is None:
             return
         try:
-            self._pause_button.configure(
-                text="▶ Продолжить" if paused else "⏸ Пауза"
-            )
+            self._pause_button.configure(text="▶ Продолжить" if paused else "⏸ Пауза")
         except Exception:
             pass
 
@@ -333,7 +412,7 @@ class MainWindow(ChatWindow):
             try:
                 active = key == mode
                 button.configure(
-                    bg=theme.BG_CENTER if active else theme.SURFACE,
+                    bg=theme.GLOW_CYAN if active else theme.BG_CENTER,
                     fg=theme.CYAN if active else theme.MUTED,
                 )
             except Exception:
@@ -378,21 +457,30 @@ class MainWindow(ChatWindow):
         self._headline_font = font.Font(
             family=theme.font_family(), size=20, weight="bold"
         )
-        self._brand_font = font.Font(
-            family=theme.font_family(), size=16, weight="bold"
-        )
+        self._brand_font = font.Font(family=theme.font_family(), size=16, weight="bold")
 
         # --- Шапка: имя и состояние жизни ---
         header = tk.Frame(root, bg=theme.BG_DEEP)
         header.pack(fill=tk.X)
         self._display_name_label = tk.Label(
-            header, text=self.agent_name, font=self._brand_font,
-            bg=theme.BG_DEEP, fg=theme.TEXT, anchor="w",
+            header,
+            text=self.agent_name,
+            font=self._brand_font,
+            bg=theme.BG_DEEP,
+            fg=theme.TEXT,
+            anchor="w",
         )
-        self._display_name_label.pack(side=tk.LEFT, padx=theme.SPACING["md"], pady=theme.SPACING["sm"])
+        self._display_name_label.pack(
+            side=tk.LEFT, padx=theme.SPACING["md"], pady=theme.SPACING["sm"]
+        )
         self._state_pill = tk.Label(
-            header, text="жив", font=self._ui_font,
-            bg=theme.SURFACE, fg=theme.CYAN, padx=10, pady=3,
+            header,
+            text="жив",
+            font=self._ui_font,
+            bg=theme.SURFACE,
+            fg=theme.CYAN,
+            padx=10,
+            pady=3,
         )
         self._state_pill.pack(side=tk.LEFT)
 
@@ -404,45 +492,82 @@ class MainWindow(ChatWindow):
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
         tk.Label(
-            sidebar, text="ЯДРО", font=self._brand_font, bg=theme.SIDEBAR,
-            fg=theme.TEXT, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["lg"], 0))
+            sidebar,
+            text="ЯДРО",
+            font=self._brand_font,
+            bg=theme.SIDEBAR,
+            fg=theme.TEXT,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["lg"], 0))
         tk.Label(
-            sidebar, text="живая карта", font=self._card_title_font,
-            bg=theme.SIDEBAR, fg=theme.MUTED, anchor="w",
+            sidebar,
+            text="живая карта",
+            font=self._card_title_font,
+            bg=theme.SIDEBAR,
+            fg=theme.MUTED,
+            anchor="w",
         ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["lg"]))
 
         def nav_section(text):
             tk.Label(
-                sidebar, text=text, font=self._card_title_font,
-                bg=theme.SIDEBAR, fg=theme.DIMMED, anchor="w",
-            ).pack(fill=tk.X, padx=theme.SPACING["md"],
-                   pady=(theme.SPACING["sm"], theme.SPACING["xs"]))
+                sidebar,
+                text=text,
+                font=self._card_title_font,
+                bg=theme.SIDEBAR,
+                fg=theme.DIMMED,
+                anchor="w",
+            ).pack(
+                fill=tk.X,
+                padx=theme.SPACING["md"],
+                pady=(theme.SPACING["sm"], theme.SPACING["xs"]),
+            )
 
         self._nav_buttons = {}
         nav_section("ЖИЗНЬ")
-        navigation = (("now", "◉", "Сейчас"), ("graph", "✦", "Карта жизни"),
-                      ("diary", "◌", "Дневник"), ("activities", "◇", "Занятия"))
+        navigation = (
+            ("now", "◉", "Сейчас"),
+            ("graph", "✦", "Карта жизни"),
+            ("diary", "◌", "Дневник"),
+            ("activities", "◇", "Занятия"),
+        )
         for key, marker, label in navigation:
             button = tk.Button(
-                sidebar, text=f"  {marker}  {label}", font=self._ui_font,
-                anchor="w", command=lambda k=key: self._show_page(k),
-                bg=theme.SIDEBAR, fg=theme.MUTED,
-                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
-                relief=tk.FLAT, bd=0, padx=theme.SPACING["sm"], pady=9,
+                sidebar,
+                text=f"  {marker}  {label}",
+                font=self._ui_font,
+                anchor="w",
+                command=lambda k=key: self._show_page(k),
+                bg=theme.SIDEBAR,
+                fg=theme.MUTED,
+                activebackground=theme.SURFACE,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=theme.SPACING["sm"],
+                pady=9,
             )
             button.pack(fill=tk.X, padx=theme.SPACING["sm"])
             self._nav_buttons[key] = button
 
         nav_section("СИСТЕМА")
-        for key, marker, label in (("access", "▣", "Доступы"), ("dialog", "◫", "Диалог")):
+        for key, marker, label in (
+            ("access", "▣", "Доступы"),
+            ("dialog", "◫", "Диалог"),
+        ):
             button = tk.Button(
-                sidebar, text=f"  {marker}  {label}", font=self._ui_font,
-                anchor="w", command=lambda k=key: self._show_page(k),
-                bg=theme.SIDEBAR, fg=theme.MUTED,
-                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
-                relief=tk.FLAT, bd=0, padx=theme.SPACING["sm"], pady=9,
+                sidebar,
+                text=f"  {marker}  {label}",
+                font=self._ui_font,
+                anchor="w",
+                command=lambda k=key: self._show_page(k),
+                bg=theme.SIDEBAR,
+                fg=theme.MUTED,
+                activebackground=theme.SURFACE,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=theme.SPACING["sm"],
+                pady=9,
             )
             button.pack(fill=tk.X, padx=theme.SPACING["sm"])
             self._nav_buttons[key] = button
@@ -466,29 +591,43 @@ class MainWindow(ChatWindow):
     # Страницы каркаса
     # ------------------------------------------------------------------
 
-    def _make_card(self, parent, title: str, *, side=None, expand=False,
-                   wraplength=680):
+    def _make_card(
+        self, parent, title: str, *, side=None, expand=False, wraplength=680
+    ):
         """Карточка: тонкая рамка, приглушённый заголовок, светлое тело."""
         frame = tk.Frame(
-            parent, bg=theme.SURFACE,
-            highlightbackground=theme.BORDER, highlightthickness=1,
+            parent,
+            bg=theme.SURFACE,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
-        options = {"fill": tk.BOTH if expand else tk.X,
-                   "padx": theme.SPACING["md"],
-                   "pady": (0, theme.SPACING["sm"])}
+        options = {
+            "fill": tk.BOTH if expand else tk.X,
+            "padx": theme.SPACING["md"],
+            "pady": (0, theme.SPACING["sm"]),
+        }
         if side is not None:
             options["side"] = side
             options["padx"] = (0, theme.SPACING["sm"])
             options["expand"] = expand
         frame.pack(**options)
         tk.Label(
-            frame, text=title, font=self._card_title_font, bg=theme.SURFACE,
-            fg=theme.MUTED, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["sm"], 2))
+            frame,
+            text=title,
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
         body = tk.Label(
-            frame, text="", font=self._card_body_font, bg=theme.SURFACE,
-            fg=theme.TEXT, anchor="w", justify=tk.LEFT, wraplength=wraplength,
+            frame,
+            text="",
+            font=self._card_body_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=wraplength,
         )
         body.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
         return body
@@ -497,17 +636,29 @@ class MainWindow(ChatWindow):
         """Экран «Сейчас»: живая фраза, занятие, причина выбора, влияния."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
         self._now_headline = tk.Label(
-            page, text="…", font=self._headline_font, bg=theme.BG_DEEP,
-            fg=theme.TEXT, anchor="w", wraplength=760, justify=tk.LEFT,
+            page,
+            text="…",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.TEXT,
+            anchor="w",
+            wraplength=760,
+            justify=tk.LEFT,
         )
-        self._now_headline.pack(fill=tk.X, padx=theme.SPACING["md"],
-                                pady=(theme.SPACING["md"], 0))
+        self._now_headline.pack(
+            fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["md"], 0)
+        )
         self._now_sub = tk.Label(
-            page, text="", font=self._ui_font, bg=theme.BG_DEEP,
-            fg=theme.MUTED, anchor="w",
+            page,
+            text="",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
         )
-        self._now_sub.pack(fill=tk.X, padx=theme.SPACING["md"],
-                           pady=(2, theme.SPACING["sm"]))
+        self._now_sub.pack(
+            fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"])
+        )
         cards = tk.Frame(page, bg=theme.BG_DEEP)
         cards.pack(fill=tk.X, padx=theme.SPACING["md"])
         self._now_activity = self._make_card(
@@ -540,34 +691,105 @@ class MainWindow(ChatWindow):
         "uses": "намерение породило это занятие",
     }
 
+    # Ключи из diary_view.ACTION_COLOR_KEYS → цвета палитры.
+    _DIARY_COLORS = {
+        "cyan": theme.CYAN,
+        "violet": theme.VIOLET,
+        "green": theme.GREEN,
+        "amber": theme.AMBER,
+        "grey": theme.GREY,
+    }
+
     def _build_page_graph(self, parent):
         """Экран «Карта жизни»: Canvas с реальными узлами и панель деталей."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
         tk.Label(
-            page, text="Карта жизни", font=self._brand_font, bg=theme.BG_DEEP,
-            fg=theme.TEXT, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["md"], 0))
+            page,
+            text="Карта жизни",
+            font=self._brand_font,
+            bg=theme.BG_DEEP,
+            fg=theme.TEXT,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["md"], 0))
         tk.Label(
             page,
             text="узлы — то, что ядро знает, хочет и пережило; связи — только записанные",
-            font=self._ui_font, bg=theme.BG_DEEP, fg=theme.MUTED, anchor="w",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
         ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
 
+        # Чипы-фильтры: тот же цвет, что у узлов, — легенда и фильтр в одном.
+        filters = tk.Frame(page, bg=theme.BG_DEEP)
+        filters.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["xs"]))
+        all_chip = tk.Button(
+            filters,
+            text="все",
+            font=self._card_title_font,
+            command=self._on_graph_filter_all,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            activebackground=theme.SURFACE,
+            activeforeground=theme.TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=2,
+        )
+        all_chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+        self._graph_filter_buttons = {"all": all_chip}
+        for kind in ("concept", "intention", "value", "activity", "forgotten"):
+            chip = tk.Button(
+                filters,
+                text=self._NODE_TYPE_LABELS[kind],
+                font=self._card_title_font,
+                command=lambda k=kind: self._toggle_graph_filter(k),
+                bg=theme.BG_DEEP,
+                fg=theme.MUTED,
+                activebackground=theme.SURFACE,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=8,
+                pady=2,
+            )
+            chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+            self._graph_filter_buttons[kind] = chip
+
         body = tk.Frame(page, bg=theme.BG_DEEP)
-        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
-                  pady=(0, theme.SPACING["md"]))
+        body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
 
         left = tk.Frame(body, bg=theme.BG_DEEP)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self._graph_canvas = tk.Canvas(
-            left, bg=theme.BG_CENTER, highlightthickness=1,
-            highlightbackground=theme.BORDER, bd=0,
+            left,
+            bg=theme.BG_CENTER,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            bd=0,
         )
         self._graph_canvas.pack(fill=tk.BOTH, expand=True)
         self._graph_canvas.bind("<Configure>", self._on_graph_resize)
-        self._graph_canvas.bind("<Button-1>", self._on_graph_click)
+        self._graph_canvas.bind("<ButtonPress-1>", self._on_graph_press)
+        self._graph_canvas.bind("<B1-Motion>", self._on_graph_motion)
+        self._graph_canvas.bind("<ButtonRelease-1>", self._on_graph_release)
+        self._graph_canvas.bind("<MouseWheel>", self._on_graph_wheel)
+
+        tk.Label(
+            left,
+            text="колёсико — масштаб · перетаскивание — панорама · клик — детали",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.DIMMED,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(theme.SPACING["xs"], 0))
 
         legend = tk.Frame(left, bg=theme.BG_DEEP)
         legend.pack(fill=tk.X, pady=(theme.SPACING["sm"], 0))
@@ -577,47 +799,79 @@ class MainWindow(ChatWindow):
             # Три подписи в ряд: при узкой колонке легенда переносится,
             # а не обрезается правым краем окна.
             item = tk.Frame(legend, bg=theme.BG_DEEP)
-            item.grid(row=index // 3, column=index % 3, sticky="w",
-                      padx=(0, theme.SPACING["md"]), pady=(0, 2))
+            item.grid(
+                row=index // 3,
+                column=index % 3,
+                sticky="w",
+                padx=(0, theme.SPACING["md"]),
+                pady=(0, 2),
+            )
             swatch = tk.Canvas(
-                item, width=18, height=18, bg=theme.BG_DEEP,
+                item,
+                width=18,
+                height=18,
+                bg=theme.BG_DEEP,
                 highlightthickness=0,
             )
             swatch.pack(side=tk.LEFT)
             self._draw_node_shape(swatch, 9, 9, 5, kind)
             tk.Label(
-                item, text=self._NODE_TYPE_LABELS[kind], font=self._ui_font,
-                bg=theme.BG_DEEP, fg=theme.MUTED,
+                item,
+                text=self._NODE_TYPE_LABELS[kind],
+                font=self._ui_font,
+                bg=theme.BG_DEEP,
+                fg=theme.MUTED,
             ).pack(side=tk.LEFT, padx=(4, 0))
 
         detail = tk.Frame(
-            body, bg=theme.SURFACE, width=310,
-            highlightbackground=theme.BORDER, highlightthickness=1,
+            body,
+            bg=theme.SURFACE,
+            width=310,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
-        detail.pack(side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0),
-                    before=left)
+        detail.pack(
+            side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0), before=left
+        )
         detail.pack_propagate(False)
         tk.Label(
-            detail, text="УЗЕЛ", font=self._card_title_font, bg=theme.SURFACE,
-            fg=theme.MUTED, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["sm"], 2))
+            detail,
+            text="УЗЕЛ",
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
         self._graph_detail = tk.Label(
-            detail, text="Выберите узел на карте — покажу только то,\n"
-                        "что ядро действительно записало.",
-            font=self._ui_font, bg=theme.SURFACE, fg=theme.TEXT,
-            anchor="nw", justify=tk.LEFT, wraplength=274,
-        )
-        self._graph_detail.pack(fill=tk.BOTH, expand=True,
-                                padx=theme.SPACING["md"],
-                                pady=(0, theme.SPACING["sm"]))
-        self._graph_counter = tk.Label(
-            detail, text="узлов: 0 · связей: 0", font=self._card_title_font,
-            bg=theme.SURFACE, fg=theme.DIMMED, anchor="w", justify=tk.LEFT,
+            detail,
+            text="Выберите узел на карте — покажу только то,\n"
+            "что ядро действительно записало.",
+            font=self._ui_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            anchor="nw",
+            justify=tk.LEFT,
             wraplength=274,
         )
-        self._graph_counter.pack(fill=tk.X, padx=theme.SPACING["md"],
-                                 pady=(0, theme.SPACING["sm"]))
+        self._graph_detail.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["sm"]),
+        )
+        self._graph_counter = tk.Label(
+            detail,
+            text="узлов: 0 · связей: 0",
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.DIMMED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=274,
+        )
+        self._graph_counter.pack(
+            fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"])
+        )
         return page
 
     def _draw_node_shape(self, canvas, x, y, radius, kind, *, tags=()):
@@ -626,30 +880,57 @@ class MainWindow(ChatWindow):
         shape = theme.node_shape(kind)
         if shape == "diamond":
             canvas.create_polygon(
-                x, y - radius, x + radius, y, x, y + radius, x - radius, y,
-                fill=color, outline=color, tags=tags,
+                x,
+                y - radius,
+                x + radius,
+                y,
+                x,
+                y + radius,
+                x - radius,
+                y,
+                fill=color,
+                outline=color,
+                tags=tags,
             )
         elif shape == "hexagon":
             points = []
             for index in range(6):
                 angle = math.pi / 3.0 * index - math.pi / 6.0
-                points.extend((x + radius * math.cos(angle),
-                               y + radius * math.sin(angle)))
+                points.extend(
+                    (x + radius * math.cos(angle), y + radius * math.sin(angle))
+                )
             canvas.create_polygon(*points, fill=color, outline=color, tags=tags)
         elif shape == "ring":
             canvas.create_oval(
-                x - radius, y - radius, x + radius, y + radius,
-                fill=theme.BG_CENTER, outline=color, width=3, tags=tags,
+                x - radius,
+                y - radius,
+                x + radius,
+                y + radius,
+                fill=theme.BG_CENTER,
+                outline=color,
+                width=3,
+                tags=tags,
             )
         elif shape == "outline":
             canvas.create_oval(
-                x - radius, y - radius, x + radius, y + radius,
-                fill="", outline=color, width=1, tags=tags,
+                x - radius,
+                y - radius,
+                x + radius,
+                y + radius,
+                fill="",
+                outline=color,
+                width=1,
+                tags=tags,
             )
         else:
             canvas.create_oval(
-                x - radius, y - radius, x + radius, y + radius,
-                fill=color, outline=color, tags=tags,
+                x - radius,
+                y - radius,
+                x + radius,
+                y + radius,
+                fill=color,
+                outline=color,
+                tags=tags,
             )
 
     def _on_graph_resize(self, event) -> None:
@@ -673,7 +954,33 @@ class MainWindow(ChatWindow):
         self._graph_render_job = None
         self._render_graph()
 
-    def _on_graph_click(self, event) -> None:
+    def _on_graph_press(self, event) -> None:
+        """Начало жеста: запоминаем точку, клик и панорама расходятся позже."""
+        self._graph_pan = {
+            "moved": False,
+            "start": (event.x, event.y),
+            "origin": tuple(self._graph_offset),
+        }
+
+    def _on_graph_motion(self, event) -> None:
+        start_x, start_y = self._graph_pan["start"]
+        if abs(event.x - start_x) + abs(event.y - start_y) < 4:
+            return
+        self._graph_pan["moved"] = True
+        origin_x, origin_y = self._graph_pan["origin"]
+        self._graph_offset = (
+            origin_x + event.x - start_x,
+            origin_y + event.y - start_y,
+        )
+        self._render_graph()
+
+    def _on_graph_release(self, event) -> None:
+        """Сдвиг больше пары пикселей — панорама, без сдвига — выбор узла."""
+        if self._graph_pan["moved"]:
+            return
+        self._select_graph_at(event)
+
+    def _select_graph_at(self, event) -> None:
         canvas = self._graph_canvas
         if canvas is None:
             return
@@ -691,6 +998,49 @@ class MainWindow(ChatWindow):
             self._show_edge_detail(edge)
             self._render_graph()
 
+    def _on_graph_wheel(self, event) -> None:
+        """Масштаб вокруг центра; границы держим, чтобы карта не потерялась."""
+        factor = 1.1 if event.delta > 0 else 1 / 1.1
+        self._graph_zoom = max(0.35, min(3.0, self._graph_zoom * factor))
+        self._render_graph()
+
+    def _toggle_graph_filter(self, kind: str) -> None:
+        """Фильтр — свойство вида, а не данных: Core не трогаем."""
+        active = set(self._graph_filter or ())
+        if kind in active:
+            active.discard(kind)
+        else:
+            active.add(kind)
+        self._graph_filter = active or None
+        self._refresh_graph_view()
+
+    def _on_graph_filter_all(self) -> None:
+        self._graph_filter = None
+        self._refresh_graph_view()
+
+    def _refresh_graph_view(self) -> None:
+        self._graph_zoom = 1.0
+        self._graph_offset = (0.0, 0.0)
+        self._refresh_graph_chips()
+        self._update_graph_counter()
+        self._render_graph()
+
+    def _refresh_graph_chips(self) -> None:
+        for kind, chip in self._graph_filter_buttons.items():
+            if kind == "all":
+                active = self._graph_filter is None
+                color = theme.CYAN
+            else:
+                active = self._graph_filter is not None and kind in self._graph_filter
+                color = theme.node_color(kind)
+            try:
+                chip.configure(
+                    bg=theme.BG_CENTER if active else theme.BG_DEEP,
+                    fg=color if active else theme.MUTED,
+                )
+            except Exception:
+                pass
+
     @staticmethod
     def _distance_to_segment(point_x, point_y, start, end) -> float:
         """Расстояние от точки до отрезка — чтобы тонкую связь было легко поймать."""
@@ -700,9 +1050,14 @@ class MainWindow(ChatWindow):
         length_sq = delta_x * delta_x + delta_y * delta_y
         if length_sq <= 0:
             return math.hypot(point_x - start_x, point_y - start_y)
-        t = max(0.0, min(1.0, (
-            (point_x - start_x) * delta_x + (point_y - start_y) * delta_y
-        ) / length_sq))
+        t = max(
+            0.0,
+            min(
+                1.0,
+                ((point_x - start_x) * delta_x + (point_y - start_y) * delta_y)
+                / length_sq,
+            ),
+        )
         return math.hypot(
             point_x - (start_x + t * delta_x),
             point_y - (start_y + t * delta_y),
@@ -733,7 +1088,8 @@ class MainWindow(ChatWindow):
         kind = str(edge.get("kind") or "")
         lines = [
             f"{source.get('label', '—')} → {target.get('label', '—')}",
-            "связь", "",
+            "связь",
+            "",
             f"тип: {edge.get('label') or kind or '—'}",
             f"основание: {self._EDGE_BASIS.get(kind, 'записано в Core')}",
         ]
@@ -746,8 +1102,11 @@ class MainWindow(ChatWindow):
         if self._graph_detail is None:
             return
         kind = str(node.get("kind") or "")
-        lines = [str(node.get("label") or "—"),
-                 self._NODE_TYPE_LABELS.get(kind, "узел"), ""]
+        lines = [
+            str(node.get("label") or "—"),
+            self._NODE_TYPE_LABELS.get(kind, "узел"),
+            "",
+        ]
         detail = node.get("detail") or {}
         for key, value in detail.items():
             if isinstance(value, bool):
@@ -760,6 +1119,13 @@ class MainWindow(ChatWindow):
         elif kind == "concept":
             lines.extend(["", "уверенность — мера доверия модели, а не факт."])
         self._graph_detail.configure(text="\n".join(lines))
+
+    def _visible_nodes(self) -> List[Dict[str, Any]]:
+        """Узлы, видимые при текущем фильтре; без фильтра — все."""
+        nodes = self._graph_data.get("nodes") or []
+        if self._graph_filter is None:
+            return list(nodes)
+        return [node for node in nodes if str(node.get("kind")) in self._graph_filter]
 
     def _render_graph(self) -> None:
         """Перерисовать карту. Ошибка рисунка не должна рушить окно."""
@@ -774,46 +1140,77 @@ class MainWindow(ChatWindow):
             if width < 80 or height < 80:
                 return
 
-            nodes = list(self._graph_data.get("nodes") or [])
+            nodes = self._visible_nodes()
             if not nodes:
                 canvas.create_text(
-                    width / 2, height / 2,
+                    width / 2,
+                    height / 2,
                     text="Пока нечего показать: ядро ещё не накопило\n"
-                         "знаний, намерений и занятий для карты.",
-                    fill=theme.MUTED, font=self._ui_font,
-                    width=max(160, width - 80), justify=tk.CENTER,
+                    "знаний, намерений и занятий для карты.",
+                    fill=theme.MUTED,
+                    font=self._ui_font,
+                    width=max(160, width - 80),
+                    justify=tk.CENTER,
                 )
                 return
 
             positions = graph_view.layout_nodes(nodes, width, height)
-            self._graph_positions = positions
+            zoom = self._graph_zoom
+            offset_x, offset_y = self._graph_offset
+            center_x, center_y = width / 2.0, height / 2.0
+            # Масштаб и панорама — вокруг центра; сами координаты раскладки
+            # не меняются, поэтому «назад» всегда возвращает прежнюю картинку.
+            shifted = {
+                node_id: (
+                    center_x + (x - center_x) * zoom + offset_x,
+                    center_y + (y - center_y) * zoom + offset_y,
+                )
+                for node_id, (x, y) in positions.items()
+            }
+            self._graph_positions = shifted
+
+            visible_ids = {str(node.get("id")) for node in nodes}
             for edge in self._graph_data.get("edges") or []:
-                start = positions.get(edge.get("source"))
-                end = positions.get(edge.get("target"))
+                if (
+                    edge.get("source") not in visible_ids
+                    or edge.get("target") not in visible_ids
+                ):
+                    continue
+                start = shifted.get(edge.get("source"))
+                end = shifted.get(edge.get("target"))
                 if not start or not end:
                     continue
                 canvas.create_line(
-                    start[0], start[1], end[0], end[1],
-                    fill=theme.EDGE, width=1, tags=("edge",),
+                    start[0],
+                    start[1],
+                    end[0],
+                    end[1],
+                    fill=theme.EDGE,
+                    width=1,
+                    tags=("edge",),
                 )
 
-            labels = graph_view.layout_labels(nodes, positions, width, height)
+            labels = graph_view.layout_labels(nodes, shifted, width, height)
             for index, node in enumerate(nodes):
-                position = positions.get(node.get("id"))
+                position = shifted.get(node.get("id"))
                 if position is None:
                     continue
                 x, y = position
                 kind = str(node.get("kind") or "")
                 weight = node.get("weight", 0.0)
-                radius = graph_view.node_radius(weight, kind)
+                radius = graph_view.node_radius(weight, kind) * zoom
                 tag = f"node-{index}"
                 self._graph_tag_nodes[tag] = node
                 tags = ("node", tag)
                 if node.get("id") == self._graph_selected:
                     canvas.create_oval(
-                        x - radius - 6, y - radius - 6,
-                        x + radius + 6, y + radius + 6,
-                        outline=theme.TEXT, width=1, tags=tags,
+                        x - radius - 6,
+                        y - radius - 6,
+                        x + radius + 6,
+                        y + radius + 6,
+                        outline=theme.TEXT,
+                        width=1,
+                        tags=tags,
                     )
                 self._draw_node_shape(canvas, x, y, radius, kind, tags=tags)
 
@@ -823,62 +1220,132 @@ class MainWindow(ChatWindow):
                     continue
                 label_x, label_y, anchor = label
                 canvas.create_text(
-                    label_x, label_y,
+                    label_x,
+                    label_y,
                     text=graph_view.short_label(node.get("label")),
                     anchor=anchor,
                     fill=theme.MUTED if node.get("kind") == "forgotten" else theme.TEXT,
-                    font=self._ui_font, tags=("node", f"node-{index}"),
+                    font=self._ui_font,
+                    tags=("node", f"node-{index}"),
                 )
         except Exception as exc:
             logger.debug("[MainWindow] graph render: %s", exc)
 
-    def _apply_graph_data(self, graph: Dict[str, Any]) -> None:
-        self._graph_data = dict(graph or {})
+    def _update_graph_counter(self) -> None:
+        """Счётчик узлов и связей; при фильтре — сколько показано из скольких."""
+        if self._graph_counter is None:
+            return
         nodes = self._graph_data.get("nodes") or []
         edges = self._graph_data.get("edges") or []
-        if self._graph_counter is not None:
+        if self._graph_filter is None:
             text = f"узлов: {len(nodes)} · связей: {len(edges)}"
-            hidden = int(self._graph_data.get("hidden_service") or 0)
-            if hidden > 0:
-                # Узкая колонка подробностей: счётчик скрытых записей
-                # переносим на отдельную строку, иначе он обрезается.
-                text += f"\nслужебных записей скрыто: {hidden}"
-            if self._graph_data.get("truncated"):
-                text += "\nпоказаны не все"
-            try:
-                self._graph_counter.configure(text=text)
-            except Exception:
-                pass
+        else:
+            shown = self._visible_nodes()
+            labels = sorted(
+                self._NODE_TYPE_LABELS.get(str(kind), str(kind))
+                for kind in self._graph_filter
+            )
+            text = (
+                f"узлов: {len(shown)} из {len(nodes)}"
+                f" · фильтр: {' + '.join(labels)}"
+            )
+        hidden = int(self._graph_data.get("hidden_service") or 0)
+        if hidden > 0:
+            # Узкая колонка подробностей: счётчик скрытых записей
+            # переносим на отдельную строку, иначе он обрезается.
+            text += f"\nслужебных записей скрыто: {hidden}"
+        if self._graph_data.get("truncated"):
+            text += "\nпоказаны не все"
+        try:
+            self._graph_counter.configure(text=text)
+        except Exception:
+            pass
+
+    def _apply_graph_data(self, graph: Dict[str, Any]) -> None:
+        self._graph_data = dict(graph or {})
+        self._update_graph_counter()
         self._render_graph()
 
     def _build_page_diary(self, parent):
-        """Дневник: лента автобиографических эпизодов из Delamain memory."""
+        """Дневник: строки эпизодов (время, действие, серия) и подробности."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._page_heading(page, "Дневник", "только записанные события жизни, от новых к старым")
-        body = tk.Frame(page, bg=theme.BG_DEEP)
-        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
-        self._diary_list = tk.Listbox(
-            body, width=32, font=self._ui_font, bg=theme.BG_CENTER,
-            fg=theme.TEXT, selectbackground=theme.GLOW_CYAN,
-            selectforeground=theme.TEXT, relief=tk.FLAT, bd=0,
-            highlightthickness=1, highlightbackground=theme.BORDER,
+        self._page_heading(
+            page, "Дневник", "только записанные события жизни, от новых к старым"
         )
-        self._diary_list.pack(side=tk.LEFT, fill=tk.Y)
-        self._diary_list.bind("<<ListboxSelect>>", self._on_diary_select)
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
+
+        holder = tk.Frame(
+            body,
+            bg=theme.BG_CENTER,
+            width=348,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
+        )
+        holder.pack(side=tk.LEFT, fill=tk.Y)
+        holder.pack_propagate(False)
+        self._diary_canvas = tk.Canvas(
+            holder,
+            bg=theme.BG_CENTER,
+            highlightthickness=0,
+            bd=0,
+        )
+        scrollbar = tk.Scrollbar(
+            holder,
+            orient=tk.VERTICAL,
+            command=self._diary_canvas.yview,
+        )
+        self._diary_inner = tk.Frame(self._diary_canvas, bg=theme.BG_CENTER)
+        self._diary_canvas.create_window((0, 0), window=self._diary_inner, anchor="nw")
+        self._diary_inner.bind(
+            "<Configure>",
+            lambda _event: self._diary_canvas.configure(
+                scrollregion=self._diary_canvas.bbox("all")
+            ),
+        )
+        self._diary_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._diary_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._diary_canvas.bind(
+            "<MouseWheel>",
+            lambda event: self._diary_canvas.yview_scroll(-event.delta // 120, "units"),
+        )
         self._diary_detail = self._detail_panel(body, "ЭПИЗОД")
+        # Пустое состояние рисуется сразу: снапшоты без записей больше
+        # не пересобирают список (см. защиту в _apply_diary_data).
+        self._render_diary_rows()
         return page
 
     def _build_page_activities(self, parent):
         """Каталог занятий: черновики и локальная партия, только чтение."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._page_heading(page, "Занятия", "работы и партии, которые Core действительно создал")
+        self._page_heading(
+            page, "Занятия", "работы и партии, которые Core действительно создал"
+        )
         body = tk.Frame(page, bg=theme.BG_DEEP)
-        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
+        body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
         self._activity_list = tk.Listbox(
-            body, width=32, font=self._ui_font, bg=theme.BG_CENTER,
-            fg=theme.TEXT, selectbackground=theme.GLOW_AMBER,
-            selectforeground=theme.TEXT, relief=tk.FLAT, bd=0,
-            highlightthickness=1, highlightbackground=theme.BORDER,
+            body,
+            width=32,
+            font=self._ui_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            selectbackground=theme.GLOW_AMBER,
+            selectforeground=theme.TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
         )
         self._activity_list.pack(side=tk.LEFT, fill=tk.Y)
         self._activity_list.bind("<<ListboxSelect>>", self._on_activity_select)
@@ -886,49 +1353,323 @@ class MainWindow(ChatWindow):
         return page
 
     def _page_heading(self, page, title, subtitle):
-        tk.Label(page, text=title, font=self._brand_font, bg=theme.BG_DEEP,
-                 fg=theme.TEXT, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
-                                                  pady=(theme.SPACING["md"], 0))
-        tk.Label(page, text=subtitle, font=self._ui_font, bg=theme.BG_DEEP,
-                 fg=theme.MUTED, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
-                                                   pady=(0, theme.SPACING["sm"]))
+        tk.Label(
+            page,
+            text=title,
+            font=self._brand_font,
+            bg=theme.BG_DEEP,
+            fg=theme.TEXT,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["md"], 0))
+        tk.Label(
+            page,
+            text=subtitle,
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
 
     def _detail_panel(self, parent, title):
-        panel = tk.Frame(parent, bg=theme.SURFACE, width=400,
-                         highlightbackground=theme.BORDER, highlightthickness=1)
-        panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(theme.SPACING["md"], 0))
+        panel = tk.Frame(
+            parent,
+            bg=theme.SURFACE,
+            width=400,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
+        )
+        panel.pack(
+            side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(theme.SPACING["md"], 0)
+        )
         panel.pack_propagate(False)
-        tk.Label(panel, text=title, font=self._card_title_font, bg=theme.SURFACE,
-                 fg=theme.MUTED, anchor="w").pack(fill=tk.X, padx=theme.SPACING["md"],
-                                                   pady=(theme.SPACING["md"], theme.SPACING["sm"]))
-        label = tk.Label(panel, text="Выберите запись слева.", font=self._ui_font,
-                         bg=theme.SURFACE, fg=theme.TEXT, anchor="nw", justify=tk.LEFT,
-                         wraplength=500)
-        label.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"], pady=(0, theme.SPACING["md"]))
+        tk.Label(
+            panel,
+            text=title,
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["md"], theme.SPACING["sm"]),
+        )
+        label = tk.Label(
+            panel,
+            text="Выберите запись слева.",
+            font=self._ui_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            anchor="nw",
+            justify=tk.LEFT,
+            wraplength=500,
+        )
+        label.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
         return label
 
     def _apply_diary_data(self, snapshot):
-        if self._diary_list is None:
+        if self._diary_inner is None:
             return
-        self._diary_entries = diary_view.diary_rows(snapshot)
-        self._diary_list.delete(0, tk.END)
-        for episode in self._diary_entries:
-            self._diary_list.insert(tk.END, diary_view.episode_title(episode))
+        entries = diary_view.diary_rows(snapshot)
+        if entries == self._diary_entries:
+            # Снимок приходит дважды в секунду: без этой проверки список
+            # пересобирается, моргает и сбрасывает раскрытие серий.
+            return
+        selected_episode = None
+        if self._diary_selected is not None and 0 <= self._diary_selected < len(
+            self._diary_rows_view
+        ):
+            selected_episode = self._diary_rows_view[self._diary_selected]["episode"]
+        self._diary_entries = entries
+        self._diary_groups = [
+            list(group["episodes"])
+            for group in diary_view.group_diary_episodes(entries)
+        ]
+        # Раскрытие хранится по ключу содержания серии (_diary_expanded),
+        # поэтому сдвиг окна истории его не сбрасывает.
+        self._render_diary_rows()
+        self._restore_diary_selection(selected_episode)
+
+    def _render_diary_rows(self) -> None:
+        """Перерисовать список: свёрнутая серия — одна строка с «×N»."""
+        if self._diary_inner is None or self._diary_canvas is None:
+            return
+        for child in list(self._diary_inner.winfo_children()):
+            child.destroy()
+        self._diary_row_frames = []
+        self._diary_rows_view = []
         if not self._diary_entries:
-            self._diary_list.insert(tk.END, "Записей пока нет")
-            self._diary_list.configure(state=tk.DISABLED)
+            self._render_diary_empty()
         else:
-            self._diary_list.configure(state=tk.NORMAL)
+            for group_index, episodes in enumerate(self._diary_groups):
+                key = diary_view.group_key(episodes[0])
+                collapsed = len(episodes) > 1 and key not in self._diary_expanded
+                if collapsed:
+                    self._append_diary_row(
+                        episodes[0],
+                        group_index=group_index,
+                        group_count=len(episodes),
+                        group_key=key,
+                    )
+                    continue
+                for position, episode in enumerate(episodes):
+                    self._append_diary_row(
+                        episode,
+                        group_index=group_index,
+                        group_count=1,
+                        group_size=len(episodes) if position == 0 else 1,
+                        group_key=key,
+                    )
+        try:
+            self._diary_canvas.configure(scrollregion=self._diary_canvas.bbox("all"))
+        except Exception:
+            pass
+
+    def _render_diary_empty(self) -> None:
+        """Пустой дневник — явное состояние, а не пустая серость."""
+        tk.Label(
+            self._diary_inner,
+            text="Записей пока нет",
+            font=self._ui_font,
+            bg=theme.BG_CENTER,
+            fg=theme.MUTED,
+        ).pack(pady=(theme.SPACING["lg"], theme.SPACING["xs"]))
+        tk.Label(
+            self._diary_inner,
+            text="здесь появятся события,\nкоторые ядро записало в дневник",
+            font=self._card_title_font,
+            bg=theme.BG_CENTER,
+            fg=theme.DIMMED,
+            justify=tk.CENTER,
+        ).pack(pady=(0, theme.SPACING["lg"]))
+
+    def _append_diary_row(
+        self,
+        episode,
+        *,
+        group_index: int,
+        group_count: int,
+        group_size: int = 1,
+        group_key: Any = None,
+    ) -> None:
+        """Одна строка дневника: время, плашка действия, тема и исход."""
+        title = diary_view.episode_title(episode)
+        row = tk.Frame(
+            self._diary_inner, bg=theme.BG_CENTER, highlightthickness=0, bd=0
+        )
+        row.pack(fill=tk.X)
+        header = tk.Frame(row, bg=theme.BG_CENTER)
+        header.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            header,
+            text=diary_view.episode_time(episode),
+            font=self._mono_font or theme.mono_family(),
+            bg=theme.BG_CENTER,
+            fg=theme.DIMMED,
+        ).pack(side=tk.LEFT)
+        pill = tk.Label(
+            header,
+            text=diary_view.action_label(episode.get("action")),
+            font=self._card_title_font,
+            bg=theme.BG_CENTER,
+            fg=self._DIARY_COLORS.get(
+                diary_view.action_color_key(episode.get("action")), theme.GREY
+            ),
+            padx=6,
+        )
+        pill.pack(side=tk.LEFT, padx=(theme.SPACING["xs"], 0))
+        collapse_link = None
+        if group_count > 1:
+            tk.Label(
+                header,
+                text=f"×{group_count} · показать",
+                font=self._card_title_font,
+                bg=theme.BG_CENTER,
+                fg=theme.CYAN,
+            ).pack(side=tk.RIGHT)
+        elif group_size > 1:
+            # Головная строка развёрнутой серии: явная кнопка «свернуть».
+            collapse_link = tk.Label(
+                header,
+                text=f"×{group_size} · свернуть",
+                font=self._card_title_font,
+                bg=theme.BG_CENTER,
+                fg=theme.CYAN,
+            )
+            collapse_link.pack(side=tk.RIGHT)
+        tk.Label(
+            row,
+            text=title,
+            font=self._ui_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=300,
+        ).pack(fill=tk.X, padx=theme.SPACING["sm"])
+        error = episode.get("error")
+        tk.Label(
+            row,
+            text=str(error) if error else diary_view.episode_status(episode),
+            font=self._card_title_font,
+            bg=theme.BG_CENTER,
+            fg=theme.DANGER if error else theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=300,
+        ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]))
+        tk.Frame(self._diary_inner, height=1, bg=theme.BORDER).pack(fill=tk.X)
+
+        self._diary_rows_view.append(
+            {
+                "episode": episode,
+                "group_index": group_index,
+                "count": group_count,
+                "key": group_key,
+                "frame": row,
+                "title": title,
+            }
+        )
+        self._diary_row_frames.append(row)
+        self._bind_row_click(row, len(self._diary_rows_view) - 1)
+        if collapse_link is not None:
+            # Поверх выбора эпизода: клик по «свернуть» не выделяет строку.
+            collapse_link.bind(
+                "<Button-1>",
+                lambda _event: self._toggle_diary_group(group_key),
+            )
+
+    def _bind_row_click(self, widget, index: int) -> None:
+        widget.bind("<Button-1>", lambda _event, i=index: self._select_diary_index(i))
+        for child in widget.winfo_children():
+            self._bind_row_click(child, index)
+
+    def _toggle_diary_group(self, key: Any) -> None:
+        """Развернуть или свернуть серию одинаковых эпизодов."""
+        selected = None
+        if self._diary_selected is not None and 0 <= self._diary_selected < len(
+            self._diary_rows_view
+        ):
+            selected = self._diary_rows_view[self._diary_selected]["episode"]
+        if key in self._diary_expanded:
+            self._diary_expanded.discard(key)
+        else:
+            self._diary_expanded.add(key)
+        self._render_diary_rows()
+        self._restore_diary_selection(selected)
+
+    def _restore_diary_selection(self, episode) -> None:
+        """Вернуть выделение на тот же эпизод после пересборки списка."""
+        self._diary_selected = None
+        if episode is None:
+            return
+        for index, row in enumerate(self._diary_rows_view):
+            if row["count"] == 1 and row["episode"] == episode:
+                self._diary_selected = index
+                self._highlight_diary_row(index)
+                if self._diary_detail is not None:
+                    self._diary_detail.configure(
+                        text=diary_view.rows_text(diary_view.episode_rows(episode))
+                    )
+                return
+
+    def _select_diary_index(self, index: int) -> None:
+        """Клик по строке: серия раскрывается, отдельный эпизод выбирается."""
+        if not 0 <= index < len(self._diary_rows_view):
+            return
+        view_row = self._diary_rows_view[index]
+        if view_row["count"] > 1:
+            self._toggle_diary_group(view_row["key"])
+            return
+        self._highlight_diary_row(index)
+        if self._diary_detail is not None:
+            self._diary_detail.configure(
+                text=diary_view.rows_text(diary_view.episode_rows(view_row["episode"]))
+            )
+
+    def _highlight_diary_row(self, index: int) -> None:
+        if self._diary_selected is not None and self._diary_selected < len(
+            self._diary_row_frames
+        ):
+            self._set_row_bg(
+                self._diary_row_frames[self._diary_selected], theme.BG_CENTER
+            )
+        self._diary_selected = index
+        if index < len(self._diary_row_frames):
+            self._set_row_bg(self._diary_row_frames[index], theme.GLOW_CYAN)
+
+    def _set_row_bg(self, widget, color) -> None:
+        try:
+            widget.configure(bg=color)
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._set_row_bg(child, color)
+
+    def _diary_titles(self) -> List[str]:
+        """Заголовки видимых строк — точка для тестов и отладки."""
+        return [row["title"] for row in self._diary_rows_view]
 
     def _apply_activity_data(self, snapshot):
         if self._activity_list is None:
             return
-        self._activity_entries = diary_view.draft_rows(snapshot)
+        drafts = diary_view.draft_rows(snapshot)
+        game = (snapshot.get("activities") or {}).get("game")
+        game = game if isinstance(game, dict) else None
+        if drafts == self._activity_entries and game == self._activity_game:
+            return
+        self._activity_entries = drafts
         self._activity_list.delete(0, tk.END)
         for draft in self._activity_entries:
-            self._activity_list.insert(tk.END, f"Черновик · {draft.get('theme', 'без темы')}")
-        game = (snapshot.get("activities") or {}).get("game")
-        self._activity_game = game if isinstance(game, dict) else None
+            self._activity_list.insert(
+                tk.END, f"Черновик · {draft.get('theme', 'без темы')}"
+            )
+        self._activity_game = game
         if self._activity_game is not None:
             self._activity_list.insert(tk.END, "Партия · крестики-нолики")
         if not self._activity_entries and self._activity_game is None:
@@ -936,15 +1677,6 @@ class MainWindow(ChatWindow):
             self._activity_list.configure(state=tk.DISABLED)
         else:
             self._activity_list.configure(state=tk.NORMAL)
-
-    def _on_diary_select(self, _event=None):
-        if self._diary_detail is None:
-            return
-        selection = self._diary_list.curselection()
-        if selection and selection[0] < len(self._diary_entries):
-            self._diary_detail.configure(text=diary_view.rows_text(
-                diary_view.episode_rows(self._diary_entries[selection[0]])
-            ))
 
     def _on_activity_select(self, _event=None):
         if self._activity_detail is None:
@@ -967,60 +1699,96 @@ class MainWindow(ChatWindow):
 
         page = tk.Frame(parent, bg=theme.BG_DEEP)
         self._page_heading(
-            page, "Доступы",
+            page,
+            "Доступы",
             "человек сам решает, что ядру разрешено; выключение ничего не стирает",
         )
 
         switches = tk.Frame(
-            page, bg=theme.SURFACE,
-            highlightbackground=theme.BORDER, highlightthickness=1,
+            page,
+            bg=theme.SURFACE,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
-        switches.pack(fill=tk.X, padx=theme.SPACING["md"],
-                      pady=(0, theme.SPACING["sm"]))
+        switches.pack(
+            fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"])
+        )
         tk.Label(
-            switches, text="РАЗРЕШЕНИЯ", font=self._card_title_font,
-            bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["sm"], 2))
+            switches,
+            text="РАЗРЕШЕНИЯ",
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
         for key in ("network", "delamain", "effector"):
             var = tk.BooleanVar(value=False)
             self._access_vars[key] = var
             row = tk.Frame(switches, bg=theme.SURFACE)
             row.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, 2))
-            check = tk.Checkbutton(
-                row, text=LABELS[key], variable=var,
-                command=lambda name=key: self._on_access_toggle(name),
-                bg=theme.SURFACE, fg=theme.TEXT,
-                activebackground=theme.SURFACE, activeforeground=theme.TEXT,
-                selectcolor=theme.BG_CENTER, highlightthickness=0,
-                bd=0, anchor="w", font=self._ui_font,
+            self._build_access_switch(row, key, var)
+            label = tk.Label(
+                row,
+                text=LABELS[key],
+                font=self._ui_font,
+                bg=theme.SURFACE,
+                fg=theme.TEXT,
+                anchor="w",
+                cursor="hand2",
             )
-            check.pack(anchor="w")
+            label.pack(anchor="w", padx=(theme.SPACING["sm"], 0))
+            label.bind(
+                "<Button-1>",
+                lambda _event, name=key: self._toggle_access_var(name),
+            )
             tk.Label(
-                row, text=HINTS[key], font=self._card_title_font,
-                bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
-            ).pack(anchor="w", padx=(24, 0))
+                row,
+                text=HINTS[key],
+                font=self._card_title_font,
+                bg=theme.SURFACE,
+                fg=theme.MUTED,
+                anchor="w",
+            ).pack(anchor="w", padx=(46, 0))
 
         self._access_card = self._make_card(page, "ЧТО РАЗРЕШЕНО СЕЙЧАС")
         self._effector_card = self._make_card(page, "ДЕЙСТВИЯ")
 
         detail = tk.Frame(
-            page, bg=theme.SURFACE,
-            highlightbackground=theme.BORDER, highlightthickness=1,
+            page,
+            bg=theme.SURFACE,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
-        detail.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
-                    pady=(0, theme.SPACING["md"]))
+        detail.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
         tk.Label(
-            detail, text="ПОДРОБНОСТИ", font=self._card_title_font,
-            bg=theme.SURFACE, fg=theme.MUTED, anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"],
-               pady=(theme.SPACING["sm"], 2))
+            detail,
+            text="ПОДРОБНОСТИ",
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
         self._status_text = tk.Text(
-            detail, height=10, font=self._mono_font, bg=theme.SURFACE,
-            fg=theme.TEXT, relief=tk.FLAT, state=tk.DISABLED, wrap=tk.NONE,
+            detail,
+            height=10,
+            font=self._mono_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+            wrap=tk.NONE,
         )
-        self._status_text.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"],
-                               pady=(0, theme.SPACING["md"]))
+        self._status_text.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
         return page
 
     def _build_page_dialog(self, parent):
@@ -1028,29 +1796,63 @@ class MainWindow(ChatWindow):
         page = tk.Frame(parent, bg=theme.BG_DEEP)
 
         self._text = scrolledtext.ScrolledText(
-            page, wrap=tk.WORD, width=60, height=20, font=self._card_body_font,
-            bg=theme.BG_CENTER, fg=theme.TEXT, insertbackground=theme.TEXT,
-            relief=tk.FLAT, state=tk.DISABLED,
+            page,
+            wrap=tk.WORD,
+            width=60,
+            height=20,
+            font=self._card_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            relief=tk.FLAT,
+            state=tk.DISABLED,
         )
-        self._text.pack(padx=theme.SPACING["sm"], pady=theme.SPACING["sm"],
-                        fill=tk.BOTH, expand=True)
-        self._text.tag_config("user", foreground="#87ceeb")
-        self._text.tag_config("agent", foreground="#98fb98")
-        self._text.tag_config("system", foreground="#888888",
-                              font=self._card_body_font)
-        self._text.tag_config("error", foreground="#ff6b6b")
-        self._text.tag_config("life", foreground="#ffd479",
-                              font=self._card_body_font)
+        self._text.pack(
+            padx=theme.SPACING["sm"],
+            pady=theme.SPACING["sm"],
+            fill=tk.BOTH,
+            expand=True,
+        )
+        self._text.tag_config("user", foreground=theme.CYAN)
+        self._text.tag_config("agent", foreground=theme.GREEN)
+        self._text.tag_config(
+            "system",
+            foreground=theme.MUTED,
+            font=self._card_title_font,
+            justify="center",
+        )
+        self._text.tag_config("error", foreground=theme.DANGER)
+        self._text.tag_config("life", foreground=theme.AMBER, font=self._card_body_font)
+        # Карточка источника: заголовок, метаданные, выдержка и ссылка.
+        self._text.tag_config("web_head", foreground=theme.TEXT, font=self._ui_font)
+        self._text.tag_config(
+            "web_meta", foreground=theme.DIMMED, font=self._card_title_font
+        )
+        self._text.tag_config(
+            "web_body",
+            foreground=theme.TEXT,
+            font=self._ui_font,
+            lmargin1=12,
+            lmargin2=12,
+        )
 
         input_frame = tk.Frame(page, bg=theme.BG_DEEP)
-        input_frame.pack(padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]),
-                         fill=tk.X)
+        input_frame.pack(
+            padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]), fill=tk.X
+        )
         self._input_var = tk.StringVar()
         self._input_entry = tk.Entry(
-            input_frame, textvariable=self._input_var, font=self._mono_font,
-            bg=theme.SURFACE, fg=theme.TEXT, insertbackground=theme.TEXT,
-            relief=tk.FLAT, bd=0, highlightthickness=1,
-            highlightbackground=theme.BORDER, highlightcolor=theme.CYAN,
+            input_frame,
+            textvariable=self._input_var,
+            font=self._mono_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            highlightcolor=theme.CYAN,
         )
         self._input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
         self._input_entry.bind("<Return>", self._on_send)
@@ -1058,10 +1860,17 @@ class MainWindow(ChatWindow):
         self._input_entry.bind("<Down>", self._on_history_down)
         self._input_entry.focus_set()
         tk.Button(
-            input_frame, text="Сказать", command=self._on_send,
-            bg=theme.SURFACE, fg=theme.TEXT, activebackground=theme.BORDER,
-            activeforeground=theme.TEXT, relief=tk.FLAT,
-        ).pack(side=tk.LEFT, padx=(4, 0))
+            input_frame,
+            text="Сказать",
+            command=self._on_send,
+            bg=theme.GLOW_CYAN,
+            fg=theme.CYAN,
+            activebackground=theme.EDGE_ACTIVE,
+            activeforeground=theme.BG_DEEP,
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+        ).pack(side=tk.LEFT, padx=(theme.SPACING["xs"], 0), ipady=4)
 
         self._history = []
         self._history_idx = -1
@@ -1103,16 +1912,23 @@ class MainWindow(ChatWindow):
             return
 
         frame = tk.Frame(
-            root, bg=theme.BG_DEEP,
-            highlightbackground=theme.BORDER, highlightthickness=1,
+            root,
+            bg=theme.BG_DEEP,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
         frame.pack(fill=tk.X, side=tk.BOTTOM)
         self._controls_frame = frame
 
-        def button(text, command, *, bg=theme.SURFACE, fg=theme.TEXT,
-                   padx=10):
+        left = tk.Frame(frame, bg=theme.BG_DEEP)
+        left.pack(side=tk.LEFT, padx=(theme.SPACING["sm"], 0))
+        # Правая группа собирается с правого края: Выход — всегда последний.
+        right = tk.Frame(frame, bg=theme.BG_DEEP)
+        right.pack(side=tk.RIGHT, padx=(0, theme.SPACING["sm"]))
+
+        def button(parent, text, command, *, bg=theme.SURFACE, fg=theme.TEXT, padx=10):
             widget = tk.Button(
-                frame,
+                parent,
                 text=text,
                 command=command,
                 bg=bg,
@@ -1127,48 +1943,81 @@ class MainWindow(ChatWindow):
             widget.pack(side=tk.LEFT, padx=3, pady=6)
             return widget
 
-        self._pause_button = button("⏸ Пауза", self._action_toggle_pause)
-
-        # Скорость жизни
-        tk.Label(
-            frame, text="Темп:", bg=theme.BG_DEEP, fg=theme.MUTED,
-            font=self._ui_font,
-        ).pack(side=tk.LEFT, padx=(10, 2))
-
-        for mode in ("live", "fast", "max"):
-            self._speed_buttons[mode] = button(
-                SPEED_LABELS[mode],
-                lambda m=mode: self._action_set_speed(m),
-                bg=theme.BG_CENTER,
-                fg=theme.MUTED,
+        def separator(parent):
+            tk.Frame(parent, width=1, bg=theme.BORDER).pack(
+                side=tk.LEFT, fill=tk.Y, padx=6, pady=6
             )
 
-        button("⏭ Шаг", self._action_step)
+        self._pause_button = button(left, "⏸ Пауза", self._action_toggle_pause)
 
+        # Темп — сегмент из трёх режимов, активный подсвечен.
         tk.Label(
-            frame, text="│", bg=theme.BG_DEEP, fg=theme.BORDER,
-            font=self._ui_font,
-        ).pack(side=tk.LEFT, padx=4)
-
-        button("Сохранить", self._action_save, padx=8)
-
-        tk.Label(
-            frame, text="  ЖИЗНЬ", bg=theme.BG_DEEP, fg=theme.DIMMED,
+            left,
+            text="ТЕМП",
+            bg=theme.BG_DEEP,
+            fg=theme.DIMMED,
             font=self._card_title_font,
-        ).pack(side=tk.LEFT, padx=(12, 2))
-        self._sleep_button = button("Сон", self._action_request_dream, padx=8)
-        self._terminate_button = button(
-            "Уйти", self._action_request_termination,
-            fg=theme.DANGER, padx=8,
+        ).pack(side=tk.LEFT, padx=(theme.SPACING["md"], theme.SPACING["xs"]))
+        segment = tk.Frame(
+            left,
+            bg=theme.BG_CENTER,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
         )
-        self._wake_button = button("Разбудить", self._action_wake,
-                                   fg=theme.GREEN, padx=8)
+        segment.pack(side=tk.LEFT, pady=6)
+        for mode in ("live", "fast", "max"):
+            chip = tk.Button(
+                segment,
+                text=SPEED_LABELS[mode],
+                command=lambda m=mode: self._action_set_speed(m),
+                bg=theme.BG_CENTER,
+                fg=theme.MUTED,
+                activebackground=theme.GLOW_CYAN,
+                activeforeground=theme.CYAN,
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+            )
+            chip.pack(side=tk.LEFT, padx=2, pady=2)
+            self._speed_buttons[mode] = chip
+
+        button(left, "⏭ Шаг", self._action_step)
+        button(left, "Сохранить", self._action_save, padx=8)
+
+        button(right, "Выход", self._action_quit, fg=theme.MUTED, padx=8)
+        separator(right)
         self._cancel_life_button = button(
-            "Отменить запрос", self._action_cancel_life, padx=8
+            right, "Отменить запрос", self._action_cancel_life, padx=8
         )
         self._cancel_life_button.pack_forget()  # появляется только при запросе
-
-        button("Выход", self._action_quit, fg=theme.MUTED, padx=8)
+        self._wake_button = button(
+            right, "Разбудить", self._action_wake, fg=theme.GREEN, padx=8
+        )
+        self._sleep_button = button(right, "Сон", self._action_request_dream, padx=8)
+        # Уход — единственное необратимое действие: красный текст и рамка.
+        self._terminate_button = tk.Button(
+            right,
+            text="Уйти…",
+            command=self._action_request_termination,
+            bg=theme.SURFACE,
+            fg=theme.DANGER,
+            activebackground=theme.BORDER,
+            activeforeground=theme.DANGER,
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=5,
+            highlightbackground=theme.DANGER,
+            highlightthickness=1,
+        )
+        self._terminate_button.pack(side=tk.LEFT, padx=3, pady=6)
+        tk.Label(
+            right,
+            text="ЖИЗНЬ",
+            bg=theme.BG_DEEP,
+            fg=theme.DIMMED,
+            font=self._card_title_font,
+        ).pack(side=tk.LEFT, padx=(theme.SPACING["md"], theme.SPACING["xs"]))
 
         self._refresh_life_buttons("alive")
 
@@ -1180,9 +2029,7 @@ class MainWindow(ChatWindow):
         paused = bool(self._status_snapshot.get("paused"))
         event = Events.RESUME_REQUESTED if paused else Events.PAUSE_REQUESTED
         self._publish(event, {})
-        self._append_system(
-            "Возобновляю жизнь." if paused else "Ставлю на паузу."
-        )
+        self._append_system("Возобновляю жизнь." if paused else "Ставлю на паузу.")
 
     def _action_set_speed(self, mode: str) -> None:
         self._publish(Events.SPEED_CHANGED, {"mode": mode})
@@ -1201,9 +2048,7 @@ class MainWindow(ChatWindow):
 
     def _action_cancel_life(self) -> None:
         prompt = self._life_prompt or {}
-        self._publish(
-            Events.LIFE_CANCEL, {"request_id": prompt.get("request_id")}
-        )
+        self._publish(Events.LIFE_CANCEL, {"request_id": prompt.get("request_id")})
 
     def _action_request_dream(self) -> None:
         self._publish(
@@ -1292,9 +2137,7 @@ class MainWindow(ChatWindow):
             return
         remaining = self._life_deadline - time.time()
         if remaining <= 0:
-            self._append_system(
-                "Пауза выдержана. Введите фразу в поле ниже."
-            )
+            self._append_system("Пауза выдержана. Введите фразу в поле ниже.")
             self._life_deadline = None
             return
         self._life_tick_job = self._root.after(1000, self._life_tick)
@@ -1332,9 +2175,7 @@ class MainWindow(ChatWindow):
 
         if self._life_deadline is not None and time.time() < self._life_deadline:
             remaining = self._life_deadline - time.time()
-            self._append_system(
-                f"Рано: подождите ещё {remaining:.0f} с."
-            )
+            self._append_system(f"Рано: подождите ещё {remaining:.0f} с.")
             return True
 
         self._append_user(text)
@@ -1350,6 +2191,72 @@ class MainWindow(ChatWindow):
     # ============================================================
     # Лента
     # ============================================================
+
+    def _render_web_card(self, data: Dict[str, Any]) -> None:
+        """Карточка источника: заголовок, домен, выдержка; ссылка без
+        процентных кракозябр — адрес декодируется для чтения."""
+        if self._text is None:
+            return
+        title = str(data.get("title") or data.get("concept") or "нашёл материал")
+        concept = str(data.get("concept") or "")
+        extract = str(data.get("extract") or "")
+        raw_url = str(data.get("url") or "")
+        url = urllib.parse.unquote(raw_url)
+        domain = urllib.parse.urlsplit(raw_url).netloc
+        if len(extract) > 240:
+            short = extract[:240].rsplit(" ", 1)[0] + "…"
+        else:
+            short = extract
+
+        card_id = f"web{self._web_card_counter}"
+        self._web_card_counter += 1
+        self._web_cards[card_id] = {
+            "full": extract,
+            "short": short,
+            "open": False,
+        }
+
+        text = self._text
+        text.configure(state=tk.NORMAL)
+        text.insert(tk.END, "\n")
+        text.insert(tk.END, f"🌐 {title}\n", "web_head")
+        if concept:
+            text.insert(tk.END, f"тема: {concept}\n", "web_meta")
+        text.insert(tk.END, f"источник: {domain or url}\n", "web_meta")
+        text.mark_set(f"{card_id}s", tk.END)
+        text.mark_gravity(f"{card_id}s", tk.LEFT)
+        text.insert(tk.END, short + "\n", "web_body")
+        text.mark_set(f"{card_id}e", tk.END)
+        text.mark_set(f"{card_id}ls", tk.END)
+        text.mark_gravity(f"{card_id}ls", tk.LEFT)
+        text.insert(tk.END, "развернуть статью ▾", f"{card_id}t")
+        text.mark_set(f"{card_id}le", tk.END)
+        text.tag_config(f"{card_id}t", foreground=theme.CYAN)
+        text.tag_bind(
+            f"{card_id}t",
+            "<Button-1>",
+            lambda _event, card=card_id: self._toggle_web_card(card),
+        )
+        text.insert(tk.END, "\n\n")
+        text.see(tk.END)
+        text.configure(state=tk.DISABLED)
+
+    def _toggle_web_card(self, card_id: str) -> None:
+        """Развернуть полную статью или свернуть обратно до выдержки."""
+        card = self._web_cards.get(card_id)
+        text = self._text
+        if card is None or text is None:
+            return
+        body = card["full"] if not card["open"] else card["short"]
+        label = "свернуть статью ▴" if not card["open"] else "развернуть статью ▾"
+        card["open"] = not card["open"]
+        text.configure(state=tk.NORMAL)
+        text.delete(f"{card_id}s", f"{card_id}e")
+        text.insert(f"{card_id}s", body + "\n", "web_body")
+        text.delete(f"{card_id}ls", f"{card_id}le")
+        text.insert(f"{card_id}ls", label, f"{card_id}t")
+        text.see(tk.END)
+        text.configure(state=tk.DISABLED)
 
     def _append_life(self, text: str) -> None:
         self._append("🌙 ЖИЗНЬ:", text, tag="life")
@@ -1383,6 +2290,10 @@ class MainWindow(ChatWindow):
         self._status_text = None
         self._controls_frame = None
         self._speed_buttons = {}
+        self._diary_canvas = None
+        self._diary_inner = None
+        self._access_switches = {}
+        self._graph_filter_buttons = {}
         super()._destroy_root()
 
 

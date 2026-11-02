@@ -41,7 +41,7 @@ def status_label(status: Any) -> str:
     return _STATUS.get(value, value)
 
 
-def _episode_status(episode: Dict[str, Any]) -> str:
+def episode_status(episode: Dict[str, Any]) -> str:
     metadata = episode.get("metadata") or {}
     if isinstance(metadata, dict) and metadata.get("status"):
         return status_label(metadata["status"])
@@ -58,10 +58,74 @@ def episode_title(episode: Dict[str, Any]) -> str:
     return f"{action} «{target}»" if target else action
 
 
+def episode_time(episode: Dict[str, Any]) -> str:
+    """Часы:минуты из записанного времени; времени нет — прочерк."""
+    timestamp = str(episode.get("ts") or "")
+    return timestamp[11:16] if len(timestamp) >= 16 else "—"
+
+
+# Цвет плашки действия — ключ палитры, а не hex: цвета живут только в theme.py.
+ACTION_COLOR_KEYS = {
+    "play": "amber",
+    "create_draft": "violet",
+    "explore": "cyan",
+    "communicate": "green",
+    "reflect": "violet",
+    "rest": "grey",
+    "wait": "grey",
+}
+
+
+def action_color_key(action: Any) -> str:
+    """Ключ цвета палитры для плашки действия; неизвестное — тихий серый."""
+    return ACTION_COLOR_KEYS.get(str(action or ""), "grey")
+
+
+def group_key(episode: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Ключ сходства эпизодов: действие, тема, статус, исход и ошибка.
+
+    Серия узнаётся по содержанию, а не по номерам строк: окно истории
+    сдвигается с каждым тиком, и привязка к конкретным записям теряла
+    раскрытие серии.
+    """
+    args = episode.get("args")
+    target = args.get("target") if isinstance(args, dict) else None
+    metadata = episode.get("metadata")
+    status = metadata.get("status") if isinstance(metadata, dict) else None
+    return (
+        str(episode.get("action")),
+        str(target),
+        str(status),
+        str(episode.get("error") or ""),
+        bool(episode.get("ok")),
+    )
+
+
+def group_diary_episodes(
+    episodes: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Свернуть подряд идущие одинаковые эпизоды в серии.
+
+    Одинаковость — только по записанным полям: действие, тема, статус,
+    исход и ошибка. Склеиваются только соседние записи: серия — это
+    повтор подряд, а не «похожие события за день».
+    """
+    groups: List[Dict[str, Any]] = []
+    for episode in episodes:
+        key = group_key(episode)
+        if groups and groups[-1]["key"] == key:
+            groups[-1]["episodes"].append(episode)
+        else:
+            groups.append({"key": key, "episodes": [episode]})
+    return groups
+
+
 def episode_rows(episode: Dict[str, Any]) -> List[Row]:
     """Детали одного эпизода для карточки дневника."""
-    rows: List[Row] = [("Событие", episode_title(episode)),
-                       ("Статус", _episode_status(episode))]
+    rows: List[Row] = [
+        ("Событие", episode_title(episode)),
+        ("Статус", episode_status(episode)),
+    ]
     timestamp = episode.get("ts")
     if timestamp:
         rows.append(("Время", str(timestamp)))
@@ -81,12 +145,12 @@ def episode_rows(episode: Dict[str, Any]) -> List[Row]:
 
 def diary_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Эпизоды в порядке от новых к старым, уже пригодные для UI."""
-    episodes = ((snapshot.get("diary") or {}).get("episodes") or [])
+    episodes = (snapshot.get("diary") or {}).get("episodes") or []
     return [episode for episode in episodes if isinstance(episode, dict)]
 
 
 def draft_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-    creative = ((snapshot.get("activities") or {}).get("creative") or {})
+    creative = (snapshot.get("activities") or {}).get("creative") or {}
     drafts = creative.get("drafts") or []
     return [draft for draft in drafts if isinstance(draft, dict)]
 
@@ -104,15 +168,21 @@ def draft_detail(draft: Dict[str, Any]) -> List[Row]:
     revision = int(draft.get("revision", 1) or 1)
     rows: List[Row] = [
         ("Что это", f"Творческий текстовый черновик на тему «{theme}»"),
-        ("О состоянии", "Работа, к которой Core может вернуться и продолжить её"
-         if status == "active" else "Работа оставлена; сохранённая версия остаётся в каталоге"),
+        (
+            "О состоянии",
+            "Работа, к которой Core может вернуться и продолжить её"
+            if status == "active"
+            else "Работа оставлена; сохранённая версия остаётся в каталоге",
+        ),
         ("Состояние", _DRAFT_STATUS.get(status, status)),
         ("Редакция", f"{revision} из 8"),
     ]
     if draft.get("leave_reason"):
         reason = str(draft["leave_reason"])
         if "лимит" in reason.lower():
-            reason = f"Core достиг предела в {revision} редакций и сохранил текст как есть"
+            reason = (
+                f"Core достиг предела в {revision} редакций и сохранил текст как есть"
+            )
         rows.append(("Почему", reason))
     if draft.get("sha256"):
         rows.append(("Файл", "сохранён; отпечаток файла записан"))
@@ -124,9 +194,11 @@ def game_detail(snapshot: Dict[str, Any]) -> List[Row]:
     if not isinstance(game, dict):
         return [("Партия", "ещё не начиналась")]
     board = game.get("board")
-    rows = [("Партия", str(game.get("round", 1))),
-            ("Ходов", str(game.get("turns", 0))),
-            ("Результат", _RESULT.get(game.get("result"), "идёт"))]
+    rows = [
+        ("Партия", str(game.get("round", 1))),
+        ("Ходов", str(game.get("turns", 0))),
+        ("Результат", _RESULT.get(game.get("result"), "идёт")),
+    ]
     if isinstance(board, list) and len(board) == 9:
         rows.append(("Поле", " ".join(str(cell) for cell in board)))
     return rows
