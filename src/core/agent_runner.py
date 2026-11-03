@@ -504,6 +504,15 @@ class AgentRunner:
         # Повторная фраза порождает вопрос-уточнение человеку — вместо
         # вечного «не понимаю». Предложение задано — общий отклик не
         # нужен: человек уже видит вопрос.
+        # «Собеседник-8»: нераспознанная реплика — тоже реплика диалога.
+        # Остальные двери пишут в память диалога, а эта забывала: care
+        # застревала на последней РАСПОЗНАННОЙ теме, хотя свежий
+        # содержательный разговор — как раз нераспознанный.
+        if interaction is not None:
+            interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+        user_model = getattr(self.agent, "user_model", None)
+        if user_model is not None:
+            user_model.observe(text, cycle=self.agent.cycle_count)
         if learning is not None:
             candidate = learning.observe(text, cycle=self.agent.cycle_count)
             if candidate is not None and interaction is not None:

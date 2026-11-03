@@ -211,6 +211,31 @@ async def test_unknown_text_gets_honest_reply_not_learning_material():
 
 
 @pytest.mark.asyncio
+async def test_unknown_text_is_remembered_as_dialogue_turn():
+    """«Собеседник-8»: нераспознанная реплика — тоже реплика диалога.
+
+    Дверь ACT_UNKNOWN была единственной, кто не писал в память диалога:
+    care застревала на последней РАСПОЗНАННОЙ теме, хотя свежий
+    содержательный разговор — как раз нераспознанный (живой зонд
+    2026-11-03: тема care не обновлялась после новой фразы человека).
+    """
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Квантовая запутанность и коллапс волновой функции."})
+    )
+
+    history = ui.get_history(5)
+    user_texts = [
+        str(entry.get("content") or "")
+        for entry in history
+        if entry.get("sender") == "user"
+    ]
+    assert any("Квантовая запутанность" in t for t in user_texts)
+
+
+@pytest.mark.asyncio
 async def test_orphan_answer_formula_gets_honest_reply():
     """Явный «ответ» без вопроса сущности — записывать некуда."""
     agent, runner, bus = _make_runner()

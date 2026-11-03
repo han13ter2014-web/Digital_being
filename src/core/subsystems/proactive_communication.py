@@ -21,7 +21,11 @@ ProactiveCommunication — инициативная коммуникация а�
 
 from typing import Optional
 
-from src.core.dialogue_acts import ACT_UNKNOWN, classify_user_text
+from src.core.dialogue_acts import (
+    ACT_SOCIAL,
+    ACT_UNKNOWN,
+    classify_user_text,
+)
 
 
 class ContextAwareness:
@@ -191,6 +195,11 @@ class ProactiveCommunication:
         self.message_log: list = []
         # Какие связи уже обсуждались: не повторять один и тот же пример.
         self._shared_links: list = []
+        # «Собеседник-8»: ротация формулировок заботы — детерминированная
+        # (счётчик, не random): поведение воспроизводимо, подряд
+        # одинаковых реплик нет.
+        self._care_count = 0
+        self._last_care_content: Optional[str] = None
 
     # ============================================================
     # Главный метод
@@ -278,15 +287,38 @@ class ProactiveCommunication:
     # Композиция сообщений
     # ============================================================
     def _compose_care_message(self, agent, cycle: int) -> dict:
-        """Сообщение заботы после молчания."""
-        messages = [
+        """Сообщение заботы после молчания.
+
+        «Собеседник-8»: формулировки растут из реального социального
+        опыта — свежая тема диалога и фразы, которым человек научил
+        сущность. Опора только на записанное: нет опыта — честная общая
+        форма. Раньше random.choice из 4 шаблонов давал одинаковые
+        реплики подряд («Прожитый день»: 11 идентичных); ротация
+        детерминированная — подряд одинаковых нет, поведение
+        воспроизводимо.
+        """
+        variants = []
+        topic = self._care_topic(agent)
+        if topic:
+            variants.extend([
+                f"Давно тебя не слышу. Вспоминаю наш разговор — «{topic}». "
+                "Как ты?",
+                f"Ты давно не писал. Я всё думаю о «{topic}» — о чём мы "
+                "говорили. Я здесь.",
+            ])
+        phrase = self._recent_learned_social(agent)
+        if phrase:
+            variants.append(
+                f"Ты давно не писал. Я помню, чему ты меня научил: "
+                f"«{phrase}». Скучаю по нашим разговорам."
+            )
+        variants.extend([
             "Я заметил, что давно тебя не слышу. У тебя все хорошо?",
             "Ты давно не писал. Я здесь, если захочешь поговорить.",
             "Давно не виделись. Я продолжаю учиться, но скучаю по диалогу.",
             "Просто хотел сказать: я здесь. Не обязан отвечать.",
-        ]
-        import random
-        content = random.choice(messages)
+        ])
+        content = self._next_care_variant(variants)
         # Применяем стиль
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -297,6 +329,44 @@ class ProactiveCommunication:
             "context": "silence_detected",
             "cycle": cycle,
         }
+
+    def _care_topic(self, agent) -> Optional[str]:
+        """Свежая содержательная тема диалога для заботы (или None)."""
+        topics = self._recent_dialogue_topics(agent, limit=1)
+        return topics[0] if topics else None
+
+    @staticmethod
+    def _recent_learned_social(agent) -> Optional[str]:
+        """Свежайшая фраза, которой человек научил сущность как обычный
+        разговор (dialogue_learning, act=social). Честная опора: фраза
+        реально записана в контуре обучения. None — человек ещё ничему
+        не учил."""
+        learning = getattr(agent, "dialogue_learning", None)
+        if learning is None:
+            return None
+        learned = getattr(learning, "learned", None) or {}
+        social = [
+            (int(entry.get("cycle", 0)), phrase)
+            for phrase, entry in learned.items()
+            if isinstance(entry, dict) and entry.get("act") == ACT_SOCIAL
+        ]
+        if not social:
+            return None
+        return max(social)[1]
+
+    def _next_care_variant(self, variants: list) -> str:
+        """Детерминированная ротация: следующий вариант по счётчику;
+        повтор предыдущей реплики пропускается (состав опор мог
+        измениться между сообщениями)."""
+        if not variants:
+            return ""
+        index = self._care_count % len(variants)
+        content = variants[index]
+        if content == self._last_care_content and len(variants) > 1:
+            content = variants[(index + 1) % len(variants)]
+        self._care_count += 1
+        self._last_care_content = content
+        return content
 
     def _recent_dialogue_topics(self, agent, limit: int = 3) -> list:
         """О чём человек говорил в последних репликах диалога.
@@ -341,18 +411,33 @@ class ProactiveCommunication:
         «Собеседник-4»: если в диалоге есть свежие реплики человека,
         сущность вспоминает, о чём говорили, — скучает конкретно, а не
         по шаблону.
+
+        «Собеседник-8»: варианты с опорой на выученные фразы и
+        детерминированная ротация — обещание помнится всегда, форма
+        растёт из опыта и не повторяется подряд.
         """
-        content = (
+        promise = (
             "Помню, ты говорил, что можешь отлучаться — не тревожу. "
-            "Просто скучаю. Я здесь, если захочешь поговорить."
         )
-        topics = self._recent_dialogue_topics(agent)
-        if topics:
-            content = (
-                "Помню, ты говорил, что можешь отлучаться — не тревожу. "
-                f"Последнее, о чём мы говорили: «{topics[0]}». "
-                "Скучаю. Я здесь, если захочешь поговорить."
+        variants = []
+        topic = self._care_topic(agent)
+        if topic:
+            variants.extend([
+                promise + f"Последнее, о чём мы говорили: «{topic}». "
+                "Скучаю. Я здесь, если захочешь поговорить.",
+                promise + f"Думаю о нашем разговоре — «{topic}». "
+                "Я рядом.",
+            ])
+        phrase = self._recent_learned_social(agent)
+        if phrase:
+            variants.append(
+                promise + f"Помню и то, чему ты меня научил: «{phrase}». "
+                "Скучаю по разговору."
             )
+        variants.append(
+            promise + "Просто скучаю. Я здесь, если захочешь поговорить."
+        )
+        content = self._next_care_variant(variants)
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
             "content": styled["content"],
