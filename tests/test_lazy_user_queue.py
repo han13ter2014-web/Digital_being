@@ -1,23 +1,27 @@
 """
-test_lazy_user_queue.py — тесты для ленивого создания _pending_user_messages.
+test_lazy_user_queue.py — ленивое создание _pending_user_messages.
 
-Покрывает регрессию: раньше в ``_on_user_message`` сообщения, пришедшие
-ДО ``start()``, молча отбрасывались с warning-логом (UX-баг:
-пользователь мог отправить сообщение в окно чата ещё до того, как
-AgentRunner стартовал, и оно исчезало бесследно).
+Исторический контракт (до «Собеседник-6»): нераспознанные сообщения
+складывались в очередь стимулов и изучались как темы. С «Собеседника-6»
+нераспознанный текст получает честный диалоговый отклик и НЕ заводится
+темой: продюсера у очереди больше нет, она создаётся в ``start()`` и
+остаётся пустой (потребитель в тике сохранён как legacy-путь).
 
-Эти тесты проверяют, что:
-1. Очередь создаётся лениво при первом сообщении (до start).
-2. Сообщения, пришедшие до start(), НЕ теряются — они дожидаются первого тика.
-3. start() НЕ пересоздаёт очередь, если она уже создана лениво.
-4. start() создаёт очередь, если сообщений ещё не было.
-5. Несколько сообщений до start() обрабатываются в правильном порядке.
+Текущий контракт:
+1. Нераспознанное сообщение до start() обрабатывается дверями
+   синхронно: честный отклик, очередь не создаётся.
+2. Несколько сообщений до start() — каждое получает отклик, порядок
+   сохраняется, очередь не создаётся.
+3. start() создаёт очередь и НЕ пересоздаёт её при сообщениях.
+4. Пустые сообщения и data=None игнорируются.
 """
 import os
 import sys
 from unittest.mock import MagicMock
 
 import pytest
+
+from src.core.event_bus import Events
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -113,11 +117,11 @@ def _make_runner():
 # Тесты
 # ============================================================
 @pytest.mark.asyncio
-async def test_message_before_start_is_not_lost():
-    """Сообщение, пришедшее ДО start(), не теряется (race-condition fix).
+async def test_message_before_start_gets_honest_reply_not_queue():
+    """Сообщение до start() обработано дверями, а не очередью стимулов.
 
-    Текст без речевых маркеров: «привет» с «Собеседником-1» — социальный
-    акт, он получает отклик и в очередь обучения не попадает.
+    «Собеседник-6»: нераспознанный текст получает честный диалоговый
+    отклик и не заводится темой для изучения — очередь не создаётся.
     """
     runner, agent, bus = _make_runner()
 
@@ -130,54 +134,58 @@ async def test_message_before_start_is_not_lost():
     event.data = {"text": "анализ распределённых систем"}
     await runner._on_user_message(event)
 
-    # Очередь создалась лениво, сообщение внутри.
-    assert runner._pending_user_messages is not None
-    assert not runner._pending_user_messages.empty()
-    # Правильный текст.
-    msg = await runner._pending_user_messages.get()
-    assert msg == "анализ распределённых систем"
+    # Очередь не создалась: продюсера у неё больше нет.
+    assert not hasattr(runner, "_pending_user_messages") or \
+           runner._pending_user_messages is None or \
+           runner._pending_user_messages.empty()
+    # Сообщение не потеряно — получен честный отклик.
+    thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
+    assert any("не понимаю" in (p["data"] or {}).get("text", "")
+               for p in thoughts)
 
 
 @pytest.mark.asyncio
-async def test_multiple_messages_before_start_preserved():
-    """Несколько сообщений до start() — все в очереди в правильном порядке."""
+async def test_multiple_messages_before_start_each_gets_reply():
+    """Несколько сообщений до start() — каждое получает отклик по порядку."""
     runner, agent, bus = _make_runner()
 
-    msgs = ["первое", "второе", "третье"]
+    msgs = ["первое непонятное", "второе непонятное", "третье непонятное"]
     for m in msgs:
         event = MagicMock()
         event.data = {"text": m}
         await runner._on_user_message(event)
 
-    # Все три в очереди, в порядке поступления.
-    received = []
-    while not runner._pending_user_messages.empty():
-        received.append(await runner._pending_user_messages.get())
-    assert received == msgs
+    # Каждое сообщение обработано дверями: три отклика, очереди нет.
+    thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
+    replies = [(p["data"] or {}).get("text", "") for p in thoughts]
+    assert len(replies) == len(msgs)
+    assert not hasattr(runner, "_pending_user_messages") or \
+           runner._pending_user_messages is None or \
+           runner._pending_user_messages.empty()
 
 
 @pytest.mark.asyncio
-async def test_start_does_not_overwrite_existing_queue():
-    """start() НЕ пересоздаёт очередь (если она уже лениво создана)."""
+async def test_start_does_not_recreate_queue_on_messages():
+    """start() создаёт очередь; сообщения её не пересоздают."""
     runner, agent, bus = _make_runner()
 
-    # Создаём ленивую очередь с сообщением.
-    event = MagicMock()
-    event.data = {"text": "до старта"}
-    await runner._on_user_message(event)
-    queue_before = runner._pending_user_messages
-    assert not queue_before.empty()
-
-    # start() не должен пересоздавать очередь.
     await runner.start()
+    queue_before = runner._pending_user_messages
+    assert queue_before is not None
+
+    event = MagicMock()
+    event.data = {"text": "до старта непонятное"}
+    await runner._on_user_message(event)
+
     queue_after = runner._pending_user_messages
     assert queue_after is queue_before, (
-        "start() пересоздал очередь — сообщения будут потеряны!"
+        "очередь пересоздалась на сообщении — legacy-потребитель сломан!"
     )
-    # Сообщение осталось.
-    assert not queue_after.empty()
-    msg = await queue_after.get()
-    assert msg == "до старта"
+    # Очередь остаётся пустой: нераспознанное в стимулы не идёт.
+    assert queue_after.empty()
+
+    # Cleanup.
+    await runner.stop()
 
 
 @pytest.mark.asyncio
@@ -234,21 +242,22 @@ async def test_message_with_none_data_ignored():
 
 
 @pytest.mark.asyncio
-async def test_message_after_start_uses_existing_queue():
-    """Сообщение после start() использует существующую очередь."""
+async def test_message_after_start_gets_reply_queue_stays_empty():
+    """Сообщение после start() обработано дверями; очередь неизменна."""
     runner, agent, bus = _make_runner()
     await runner.start()
     queue_after_start = runner._pending_user_messages
 
     event = MagicMock()
-    event.data = {"text": "после старта"}
+    event.data = {"text": "после старта непонятное"}
     await runner._on_user_message(event)
 
-    # Та же очередь.
+    # Та же очередь, и она пуста: сообщения в стимулы не идут.
     assert runner._pending_user_messages is queue_after_start
-    # Сообщение в ней.
-    msg = await runner._pending_user_messages.get()
-    assert msg == "после старта"
+    assert runner._pending_user_messages.empty()
+    thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
+    assert any("не понимаю" in (p["data"] or {}).get("text", "")
+               for p in thoughts)
 
     # Cleanup.
     await runner.stop()

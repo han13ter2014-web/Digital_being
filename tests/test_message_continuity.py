@@ -1,12 +1,11 @@
 """Вопрос в работе и ожидающие сообщения сохраняются раздельно и по порядку."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from src.core.agent import DigitalBeing
-from src.core.agent_runner import AgentRunner
+from src.core.agent_runner import AgentRunner, PersistentMessageQueue
 from src.core.checkpoint_serializer import build_state_from_agent, apply_state_to_agent
 from src.core.checkpoint_validation import validate_checkpoint_state
 from src.core.event_bus import EventBus
@@ -16,8 +15,14 @@ from src.core.event_bus import EventBus
 async def test_pending_messages_survive_checkpoint_preserving_duplicates():
     first = DigitalBeing(name="MessageContinuity")
     runner = AgentRunner(first, EventBus())
+    # «Собеседник-6»: _on_user_message больше не кладёт тексты в очередь
+    # (нераспознанное получает честный отклик, а не становится темой).
+    # Очередь наполняем напрямую — тест проверяет непрерывность самого
+    # механизма очереди через чекпоинт, а не двери диалога.
+    queue = PersistentMessageQueue(first)
+    runner._pending_user_messages = queue
     for text in ("одинаковый", "одинаковый", "последний"):
-        await runner._on_user_message(SimpleNamespace(data={"text": text}))
+        await queue.put(text)
     first._deferred_stimulus = {"text": "уже выбранный", "user_initiated": True}
     state = build_state_from_agent(first)
     second = DigitalBeing(name="MessageContinuity")

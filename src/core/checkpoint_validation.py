@@ -321,6 +321,32 @@ def validate_checkpoint_state(state) -> None:
             if not isinstance(topic, str):
                 _fail("shared_topics", "expected string keys")
             _integer(cycle, f"shared_topics.{topic}", nonnegative=True)
+    if state.get("dialogue_learning") is not None:
+        learning = _dict(state["dialogue_learning"], "dialogue_learning")
+        buffer = _dict(learning.get("buffer", {}), "dialogue_learning.buffer")
+        for phrase, entry in buffer.items():
+            entry_path = f"dialogue_learning.buffer.{phrase}"
+            entry_dict = _dict(entry, entry_path)
+            _convertible_int(entry_dict.get("count"), f"{entry_path}.count")
+        learned = _dict(
+            learning.get("learned", {}), "dialogue_learning.learned"
+        )
+        for phrase, entry in learned.items():
+            entry_path = f"dialogue_learning.learned.{phrase}"
+            entry_dict = _dict(entry, entry_path)
+            if entry_dict.get("act") not in (
+                "social",
+                "ask_about_self",
+                "request",
+            ):
+                _fail(f"{entry_path}.act", "expected a learnable act")
+        suppressed = _dict(
+            learning.get("suppressed", {}), "dialogue_learning.suppressed"
+        )
+        for phrase, cycle in suppressed.items():
+            _convertible_int(
+                cycle, f"dialogue_learning.suppressed.{phrase}"
+            )
     if state.get("user_interaction") is not None:
         interaction = _dict(state["user_interaction"], "user_interaction")
         for index, entry in enumerate(

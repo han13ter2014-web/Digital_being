@@ -51,6 +51,7 @@ from src.core.buffered_logger import flush_logs
 from src.core.paths import data_path
 from src.core.agent import AgentDeadSignal
 from src.core.dialogue_acts import (
+    ACT_ANSWER,
     ACT_ASK_ABOUT_SELF,
     ACT_REQUEST,
     ACT_SOCIAL,
@@ -58,6 +59,7 @@ from src.core.dialogue_acts import (
     extract_definition,
     is_noise_input,
 )
+from src.core.dialogue_learning import DialogueLearning
 
 
 logger = logging.getLogger(__name__)
@@ -291,7 +293,42 @@ class AgentRunner:
         # «Ответ записан» или в изучение концептов («Не нашел файл для…»).
         # Настоящие ответы (ACT_ANSWER/ACT_UNKNOWN) идут прежним путём
         # без изменений — безопасный fallback сохранён.
-        act = classify_user_text(text)
+        # «Собеседник-7»: обученные маркеры участвуют в классификации
+        # (после статических таблиц).
+        act = classify_user_text(text, learned=self._learned_markers())
+
+        # === «Собеседник-7»: обучающий ответ — до всех дверей ===
+        # Ответ на вопрос-уточнение («1», «вопрос», «не учи») не должен
+        # проглатываться дверями шума/социальной речи: «2» — без букв,
+        # «приветствие» — содержит социальный маркер «привет».
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if (
+            learning is not None
+            and pending is not None
+            and DialogueLearning.is_proposal_context(pending.get("context"))
+        ):
+            await self._handle_learning_answer(pending, interaction, text)
+            return
+
+        # === «Собеседник-7»: «забудь фразу X» — до дверей ===
+        # Фраза внутри команды может содержать социальный маркер
+        # («забудь фразу привет»), поэтому команда проверяется раньше
+        # социальной двери и раньше pending-ответа.
+        if learning is not None:
+            forget_phrase = DialogueLearning.parse_forget_command(text)
+            if forget_phrase is not None:
+                if interaction is not None:
+                    interaction.receive_user_message(
+                        text, cycle=self.agent.cycle_count
+                    )
+                if learning.forget(forget_phrase):
+                    reply = f"Забыл фразу «{forget_phrase}» — больше не использую."
+                else:
+                    reply = f"Фразы «{forget_phrase}» я не учил — забывать нечего."
+                await self._reply_to_user(
+                    reply, context="dialogue_forget", source="dialogue_learning"
+                )
+                return
 
         # Вопрос о самой сущности — честный ответ из read-only Core.
         if act.kind == ACT_ASK_ABOUT_SELF:
@@ -302,11 +339,8 @@ class AgentRunner:
                 user_model.observe(text, cycle=self.agent.cycle_count)
             response = self._format_about_self_reply()
             if response:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="dialogue_acts",
-                    priority=1,
+                await self._reply_to_user(
+                    response, context="about_self", source="dialogue_acts"
                 )
             return
 
@@ -320,11 +354,8 @@ class AgentRunner:
                 user_model.observe(text, cycle=self.agent.cycle_count)
             response = self._format_request_refusal()
             if response:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="dialogue_acts",
-                    priority=1,
+                await self._reply_to_user(
+                    response, context="request_refusal", source="dialogue_acts"
                 )
             return
 
@@ -341,11 +372,8 @@ class AgentRunner:
                 "В твоём сообщении нет букв — я умею читать только слова. "
                 "Напиши текстом, и я отвечу."
             )
-            await self.bus.publish(
-                Events.AGENT_THOUGHT,
-                {"text": response, "cycle": self.agent.cycle_count},
-                source="dialogue_acts",
-                priority=1,
+            await self._reply_to_user(
+                response, context="noise_input", source="dialogue_acts"
             )
             return
 
@@ -361,20 +389,33 @@ class AgentRunner:
                 and act.matched_marker in _REPEAT_PROTEST_MARKERS
             ):
                 response = self._handle_repeat_protest(pending, interaction)
+                reply_context = "repeat_protest"
             else:
                 response = self._format_social_reply(pending)
+                reply_context = "social_reply"
             if response:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="dialogue_acts",
-                    priority=1,
+                await self._reply_to_user(
+                    response, context=reply_context, source="dialogue_acts"
                 )
             return
 
         # Если Core задал пользователю прямой вопрос, обычный ответ должен
         # закрыть именно его, а не стать новой темой обучения.
         if pending is not None:
+            # «Собеседник-6»: «X — это Y» про другую тему — не ответ на
+            # вопрос сущности, а самостоятельное объяснение. Живой день
+            # 2026-11-02: «Запомни, пожалуйста: оптика — это…» при вопросе
+            # про «понимать» записалась как знание о «понимать». Определение
+            # чужой темы уходит в дверь объяснений; вопрос остаётся открытым.
+            definition = extract_definition(text)
+            if (
+                definition is not None
+                and not AgentRunner._definition_answers_pending(
+                    definition[0], pending
+                )
+            ):
+                await self._handle_user_definition(definition)
+                return
             # Синтез сложного вопроса: когда все под-вопросы отвечены,
             # submit_answer вызывает колбэк. Живой путь раньше шёл без
             # него — синтез существовал только во внутреннем контуре.
@@ -411,11 +452,8 @@ class AgentRunner:
                 result, topic=topic, answer_text=text
             )
             if response:
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="user_interaction",
-                    priority=1,
+                await self._reply_to_user(
+                    response, context="user_answer", source="user_interaction"
                 )
             return
 
@@ -423,53 +461,211 @@ class AgentRunner:
         # закрыть этот вопрос, а не стать новой темой обучения.
         answerer = getattr(self.agent, "answer_open_question", None)
         if callable(answerer) and self.agent.has_open_questions():
+            definition = extract_definition(text)
+            if (
+                definition is not None
+                and not self._definition_matches_open_questions(definition[0])
+            ):
+                await self._handle_user_definition(definition)
+                return
             result = answerer(text)
             if result.get("status") == "answered":
                 response = f"Ответ записан к вопросу «{result['question']}»."
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
+                await self._reply_to_user(
+                    response, context="open_question_answer",
                     source="open_question",
-                    priority=1,
                 )
                 return
 
-        # === «Собеседник-5»: «X — это Y» — свидетельство без вопроса ===
+        # === «Собеседник-5/6»: «X — это Y» — свидетельство без вопроса ===
         # Человек объясняет тему по своей инициативе; раньше такое уходило
         # в очередь стимулов и изучалось как «файл». Записываем как
         # знание-свидетельство (record_user_answer) со штампом «не
-        # переспрашивать». Не записалось — текст идёт старым путём.
+        # переспрашивать». Не записалось — честный отказ, не материал.
         definition = extract_definition(text)
         if definition is not None:
-            topic, body = definition
-            recorder = getattr(self.agent, "record_user_answer", None)
-            saved = (
-                recorder(topic, f"{topic} — это {body}", self.agent.cycle_count)
-                if callable(recorder)
-                else None
-            )
-            if saved:
-                response = (
-                    f"Записал: «{saved} — это {body}». "
-                    "Теперь я знаю это от тебя — переспрашивать не буду."
-                )
-                await self.bus.publish(
-                    Events.AGENT_THOUGHT,
-                    {"text": response, "cycle": self.agent.cycle_count},
-                    source="dialogue_acts",
-                    priority=1,
-                )
-                return
+            await self._handle_user_definition(definition)
+            return
 
-        # Ленивое создание очереди — сообщения, пришедшие до start(),
-        # не теряются, а дожидаются первого тика.
-        if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
-            self._pending_user_messages = PersistentMessageQueue(self.agent)
-            logger.debug(
-                f"[{self.name}] Очередь user-сообщений создана лениво "
-                f"(до start()) — сообщение будет обработано."
+        # === «Собеседник-6»: нераспознанное — честный отклик, не материал ===
+        # Раньше непознанный текст падал в очередь стимулов и изучался как
+        # тема («Не нашел файл для 'фраза'»): дословные реплики человека не
+        # должны становиться знанием. Явные ответные формулы («мой ответ:
+        # …») без вопроса сущности — отдельный случай: записывать некуда.
+        if act.kind == ACT_ANSWER:
+            await self._reply_to_user(
+                "Сейчас у меня нет вопроса, к которому это ответ. "
+                "Спроси меня о чём-нибудь — или расскажи по-другому.",
+                context="orphan_answer", source="dialogue_acts",
             )
-        await self._pending_user_messages.put(text)
+            return
+
+        # === «Собеседник-7»: нераспознанное копится для саморазвития ===
+        # Повторная фраза порождает вопрос-уточнение человеку — вместо
+        # вечного «не понимаю». Предложение задано — общий отклик не
+        # нужен: человек уже видит вопрос.
+        if learning is not None:
+            candidate = learning.observe(text, cycle=self.agent.cycle_count)
+            if candidate is not None and interaction is not None:
+                proposal = learning.build_proposal(
+                    candidate, cycle=self.agent.cycle_count
+                )
+                asked = interaction.ask_user(
+                    proposal["question"],
+                    context=proposal["context"],
+                    cycle=self.agent.cycle_count,
+                )
+                if isinstance(asked, dict) and asked.get("status") in {
+                    "queued",
+                    "duplicate",
+                }:
+                    # Кулдаун — только за фактически заданный вопрос:
+                    # отказ ask_user (свой cooldown вопросов) не должен
+                    # молча глушить фразу на 1200 циклов.
+                    learning.mark_proposed(self.agent.cycle_count)
+                    return
+
+        await self._reply_to_user(
+            "Я тебя слышу, но пока не понимаю, о чём это. "
+            "Расскажешь подробнее?",
+            context="unknown_reply", source="dialogue_acts",
+        )
+
+    def _learned_markers(self):
+        """Обученные маркеры для классификатора (или None)."""
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if learning is None:
+            return None
+        return learning.classifier_entries()
+
+    async def _handle_learning_answer(self, pending, interaction, text) -> None:
+        """Применить обучающий ответ к фразе («Собеседник-7»).
+
+        Вопрос-уточнение закрывается через тот же submit_answer, что и
+        обычные ответы: история диалога остаётся единой. Непонятный
+        ответ ничему не учит и не запрещает — кулдаун предложений не
+        даёт спросить снова сразу.
+        """
+        phrase = DialogueLearning.phrase_from_context(pending.get("context"))
+        if interaction is not None:
+            interaction.submit_answer(
+                pending["id"], text, cycle=self.agent.cycle_count
+            )
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if learning is None or not phrase:
+            await self._reply_to_user(
+                "Ответ записан.",
+                context="dialogue_learning", source="dialogue_learning",
+            )
+            return
+        outcome = learning.resolve(phrase, text, cycle=self.agent.cycle_count)
+        if outcome["status"] == "learned":
+            label = {
+                ACT_SOCIAL: "обычный разговор",
+                ACT_ASK_ABOUT_SELF: "вопрос ко мне",
+                ACT_REQUEST: "просьбу, которой я не умею",
+            }[outcome["act"]]
+            reply = (
+                f"Понял: «{phrase}» — теперь буду воспринимать это как "
+                f"{label}."
+            )
+        elif outcome["status"] == "suppressed":
+            reply = f"Хорошо: «{phrase}» учить не буду."
+        else:
+            reply = (
+                "Не понял ответ — оставлю эту фразу как есть. "
+                "Если захочешь, объясни позже."
+            )
+        await self._reply_to_user(
+            reply, context="dialogue_learning", source="dialogue_learning"
+        )
+
+    async def _reply_to_user(self, text: str, context: str,
+                             source: str) -> None:
+        """Доставить прямую реплику пользователю через канал диалога.
+
+        «Собеседник-6»: ответ на реплику человека — это AGENT_MESSAGE
+        (UserInteraction.send_reply), а не AGENT_THOUGHT: реплика видна
+        в чате как сообщение, попадает в message_history и переживает
+        рестарт, а не теряется в потоке автономных мыслей. Для стендов
+        без user_interaction — прежняя публикация мысли (совместимость
+        с фейками в тестах).
+        """
+        interaction = getattr(self.agent, "user_interaction", None)
+        if interaction is not None and hasattr(interaction, "send_reply"):
+            interaction.send_reply(
+                text, context=context, cycle=self.agent.cycle_count,
+            )
+            return
+        if interaction is not None and hasattr(interaction, "send_message"):
+            interaction.send_message(
+                text, msg_type="statement", tone="casual",
+                urgency=0.3, context=context, cycle=self.agent.cycle_count,
+            )
+            return
+        await self.bus.publish(
+            Events.AGENT_THOUGHT,
+            {"text": text, "cycle": self.agent.cycle_count},
+            source=source, priority=1,
+        )
+
+    async def _handle_user_definition(self, definition) -> None:
+        """Записать «X — это Y» как свидетельство и ответить в канал диалога.
+
+        Определение не записалось (служебная/недопустимая тема) — честный
+        отказ вместо прежнего падения в очередь стимулов.
+        """
+        topic, body = definition
+        recorder = getattr(self.agent, "record_user_answer", None)
+        saved = (
+            recorder(topic, f"{topic} — это {body}", self.agent.cycle_count)
+            if callable(recorder)
+            else None
+        )
+        if saved:
+            await self._reply_to_user(
+                f"Записал: «{saved} — это {body}». "
+                "Теперь я знаю это от тебя — переспрашивать не буду.",
+                context="user_definition", source="dialogue_acts",
+            )
+            return
+        await self._reply_to_user(
+            "Это я записывать не буду — тема не подходит для моих знаний.",
+            context="user_definition_refused", source="dialogue_acts",
+        )
+
+    @staticmethod
+    def _definition_answers_pending(topic: str, pending) -> bool:
+        """True, если «X — это Y» похоже на ответ именно на этот вопрос.
+
+        Тема определения должна встречаться в тексте вопроса или его
+        контексте. «Оптика — это …» при вопросе про «понимать» — не ответ:
+        объяснение уходит в дверь определений, вопрос остаётся открытым.
+        «Git — это …» при вопросе «Что такое Git?» — ответ: прежний
+        приоритет ступени 1 сохранён.
+        """
+        if not pending:
+            return False
+        normalized_topic = " ".join(str(topic or "").lower().split())
+        if not normalized_topic:
+            return False
+        question = " ".join(str(pending.get("question") or "").lower().split())
+        context = " ".join(str(pending.get("context") or "").lower().split())
+        return normalized_topic in question or normalized_topic in context
+
+    def _definition_matches_open_questions(self, topic: str) -> bool:
+        """True, если тема определения встречается в открытых вопросах."""
+        normalized_topic = " ".join(str(topic or "").lower().split())
+        if not normalized_topic:
+            return False
+        questions = getattr(self.agent, "_open_questions", None) or []
+        for question in questions:
+            question_text = " ".join(
+                str(question.get("text", "")).lower().split()
+            )
+            if normalized_topic in question_text:
+                return True
+        return False
 
     async def _publish_naming_result(self, result: Dict[str, Any],
                                      proposed: str) -> None:
@@ -478,11 +674,8 @@ class AgentRunner:
             self._publish_name_changed(result)
         response = self._format_name_result(result, proposed)
         if response:
-            await self.bus.publish(
-                Events.AGENT_THOUGHT,
-                {"text": response, "cycle": self.agent.cycle_count},
-                source="naming_dialogue",
-                priority=1,
+            await self._reply_to_user(
+                response, context="naming_dialogue", source="naming_dialogue"
             )
 
     def _extract_name_proposal_guarded(self, text: str):
@@ -496,7 +689,7 @@ class AgentRunner:
         """
         from src.core.name_proposal import extract_name_proposal
 
-        if classify_user_text(text).kind == ACT_REQUEST:
+        if classify_user_text(text, learned=self._learned_markers()).kind == ACT_REQUEST:
             return None
         return extract_name_proposal(text)
 
@@ -575,10 +768,8 @@ class AgentRunner:
                 "«Пусть тебя зовут Омелла». "
                 "Остальную речь я пока не умею разбирать свободно."
             )
-        await self.bus.publish(
-            Events.AGENT_THOUGHT,
-            {"text": hint, "cycle": cycle},
-            source="naming_dialogue", priority=1,
+        await self._reply_to_user(
+            hint, context="naming_hint", source="naming_dialogue"
         )
         return True
 
@@ -809,24 +1000,19 @@ class AgentRunner:
         logger.info(f"[{self.name}] USER_COMMAND: /{cmd}")
         response = await self.handle_command("/" + cmd)
         if response:
-            # Публикуем ответ как сообщение от агента (для отображения в чате)
-            await self.bus.publish(
-                Events.AGENT_THOUGHT,
-                {"text": response, "cycle": self.agent.cycle_count},
-                source="runner",
-                priority=1,
+            # Ответ на команду — реплика в канале диалога (AGENT_MESSAGE),
+            # не мысль: комментарий ниже был честным, канал — нет.
+            await self._reply_to_user(
+                response, context=f"command:{cmd}", source="runner"
             )
 
     async def _on_user_opened_chat(self, event) -> None:
         """Пользователь открыл чат из трея. Публикуем краткий статус."""
         logger.info(f"[{self.name}] USER_OPENED_CHAT")
         status = self._format_status()
-        await self.bus.publish(
-            Events.AGENT_THOUGHT,
-            {"text": f"👋 Привет! Вот мой статус:\n\n{status}",
-             "cycle": self.agent.cycle_count},
-            source="runner",
-            priority=1,
+        await self._reply_to_user(
+            f"👋 Привет! Вот мой статус:\n\n{status}",
+            context="chat_opened", source="runner",
         )
 
     async def _on_pause(self, event) -> None:
@@ -1334,16 +1520,23 @@ class AgentRunner:
             f"[{self.name}] Стимул отпущен после {MAX_STIMULUS_RETRIES} "
             f"неудач (этап {stage}): {error}"
         )
+        confession = (
+            f"Я {MAX_STIMULUS_RETRIES} раза пытался разобрать "
+            f"«{preview}» и не смог — отпускаю это. "
+            "Если это было твоё сообщение, напиши его ещё раз."
+        )
+        # «Собеседник-6»: реплика адресована человеку — канал диалога.
+        # Вызов из worker-потока: publish_sync-путь send_reply потокобезопасен.
+        interaction = getattr(self.agent, "user_interaction", None)
+        if interaction is not None and hasattr(interaction, "send_reply"):
+            interaction.send_reply(
+                confession, context="deferred_stimulus_released",
+                cycle=self.agent.cycle_count,
+            )
+            return
         self.bus.publish_sync(
             Events.AGENT_THOUGHT,
-            {
-                "text": (
-                    f"Я {MAX_STIMULUS_RETRIES} раза пытался разобрать "
-                    f"«{preview}» и не смог — отпускаю это. "
-                    "Если это было твоё сообщение, напиши его ещё раз."
-                ),
-                "cycle": self.agent.cycle_count,
-            },
+            {"text": confession, "cycle": self.agent.cycle_count},
             source="runner",
             priority=1,
         )

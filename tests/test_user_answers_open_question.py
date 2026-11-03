@@ -6,8 +6,33 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.core.agent_runner import AgentRunner
+from src.core.event_bus import Events
 from src.core.open_questions import OpenQuestionsManager
 from src.perception.user_interaction import UserInteraction
+
+
+class RecordingBus:
+    """Шина-записывалка: реплики «Собеседника-6» идут через publish_sync."""
+
+    def __init__(self):
+        self.published = []
+
+    def subscribe(self, name, callback):
+        pass
+
+    def publish_sync(self, name, data=None, source="system", priority=1):
+        self.published.append((name, dict(data or {})))
+
+    async def publish(self, name, data=None, source="system", priority=1):
+        self.published.append((name, dict(data or {})))
+
+
+def _reply_texts(bus):
+    return [
+        dict(data or {}).get("content", "")
+        for name, data in bus.published
+        if name == Events.AGENT_MESSAGE
+    ]
 
 
 @pytest.mark.asyncio
@@ -44,6 +69,8 @@ def test_name_result_formatter_does_not_invent_alternative():
 @pytest.mark.asyncio
 async def test_i_dont_know_is_recorded_as_unknown_not_fact():
     interaction = UserInteraction("Alpha")
+    bus = RecordingBus()
+    interaction.attach_bus(bus)
     interaction.ask_user("Что для тебя важно?", cycle=2)
     agent = SimpleNamespace(
         name="Alpha", cycle_count=2,
@@ -59,8 +86,8 @@ async def test_i_dont_know_is_recorded_as_unknown_not_fact():
 
     assert interaction.question_history[0]["answer"] == "Не знаю"
     assert interaction.pending_questions == []
-    assert "не знаю" in runner.bus.publish.call_args.args[1]["text"].lower()
-    assert "факт" in runner.bus.publish.call_args.args[1]["text"].lower()
+    reply = next(t for t in _reply_texts(bus) if "не знаю" in t.lower())
+    assert "факт" in reply.lower()
 
 
 def test_open_question_unknown_answer_has_explicit_kind():
@@ -74,6 +101,8 @@ def test_open_question_unknown_answer_has_explicit_kind():
 @pytest.mark.asyncio
 async def test_direct_user_question_gets_priority_over_learning_queue():
     interaction = UserInteraction("Alpha")
+    bus = RecordingBus()
+    interaction.attach_bus(bus)
     interaction.ask_user("Как тебя поддержать?", cycle=2)
     agent = SimpleNamespace(
         name="Alpha", cycle_count=2,
@@ -89,4 +118,4 @@ async def test_direct_user_question_gets_priority_over_learning_queue():
 
     assert interaction.question_history[0]["answer"] == "Просто будь рядом."
     assert not hasattr(runner, "_pending_user_messages")
-    assert "Ответ записан" in runner.bus.publish.call_args.args[1]["text"]
+    assert any("Ответ записан" in t for t in _reply_texts(bus))

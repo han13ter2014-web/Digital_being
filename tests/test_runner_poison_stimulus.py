@@ -35,6 +35,9 @@ def runtime():
         searcher.toggle(False)
     bus = EventBus(max_queue_size=200, history_size=100)
     runner = AgentRunner(agent, bus, name="PoisonRunner")
+    # «Собеседник-6»: признание об отпущенном стимуле уходит в канал
+    # диалога (AGENT_MESSAGE через send_reply) — нужна привязка шины.
+    agent.user_interaction.attach_bus(bus)
     return agent, bus, runner
 
 
@@ -85,10 +88,12 @@ def test_poison_stimulus_dropped_after_limit(runtime):
 
     assert agent._deferred_stimulus is None
     assert runner._deferred_fail_count == 0
+    # «Собеседник-6»: признание адресовано человеку — канал диалога
+    # (AGENT_MESSAGE), а не поток автономных мыслей.
     drops = [
         event
-        for event in bus.get_history(name_filter=Events.AGENT_THOUGHT)
-        if "отпускаю" in (event.data or {}).get("text", "")
+        for event in bus.get_history(name_filter=Events.AGENT_MESSAGE)
+        if "отпускаю" in (event.data or {}).get("content", "")
     ]
     assert drops, "человек должен получить честное объяснение"
 

@@ -1,6 +1,5 @@
 """Принятая пачка сообщений проходит настоящий save/start обоих backend."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 from config.simulation_config import SIM_CONFIG
 from src.app.bootstrap import create_agent
 from src.app.paths import setup_environment
-from src.core.agent_runner import AgentRunner
+from src.core.agent_runner import AgentRunner, PersistentMessageQueue
 from src.core.event_bus import EventBus
 from src.core.subsystem_base import PluginRegistry
 
@@ -23,9 +22,15 @@ async def test_burst_survives_real_profile_restart(tmp_path, monkeypatch, backen
         env = setup_environment(chdir=False, console=False)
         first, _ = create_agent(env, "MessageLife", new=True)
         runner = AgentRunner(first, EventBus())
+        # «Собеседник-6»: _on_user_message больше не кладёт тексты в
+        # очередь (нераспознанное получает честный отклик). Очередь
+        # наполняем напрямую — тест проверяет непрерывность механизма
+        # очереди через настоящий save/start, а не двери диалога.
+        queue = PersistentMessageQueue(first)
+        runner._pending_user_messages = queue
         messages = [f"вопрос {index // 2}" for index in range(40)]
         for text in messages:
-            await runner._on_user_message(SimpleNamespace(data={"text": text}))
+            await queue.put(text)
         first._deferred_stimulus = {"text": "текущий вопрос", "user_initiated": True}
         assert runner.save_now()
         PluginRegistry.reset_global()

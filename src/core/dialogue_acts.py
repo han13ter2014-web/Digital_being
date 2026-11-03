@@ -9,8 +9,8 @@
 
 Здесь — детерминированная таблица маркеров, упорядоченная по
 приоритету. Без LLM: это граница архитектуры проекта. Нераспознанное
-возвращает ACT_UNKNOWN, и маршрутизация работает по-старому —
-безопасный fallback, который ничего не ломает для настоящих ответов.
+возвращает ACT_UNKNOWN: с «Собеседника-6» такой текст получает честный
+диалоговый отклик и больше не заводится темой для изучения.
 
 Реестры сознательно вынесены на уровень модуля: будущие ступени
 «Собеседника» (включая возможное саморазвитие таблиц самой сущностью)
@@ -165,12 +165,17 @@ class DialogueAct:
     matched_marker: str = ""
 
 
-def classify_user_text(text) -> DialogueAct:
+def classify_user_text(text, learned=None) -> DialogueAct:
     """Определить речевой акт пользователя по таблице маркеров.
 
     Приоритет: явная ответная формула → ACT_ANSWER; вопрос о сущности →
     ACT_ASK_ABOUT_SELF; социальная фраза → ACT_SOCIAL; иначе
     ACT_UNKNOWN (старая маршрутизация без изменений).
+
+    «Собеседник-7»: необязательный ``learned`` — отображение
+    {нормализованная фраза: акт} из DialogueLearning. Обученные маркеры
+    проверяются ПОСЛЕ статических таблиц (рукописное сильнее
+    обученного) и ведут только на существующие акты.
 
     Сравнение идёт по нормализованному тексту: нижний регистр, сжатые
     пробелы. Пунктуация не вырезается — маркеры в таблицах уже содержат
@@ -207,6 +212,13 @@ def classify_user_text(text) -> DialogueAct:
         if marker in normalized:
             return DialogueAct(ACT_SOCIAL, marker)
 
+    # Обученные маркеры — строго после статических таблиц: рукописное
+    # решение разработчика обучение не перекрывает.
+    if learned:
+        for phrase, kind in learned.items():
+            if phrase and phrase in normalized:
+                return DialogueAct(kind, phrase)
+
     return DialogueAct(ACT_UNKNOWN)
 
 
@@ -230,6 +242,23 @@ _DEFINITION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# «Собеседник-6»: вежливые префиксы («Запомни, пожалуйста: оптика —
+# это…») не должны попадать в тему. Срезаются до трёх раз подряд,
+# поэтому «Пожалуйста, запомни:» тоже разбирается. Совпадение ищется
+# после среза; если определение узнавалось и в исходном тексте —
+# исходный разбор остаётся запасным.
+_POLITE_PREFIX_RE = re.compile(
+    r"^(?:пожалуйста\s*,\s*)?"
+    r"(?:запомни|запиши|зафиксируй|имей в виду|прими к сведению|"
+    r"пожалуйста|кстати|на заметку|для справки)"
+    r"\b[,:!]*\s*",
+    re.IGNORECASE,
+)
+
+# Определение — свидетельство, а не спор: «X — это не Y» знанием не
+# записывается.
+_DEFINITION_NEGATION_RE = re.compile(r"^(?:не|нет)\b", re.IGNORECASE)
+
 _QUOTE_CHARS = "\"«»„““”"
 
 
@@ -237,18 +266,31 @@ def extract_definition(text) -> Optional[Tuple[str, str]]:
     """Разобрать «X — это Y» в пару (тема, определение) или None.
 
     Тема обрезается до 60 символов (regex), кавычки и хвостовая
-    пунктуация снимаются. Возвращает None, если формула не узнана или
-    одна из частей пуста: нераспознанный текст уходит в старую
-    маршрутизацию.
+    пунктуация снимаются. «Собеседник-6»: перед разбором срезаются
+    вежливые префиксы («Запомни, пожалуйста:»), вопросительная форма
+    («…это Y?» — вопрос, не свидетельство) и отрицание («X — это не Y»)
+    определением не считаются. Возвращает None, если формула не узнана
+    или одна из частей пуста: нераспознанный текст получает честный
+    диалоговый отклик.
     """
     normalized = " ".join(str(text or "").split())
     if not normalized:
         return None
-    match = _DEFINITION_RE.match(normalized)
+    if normalized.rstrip("!?.,;: ").endswith("?"):
+        return None
+    candidate = normalized
+    for _ in range(3):
+        stripped = _POLITE_PREFIX_RE.sub("", candidate, count=1)
+        if stripped == candidate:
+            break
+        candidate = " ".join(stripped.split())
+    match = _DEFINITION_RE.match(candidate) or _DEFINITION_RE.match(normalized)
     if match is None:
         return None
     topic = match.group("topic").strip().strip(_QUOTE_CHARS).strip()
     body = match.group("body").strip().rstrip(".!?").strip()
     if not topic or not body:
+        return None
+    if _DEFINITION_NEGATION_RE.match(body):
         return None
     return topic, body

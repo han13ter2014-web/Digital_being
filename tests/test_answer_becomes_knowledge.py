@@ -46,6 +46,8 @@ def _make_runner():
     agent = DigitalBeing(name="KN")
     bus = RecordingBus()
     runner = AgentRunner(agent, bus)
+    # «Собеседник-6»: реплики идут через UserInteraction.send_reply.
+    agent.user_interaction.attach_bus(bus)
     return agent, runner, bus
 
 
@@ -54,6 +56,15 @@ def _thoughts(bus):
         dict(data or {})
         for name, data in bus.published
         if name == Events.AGENT_THOUGHT
+    ]
+
+
+def _reply_texts(bus):
+    """Содержание реплик канала диалога (AGENT_MESSAGE)."""
+    return [
+        dict(data or {}).get("content", "")
+        for name, data in bus.published
+        if name == Events.AGENT_MESSAGE
     ]
 
 
@@ -238,7 +249,7 @@ async def test_direct_answer_becomes_knowledge_with_citation():
     assert experience["source"] == "user"
     assert agent._user_explained_topics == {"вопрос": agent.cycle_count}
 
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "Записал про" in t)
     assert "«вопрос»" in reply
     assert ANSWER in reply
@@ -257,7 +268,7 @@ async def test_unknown_answer_is_not_recorded_as_knowledge():
     assert agent._user_explained_topics == {}
     node = agent.mental_models.concepts.get("вопрос")
     assert node is None or len(node.experiences) == experiences_before
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("не знаю" in t for t in texts)
 
 
@@ -279,7 +290,7 @@ async def test_open_question_answer_becomes_knowledge_via_callback():
     node = agent.mental_models.concepts["любовь"]
     assert node.experiences[-1]["evidence_kind"] == "testimony"
     assert agent._user_explained_topics["любовь"] == agent.cycle_count
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("Ответ записан к вопросу" in t for t in texts)
 
 

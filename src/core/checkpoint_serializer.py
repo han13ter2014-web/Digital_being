@@ -169,6 +169,14 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "user_interaction", None) is not None
             else None
         ),
+        # «Собеседник-7»: саморазвитие диалоговых таблиц — буфер
+        # нераспознанных фраз, выученные маркеры и запреты. Без секции
+        # после рестарта сущность забывает, чему её научил человек.
+        "dialogue_learning": (
+            agent.dialogue_learning.to_dict()
+            if getattr(agent, "dialogue_learning", None) is not None
+            else None
+        ),
         # NEW: Интероцепция
         "interoception": getattr(agent, 'interoception', None) and {
             "glucose": agent.interoception.state.glucose,
@@ -582,6 +590,14 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         and getattr(agent, "user_interaction", None) is not None
     ):
         agent.user_interaction.restore_from_checkpoint(saved_interaction)
+
+    # «Собеседник-7»: выученные маркеры переживают рестарт.
+    saved_learning = state.get("dialogue_learning")
+    if (
+        isinstance(saved_learning, dict)
+        and getattr(agent, "dialogue_learning", None) is not None
+    ):
+        agent.dialogue_learning.load_from(saved_learning)
 
     # История попыток нужна для продолжения стратегии, а не нового старта.
     # Структура разобрана в фазе 1 — здесь только присваивание.

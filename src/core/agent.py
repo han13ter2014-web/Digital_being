@@ -3,7 +3,6 @@ import time
 import gc
 import random
 import re
-import numpy as np
 from datetime import datetime
 import os
 from typing import Dict, List, Optional
@@ -54,7 +53,7 @@ from src.core.motivation.unified_motivation import create_motivation_system as c
 from src.cognition.active_inference import create_active_inference_engine, encode_observations
 # New systems: Interoception, Continuous Time, Meta-Learning, Social Cell, Death Risk
 from src.core.interoception import create_interoceptive_model
-from src.core.continuous_time import create_continuous_time_engine, EventType
+from src.core.continuous_time import create_continuous_time_engine
 from src.core.meta_learning import create_meta_learner
 from src.core.social_cell import create_social_cell
 from src.core.death_risk import create_death_risk_engine
@@ -69,8 +68,6 @@ from src.core.effector_driver import EffectorDriver
 from src.core.life_guard import (
     KIND_TERMINATE,
     STATE_ALIVE,
-    STATE_DORMANT,
-    STATE_TERMINATED,
     ConfirmationError,
     LifeGuard,
 )
@@ -434,6 +431,14 @@ class DigitalBeing:
         # {тема: cycle_count} — что уже рассказано человеку. Повтор одного
         # и того же — не общение, а шум; сериализуется в чекпоинт.
         self._shared_topics: Dict[str, int] = {}
+
+        # === «Собеседник-7»: саморазвитие диалоговых таблиц ===
+        # Нераспознанные реплики копятся; повторные сущность уточняет у
+        # человека и учит как маркеры (только social/about_self/request,
+        # после статических таблиц). Сериализуется в чекпоинт.
+        from src.core.dialogue_learning import DialogueLearning
+
+        self.dialogue_learning = DialogueLearning()
 
         os.makedirs(data_path('checkpoints'), exist_ok=True)
         os.makedirs(data_path('logs'), exist_ok=True)
@@ -4957,12 +4962,12 @@ class DigitalBeing:
         print(f"{'-'*50}")
 
         if report['insights']:
-            print(f"Выводы:")
+            print("Выводы:")
             for insight in report['insights']:
                 print(f"  {insight}")
 
         if report['strategy_recommendations']:
-            print(f"\nРекомендации стратегии:")
+            print("\nРекомендации стратегии:")
             for rec in report['strategy_recommendations']:
                 priority_icon = "Красный" if rec['priority'] == 'high' else "Желтый"
                 print(f"  {priority_icon} {rec['recommendation']}")
@@ -5009,7 +5014,7 @@ class DigitalBeing:
             print(f"  Уверенность: {understanding['confidence']:.0%}")
             
             if understanding.get("connections"):
-                print(f"  Связанные концепции:")
+                print("  Связанные концепции:")
                 for conn in understanding["connections"][:5]:
                     print(f"     {conn['concept']} ({conn['weight']:.0%})")
         else:

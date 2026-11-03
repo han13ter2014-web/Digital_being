@@ -48,7 +48,13 @@ async def test_quiet_delivers_user_message_and_advances_idle_time():
         await runner.step_once()
     assert agent.cycle_count == before + 1
     await runner._on_user_message(SimpleNamespace(data={"text": "сообщение"}))
+    # «Собеседник-6»: текст пользователя — диалог (честный отклик),
+    # а не стимул тика; очередь стимулов остаётся пустой.
+    assert runner._pending_user_messages.empty()
     with patch.object(runner, "_do_one_agent_cycle") as process:
         await runner.step_once()
-    process.assert_called_once_with("сообщение", user_initiated=True)
+    for call in process.call_args_list:
+        assert call.args[0] != "сообщение", (
+            "текст пользователя не должен становиться стимулом тика"
+        )
     await runner.stop()

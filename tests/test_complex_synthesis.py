@@ -14,8 +14,33 @@ import pytest
 
 from src.core.agent import DigitalBeing
 from src.core.agent_runner import AgentRunner
+from src.core.event_bus import Events
 from src.cognition.thinking_pipeline import ThinkingPipeline
 from src.perception.user_interaction import UserInteraction
+
+
+class RecordingBus:
+    """Шина-записывалка: реплики «Собеседника-6» идут через publish_sync."""
+
+    def __init__(self):
+        self.published = []
+
+    def subscribe(self, name, callback):
+        pass
+
+    def publish_sync(self, name, data=None, source="system", priority=1):
+        self.published.append((name, dict(data or {})))
+
+    async def publish(self, name, data=None, source="system", priority=1):
+        self.published.append((name, dict(data or {})))
+
+
+def _reply_texts(bus):
+    return [
+        dict(data or {}).get("content", "")
+        for name, data in bus.published
+        if name == Events.AGENT_MESSAGE
+    ]
 
 
 # ============================================================
@@ -138,6 +163,8 @@ def _chain_last_question(ui):
 @pytest.mark.asyncio
 async def test_runner_answer_triggers_synthesis_and_reports_it():
     ui = UserInteraction("Тэсс")
+    bus = RecordingBus()
+    ui.attach_bus(bus)
     _chain_last_question(ui)
     agent = SimpleNamespace(
         name="Тэсс", cycle_count=20,
@@ -158,9 +185,8 @@ async def test_runner_answer_triggers_synthesis_and_reports_it():
             "что такое смысл?": "Смысл — это цель",
         },
     )
-    runner.bus.publish.assert_awaited_once()
-    text = runner.bus.publish.call_args.args[1]["text"]
-    assert "свёл воедино" in text
+    texts = _reply_texts(bus)
+    text = next(t for t in texts if "свёл воедино" in t)
     assert "жизнь" in text
     assert ui.get_pending_question() is None
 
@@ -168,6 +194,8 @@ async def test_runner_answer_triggers_synthesis_and_reports_it():
 @pytest.mark.asyncio
 async def test_runner_without_synthesizer_still_answers():
     ui = UserInteraction("Тэсс")
+    bus = RecordingBus()
+    ui.attach_bus(bus)
     ui.ask_user("Как тебя поддержать?", context="самостоятельный вопрос", cycle=5)
     agent = SimpleNamespace(
         name="Тэсс", cycle_count=6,
@@ -180,8 +208,7 @@ async def test_runner_without_synthesizer_still_answers():
         SimpleNamespace(data={"text": "Просто будь рядом."})
     )
 
-    runner.bus.publish.assert_awaited_once()
-    assert "Ответ записан" in runner.bus.publish.call_args.args[1]["text"]
+    assert any("Ответ записан" in t for t in _reply_texts(bus))
     assert ui.get_pending_question() is None
 
 

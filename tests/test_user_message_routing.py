@@ -40,6 +40,9 @@ def _make_runner():
     agent = DigitalBeing(name="Router")
     bus = RecordingBus()
     runner = AgentRunner(agent, bus)
+    # «Собеседник-6»: реплики идут через UserInteraction.send_reply →
+    # AGENT_MESSAGE; без attach_bus запись в шину молча не происходит.
+    agent.user_interaction.attach_bus(bus)
     return agent, runner, bus
 
 
@@ -49,6 +52,19 @@ def _thoughts(bus):
         for name, data in bus.published
         if name == Events.AGENT_THOUGHT
     ]
+
+
+def _replies(bus):
+    """Реплики канала диалога (AGENT_MESSAGE от UserInteraction.send_reply)."""
+    return [
+        dict(data or {})
+        for name, data in bus.published
+        if name == Events.AGENT_MESSAGE
+    ]
+
+
+def _reply_texts(bus):
+    return [d.get("content", "") for d in _replies(bus)]
 
 
 @pytest.mark.asyncio
@@ -75,9 +91,12 @@ async def test_repeat_protest_declines_question_and_mutes_topic():
     assert agent._user_explained_topics == {"вопрос": agent.cycle_count}
     # контакт зафиксирован
     assert ui.get_last_user_message_cycle() == agent.cycle_count
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("вопрос снимаю" in t for t in texts)
     assert any("«вопрос»" in t for t in texts)
+    # «Собеседник-6»: реплика — в канале диалога, не в мыслях
+    assert not _thoughts(bus)
+    assert ui.message_history[-1]["context"] == "repeat_protest"
 
 
 @pytest.mark.asyncio
@@ -93,7 +112,7 @@ async def test_social_presence_with_pending_keeps_question_open():
 
     assert ui.get_pending_question() is not None
     assert agent._user_explained_topics == {}
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("остаётся открытым" in t for t in texts)
 
 
@@ -109,7 +128,7 @@ async def test_repeat_protest_without_pending_is_just_social():
 
     assert ui.question_history == []
     assert agent._user_explained_topics == {}
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("Спасибо, что ты рядом" in t for t in texts)
 
 
@@ -124,8 +143,12 @@ async def test_social_presence_without_pending_gets_neutral_reply():
 
     assert ui.get_last_user_message_cycle() == agent.cycle_count
     assert ui.question_history == []
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("Спасибо, что ты рядом" in t for t in texts)
+    # «Собеседник-6»: реплика записана в message_history и переживает
+    # рестарт (персистентность user_interaction).
+    assert ui.message_history[-1]["sender"] == "agent"
+    assert "Спасибо, что ты рядом" in ui.message_history[-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -160,13 +183,18 @@ async def test_plain_answer_still_closes_pending_question():
     )
 
     assert ui.get_pending_question() is None
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("Записал про «вопрос»" in t for t in texts)
 
 
 @pytest.mark.asyncio
-async def test_unknown_text_without_pending_still_goes_to_learning_queue():
-    """Регрессия: нераспознанный текст без вопроса — учебный материал."""
+async def test_unknown_text_gets_honest_reply_not_learning_material():
+    """«Собеседник-6»: нераспознанный текст — честный отклик, не материал.
+
+    Раньше текст падал в очередь стимулов и изучался как тема
+    («Не нашел файл для 'фраза'»); живой день 2026-11-02 показал эхо
+    таких тем в share-сообщениях.
+    """
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
@@ -174,10 +202,28 @@ async def test_unknown_text_without_pending_still_goes_to_learning_queue():
         SimpleNamespace(data={"text": "Квантовая запутанность и коллапс волновой функции."})
     )
 
-    assert len(ui.message_history) == 0
+    assert agent._user_explained_topics == {}
     queue = getattr(runner, "_pending_user_messages", None)
-    assert queue is not None
-    assert queue.qsize() == 1
+    assert queue is None or queue.qsize() == 0
+    texts = _reply_texts(bus)
+    assert any("слышу" in t.lower() for t in texts)
+    assert not _thoughts(bus)
+
+
+@pytest.mark.asyncio
+async def test_orphan_answer_formula_gets_honest_reply():
+    """Явный «ответ» без вопроса сущности — записывать некуда."""
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Мой ответ: сорок два."})
+    )
+
+    assert agent._user_explained_topics == {}
+    queue = getattr(runner, "_pending_user_messages", None)
+    assert queue is None or queue.qsize() == 0
+    texts = _reply_texts(bus)
+    assert any("нет вопроса" in t for t in texts)
 
 
 @pytest.mark.asyncio
@@ -194,7 +240,7 @@ async def test_ask_about_self_gets_honest_reply_not_learning_material():
     assert ui.question_history == []
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "Меня зовут" in t)
     assert agent.name in reply
     assert "циклов" in reply
@@ -213,7 +259,7 @@ async def test_ask_about_self_reports_occupation_and_memory():
         SimpleNamespace(data={"text": "Чем ты занята?"})
     )
 
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "Меня зовут" in t)
     assert "квантовая запутанность" in reply
     assert "не тревожу" in reply
@@ -236,15 +282,16 @@ async def test_definition_without_question_becomes_knowledge():
     assert node.experiences[-1]["source"] == "user"
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "Записал" in t)
     assert "Git" in reply
     assert "переспрашивать не буду" in reply
+    assert not _thoughts(bus)
 
 
 @pytest.mark.asyncio
-async def test_definition_of_unlearnable_topic_falls_back_to_queue():
-    """Незаписанное определение идёт старым путём — в очередь стимулов."""
+async def test_unlearnable_definition_gets_honest_refusal_not_queue():
+    """«Собеседник-6»: незаписанное определение — отказ, не материал."""
     agent, runner, bus = _make_runner()
 
     await runner._on_user_message(
@@ -253,8 +300,76 @@ async def test_definition_of_unlearnable_topic_falls_back_to_queue():
 
     assert agent._user_explained_topics == {}
     queue = getattr(runner, "_pending_user_messages", None)
-    assert queue is not None
-    assert queue.qsize() == 1
+    assert queue is None or queue.qsize() == 0
+    texts = _reply_texts(bus)
+    assert any("не буду" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_definition_with_polite_prefix_records_topic():
+    """«Запомни, пожалуйста: X — это Y» — тема X, без префикса.
+
+    Живой день 2026-11-02: «оптики» штамповалась как «понимать».
+    """
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(
+            data={"text": "Запомни, пожалуйста: оптика — это раздел физики о свете."}
+        )
+    )
+
+    assert "оптика" in agent._user_explained_topics
+    assert "понимать" not in agent._user_explained_topics
+    texts = _reply_texts(bus)
+    assert any("Записал" in t and "оптика" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_definition_with_unrelated_pending_diverts_to_definition_door():
+    """«X — это Y» про чужую тему — не ответ на вопрос сущности.
+
+    Живой день 2026-11-02: определение погоды при вопросе про «сильный
+    ИИ vs слабый ИИ» записалось как знание о вопросе. Теперь объяснение
+    уходит в дверь определений, вопрос сущности остаётся открытым.
+    """
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(
+        "Как ты думаешь, чем сильный ИИ отличается от слабого?",
+        context="самостоятельный вопрос по теме: сильный ИИ vs слабый ИИ",
+        cycle=1,
+    )
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Погода — это состояние атмосферы в данное время."})
+    )
+
+    assert "Погода" in agent._user_explained_topics
+    assert "сильный ИИ vs слабый ИИ" not in agent._user_explained_topics
+    # вопрос сущности не съеден чужим определением
+    assert ui.get_pending_question() is not None
+    texts = _reply_texts(bus)
+    assert any("Записал" in t and "Погода" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_definition_of_pending_topic_still_answers_pending():
+    """Регрессия ступени 1: «Git — это …» при вопросе про Git — ответ."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(
+        "Что такое Git?",
+        context="самостоятельный вопрос по теме: Git",
+        cycle=1,
+    )
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Git — это система контроля версий."})
+    )
+
+    assert "Git" in agent._user_explained_topics
+    assert ui.get_pending_question() is None
 
 
 @pytest.mark.asyncio
@@ -288,7 +403,7 @@ async def test_request_gets_honest_refusal_not_learning_material():
     assert ui.get_last_user_message_cycle() == agent.cycle_count
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "не умею" in t)
     assert "тела" in reply
     assert "Не нашел файл" not in reply
@@ -307,7 +422,7 @@ async def test_request_with_pending_keeps_question_open():
 
     assert ui.get_pending_question() is not None
     assert agent._user_explained_topics == {}
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     assert any("не умею" in t for t in texts)
 
 
@@ -327,6 +442,6 @@ async def test_noise_input_gets_honest_reply_not_learning_material():
     assert ui.get_last_user_message_cycle() == agent.cycle_count
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = [d.get("text", "") for d in _thoughts(bus)]
+    texts = _reply_texts(bus)
     reply = next(t for t in texts if "нет букв" in t)
     assert "Напиши текстом" in reply

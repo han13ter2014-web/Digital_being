@@ -507,6 +507,21 @@ class UserInteraction:
 
         return msg_id
 
+    def send_reply(self, text: str, context: str = "reply",
+                   cycle: int = 0) -> str:
+        """Прямая реплика агенту в ответ на сообщение пользователя.
+
+        Участок «Собеседник-6»: раньше прямые ответы публиковались как
+        AGENT_THOUGHT и терялись в потоке мыслей — пользователь видел
+        только вопросы и проактивные сообщения. Реплика — это сообщение
+        (AGENT_MESSAGE) с записью в message_history: она переживает
+        рестарт и отличима от автономных мыслей.
+        """
+        return self.send_message(
+            text, msg_type="statement", tone="casual",
+            urgency=0.3, context=context, cycle=cycle,
+        )
+
     def get_pending_messages(self, include_acknowledged: bool = False) -> list:
         """Возвращает все непрочитанные сообщения (включая вопросы)."""
         if include_acknowledged:
