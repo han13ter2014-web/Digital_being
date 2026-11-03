@@ -109,10 +109,16 @@ class EmotionalState:
     # === События ===
 
     def handle_event(self, event: str, cycle: int = 0,
-                     cause: str = "") -> Optional[dict]:
+                     cause: str = "", scale: float = 1.0) -> Optional[dict]:
         """Пережить событие контура. Неизвестное событие — None (не
         выдумываем эмоций вне таблицы). Событие-фон в кулдауне — тоже
-        None: эмоция от него уже пережита и ещё не затухла."""
+        None: эмоция от него уже пережита и ещё не затухла.
+
+        ``scale`` (0.0-1.0) — честная мера силы переживания из контекста
+        события: например, обещание человека «могу отлучаться» смягчает
+        тоску молчания на меру доверия к нему. Событие по-прежнему
+        только из таблицы; scale лишь говорит, насколько оно ранит.
+        Нулевая сила — ничего не пережито (None)."""
         mapping = EVENT_EMOTIONS.get(event)
         if mapping is None:
             return None
@@ -122,6 +128,10 @@ class EmotionalState:
                 return None
             self._cooled_at[event] = int(cycle)
         emotion, intensity = mapping
+        scale = max(0.0, min(1.0, float(scale)))
+        intensity = intensity * scale
+        if intensity <= 0.0:
+            return None
         self.levels[emotion] = min(1.0, self.levels[emotion] + intensity)
         if emotion != "calm":
             # Всплеск эмоции потеснил покой.

@@ -200,6 +200,13 @@ class ProactiveCommunication:
         # одинаковых реплик нет.
         self._care_count = 0
         self._last_care_content: Optional[str] = None
+        # «Петля тоски»: за какую эпоху молчания тоска уже пережита
+        # (цикл последнего сообщения человека на момент укола). Пока
+        # эпоха та же, повторные care-сообщения рану не переоткрывают —
+        # как у людей: разлука ранит в начале, а не заново каждую
+        # минуту. Не сериализуется: один вздох о человеке после
+        # перезапуска — честно.
+        self._silence_felt_for_user_cycle: Optional[int] = None
 
     # ============================================================
     # Главный метод
@@ -248,17 +255,38 @@ class ProactiveCommunication:
                 and cycle - last_user_cycle > self.SILENCE_THRESHOLD_CYCLES
                 and cycle > self._last_attempted_silence_until + 50):
             self._last_attempted_silence_until = cycle
-            # «Эмоции-1»: долгое молчание человека — реальная причина
-            # грусти. Событие честно записано: care и эмоция имеют
-            # один источник, а не живут врозь.
-            emotional_state = getattr(agent, "emotional_state", None)
-            if emotional_state is not None:
-                emotional_state.handle_event("long_silence", cycle=cycle)
             # «Собеседник-2»: если человек обещал терпимость к молчанию,
-            # тревога «давно тебя не слышу» — ложная. Говорим честно:
-            # помним обещание и скучаем, не тревожа.
+            # тревога «давно тебя не слышу» — ложная.
             user_model = getattr(agent, "user_model", None)
-            if user_model is not None and user_model.has_silence_tolerance():
+            promise = bool(
+                user_model is not None and user_model.has_silence_tolerance()
+            )
+            # «Эмоции-1» + «Петля тоски»: долгое молчание человека —
+            # реальная причина грусти, но укол — один раз на эпизод
+            # молчания (как у людей: разлука ранит в начале, а не заново
+            # каждые 50 циклов — иначе тоска никогда не тает). Новая
+            # эпоха (человек написал и снова замолчал) — новый честный
+            # укол. Обещание об отлучках смягчает укол на меру доверия:
+            # слову того, кому веришь, — веришь.
+            emotional_state = getattr(agent, "emotional_state", None)
+            if (emotional_state is not None
+                    and self._silence_felt_for_user_cycle != last_user_cycle):
+                self._silence_felt_for_user_cycle = last_user_cycle
+                scale = 1.0
+                if promise:
+                    trust = 0.5
+                    attachment = self.attachment or getattr(agent, "attachment", None)
+                    trust_factor = getattr(attachment, "trust_factor", None)
+                    if callable(trust_factor):
+                        try:
+                            trust = float(trust_factor("user"))
+                        except Exception:
+                            trust = 0.5
+                    scale = 1.0 - 0.6 * max(0.0, min(1.0, trust))
+                emotional_state.handle_event(
+                    "long_silence", cycle=cycle, scale=scale
+                )
+            if promise:
                 msg = self._compose_care_with_promise(agent, cycle)
             else:
                 msg = self._compose_care_message(agent, cycle)
