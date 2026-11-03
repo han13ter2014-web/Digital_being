@@ -143,6 +143,28 @@ def test_claim_parser_rejects_unknown_metric():
         validate_checkpoint_state({"mental_models": {"concepts": {}, "claims": {"claim": claim}}})
 
 
+def test_every_producible_activity_kind_survives_validation():
+    """Всё, что умеет порождать attach_activity, обязано переживать рестарт.
+
+    Регрессия: валидатор знал только play/create_draft, а снимок с целью
+    «нарисовать картину» молча отбрасывался при загрузке — жизнь откатывалась
+    к более старому чекпоинту, теряя пережитые циклы.
+    """
+    from src.cognition.activity_goals import CRITERIA
+
+    for action, criterion in CRITERIA.items():
+        state = {"goals": [{"id": 1, "title": "t",
+                            "activity": {"action": action, "criterion": criterion}}]}
+        assert validate_checkpoint_state(state) is None
+
+
+def test_unknown_activity_criterion_still_rejected():
+    state = {"goals": [{"id": 1, "title": "t",
+                        "activity": {"action": "draw", "criterion": "unknown"}}]}
+    with pytest.raises(ValueError, match=r"goals\[0\]\.activity"):
+        validate_checkpoint_state(state)
+
+
 def _agent():
     node = ConceptNode("original")
     model = SimpleNamespace(

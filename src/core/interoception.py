@@ -64,6 +64,13 @@ class InteroceptiveState:
 
     fatigue: float = 0.0
     fatigue_integration_tau: float = 30.0
+    # Отдых — время репарации: митохондрии восстанавливаются во сне и
+    # покое (асимптотически к 1.0). Без этого тело старело без пути
+    # назад: повреждение копилось от каждой выработки АТФ, а росли
+    # митохондрии только от нагрузки — «лечение работой». Уставшее
+    # тело не могло выздороветь в принципе: порог восстановления по
+    # АТФ (0.75) оставался недостижим при деградированных митохондриях.
+    mitochondrial_rest_repair: float = 0.01
     # Усталость начинается не с первого же потерянного АТФ: у тела есть
     # комфортный уровень, ниже которого появляется сигнал.
     atp_comfort_ratio: float = 0.7
@@ -127,6 +134,13 @@ class InteroceptiveModel:
         mito_growth = cognitive_load * s.mitochondrial_biogenesis * self.mito_stress_response * dt
         if s.mitochondrial_health < s.mitophagy_threshold:
             mito_growth += 0.002 * dt
+        if rest > 0 and s.mitochondrial_health < 1.0:
+            # Репарация в покое: асимптотически к полному здоровью,
+            # быстрее при глубоком отдыхе.
+            mito_growth += (
+                rest * s.mitochondrial_rest_repair
+                * (1.0 - s.mitochondrial_health) * dt
+            )
         s.mitochondrial_health = np.clip(s.mitochondrial_health - mito_damage + mito_growth, 0.05, 1.5)
 
         # Усталость — от нехватки АТФ ниже комфортного уровня, а не от

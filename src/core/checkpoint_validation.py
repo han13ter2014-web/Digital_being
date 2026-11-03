@@ -236,7 +236,13 @@ def validate_checkpoint_state(state) -> None:
                 _dict(goal["motivation_origin"], f"{path}.motivation_origin")
             if "activity" in goal:
                 activity = _dict(goal["activity"], f"{path}.activity")
-                expected = {"play": {"play_turn", "play_round"}, "create_draft": {"draft_revision"}}
+                # Белый список строится из рук производителя: новые виды
+                # деятельности (draw, compose_music, ...) не должны молча
+                # превращать свежий снимок жизни в нечитаемый.
+                from src.cognition.activity_goals import CRITERIA
+
+                expected = {action: {criterion} for action, criterion in CRITERIA.items()}
+                expected.setdefault("play", set()).add("play_turn")  # старые снимки
                 if activity.get("action") not in expected or activity.get("criterion") not in expected[activity["action"]]:
                     _fail(f"{path}.activity", "unsupported activity criterion")
                 if "steps" in activity:
