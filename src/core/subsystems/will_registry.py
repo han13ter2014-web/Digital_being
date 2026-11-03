@@ -42,6 +42,8 @@ class WillRegistry:
             "web_searches": 0,
             # «Источники-2»: чтение новостей — тоже волевой акт, свой счётчик
             "news_reads": 0,
+            # «Интернет-1»: прогулки по открытому вебу — свой счётчик
+            "web_browses": 0,
             "goals_set": 0,
         }
         self._last_value_change_cycle = 0

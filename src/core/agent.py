@@ -119,6 +119,8 @@ BODY_LOAD: Dict[str, float] = {
     "draw": 0.5,
     # чтение новостей — лёгкое: глаза бегут, тело почти не работает
     "read_news": 0.4,
+    # «Интернет-1»: прогулка по открытому вебу — такая же лёгкая
+    "browse_web": 0.4,
     # общение и решения
     "know_answer": 0.5,
     "ask_user": 0.5,
@@ -178,6 +180,8 @@ EMOTION_ACTION_BIAS: Dict[str, Dict[str, float]] = {
         "rest": 1.15,
         # тихое чтение новостей — занятие для грустного настроения
         "read_news": 1.1,
+        # и тихая прогулка по открытому вебу — тоже
+        "browse_web": 1.1,
         "explore": 0.9,
         "play": 0.85,
     },
@@ -285,6 +289,8 @@ class DigitalBeing:
         "web_search": "web_search",
         # «Источники-2»: чтение новостей — окно в «сегодня»
         "read_news": "read_news",
+        # «Интернет-1»: прогулка по открытому вебу
+        "browse_web": "browse_web",
         # гипотеза и своя цель: мотивация предлагает их напрямую
         "hypothesis": "hypothesis",
         "set_own_goal": "set_own_goal",
@@ -495,6 +501,8 @@ class DigitalBeing:
         # охоты, не сериализуется: сон стирает след, после перезапуска
         # ленту можно проверить снова.
         self._news_reads: Dict[str, int] = {}
+        # «Интернет-1»: кулдаун прогулок по открытому вебу по теме.
+        self._web_browses: Dict[str, int] = {}
 
         # === «Творчество+»: рисунки и вторая игра ===
         # Каталог рисунков и текущая работа — как у текстовых черновиков;
@@ -1838,6 +1846,11 @@ class DigitalBeing:
             news = handler() if handler else None
             topic = (news or {}).get("target") or ""
             action = (news or {}).get("text") or action
+        elif action_type == "browse_web":
+            handler = getattr(self, "_act_browse_web", None)
+            browsed = handler() if handler else None
+            topic = (browsed or {}).get("target") or ""
+            action = (browsed or {}).get("text") or action
         elif action_type == "draw":
             handler = getattr(self, "_act_draw", None)
             drawn = handler() if handler else None
@@ -2075,6 +2088,11 @@ class DigitalBeing:
                 return False
             # Нет темы — нечего читать; кулдаун по теме не отсекаем
             # здесь: честный «уже читал» информативнее тихого отказа.
+            return self._pick_news_topic() is not None
+        if normalized == "browse_web":
+            searcher = getattr(self, "web_searcher", None)
+            if searcher is None or not getattr(searcher, "is_enabled", False):
+                return False
             return self._pick_news_topic() is not None
         if normalized == "decomposition":
             # Декомпозиция полезна только пока есть что разложить и куда
@@ -3465,6 +3483,109 @@ class DigitalBeing:
             ),
         }
 
+    def _act_browse_web(self) -> Dict:
+        """Погулять по открытому интернету по тому, что занимает.
+
+        «Интернет-1»: компас (search_web) даёт краткий ответ и ссылки,
+        затем существо читает одну страницу сама (open_page). Страница —
+        впечатление, не знание: в knowledge_base она не идёт (веб шумный,
+        определениям там не место); её след — эпизод дневника и волевой
+        акт ``web_browses``. Кулдаун по теме живёт только в памяти:
+        сон стирает его.
+        """
+        searcher = getattr(self, "web_searcher", None)
+        if searcher is None or not getattr(searcher, "is_enabled", False):
+            return {"text": "Ответ: интернет недоступен — поиск выключен"}
+
+        topic = self._pick_news_topic()
+        if not topic:
+            return {"text": "Ответ: гулять по интернету не о чем — нет темы"}
+
+        browses = getattr(self, "_web_browses", None)
+        if not isinstance(browses, dict):
+            browses = self._web_browses = {}
+        cooldown = int(getattr(LR_CONFIG, "WEB_BROWSE_COOLDOWN_CYCLES", 300) or 0)
+        last_browse = browses.get(topic)
+        if (
+            cooldown > 0
+            and last_browse is not None
+            and (self.cycle_count - last_browse) < cooldown
+        ):
+            return {
+                "target": topic,
+                "text": (
+                    f"Ответ: интернет про '{topic}' недавно обошёл — "
+                    f"вернусь позже"
+                ),
+            }
+
+        try:
+            compass = searcher.search_web(topic)
+        except Exception as exc:
+            get_logger().log(f"[WEB] компас упал: {exc}")
+            return {
+                "target": topic,
+                "text": f"Ответ: интернет по '{topic}' не отозвался",
+            }
+
+        if not compass.get("found"):
+            browses[topic] = self.cycle_count
+            return {
+                "target": topic,
+                "text": f"Ответ: интернет про '{topic}' ничего не подсказал",
+            }
+
+        # Куда пойти: ссылка мгновенного ответа, иначе первая связанная.
+        destination = str(compass.get("url") or "").strip()
+        if not destination:
+            for link in compass.get("related") or []:
+                candidate = str(link.get("url") or "").strip()
+                if candidate:
+                    destination = candidate
+                    break
+
+        if not destination:
+            browses[topic] = self.cycle_count
+            return {
+                "target": topic,
+                "text": f"Ответ: компас по '{topic}' не дал адреса",
+            }
+
+        try:
+            page = searcher.open_page(destination)
+        except Exception as exc:
+            get_logger().log(f"[WEB] чтение страницы упало: {exc}")
+            return {
+                "target": topic,
+                "text": f"Ответ: страница по '{topic}' не открылась",
+            }
+
+        browses[topic] = self.cycle_count
+        if not page.get("found"):
+            return {
+                "target": topic,
+                "text": (
+                    f"Ответ: страница про '{topic}' не читается "
+                    f"({page.get('error') or 'пусто'})"
+                ),
+            }
+
+        title = str(page.get("title") or destination)
+        extract = str(page.get("extract") or "")
+        snippet = extract[:200]
+        if len(extract) > 200:
+            snippet = snippet.rsplit(" ", 1)[0] + "…"
+        self._record_will(
+            "web_browses", topic, f"погулял по интернету: {title}"
+        )
+        return {
+            "target": topic,
+            "text": (
+                f"Ответ: погулял по интернету про '{topic}': «{title}». "
+                f"{snippet}"
+            ),
+        }
+
     def _act_hypothesis(self) -> Dict:
         """Выдвинуть гипотезу о теме, в которой агент не уверен.
 
@@ -4068,6 +4189,7 @@ class DigitalBeing:
         "draw": "Творчество",
         "play": "Игра",
         "read_news": "Исследование",
+        "browse_web": "Исследование",
     }
 
     def _absorb_action_failure(self, action: str, error: str) -> Optional[Dict]:

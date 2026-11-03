@@ -21,19 +21,28 @@ WebSearcher — поиск информации в Wikipedia API.
 - «Источники-2»: отдельное окно в «сегодня» — ``search_news`` читает
   Викиновости. Новости — впечатления, не определения: в базу знаний и
   кэш они не идут, фильтры качества у них свои.
+- «Интернет-1»: открытый веб. ``search_web`` — компас (DuckDuckGo
+  Instant Answer, официальный API без ключа; живые поисковые выдачи
+  закрыты капчей), ``open_page`` — чтение произвольной страницы с
+  SSRF-гардом (только публичный http/https, текст, потолки по размеру).
+  Страницы — впечатления, как новости: базу знаний не кормят.
 - Фильтры качества (is_valid_definition, is_relevant) применяются к
   каждому источнику одинаково: всеядность не значит «есть что попало».
 - Graceful degradation: любая ошибка → {"found": False}, агент продолжает жить.
 """
 
+import html
+import ipaddress
 import json
 import logging
+import re
+import socket
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.memory.knowledge_quality import (
     is_relevant,
@@ -131,6 +140,11 @@ class WebSearcher:
             # «Источники-2»: новости — не еда, а впечатления; считаются
             # отдельно от находок в базу знаний.
             "news_reads": 0,
+            # «Интернет-1»: открытый веб. pages_read — прочитанные страницы
+            # (впечатления, не определения), web_queries — запросы к
+            # компасу (DuckDuckGo Instant Answer).
+            "pages_read": 0,
+            "web_queries": 0,
         }
 
     # ============================================================
@@ -609,3 +623,258 @@ class WebSearcher:
             "source": "wikinews:search",
             "error": None,
         }
+
+    # ============================================================
+    # «Интернет-1»: открытый веб — впечатления, не определения
+    # ============================================================
+
+    # Компас: DuckDuckGo Instant Answer API — официальный, без ключа.
+    # Это НЕ полный поиск: мгновенный ответ + несколько связанных ссылок.
+    # Живые поисковые выдачи (HTML) закрыты капчей для скриптов — проверено
+    # вживую 2026-11-03 (DuckDuckGo html, Mojeek).
+    DDG_INSTANT_URL = "https://api.duckduckgo.com/"
+    # Сколько связанных ссылок отдавать существу.
+    WEB_RELATED_LIMIT = 3
+    # Страница читается с потолком по байтам и по символам текста.
+    WEB_PAGE_MAX_BYTES = 500_000
+    WEB_PAGE_MAX_CHARS = 4000
+    # Короче — скорее визитка-заглушка, чем страница; впечатления не даст.
+    WEB_PAGE_MIN_CHARS = 150
+
+    _DDG_KL = {"ru": "ru-ru", "en": "us-en"}
+
+    def search_web(self, query: str) -> dict:
+        """Компас по открытому вебу: краткий ответ и ссылки для open_page.
+
+        DuckDuckGo Instant Answer — не полнотекстовый поиск, а мгновенный
+        ответ плюс горстка связанных тем. Его ценность для существа —
+        ссылки: по ним она идёт читать сама через ``open_page``. Найденное
+        не кэшируется и не кормит базу знаний напрямую.
+        """
+        if not self._enabled:
+            return self._empty("disabled")
+
+        query = normalize_concept_name((query or "").strip())
+        if not is_worth_searching(query):
+            self._stats["misses"] += 1
+            return self._empty("not_worth_searching")
+
+        params = {
+            "q": query,
+            "format": "json",
+            "no_html": "1",
+            "skip_disambig": "1",
+            "kl": self._DDG_KL.get(self.lang, "wt-wt"),
+        }
+        url = self.DDG_INSTANT_URL + "?" + urllib.parse.urlencode(params)
+
+        data, error = self._request_json(url, lang=self.lang, query=query)
+        if error is not None or data is None:
+            return self._empty(error or "json_error")
+
+        abstract = str(data.get("AbstractText") or "").strip()
+        abstract_url = str(data.get("AbstractURL") or "").strip()
+        heading = str(data.get("Heading") or "").strip()
+
+        related: List[Dict[str, str]] = []
+        for topic in data.get("RelatedTopics") or []:
+            if not isinstance(topic, dict) or "Topics" in topic:
+                continue  # вложенные группы пропускаем — берём плоские темы
+            text = str(topic.get("Text") or "").strip()
+            first_url = str(topic.get("FirstURL") or "").strip()
+            if text and first_url:
+                related.append({"text": text, "url": first_url})
+            if len(related) >= self.WEB_RELATED_LIMIT:
+                break
+
+        if not abstract and not related:
+            self._stats["misses"] += 1
+            return self._empty("no_search_results")
+
+        self._stats["web_queries"] += 1
+        return {
+            "found": True,
+            "title": heading or query,
+            "extract": abstract,
+            "url": abstract_url,
+            "related": related,
+            "lang": self.lang,
+            "source": "duckduckgo:instant",
+            "error": None,
+        }
+
+    def open_page(self, url: str) -> dict:
+        """Прочитать произвольную страницу интернета — впечатление, не знание.
+
+        Границы безопасности (это не полная ОС-изоляция, но бытовые ловушки
+        закрыты):
+        * только http/https;
+        * хост не должен быть localhost, приватным, служебным или
+          link-local адресом — проверяется и до запроса, и после
+          редиректов (SSRF-гард);
+        * читаются только текстовые ответы (html/plain/xhtml);
+        * потолки: WEB_PAGE_MAX_BYTES на сырой ответ, WEB_PAGE_MAX_CHARS
+          на извлечённый текст;
+        * общий rate limit и тот же User-Agent, что у вики-источников.
+
+        Страница НЕ проходит фильтры «похоже на определение»: веб шумный,
+        и его место — впечатления (дневник, реестр воли), а не база знаний.
+        """
+        if not self._enabled:
+            return self._empty("disabled")
+
+        url = (url or "").strip()
+        guard_error = self._url_guard(url)
+        if guard_error is not None:
+            self._stats["misses"] += 1
+            return self._empty(guard_error)
+        url = self._quote_url(url)
+
+        self._respect_rate_limit()
+        self._stats["network_calls"] += 1
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": self.user_agent,
+                    "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8",
+                    "Accept-Language": f"{self.lang},en;q=0.5",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                if resp.status != 200:
+                    self._stats["errors"] += 1
+                    return self._empty(f"http_{resp.status}")
+                # Редирект мог увести внутрь — гард повторяется на финале.
+                final_error = self._url_guard(resp.geturl())
+                if final_error is not None:
+                    self._stats["errors"] += 1
+                    return self._empty(final_error)
+                content_type = str(resp.headers.get("Content-Type") or "").lower()
+                if not (
+                    "text/html" in content_type
+                    or "application/xhtml" in content_type
+                    or content_type.startswith("text/plain")
+                ):
+                    self._stats["misses"] += 1
+                    return self._empty("not_text")
+                body = resp.read(self.WEB_PAGE_MAX_BYTES + 1)
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as e:
+            self._stats["errors"] += 1
+            return self._empty(f"http_{e.code}")
+        except urllib.error.URLError as e:
+            self._stats["errors"] += 1
+            logger.warning(f"[WebSearcher] URL error для страницы: {e.reason}")
+            return self._empty("network_error")
+        except (TimeoutError, OSError) as e:
+            self._stats["errors"] += 1
+            logger.warning(f"[WebSearcher] Timeout/OSError для страницы: {e}")
+            return self._empty("timeout")
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.exception(f"[WebSearcher] Unexpected error для страницы: {e}")
+            return self._empty("unknown_error")
+
+        if len(body) > self.WEB_PAGE_MAX_BYTES:
+            body = body[: self.WEB_PAGE_MAX_BYTES]
+
+        charset = "utf-8"
+        match = re.search(r"charset=([\w.-]+)", content_type)
+        if match:
+            charset = match.group(1)
+        raw = body.decode(charset, errors="replace")
+
+        title, text = self._html_to_text(raw)
+        if len(text) < self.WEB_PAGE_MIN_CHARS:
+            self._stats["misses"] += 1
+            return self._empty("no_extract")
+        if len(text) > self.WEB_PAGE_MAX_CHARS:
+            text = text[: self.WEB_PAGE_MAX_CHARS].rsplit(" ", 1)[0] + "…"
+
+        self._stats["pages_read"] += 1
+        logger.info(
+            f"[WebSearcher] страница прочитана: {final_url!r} "
+            f"({len(text)} символов)"
+        )
+        return {
+            "found": True,
+            "title": title or final_url,
+            "extract": text,
+            "url": final_url,
+            "lang": self.lang,
+            "source": "web:page",
+            "error": None,
+        }
+
+    def _url_guard(self, url: str) -> Optional[str]:
+        """Причина отказа или None: только публичный http/https."""
+
+        try:
+            parts = urllib.parse.urlsplit(url)
+        except ValueError:
+            return "bad_url"
+        if parts.scheme not in ("http", "https"):
+            return "bad_scheme"
+        host = parts.hostname
+        if not host:
+            return "bad_url"
+        try:
+            for family, _type, _proto, _canon, sockaddr in socket.getaddrinfo(
+                host, None
+            ):
+                if family not in (socket.AF_INET, socket.AF_INET6):
+                    continue
+                ip = ipaddress.ip_address(sockaddr[0])
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                ):
+                    return "private_host"
+        except OSError:
+            return "dns_error"
+        return None
+
+    @staticmethod
+    def _quote_url(url: str) -> str:
+        """Перевести URL в ASCII: кириллица в пути и запросе кодируется,
+        хост — через IDNA. Уже закодированное (%XX) не трогается."""
+
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ""
+        try:
+            host_ascii = host.encode("idna").decode("ascii")
+        except (UnicodeError, ValueError):
+            host_ascii = host
+        if parts.port is not None:
+            host_ascii = f"{host_ascii}:{parts.port}"
+        path = urllib.parse.quote(parts.path, safe="/%:@!$&'()*+,;=-._~")
+        query = urllib.parse.quote(parts.query, safe="=&%?/:@!$'()*+,;-._~")
+        return urllib.parse.urlunsplit(
+            (parts.scheme, host_ascii, path, query, parts.fragment)
+        )
+
+    def _html_to_text(self, raw: str) -> Tuple[str, str]:
+        """Грубый, но честный стрип HTML → (заголовок, текст)."""
+
+        title = ""
+        match = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
+        if match:
+            title = html.unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip()
+
+        body = re.sub(
+            r"<(script|style|noscript|template|svg|head)[^>]*>.*?</\1>",
+            " ",
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        body = re.sub(r"<!--.*?-->", " ", body, flags=re.DOTALL)
+        body = re.sub(r"<[^>]+>", " ", body)
+        body = html.unescape(body)
+        lines = [" ".join(line.split()) for line in body.splitlines()]
+        text = "\n".join(line for line in lines if line).strip()
+        return title, text

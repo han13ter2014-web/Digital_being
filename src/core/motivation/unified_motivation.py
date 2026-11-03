@@ -160,7 +160,7 @@ DEFAULT_NEEDS = {
         base_level=0.8, current_level=0.5, decay_rate=0.02,
         threshold=0.35, priority=1.2,
         related_concepts=["вопрос", "понимать", "знать", "обучение", "ошибка", "любопытство", "исследовать"],
-        related_actions=["ask_question", "decompose_concept", "explore", "web_search", "read_news", "synthesize", "hypothesis"]
+        related_actions=["ask_question", "decompose_concept", "explore", "web_search", "read_news", "browse_web", "synthesize", "hypothesis"]
     ),
     "competence": Need(
         name="competence", label="Компетентность / Мастерство",

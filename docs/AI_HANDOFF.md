@@ -16,6 +16,55 @@
 
 Версия пакета: `0.1.3`
 
+## Участок «Интернет-1»: существо выходит в открытый веб — ожидает коммита
+
+2026-11-03 завершён участок **«Интернет-1»** (код и тесты готовы, живой
+зонд пройден; коммит — по слову владельца). Заказ: «дать ей доступ ко
+всему интернету»; размах A+B+C выбран владельцем явно. Разведка
+вживую (2026-11-03): DuckDuckGo HTML и Mojeek отвечают капчей —
+общий поиск без API-ключей недоступен; DDG Instant Answer API работает;
+чтение произвольных страниц работает.
+
+Что сделано:
+- **`open_page(url)`** (`src/perception/web_search.py`): чтение
+  произвольной страницы. SSRF-гард `_url_guard`: только http/https;
+  `socket.getaddrinfo` + `ipaddress` — отказ для private/loopback/
+  link-local/multicast/reserved/unspecified; гард повторяется на
+  финальном URL после редиректов. Только text/html, xhtml, text/plain;
+  потолки `WEB_PAGE_MAX_BYTES=500_000`, `WEB_PAGE_MAX_CHARS=4000`,
+  минимум `WEB_PAGE_MIN_CHARS=150` (тонкие заглушки отбраковываются).
+  `_quote_url`: кириллица в пути/запросе кодируется, хост через IDNA —
+  без этого http.client падает с UnicodeEncodeError «unknown_error»
+  (урок живого зонда). `_html_to_text`: вырезает
+  script/style/noscript/template/svg/head, комментарии и теги,
+  unescape, схлопывание пробелов. Страница — впечатление: фильтры
+  «похоже на определение» не применяются, база знаний не кормится.
+- **`search_web(query)`** — компас: DuckDuckGo Instant Answer API
+  (официальный, без ключа), `kl` по языку; отдаёт abstract, URL и до
+  `WEB_RELATED_LIMIT=3` связанных ссылок (вложенные группы RelatedTopics
+  пропускаются). Честно: не полный поиск. Счётчик `web_queries`.
+- **Действие `browse_web`** (agent.py, `_act_browse_web`): тема —
+  `_pick_news_topic`; компас → первая ссылка (abstract-url, иначе
+  related) → open_page. Волевой акт `web_browses` (счётчик добавлен в
+  WillRegistry; from_dict сливает с дефолтами — старые чекпоинты целы),
+  knowledge_base нетронута. Кулдаун `WEB_BROWSE_COOLDOWN_CYCLES=300`
+  по теме (`_web_browses`, аннотирован в `__init__`, не сериализуется).
+  Проводка: BODY_LOAD 0.4, EMOTION_ACTION_BIAS sadness 1.1,
+  ACTION_ALIASES, доступность (поисковик включён + есть тема),
+  `_METHOD_VALUE_MAP` → «Исследование», curiosity.related_actions.
+  Статистика диеты: `web_queries`, `pages_read`.
+
+Проверки: полный гейт частями **1959 passed, 2 skipped** (бейзлайн
+1943 + 16 новых в `test_web_open.py`: компас, страница, SSRF-отказы,
+редирект внутрь, не-текст, тонкая страница, потолок, кириллический
+URL, действие с кулдауном). mypy: 0 новых ошибок (250=250); +1 note
+annotation-unchecked — тот же прецедент, что `_news_reads`. Живой зонд
+на Тэсс (`live_probe_internet1.py`) — **5/5**: компас нашёл «Нейронную
+сеть» (3 ссылки), страница Википедии прочитана как обычный HTML
+(3987 символов), browse_web прошёл компас → страница с волевым актом
+и чистой базой знаний, стенд цел (6007→6019, энергия 147.5), следы
+вычищены, pointer восстановлен.
+
 ## Участок «Sandbox»: существо запускает свои программы — закрыт
 
 2026-11-03 закрыт участок **«Sandbox»** (закоммичен: 37ef54d,
