@@ -55,6 +55,13 @@ SALIENCE_THRESHOLD = 0.35
 # Лимит журнала эпизодов: долгоживущий процесс не копит без границ.
 EPISODES_MAX = 100
 
+# «Эмоции-2»: события-фоны, которые без кулдауна стреляли бы каждый цикл
+# (целостность ниже порога держится циклами, фаза finale — тысячи циклов).
+# Эмоция от повторного сигнала не новая: она уже пережита. Кулдаун
+# сериализуется, иначе рестарт обнулял бы тишину.
+EVENT_COOLDOWN_CYCLES = 300
+COOLED_EVENTS = frozenset({"death_risk", "life_finale"})
+
 # Детерминированная карта событий контура → эмоция. Единственный
 # законный путь породить эмоцию — реальное событие из этой таблицы.
 EVENT_EMOTIONS = {
@@ -96,16 +103,24 @@ class EmotionalState:
         self.last_causes: Dict[str, tuple] = {}
         # журнал эпизодов: {"cycle", "event", "emotion", "intensity"}
         self.episodes: List[dict] = []
+        # событие-фон → цикл последнего всплеска (кулдаун от спама)
+        self._cooled_at: Dict[str, int] = {}
 
     # === События ===
 
     def handle_event(self, event: str, cycle: int = 0,
                      cause: str = "") -> Optional[dict]:
         """Пережить событие контура. Неизвестное событие — None (не
-        выдумываем эмоций вне таблицы)."""
+        выдумываем эмоций вне таблицы). Событие-фон в кулдауне — тоже
+        None: эмоция от него уже пережита и ещё не затухла."""
         mapping = EVENT_EMOTIONS.get(event)
         if mapping is None:
             return None
+        if event in COOLED_EVENTS:
+            cooled_at = self._cooled_at.get(event)
+            if cooled_at is not None and (int(cycle) - cooled_at) < EVENT_COOLDOWN_CYCLES:
+                return None
+            self._cooled_at[event] = int(cycle)
         emotion, intensity = mapping
         self.levels[emotion] = min(1.0, self.levels[emotion] + intensity)
         if emotion != "calm":
@@ -186,6 +201,7 @@ class EmotionalState:
                 k: [int(v[0]), str(v[1])] for k, v in self.last_causes.items()
             },
             "episodes": [dict(e) for e in self.episodes[-EPISODES_MAX:]],
+            "cooled_at": {k: int(v) for k, v in self._cooled_at.items()},
         }
 
     def load_from(self, data) -> None:
@@ -220,3 +236,13 @@ class EmotionalState:
                 for e in episodes[-EPISODES_MAX:]
                 if isinstance(e, dict) and e.get("emotion") in EMOTIONS
             ]
+        cooled = data.get("cooled_at")
+        if isinstance(cooled, dict):
+            self._cooled_at = {}
+            for event, cycle in cooled.items():
+                if event not in COOLED_EVENTS:
+                    continue
+                try:
+                    self._cooled_at[str(event)] = int(cycle)
+                except (TypeError, ValueError):
+                    continue
