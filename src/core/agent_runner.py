@@ -276,6 +276,14 @@ class AgentRunner:
             return
         logger.info(f"[{self.name}] USER_MESSAGE: {text[:60]}")
 
+        # «Эмоции-1»: контакт с человеком — реальная причина радости.
+        # Неважно, что сказано: сам факт, что человек рядом.
+        emotional_state = getattr(self.agent, "emotional_state", None)
+        if emotional_state is not None:
+            emotional_state.handle_event(
+                "user_contact", cycle=self.agent.cycle_count
+            )
+
         # Имя — отдельный Core-owned диалог, а не обычная тема для обучения.
         # После приветствия NamingDialogue ждёт естественный ответ пользователя
         # без требования команды /name. Это должно происходить до помещения
@@ -569,6 +577,14 @@ class AgentRunner:
             return
         outcome = learning.resolve(phrase, text, cycle=self.agent.cycle_count)
         if outcome["status"] == "learned":
+            # «Эмоции-1»: человек научил новому слову — реальная
+            # причина радости (и честная: событие записано в контуре).
+            emotional_state = getattr(self.agent, "emotional_state", None)
+            if emotional_state is not None:
+                emotional_state.handle_event(
+                    "learned_phrase", cycle=self.agent.cycle_count,
+                    cause=phrase,
+                )
             label = {
                 ACT_SOCIAL: "обычный разговор",
                 ACT_ASK_ABOUT_SELF: "вопрос ко мне",

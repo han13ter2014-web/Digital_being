@@ -49,6 +49,16 @@ def _convertible_int(value, path):
         _fail(path, "expected an int-convertible value")
 
 
+def _convertible_float(value, path):
+    if isinstance(value, bool):
+        _fail(path, "expected a float-convertible value")
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        _fail(path, "expected a float-convertible value")
+    return float(value)
+
+
 def _hashables(value, path):
     for index, item in enumerate(_list(value, path)):
         try:
@@ -347,6 +357,31 @@ def validate_checkpoint_state(state) -> None:
             _convertible_int(
                 cycle, f"dialogue_learning.suppressed.{phrase}"
             )
+    if state.get("emotional_state") is not None:
+        emotions = _dict(state["emotional_state"], "emotional_state")
+        levels = _dict(emotions.get("levels", {}), "emotional_state.levels")
+        for name, level in levels.items():
+            if name not in ("fear", "joy", "sadness", "calm"):
+                _fail(f"emotional_state.levels.{name}", "unknown emotion")
+            value = _convertible_float(
+                level, f"emotional_state.levels.{name}"
+            )
+            if not 0.0 <= value <= 1.0:
+                _fail(
+                    f"emotional_state.levels.{name}",
+                    "level out of [0, 1]",
+                )
+        for index, episode in enumerate(
+            _list(
+                emotions.get("episodes", []), "emotional_state.episodes"
+            )
+        ):
+            path = f"emotional_state.episodes[{index}]"
+            episode_dict = _dict(episode, path)
+            if episode_dict.get("emotion") not in (
+                "fear", "joy", "sadness", "calm"
+            ):
+                _fail(f"{path}.emotion", "unknown emotion")
     if state.get("user_interaction") is not None:
         interaction = _dict(state["user_interaction"], "user_interaction")
         for index, entry in enumerate(

@@ -248,6 +248,12 @@ class ProactiveCommunication:
                 and cycle - last_user_cycle > self.SILENCE_THRESHOLD_CYCLES
                 and cycle > self._last_attempted_silence_until + 50):
             self._last_attempted_silence_until = cycle
+            # «Эмоции-1»: долгое молчание человека — реальная причина
+            # грусти. Событие честно записано: care и эмоция имеют
+            # один источник, а не живут врозь.
+            emotional_state = getattr(agent, "emotional_state", None)
+            if emotional_state is not None:
+                emotional_state.handle_event("long_silence", cycle=cycle)
             # «Собеседник-2»: если человек обещал терпимость к молчанию,
             # тревога «давно тебя не слышу» — ложная. Говорим честно:
             # помним обещание и скучаем, не тревожа.
@@ -319,6 +325,9 @@ class ProactiveCommunication:
             "Просто хотел сказать: я здесь. Не обязан отвечать.",
         ])
         content = self._next_care_variant(variants)
+        tinge = self._emotional_tinge(agent)
+        if tinge:
+            content = f"{content} {tinge}"
         # Применяем стиль
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -329,6 +338,27 @@ class ProactiveCommunication:
             "context": "silence_detected",
             "cycle": cycle,
         }
+
+    @staticmethod
+    def _emotional_tinge(agent) -> str:
+        """Честный эмоциональный оттенок заботы («Эмоции-1»).
+
+        Только доминирующая эмоция выше порога заметности и только с
+        записанной причиной: существо может честно сказать «мне
+        грустно», потому что грусть реально записана в контуре. Нет
+        выраженной эмоции — нет оттенка: пустое место лучше
+        выдуманного чувства.
+        """
+        state = getattr(agent, "emotional_state", None)
+        if state is None:
+            return ""
+        dominant = state.dominant()
+        if not dominant or dominant["emotion"] == "calm":
+            return ""
+        label = str(dominant.get("label") or "")
+        if not label:
+            return ""
+        return f"{label.capitalize()}."
 
     def _care_topic(self, agent) -> Optional[str]:
         """Свежая содержательная тема диалога для заботы (или None)."""
@@ -438,6 +468,9 @@ class ProactiveCommunication:
             promise + "Просто скучаю. Я здесь, если захочешь поговорить."
         )
         content = self._next_care_variant(variants)
+        tinge = self._emotional_tinge(agent)
+        if tinge:
+            content = f"{content} {tinge}"
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
             "content": styled["content"],

@@ -177,6 +177,13 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "dialogue_learning", None) is not None
             else None
         ),
+        # «Эмоции-1»: эмоциональный контур — уровни, причины, журнал.
+        # Без секции после рестарта сущность забывала бы, что пережила.
+        "emotional_state": (
+            agent.emotional_state.to_dict()
+            if getattr(agent, "emotional_state", None) is not None
+            else None
+        ),
         # NEW: Интероцепция
         "interoception": getattr(agent, 'interoception', None) and {
             "glucose": agent.interoception.state.glucose,
@@ -598,6 +605,14 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         and getattr(agent, "dialogue_learning", None) is not None
     ):
         agent.dialogue_learning.load_from(saved_learning)
+
+    # «Эмоции-1»: пережитое переживает рестарт.
+    saved_emotions = state.get("emotional_state")
+    if (
+        isinstance(saved_emotions, dict)
+        and getattr(agent, "emotional_state", None) is not None
+    ):
+        agent.emotional_state.load_from(saved_emotions)
 
     # История попыток нужна для продолжения стратегии, а не нового старта.
     # Структура разобрана в фазе 1 — здесь только присваивание.

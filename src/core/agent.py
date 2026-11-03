@@ -440,6 +440,14 @@ class DigitalBeing:
 
         self.dialogue_learning = DialogueLearning()
 
+        # === «Эмоции-1»: эмоциональный контур ===
+        # Страх/счастье/грусть/покой с реальными причинами и затуханием.
+        # Окрашивает жизнь (тон, care, статус), но не выбирает целей и
+        # не пишет в ценности. Сериализуется в чекпоинт.
+        from src.core.emotional_state import EmotionalState
+
+        self.emotional_state = EmotionalState()
+
         os.makedirs(data_path('checkpoints'), exist_ok=True)
         os.makedirs(data_path('logs'), exist_ok=True)
 
@@ -942,10 +950,24 @@ class DigitalBeing:
             finish_intention(entry, outcome=SimpleNamespace(
                 reason="", as_dict=lambda: dict(outcome)
             ))
+            # «Эмоции-1»: завершённое дело — реальная причина счастья.
+            emotional_state = getattr(self, "emotional_state", None)
+            if emotional_state is not None:
+                emotional_state.handle_event(
+                    "intention_completed", cycle=self.cycle_count,
+                    cause=str(entry.get("action") or ""),
+                )
         elif status == "failed":
             finish_intention(entry, error=RuntimeError(
                 str(payload.get("error") or "effector action failed")
             ))
+            # «Эмоции-1»: неудача — реальная причина грусти.
+            emotional_state = getattr(self, "emotional_state", None)
+            if emotional_state is not None:
+                emotional_state.handle_event(
+                    "intention_failed", cycle=self.cycle_count,
+                    cause=str(entry.get("action") or ""),
+                )
         elif status == "rejected":
             finish_intention(entry, outcome=SimpleNamespace(
                 reason=f"denied: {payload.get('error') or 'effector rejected'}",
@@ -3880,6 +3902,12 @@ class DigitalBeing:
             abuse_type, intensity, description,
             cycle=self.cycle_count,
         )
+        # «Эмоции-1»: вред — реальная причина страха.
+        emotional_state = getattr(self, "emotional_state", None)
+        if emotional_state is not None:
+            emotional_state.handle_event(
+                "abuse", cycle=self.cycle_count, cause=abuse_type
+            )
         analysis = self.self_termination.analyze_suffering(self.cycle_count)
         return {
             "recorded": True,
@@ -3911,6 +3939,14 @@ class DigitalBeing:
         if getattr(self, "_last_communication_tick_cycle", None) == cycle_count:
             return {"cycle": cycle_count, "skipped": "duplicate_cycle"}
         self._last_communication_tick_cycle = cycle_count
+
+        # «Эмоции-1»: затухание эмоций каждый цикл жизни — эмоция тает,
+        # покой возвращается. Без тика контур застыл бы на последнем
+        # всплеске навсегда.
+        emotional_state = getattr(self, "emotional_state", None)
+        if emotional_state is not None:
+            emotional_state.tick(cycle_count)
+
         result = {
             "cycle": cycle_count,
             "proactive_message": None,

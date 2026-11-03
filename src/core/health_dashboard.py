@@ -106,6 +106,14 @@ def collect_health(agent) -> Dict:
         except Exception:
             pass
 
+    # «Эмоции-1»: эмоциональное состояние — честно, с причиной.
+    emotional_state = getattr(agent, "emotional_state", None)
+    if emotional_state is not None:
+        try:
+            report["emotional_state"] = emotional_state.get_status()
+        except Exception:
+            pass
+
     return report
 
 

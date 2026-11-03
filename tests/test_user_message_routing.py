@@ -236,6 +236,24 @@ async def test_unknown_text_is_remembered_as_dialogue_turn():
 
 
 @pytest.mark.asyncio
+async def test_user_contact_is_felt_as_joy():
+    """«Эмоции-1»: контакт с человеком — реальная причина радости.
+
+    Событие записывается в эмоциональный контур до всех дверей:
+    неважно, что сказано — важно, что человек рядом.
+    """
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "привет"})
+    )
+
+    state = agent.emotional_state
+    assert state.levels["joy"] > 0.0
+    assert state.episodes[-1]["event"] == "user_contact"
+
+
+@pytest.mark.asyncio
 async def test_orphan_answer_formula_gets_honest_reply():
     """Явный «ответ» без вопроса сущности — записывать некуда."""
     agent, runner, bus = _make_runner()

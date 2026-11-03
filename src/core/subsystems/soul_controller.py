@@ -42,7 +42,7 @@ class SoulController:
             "meaning", "src.motivation.intrinsic_meaning_finder", "IntrinsicMeaningFinder"
         )
         self._try_import(
-            "immune", "src.emotion.immuno_system", "ImmuneSystem"
+            "immune", "src.emotion.immune_system", "ImmuneSystem"
         )
         self._try_import(
             "survival", "src.emotion.survival_instincts", "SurvivalInstincts"

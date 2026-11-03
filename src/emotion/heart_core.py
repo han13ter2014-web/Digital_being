@@ -167,9 +167,11 @@ class HeartCore:
                                    intensity1: float = 1.0, intensity2: float = 1.0) -> Emotion:
         """Решает конфликт между противоположными эмоциями."""
         
-        # Определяет "сильнее" эмоцию
-        combined_intensity = (intensity1 * self.BASE_EMOTIONS[emotion1]["quality"] + 
-                            intensity2 * self.BASE_EMOTIONS[emotion2]["quality"]) / 2
+        # Определяет "сильнее" эмоцию. «Эмоции-1» (2026-11-03): здесь
+        # стояло intensity * quality — строка на число; орган никогда не
+        # запускался вживую, поэтому баг не был замечен. combined —
+        # среднее интенсивностей.
+        combined_intensity = (intensity1 + intensity2) / 2
         
         # Гнев побеждает страх, радость побеждает грусть и т.д.
         dominance_rules = {
