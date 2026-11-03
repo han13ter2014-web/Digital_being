@@ -6,7 +6,8 @@ paths and parent-directory escapes are rejected before touching the file
 system. Symlinks are resolved and must still stay inside the root.
 
 This is intentionally *not* a full OS sandbox. It is a defensive path policy
-for a local, single-user agent. Code execution is not part of this layer.
+for a local, single-user agent. Code execution is not part of this layer;
+it lives in ``runner.py`` behind the same path policy and the approval gate.
 """
 
 from __future__ import annotations
@@ -213,6 +214,67 @@ class Sandbox:
             "bytes": len(data),
             "created": created,
         }
+
+    def append_text(
+        self,
+        path: str | os.PathLike[str],
+        content: str,
+    ) -> Dict[str, object]:
+        """Append UTF-8 text to a workspace file without rewriting it.
+
+        The same size and binary invariants as ``write_text`` apply to the
+        *combined* result, so appends cannot grow a file past the limit.
+        """
+
+        target = self.resolve(path)
+        if target == self.root:
+            raise SandboxError("the workspace root is not a file")
+        if target.exists() and target.is_dir():
+            raise SandboxError(f"target is a directory: {path}")
+
+        if not isinstance(content, str):
+            content = str(content)
+        data = content.encode("utf-8")
+
+        created = not target.exists()
+        existing = b""
+        if target.exists():
+            if not target.is_file():
+                raise SandboxError(f"not a regular file: {path}")
+            existing = target.read_bytes()
+            if b"\x00" in existing[:4096]:
+                raise SandboxError(f"binary files are not supported: {path}")
+        total = len(existing) + len(data)
+        if total > self.max_file_bytes:
+            raise SandboxError(
+                f"file would grow beyond the limit: {total} bytes > {self.max_file_bytes}"
+            )
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not _is_within(target.parent.resolve(strict=False), self.root):
+            raise SandboxError(f"parent directory escapes the workspace: {path}")
+
+        with open(target, "ab") as handle:
+            handle.write(data)
+
+        return {
+            "path": self.relative(target),
+            "appended_bytes": len(data),
+            "bytes": total,
+            "created": created,
+        }
+
+    def make_dir(self, path: str | os.PathLike[str]) -> Dict[str, object]:
+        """Create a workspace directory (and missing parents)."""
+
+        target = self.resolve(path)
+        if target == self.root:
+            raise SandboxError("the workspace root already exists")
+        if target.exists() and not target.is_dir():
+            raise SandboxError(f"a file already exists at this path: {path}")
+        created = not target.exists()
+        target.mkdir(parents=True, exist_ok=True)
+        return {"path": self.relative(target), "created": created}
 
     def exists(self, path: str | os.PathLike[str]) -> bool:
         target = self.resolve(path)

@@ -64,6 +64,8 @@ def make_agent(
         "enabled": True,
         "tick_interval": tick_interval,
         "bridge_enabled": bridge_enabled,
+        # Bridge mechanics, not the gate: the project default is "dangerous".
+        "approval_mode": "off",
     }
     params.update(sub_kwargs)
     sub = DelamainSubsystem(**params)

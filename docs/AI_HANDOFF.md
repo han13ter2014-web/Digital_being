@@ -16,6 +16,62 @@
 
 Версия пакета: `0.1.3`
 
+## Участок «Sandbox»: существо запускает свои программы — ожидает коммита
+
+2026-11-03 завершён участок **«Sandbox»** (код и тесты готовы, живой
+зонд пройден; коммит — по слову владельца). Заказ владельца: «пусть
+сама пишет программы или мелкие улучшения для себя». Вопрос о размахе
+и approval-режиме отклонён без ответа → по ритуалу взят
+рекомендованный размах: ступени A+B, approval `dangerous`.
+
+Что сделано:
+- **`src/delamain/runner.py` (новый) — `CodeRunner`**: исполнение
+  .py-файлов из workspace. `sys.executable -I -X utf8`, `cwd` — корень
+  workspace, таймаут `DELAMAIN_RUN_TIMEOUT_SEC` (10 с, зажат в 0.5–60),
+  белый список env (SystemRoot/WINDIR/COMSPEC/TEMP/TMP/PATH +
+  PYTHONIOENCODING/PYTHONNOUSERSITE/PYTHONDONTWRITEBYTECODE), лимиты
+  вывода (`DELAMAIN_RUN_OUTPUT_CHARS=4000`) и размера скрипта
+  (`DELAMAIN_RUN_MAX_CODE_BYTES=100_000`). Возвращает `RunOutcome`
+  (exit_code, stdout, stderr, duration_ms, timed_out); таймаут убивает
+  процесс. Докстринг честно фиксирует: это не полная ОС-изоляция,
+  сеть на уровне ОС не блокируется — поэтому действие dangerous и
+  живёт за approval-гейтом. Ловушка: `-I` подразумевает `-E`, поэтому
+  PYTHONIOENCODING игнорируется — кириллицу спасает `-X utf8`.
+- **Действия** (`actions.py`): `RunPythonAction` (dangerous=True;
+  nonzero exit → ActionError с хвостом stderr/stdout, таймаут —
+  ActionError), `AppendFileAction` (dangerous=True), `MakeDirAction`
+  (мирное). `ActionRegistry.default(..., code_runner=None)` — раннер
+  можно подменить в тестах.
+- **Песочница** (`sandbox.py`): `append_text` (лимит на объединённый
+  размер, бинарная цель отвергается, родители создаются с повторной
+  проверкой границы) и `make_dir`. Файловый контракт песочницы не
+  нарушен: исполнение — отдельный модуль.
+- **Планировщик** (`planner.py`): команды «запусти x.py» / run,
+  «допиши в a.txt: …» / append, «создай папку» / mkdir.
+- **Связка**: `DelamainRuntime(..., code_runner=None)`;
+  `DelamainSubsystem` принимает `run_timeout`, `run_output_chars`,
+  `run_max_code_bytes` (env `DELAMAIN_RUN_*`, конфиг), строит
+  `CodeRunner` в `_ensure_runtime`, показывает лимиты в `status()`.
+- **Конфиг**: `DELAMAIN_APPROVAL_MODE = "dangerous"` (было `off`):
+  с появлением run_python гейт включён — write_file, append_file,
+  run_python, set_self_model, write_creative_draft ждут одобрения.
+  Тестовые хелперы механики (не гейта) зафиксированы на `off` явно:
+  test_delamain_subsystem.py, test_delamain_step_repair.py,
+  test_delamain_goal_bridge.py, test_delamain_effector.py (+ env в
+  тесте связки ядра).
+
+Проверки: полный гейт частями **1943 passed, 2 skipped** (бейзлайн
+1928 + 15 новых в `test_delamain_run_python.py`: sandbox append/mkdir,
+раннер — успех/кириллица/timeout/чистое env/отказы, действие, гейт
+dangerous, планировщик). mypy в паритете с HEAD (stash-diff пуст),
+`runner.py` чист. Живой зонд на Тэсс (`live_probe_sandbox.py`) —
+**5/5**: wiring жив и режим dangerous на месте, append дописывает,
+run_python ждёт одобрения (sentinel НЕ появился до approve), после
+approve скрипт напечатал «тэсс-жива» и создал sentinel, стенд цел.
+Гигиена: probe-файлы удалены из workspace, эпизоды/approvals с
+task_id `probe-sandbox-*` вычищены из её delamain.sqlite3
+(проверено запросом: 0 и 0), pointer восстановлен байт-в-байт.
+
 ## Участок «Источники-2»: Викибуки и новости — закрыт
 
 2026-11-03 закрыт участок **«Источники-2»** (закоммичен: d8d71d8,

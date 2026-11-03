@@ -18,6 +18,8 @@ first working vertical slice of the new architecture:
 * optional bounded step repair inside one attempt, disabled by default;
 * a core-owned, idempotent effector contract, disabled by default;
 * an optional core-driven effector step, also disabled by default;
+* bounded execution of small workspace Python programs (``run_python``),
+  marked dangerous and meant to run behind the approval gate;
 * an offline, deterministic capability evaluation harness.
 
 The LLM layer is never required: constructing the core does not start Ollama
@@ -51,6 +53,7 @@ from .models import (
 )
 from .llm_planner import OllamaPlanner
 from .planner import FallbackPlanner, HeuristicPlanner, Planner, PlannerError
+from .runner import CodeRunner, RunnerError, RunOutcome
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox, SandboxError
 from .subsystem import DelamainSubsystem
@@ -66,6 +69,7 @@ __all__ = [
     "AUTHORABLE_GOAL_STATUSES",
     "BRIDGE_STATUSES",
     "CaseResult",
+    "CodeRunner",
     "DelamainEffectorAdapter",
     "DelamainRuntime",
     "DelamainSubsystem",
@@ -81,6 +85,8 @@ __all__ = [
     "PROPOSAL_STATUSES",
     "Planner",
     "PlannerError",
+    "RunOutcome",
+    "RunnerError",
     "Sandbox",
     "SandboxError",
     "ScriptedPlanner",

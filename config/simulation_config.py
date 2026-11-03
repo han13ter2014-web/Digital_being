@@ -471,6 +471,14 @@ class LongRunningConfig:
     DELAMAIN_WORKSPACE = ""                 # пусто => data/delamain/workspace
     DELAMAIN_DB = ""                        # пусто => data/delamain/delamain.sqlite3
 
+    # Запуск .py-программ из workspace (действие run_python, dangerous).
+    # Это не полная ОС-изоляция: процесс идёт от того же пользователя, сеть
+    # на уровне ОС не блокируется. Гарантии: только .py внутри workspace,
+    # вычищенное окружение, жёсткий таймаут, обрезанный вывод.
+    DELAMAIN_RUN_TIMEOUT_SEC = 10.0         # жёсткий таймаут (потолок 60 с)
+    DELAMAIN_RUN_OUTPUT_CHARS = 4000        # максимум символов stdout/stderr
+    DELAMAIN_RUN_MAX_CODE_BYTES = 100_000   # максимум размера .py-файла
+
     # Опциональный LLM-планировщик (Ollama /api/chat). Модель не входит в
     # проект и не запускается автоматически; при ошибке используется
     # эвристический fallback.
@@ -482,10 +490,12 @@ class LongRunningConfig:
     DELAMAIN_LLM_TEMPERATURE = 0.0          # 0 = максимально детерминированно
 
     # Approval для опасных действий. off сохраняет поведение этапов 7–10;
-    # dangerous требует подтверждения для write_file/set_self_model; all —
-    # для любого известного действия. При ошибке в значении включается
-    # fail-closed режим dangerous.
-    DELAMAIN_APPROVAL_MODE = "off"          # off | dangerous | all
+    # dangerous требует подтверждения для write_file/append_file/run_python/
+    # set_self_model; all — для любого известного действия. При ошибке в
+    # значении включается fail-closed режим dangerous.
+    # С появлением run_python режим по умолчанию поднят до dangerous: существо
+    # предлагает код и изменения, человек решает.
+    DELAMAIN_APPROVAL_MODE = "dangerous"    # off | dangerous | all
 
     # Мост «когнитивная цель GoalSubsystem → исполняемая цель Delamain».
     # По умолчанию выключен: без явного payload у когнитивной цели ничего

@@ -45,8 +45,11 @@ class HeuristicPlanner:
         "список файлов",
         "прочитай notes/a.txt",
         "запиши в notes/a.txt: привет",
+        "допиши в notes/a.txt: ещё строка",
+        "создай папку notes",
         "проверь notes/a.txt на привет",
         "найди TODO в **/*.py",
+        "запусти scripts/hello.py",
         "запомни язык = Python",
         "вспомни язык",
     )
@@ -80,6 +83,41 @@ class HeuristicPlanner:
                     },
                 )
             ]
+
+        match = re.match(
+            r"^(?:допиши|append)\s+(?:в\s+)?(?P<path>[^:]+):\s*(?P<content>.*)$",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            return [
+                ActionRequest(
+                    "append_file",
+                    {
+                        "path": _clean(match.group("path")),
+                        "content": match.group("content"),
+                    },
+                )
+            ]
+
+        match = re.match(
+            r"^(?:создай\s+(?:папку|каталог)|make\s+dir(?:ectory)?|mkdir)\s+(?P<path>.+)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            path = _clean(match.group("path"))
+            if not path:
+                raise PlannerError("make_dir command needs a non-empty path")
+            return [ActionRequest("make_dir", {"path": path})]
+
+        match = re.match(
+            r"^(?:запусти|выполни|run)\s+(?P<path>\S+\.py)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return [ActionRequest("run_python", {"path": _clean(match.group("path"))})]
 
         match = re.match(
             r"^(?:проверь|verify)\s+(?P<path>\S+)"

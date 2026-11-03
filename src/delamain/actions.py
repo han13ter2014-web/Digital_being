@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .memory import MemoryStore
 from .models import ActionResult, ActionSpec, utc_now_iso
+from .runner import CodeRunner, RunnerError
 from .sandbox import Sandbox, SandboxError
 
 
@@ -66,6 +67,14 @@ def _bool_arg(args: Mapping[str, Any], name: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on", "да"}
     return bool(value)
+
+
+def _tail_text(text: str, limit: int = 400) -> str:
+    """Keep the end of a long error output; the beginning is usually noise."""
+
+    if len(text) <= limit:
+        return text
+    return "…" + text[-limit:]
 
 
 class Action:
@@ -122,7 +131,7 @@ class ActionRegistry:
             output = None
             ok = False
             error = str(exc)
-        except (SandboxError, FileNotFoundError, FileExistsError, OSError) as exc:
+        except (RunnerError, SandboxError, FileNotFoundError, FileExistsError, OSError) as exc:
             output = None
             ok = False
             error = str(exc)
@@ -141,13 +150,23 @@ class ActionRegistry:
         )
 
     @classmethod
-    def default(cls, sandbox: Sandbox, memory: MemoryStore) -> "ActionRegistry":
+    def default(
+        cls,
+        sandbox: Sandbox,
+        memory: MemoryStore,
+        *,
+        code_runner: Optional[CodeRunner] = None,
+    ) -> "ActionRegistry":
         registry = cls()
+        runner = code_runner or CodeRunner(sandbox)
         for action in (
             ListFilesAction(sandbox),
             ReadFileAction(sandbox),
             WriteFileAction(sandbox),
+            AppendFileAction(sandbox),
+            MakeDirAction(sandbox),
             WriteCreativeDraftAction(Sandbox(sandbox.root / "creative", max_file_bytes=8192, max_results=32)),
+            RunPythonAction(runner),
             SearchFilesAction(sandbox),
             VerifyFileAction(sandbox),
             RememberFactAction(memory),
@@ -223,6 +242,42 @@ class WriteFileAction(Action):
         return self.sandbox.write_text(path, content, overwrite=overwrite)
 
 
+class AppendFileAction(Action):
+    spec = ActionSpec(
+        name="append_file",
+        description="Append UTF-8 text to a workspace file without rewriting it.",
+        parameters={
+            "path": "workspace-relative file path",
+            "content": "text to append",
+        },
+        dangerous=True,
+    )
+
+    def __init__(self, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+
+    def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
+        path = _text_arg(args, "path")
+        if "content" not in args:
+            raise ActionError("missing required argument: content")
+        return self.sandbox.append_text(path, args["content"])
+
+
+class MakeDirAction(Action):
+    spec = ActionSpec(
+        name="make_dir",
+        description="Create a workspace directory (and missing parents).",
+        parameters={"path": "workspace-relative directory path"},
+    )
+
+    def __init__(self, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+
+    def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
+        path = _text_arg(args, "path")
+        return self.sandbox.make_dir(path)
+
+
 class WriteCreativeDraftAction(Action):
     spec = ActionSpec(
         name="write_creative_draft",
@@ -240,6 +295,37 @@ class WriteCreativeDraftAction(Action):
             raise ActionError("creative artifact must be a relative .txt path")
         content = _text_arg(args, "content")
         return self.sandbox.write_text(path, content, overwrite=_bool_arg(args, "overwrite", True))
+
+
+class RunPythonAction(Action):
+    spec = ActionSpec(
+        name="run_python",
+        description=(
+            "Run a .py file from the workspace with the project interpreter, "
+            "a hard timeout, a cleaned environment and capped output. "
+            "Dangerous: meant to run behind the approval gate."
+        ),
+        parameters={"path": "workspace-relative .py file path"},
+        dangerous=True,
+    )
+
+    def __init__(self, runner: CodeRunner) -> None:
+        self.runner = runner
+
+    def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
+        path = _text_arg(args, "path")
+        outcome = self.runner.run(path)
+        if outcome.timed_out:
+            raise ActionError(
+                f"script timed out after {self.runner.timeout_sec:g}s: {path}"
+            )
+        if outcome.exit_code != 0:
+            detail = outcome.stderr.strip() or outcome.stdout.strip()
+            suffix = f": {_tail_text(detail)}" if detail else ""
+            raise ActionError(
+                f"script exited with code {outcome.exit_code}{suffix}"
+            )
+        return outcome.to_dict()
 
 
 class SearchFilesAction(Action):

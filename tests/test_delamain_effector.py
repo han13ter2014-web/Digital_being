@@ -24,6 +24,8 @@ def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
         "enabled": True,
         "tick_interval": 1,
         "effector_enabled": True,
+        # Effector mechanics, not the gate: the project default is "dangerous".
+        "approval_mode": "off",
     }
     params.update(kwargs)
     return DelamainSubsystem(**params)
@@ -422,6 +424,8 @@ def test_digital_being_wires_one_core_driver(
     monkeypatch.setenv("DELAMAIN_EFFECTOR_ENABLED", "1")
     monkeypatch.setenv("DELAMAIN_EFFECTOR_CORE_DRIVEN", "1")
     monkeypatch.setenv("DELAMAIN_TICK_INTERVAL", "1")
+    # Wiring, not the gate: the project default is now "dangerous".
+    monkeypatch.setenv("DELAMAIN_APPROVAL_MODE", "off")
     PluginRegistry.reset_global()
     agent = None
     try:

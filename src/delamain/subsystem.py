@@ -16,7 +16,9 @@ deterministic planner understands, an explicit list of action requests stored
 in the goal metadata, or (optionally) a plan from a local Ollama model with a
 heuristic fallback. The LLM is disabled by default by
 ``DELAMAIN_LLM_ENABLED``. Dangerous plans can wait for explicit approval;
-the gate is disabled by default by ``DELAMAIN_APPROVAL_MODE=off``.
+the gate is configured by ``DELAMAIN_APPROVAL_MODE`` (``dangerous`` by
+default since ``run_python`` joined the action set: the entity proposes code
+and changes, the human decides).
 
 An optional bridge (``DELAMAIN_BRIDGE_ENABLED=1``) links the active cognitive
 goal from ``GoalSubsystem`` to at most one durable Delamain goal when the
@@ -50,6 +52,7 @@ from .goal_bridge import GoalBridge, derive_bridge_status
 from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
 from .planner import FallbackPlanner, HeuristicPlanner, Planner
+from .runner import CodeRunner
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox
 
@@ -130,6 +133,9 @@ class DelamainSubsystem(Subsystem):
         max_step_repairs: Optional[int] = None,
         max_repair_steps: Optional[int] = None,
         max_file_bytes: Optional[int] = None,
+        run_timeout: Optional[float] = None,
+        run_output_chars: Optional[int] = None,
+        run_max_code_bytes: Optional[int] = None,
         llm_enabled: Optional[bool] = None,
         llm_base_url: Optional[str] = None,
         llm_model: Optional[str] = None,
@@ -373,6 +379,32 @@ class DelamainSubsystem(Subsystem):
         )
         self.max_file_bytes = max(1, int(bytes_value))
 
+        run_timeout_value = (
+            run_timeout
+            if run_timeout is not None
+            else os.environ.get("DELAMAIN_RUN_TIMEOUT_SEC")
+            or _cfg("DELAMAIN_RUN_TIMEOUT_SEC", 10.0)
+        )
+        # A child program runs synchronously inside the loop, so the ceiling
+        # must stay modest even if someone configures an hour.
+        self.run_timeout = min(60.0, max(0.5, float(run_timeout_value)))
+
+        run_output_value = (
+            run_output_chars
+            if run_output_chars is not None
+            else os.environ.get("DELAMAIN_RUN_OUTPUT_CHARS")
+            or _cfg("DELAMAIN_RUN_OUTPUT_CHARS", 4000)
+        )
+        self.run_output_chars = max(200, int(run_output_value))
+
+        run_code_value = (
+            run_max_code_bytes
+            if run_max_code_bytes is not None
+            else os.environ.get("DELAMAIN_RUN_MAX_CODE_BYTES")
+            or _cfg("DELAMAIN_RUN_MAX_CODE_BYTES", 100_000)
+        )
+        self.run_max_code_bytes = max(1, int(run_code_value))
+
         self.runtime: Optional[DelamainRuntime] = None
         self._agent: Any = None
         self._last_result: Optional[Dict[str, Any]] = None
@@ -460,6 +492,12 @@ class DelamainSubsystem(Subsystem):
             self.workspace.mkdir(parents=True, exist_ok=True)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             sandbox = Sandbox(self.workspace, max_file_bytes=self.max_file_bytes)
+            code_runner = CodeRunner(
+                sandbox,
+                timeout_sec=self.run_timeout,
+                output_chars=self.run_output_chars,
+                max_code_bytes=self.run_max_code_bytes,
+            )
             self.runtime = DelamainRuntime(
                 self.workspace,
                 self.db_path,
@@ -469,6 +507,7 @@ class DelamainSubsystem(Subsystem):
                 step_repair_enabled=self.step_repair_enabled,
                 max_step_repairs=self.max_step_repairs,
                 max_repair_steps=self.max_repair_steps,
+                code_runner=code_runner,
             )
         return self.runtime
 
@@ -1798,6 +1837,11 @@ class DelamainSubsystem(Subsystem):
                     "enabled": self.step_repair_enabled,
                     "max_step_repairs": self.max_step_repairs,
                     "max_repair_steps": self.max_repair_steps,
+                },
+                "run_python": {
+                    "timeout_sec": self.run_timeout,
+                    "output_chars": self.run_output_chars,
+                    "max_code_bytes": self.run_max_code_bytes,
                 },
                 "goals": counts,
                 "skills": skill_count,

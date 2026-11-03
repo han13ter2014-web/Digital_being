@@ -13,6 +13,7 @@ from .context import build_failure_context
 from .memory import MemoryStore
 from .models import ActionResult, ActionRequest, TaskResult
 from .planner import HeuristicPlanner, Planner, PlannerError
+from .runner import CodeRunner
 from .sandbox import Sandbox
 
 
@@ -51,6 +52,7 @@ class DelamainRuntime:
         step_repair_enabled: bool = False,
         max_step_repairs: int = 1,
         max_repair_steps: int = 5,
+        code_runner: Optional[CodeRunner] = None,
     ) -> None:
         if memory is None and db_path is None:
             raise ValueError("db_path is required when memory is not provided")
@@ -58,7 +60,11 @@ class DelamainRuntime:
         self.sandbox = sandbox or Sandbox(self.workspace_root)
         self.memory = memory or MemoryStore(db_path)  # type: ignore[arg-type]
         self._owns_memory = memory is None
-        self.registry = registry or ActionRegistry.default(self.sandbox, self.memory)
+        self.registry = registry or ActionRegistry.default(
+            self.sandbox,
+            self.memory,
+            code_runner=code_runner,
+        )
         self.planner = planner or HeuristicPlanner()
         self.approval_policy = approval_policy or ApprovalPolicy(approval_mode)
         self.approval_policy.bind_registry(self.registry)

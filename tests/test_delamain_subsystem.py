@@ -75,6 +75,9 @@ def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
         "db_path": tmp_path / "memory.sqlite3",
         "enabled": True,
         "tick_interval": 1,
+        # These tests exercise execution mechanics, not the approval gate;
+        # the project default is now "dangerous".
+        "approval_mode": "off",
     }
     params.update(kwargs)
     return DelamainSubsystem(**params)
