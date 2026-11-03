@@ -2,7 +2,10 @@
 
 from copy import deepcopy
 
-ACTIVITIES = {"play": "play", "create_draft": "create_draft", "creative_act": "create_draft"}
+ACTIVITIES = {"play": "play", "create_draft": "create_draft", "creative_act": "create_draft",
+              "draw": "draw"}
+
+CRITERIA = {"play": "play_round", "create_draft": "draft_revision", "draw": "art_revision"}
 
 
 def attach_activity(agent, goal_id, generated):
@@ -11,7 +14,7 @@ def attach_activity(agent, goal_id, generated):
         ("source", "need", "drive", "priority", "action_hint", "type", "metadata") if key in generated})
     action = ACTIVITIES.get(generated.get("action_hint"))
     if action:
-        goal["activity"] = {"action": action, "criterion": "play_round" if action == "play" else "draft_revision"}
+        goal["activity"] = {"action": action, "criterion": CRITERIA[action]}
 
 
 def activity_candidate(agent):
@@ -19,7 +22,7 @@ def activity_candidate(agent):
     if not goal or not isinstance(goal.get("activity"), dict):
         return None
     action = goal["activity"].get("action")
-    if action not in {"play", "create_draft"}:
+    if action not in {"play", "create_draft", "draw"}:
         return None
     return {"action": action, "source": "own_activity", "strength": 0.4,
             "params": {"activity_goal_id": goal["id"], "reason": goal["title"]}}
@@ -34,6 +37,8 @@ def record_activity_step(agent, intention, action, before, after):
         return
     if action == "create_draft" and after.get("status") == "left":
         return
+    if action == "draw" and after.get("status") == "left":
+        return
     # Факт шага не равен выполнению всего дела и не выдаёт награду за знание.
     goal["activity"]["last_step"] = {"cycle": agent.cycle_count,
                                      "artifact": deepcopy(after)}
@@ -41,7 +46,8 @@ def record_activity_step(agent, intention, action, before, after):
     criterion = goal["activity"].get("criterion")
     satisfied = ((action == "play" and criterion == "play_round" and after.get("result") is not None)
                  or (action == "play" and criterion == "play_turn")
-                 or (action == "create_draft" and criterion == "draft_revision"))
+                 or (action == "create_draft" and criterion == "draft_revision")
+                 or (action == "draw" and criterion == "art_revision"))
     if satisfied:
         goal["activity"]["satisfied_at"] = agent.cycle_count
         agent.complete_goal(goal_id)

@@ -69,7 +69,9 @@ def test_full_workspace_blocks_new_draft_without_deleting_files(monkeypatch):
     agent.leave_creative_draft("достаточно")
     root = Path(data_path("delamain", "workspace", "creative"))
     files = {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
-    monkeypatch.setattr(creative_draft, "MAX_DRAFTS", len(list(root.iterdir())))
+    # Квота черновиков считает только тексты: рядом могут лежать
+    # рисунки (*.svg) — у них своя квота (MAX_ART).
+    monkeypatch.setattr(creative_draft, "MAX_DRAFTS", len(list(root.glob("*.txt"))))
     assert not agent._is_action_available("create_draft")
     with pytest.raises(ValueError, match="заполнена"):
         agent.act("creative_act")

@@ -116,6 +116,7 @@ BODY_LOAD: Dict[str, float] = {
     "hypothesis": 0.8,
     "reflection": 0.7,
     "web_search": 0.6,
+    "draw": 0.5,
     # общение и решения
     "know_answer": 0.5,
     "ask_user": 0.5,
@@ -167,6 +168,7 @@ EMOTION_ACTION_BIAS: Dict[str, Dict[str, float]] = {
         "synthesis": 1.2,
         "communicate": 1.15,
         "explore": 1.1,
+        "draw": 1.2,
     },
     "sadness": {
         "reflection": 1.25,
@@ -250,6 +252,7 @@ class DigitalBeing:
         "let_go": "let_go",
         # исследование — реальная работа с неизвестным
         "play": "play",
+        "draw": "draw",
         "explore": "explore",
         "exploration": "explore",
         "novelty_seeking": "explore",
@@ -479,6 +482,13 @@ class DigitalBeing:
         # сериализуется: сон стирает след неудачной охоты, после
         # перезапуска существо может попробовать снова.
         self._hunt_misses: Dict[str, int] = {}
+
+        # === «Творчество+»: рисунки и вторая игра ===
+        # Каталог рисунков и текущая работа — как у текстовых черновиков;
+        # сериализуются в чекпоинт.
+        self._art_catalog: Dict[str, Dict] = {}
+        self._art_work: Optional[Dict] = None
+        self._local_guess: Optional[Dict] = None
 
         # === «Собеседник-7»: саморазвитие диалоговых таблиц ===
         # Нераспознанные реплики копятся; повторные сущность уточняет у
@@ -1722,16 +1732,39 @@ class DigitalBeing:
             verb = "оставил" if mode == "leave" else "создал" if mode == "new" else "продолжил"
             action = f"Ответ: {verb} черновик «{draft['theme']}», версия {draft['revision']}"
         elif action_type == "play":
-            from src.cognition.local_play import new_game, play_turn
+            from src.cognition.local_play import (
+                guess_turn, new_game, new_guess_game, play_turn,
+            )
 
-            state = getattr(self, "_local_play", None)
-            if state is None:
-                state = self._local_play = new_game()
-            turn = play_turn(state)
-            self._last_play_result = turn
-            action = f"Ответ: сыграл ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
-            if turn["result"] is not None:
-                action += f"; партия завершена: {turn['result']}"
+            # Две игры. Выбор — та, где сыграно меньше партий: опыт
+            # распределяется ровно, а не залипает на первой игре.
+            ttt = getattr(self, "_local_play", None)
+            guess = getattr(self, "_local_guess", None)
+            ttt_rounds = (ttt or {}).get("round", 0)
+            guess_rounds = (guess or {}).get("round", 0)
+            if guess_rounds < ttt_rounds:
+                if guess is None:
+                    guess = self._local_guess = new_guess_game()
+                turn = guess_turn(guess)
+                self._last_play_result = turn
+                action = (
+                    f"Ответ: угадываю число — назвал {turn['guess']} "
+                    f"({turn['hint']}), попытка {turn['attempts']}"
+                )
+                if turn["result"] is not None:
+                    action += (
+                        f"; партия {turn['round']} выиграна "
+                        f"за {turn['attempts']} попыток"
+                    )
+            else:
+                state = ttt
+                if state is None:
+                    state = self._local_play = new_game()
+                turn = play_turn(state)
+                self._last_play_result = turn
+                action = f"Ответ: сыграл ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
+                if turn["result"] is not None:
+                    action += f"; партия завершена: {turn['result']}"
         elif action_type == "explore":
             # Раньше «explore» ничего не делал: тип «default», энергия
             # списывалась, мир не менялся. Теперь это настоящая работа —
@@ -1787,6 +1820,11 @@ class DigitalBeing:
             found = handler() if handler else None
             topic = (found or {}).get("target") or ""
             action = (found or {}).get("text") or action
+        elif action_type == "draw":
+            handler = getattr(self, "_act_draw", None)
+            drawn = handler() if handler else None
+            topic = (drawn or {}).get("target") or ""
+            action = (drawn or {}).get("text") or action
         elif action_type == "hypothesis":
             handler = getattr(self, "_act_hypothesis", None)
             guess = handler() if handler else None
@@ -2002,6 +2040,10 @@ class DigitalBeing:
             from src.cognition.creative_draft import draft_available
 
             return self._is_action_affordable(normalized) and draft_available(getattr(self, "_creative_draft", None))
+        if normalized == "draw":
+            from src.cognition.local_art import art_available
+
+            return self._is_action_affordable(normalized) and art_available(getattr(self, "_art_work", None))
         if normalized == "ask_user":
             return self._can_ask_now(self.cycle_count) and self._has_question_target()
         if normalized == "web_search":
@@ -2586,6 +2628,110 @@ class DigitalBeing:
         catalog = catalog_for(self)
         return [catalog[identifier] for identifier in sorted(catalog)]
 
+    # === «Творчество+»: рисование ===
+
+    def _pick_art_theme(self) -> str:
+        """Тема картины — из собственной жизни, а не из чужого списка.
+
+        Активная цель, а если её нет — самая слабая известная концепция:
+        существо рисует то, что его сейчас занимает.
+        """
+        goal = getattr(self, "active_goal", None)
+        if isinstance(goal, dict):
+            title = str(goal.get("title") or "").strip()
+            if title:
+                return title[:60]
+        concepts = getattr(getattr(self, "mental_models", None), "concepts", None)
+        if isinstance(concepts, dict) and concepts:
+            weakest = min(
+                (name for name in concepts if self._is_learnable(name)),
+                key=lambda name: float(getattr(concepts[name], "confidence", 0.0) or 0.0),
+                default=None,
+            )
+            if weakest:
+                return weakest[:60]
+        from src.cognition.local_art import DEFAULT_THEMES
+
+        return random.choice(DEFAULT_THEMES)
+
+    def _art_richness(self) -> int:
+        """Густота мазков: запас сил тела — видимый в работе факт."""
+        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200) or 200)
+        ratio = float(self.energy) / max_energy if max_energy > 0 else 0.0
+        return 3 + int(6 * max(0.0, min(1.0, ratio)))
+
+    def _act_draw(self) -> Dict:
+        """Нарисовать картину: отпечаток текущего внутреннего состояния.
+
+        Палитра — доминирующая эмоция (у уже начатой работы палитра
+        хранится с рождения и не переписывается), тема — то, что
+        занимает существо, густота — запас сил. Работа на лимите
+        редакций оставляется с честной причиной, и начинается новая.
+        """
+        from src.cognition.local_art import (
+            ART_LIMIT, art_available, art_step, art_thumbnail, leave_art,
+        )
+
+        work = getattr(self, "_art_work", None)
+        try:
+            if work is not None and (
+                work.get("status") == "left" or work.get("revision", 0) >= ART_LIMIT
+            ):
+                if work.get("status") != "left":
+                    work = leave_art(work, "достигнут лимит редакций — работа завершена")
+                    catalog = getattr(self, "_art_catalog", None)
+                    if isinstance(catalog, dict):
+                        catalog[work["id"]] = dict(work)
+                    get_logger().log(
+                        f"[ART] оставил «{work['theme']}» (лимит редакций)"
+                    )
+                work = None
+            if work is None and not art_available(None):
+                return {"text": "Ответ: рисовать негде — папка работ заполнена"}
+
+            if work is not None:
+                # Работа хранит настроение своего рождения.
+                palette = work["palette"]
+                theme = work["theme"]
+            else:
+                palette = "calm"
+                emotions = getattr(self, "emotional_state", None)
+                dominant = emotions.dominant() if emotions is not None else None
+                if dominant:
+                    palette = dominant["emotion"]
+                theme = self._pick_art_theme()
+
+            updated = art_step(
+                work, palette=palette, theme=theme, richness=self._art_richness()
+            )
+            self._art_work = updated
+            catalog = getattr(self, "_art_catalog", None)
+            if not isinstance(catalog, dict):
+                catalog = self._art_catalog = {}
+            catalog[updated["id"]] = dict(updated)
+            self._record_will(
+                "art_works", updated["theme"],
+                f"рисунок, редакция {updated['revision']}, палитра {updated['palette']}",
+            )
+            thumb = art_thumbnail(updated)
+            return {
+                "target": updated["theme"],
+                "text": (
+                    f"Ответ: нарисовал «{updated['theme']}», редакция "
+                    f"{updated['revision']} ({updated['palette']})\n{thumb}"
+                ),
+            }
+        except Exception as exc:
+            get_logger().log(f"[ART] не удалось нарисовать: {exc}")
+            return {"text": "Ответ: хотел нарисовать, но не получилось"}
+
+    def list_art_works(self) -> List[Dict]:
+        """Каталог собственных рисунков (для снимка жизни)."""
+        catalog = getattr(self, "_art_catalog", None)
+        if not isinstance(catalog, dict):
+            return []
+        return [dict(catalog[key]) for key in sorted(catalog)]
+
     def _act_explore(self, target=None) -> Dict:
         """Исследование как работа, а не как счётчик.
 
@@ -3136,8 +3282,10 @@ class DigitalBeing:
         motivation = getattr(self, "motivation_system", None)
         play_need = motivation.needs.get("play") if motivation is not None else None
         if play_need is not None and play_need.is_pressing():
-            activity = "play" if random.random() < 0.5 else "creative_act"
-            title = "Сыграть партию" if activity == "play" else "Создать текстовую композицию"
+            activity = random.choice(["play", "creative_act", "draw"])
+            title = {"play": "Сыграть партию",
+                     "creative_act": "Создать текстовую композицию",
+                     "draw": "Нарисовать картину"}[activity]
             if any(g.get("title") == title and g.get("status") != "completed" for g in self.goals):
                 return {"text": f"Ответ: дело '{title}' уже есть"}
             goal_id = self.set_goal(title, difficulty=1)
@@ -3680,6 +3828,7 @@ class DigitalBeing:
         "know_answer": "Знание",
         "ask_user": "Диалог",
         "create_draft": "Творчество",
+        "draw": "Творчество",
         "play": "Игра",
     }
 
@@ -4888,8 +5037,11 @@ class DigitalBeing:
                 selected_intention = result.get("arbitrator") or {}
                 from copy import deepcopy
 
-                activity_before = deepcopy(getattr(self, "_local_play", None) if chosen_action == "play"
-                                           else getattr(self, "_creative_draft", None))
+                activity_attrs = {"play": "_local_play", "create_draft": "_creative_draft",
+                                  "draw": "_art_work"}
+                activity_before = deepcopy(
+                    getattr(self, activity_attrs.get(chosen_action, "_creative_draft"), None)
+                )
                 if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "create_draft"} and selected_intention.get("params"):
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
@@ -4898,26 +5050,26 @@ class DigitalBeing:
 
                 last = getattr(self, "_last_action_outcome", None)
                 normalized_action = self._normalize_action(chosen_action)
-                if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft"}:
+                if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft", "draw"}:
                     generic_outcome = "performed"
                     if last is not None and last.reason.startswith("denied:"):
                         generic_outcome = "denied"
                     observe_method(self, normalized_action, outcome=generic_outcome,
                                had_effect=bool(last and last.had_effect),
                                emotional_valence=result.get("actual_valence", 0.0))
-                if normalized_action in {"play", "create_draft"}:
-                    activity_state = getattr(self, "_creative_draft", None) if normalized_action == "create_draft" else getattr(self, "_local_play", None)
+                if normalized_action in {"play", "create_draft", "draw"}:
+                    activity_state = getattr(self, activity_attrs[normalized_action], None)
                     activity_outcome = "left" if activity_state and activity_state.get("status") == "left" else "performed"
                     if last is not None and last.reason.startswith("denied:"):
                         activity_outcome = "denied"
                     observe_method(self, chosen_action, outcome=activity_outcome,
                                    had_effect=bool(last and last.had_effect),
                                    emotional_valence=result.get("actual_valence", 0.0))
-                if normalized_action in {"play", "create_draft"}:
+                if normalized_action in {"play", "create_draft", "draw"}:
                     from src.cognition.activity_goals import record_activity_step
 
                     activity_type = self._normalize_action(chosen_action)
-                    activity_after = getattr(self, "_local_play", None) if activity_type == "play" else getattr(self, "_creative_draft", None)
+                    activity_after = getattr(self, activity_attrs[activity_type], None)
                     record_activity_step(self, selected_intention, activity_type, activity_before, activity_after)
                 finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
                 self._record_core_life_episode(intention_entry)

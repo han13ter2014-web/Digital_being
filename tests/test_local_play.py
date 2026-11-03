@@ -71,6 +71,11 @@ def test_game_survives_normal_restart(tmp_path, monkeypatch, backend):
         PluginRegistry.reset_global()
         second, _ = create_agent(env, "GameLife")
         assert second._local_play == before
+        # Вторая игра («угадай число») отстаёт по партиям — ход уходит ей.
+        second.act("play")
+        assert second._local_guess["attempts"] == 1
+        assert second._local_play == before
+        # Баланс выровнялся (по партии у каждой) — очередь крестиков.
         second.act("play")
         assert second._local_play["turns"] == 2
     finally:

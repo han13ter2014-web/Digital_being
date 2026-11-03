@@ -267,6 +267,9 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "creative_catalog": deepcopy(getattr(agent, "_creative_catalog", {})),
         "creative_draft": deepcopy(getattr(agent, "_creative_draft", None)),
         "local_play": deepcopy(getattr(agent, "_local_play", None)),
+        "local_guess": deepcopy(getattr(agent, "_local_guess", None)),
+        "art_catalog": deepcopy(getattr(agent, "_art_catalog", {})),
+        "art_work": deepcopy(getattr(agent, "_art_work", None)),
         "waiting_intentions": deepcopy(getattr(agent, "_waiting_intentions", {})),
         "method_preferences": deepcopy(getattr(agent, "_method_preferences", {})),
         "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
@@ -508,6 +511,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent._creative_catalog = deepcopy(state.get("creative_catalog", {}))
     agent._creative_draft = deepcopy(state.get("creative_draft"))
     agent._local_play = deepcopy(state.get("local_play"))
+    agent._local_guess = deepcopy(state.get("local_guess"))
+    agent._art_catalog = deepcopy(state.get("art_catalog", {}))
+    agent._art_work = deepcopy(state.get("art_work"))
     agent._waiting_intentions = deepcopy(state.get("waiting_intentions", {}))
     # Правила и история разобраны и проверены в фазе 1.
     agent._method_preferences = staged_method_preferences

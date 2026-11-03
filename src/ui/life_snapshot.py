@@ -116,7 +116,7 @@ def _effector_section(agent: Any) -> Dict[str, Any]:
 
 
 def _activity_section(agent: Any) -> Dict[str, Any]:
-    """Только собственные работы Core: черновики и партии."""
+    """Только собственные работы Core: черновики, рисунки и партии."""
     drafts: List[Dict] = []
     list_drafts = getattr(agent, "list_creative_drafts", None)
     if callable(list_drafts):
@@ -124,9 +124,18 @@ def _activity_section(agent: Any) -> Dict[str, Any]:
             drafts = [deepcopy(item) for item in list_drafts()]
         except Exception:  # pragma: no cover - защита UI
             drafts = []
+    art: List[Dict] = []
+    list_art = getattr(agent, "list_art_works", None)
+    if callable(list_art):
+        try:
+            art = [deepcopy(item) for item in list_art()]
+        except Exception:  # pragma: no cover - защита UI
+            art = []
     return {
         "creative": {"count": len(drafts), "drafts": drafts},
+        "art": {"count": len(art), "works": art},
         "game": deepcopy(_own(agent, "_local_play", None)),
+        "guess_game": deepcopy(_own(agent, "_local_guess", None)),
     }
 
 

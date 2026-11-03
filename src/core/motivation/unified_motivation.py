@@ -406,6 +406,8 @@ DRIVE_GOAL_TEMPLATES = {
 ACTION_ALIASES: Dict[str, List[str]] = {
     "play": ["play"],
     "create_draft": ["creative_act"],
+    # Рисование — тот же творческий порыв, что и текстовый черновик.
+    "draw": ["creative_act"],
     # исследование и работа с материалом
     "explore": ["explore", "experiment", "act", "practice"],
     "hypothesis": ["hypothesis", "synthesize_understanding"],

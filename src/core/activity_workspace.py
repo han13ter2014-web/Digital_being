@@ -25,5 +25,5 @@ class ActivityWorkspace:
     def exists(self, filename):
         return self.sandbox.exists(filename)
 
-    def list(self):
-        return self.sandbox.list_files("*.txt", limit=32)
+    def list(self, pattern="*.txt"):
+        return self.sandbox.list_files(pattern, limit=32)
