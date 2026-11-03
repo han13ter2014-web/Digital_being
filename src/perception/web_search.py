@@ -14,7 +14,11 @@ WebSearcher — поиск информации в Wikipedia API.
 - HTTPS, User-Agent обязателен (Wikipedia блокирует без него).
 - Rate limit между запросами (этикет Wikipedia API).
 - In-memory LRU-кэш для повторных запросов.
-- Graceful fallback: RU → EN если RU пуст.
+- «Всеядность» (Питание-1): если точного заголовка нет — полнотекстовый
+  поиск (list=search, до 3 кандидатов по рангу), затем Викисловарь,
+  затем EN. Каждый шаг — только после «не нашли», не после ошибки сети.
+- Фильтры качества (is_valid_definition, is_relevant) применяются к
+  каждому источнику одинаково: всеядность не значит «есть что попало».
 - Graceful degradation: любая ошибка → {"found": False}, агент продолжает жить.
 """
 
@@ -25,6 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
+from typing import Any, Dict, Optional, Tuple
 
 from src.memory.knowledge_quality import (
     is_relevant,
@@ -48,6 +53,25 @@ class WebSearcher:
     """
 
     BASE_URL = "https://{lang}.wikipedia.org/w/api.php"
+    WIKTIONARY_BASE_URL = "https://{lang}.wiktionary.org/w/api.php"
+
+    # Сколько кандидатов полнотекстового поиска проверять по рангу.
+    SEARCH_CANDIDATES = 3
+
+    # Причины «не нашли», при которых имеет смысл идти к следующему
+    # источнику в цепочке. Сетевые ошибки цепочку прерывают: при
+    # DNS-ошибке делать четыре запроса — учетверять время отказа.
+    NOT_FOUND_REASONS = (
+        "no_pages", "no_extract", "not_found",
+        "low_quality", "irrelevant", "no_search_results",
+    )
+
+    # Источник находки → слот статистики found_by.
+    _SOURCE_KIND = {
+        "wikipedia:title": "title",
+        "wikipedia:search": "search",
+        "wiktionary:title": "wiktionary",
+    }
 
     def __init__(
         self,
@@ -85,13 +109,15 @@ class WebSearcher:
         self._enabled = True
 
         # Статистика для отладки.
-        self._stats = {
+        self._stats: Dict[str, Any] = {
             "hits": 0,         # найдено в кэше
             "cache_hits": 0,
             "network_calls": 0,
             "found": 0,        # найдено в Wikipedia
             "misses": 0,       # не найдено
             "errors": 0,       # сетевые/HTTP ошибки
+            # Диета существа: из какого источника пришла находка.
+            "found_by": {"title": 0, "search": 0, "wiktionary": 0},
         }
 
     # ============================================================
@@ -109,7 +135,9 @@ class WebSearcher:
 
     def get_stats(self) -> dict:
         """Статистика для дашборда."""
-        return dict(self._stats)
+        stats = dict(self._stats)
+        stats["found_by"] = dict(self._stats["found_by"])
+        return stats
 
     def clear_cache(self) -> None:
         """Очистить кэш."""
@@ -136,6 +164,8 @@ class WebSearcher:
                 "extract": str,     # текст (до max_chars)
                 "url": str,         # ссылка на статью
                 "lang": str,        # "ru" или "en"
+                "source": str|None, # "wikipedia:title" / "wikipedia:search" /
+                                    # "wiktionary:title"; None, если не найдено
                 "error": str|None,  # описание ошибки, если есть
             }
         """
@@ -162,24 +192,25 @@ class WebSearcher:
             self._cache.move_to_end(cache_key)
             return dict(self._cache[cache_key])
 
-        # Сначала пробуем основной язык.
-        result = self._fetch(query, lang=self.lang)
+        # Цепочка источников — существо всеядно, но детерминировано:
+        # точный заголовок → полнотекстовый поиск → Викисловарь → EN.
+        # Каждый следующий шаг — только после «не нашли», а не после
+        # ошибки сети: при DNS-отказе цепочка обрывается на первом звене.
+        result = self._fetch(query, lang=self.lang, source="wikipedia:title")
 
-        # Если ничего не нашли и включён фоллбэк — пробуем EN.
-        # Делаем фоллбэк ТОЛЬКО если первая попытка была "не нашли" (no_*),
-        # а не "ошибка сети". Иначе при DNS-ошибке делаем 2 запроса и удваиваем
-        # время отказа.
-        NOT_FOUND_REASONS = (
-            "no_pages", "no_extract", "not_found",
-            "low_quality", "irrelevant",
-        )
+        if not result["found"] and result.get("error") in self.NOT_FOUND_REASONS:
+            result = self._search_fulltext(query, self.lang)
+
+        if not result["found"] and result.get("error") in self.NOT_FOUND_REASONS:
+            result = self._fetch_wiktionary(query, self.lang)
+
         if (
             not result["found"]
             and self.fallback_to_en
             and self.lang != "en"
-            and result.get("error") in NOT_FOUND_REASONS
+            and result.get("error") in self.NOT_FOUND_REASONS
         ):
-            en_result = self._fetch(query, lang="en")
+            en_result = self._fetch(query, lang="en", source="wikipedia:title")
             # Если EN нашёл — берём его.
             if en_result["found"]:
                 result = en_result
@@ -212,6 +243,7 @@ class WebSearcher:
             "extract": "",
             "url": "",
             "lang": self.lang,
+            "source": None,
             "error": reason,
         }
 
@@ -225,28 +257,16 @@ class WebSearcher:
             time.sleep(sleep_for)
         self._last_request_ts = time.time()
 
-    def _fetch(self, query: str, lang: str) -> dict:
-        """Один HTTP-запрос к Wikipedia API.
+    def _request_json(
+        self, url: str, lang: str, query: str
+    ) -> Tuple[Optional[dict], Optional[str]]:
+        """Один HTTP GET → ``(data, None)`` или ``(None, причина)``.
 
-        Использует action=query с prop=extracts|info для получения:
-        - extracts (краткое извлечение, plaintext)
-        - fullurl (канонический URL)
+        Любая ошибка превращается в строку-причину: поиск — необязательная
+        активность, он не имеет права уронить цикл агента.
         """
         self._respect_rate_limit()
         self._stats["network_calls"] += 1
-
-        params = {
-            "action": "query",
-            "prop": "extracts|info",
-            "exintro": "1",          # только введение (2-3 параграфа)
-            "explaintext": "1",      # plaintext, без HTML
-            "inprop": "url",
-            "redirects": "1",        # следовать за редиректами
-            "titles": query,
-            "format": "json",
-            "formatversion": "1",    # современный формат без обёртки ["query"]
-        }
-        url = self.BASE_URL.format(lang=lang) + "?" + urllib.parse.urlencode(params)
 
         try:
             req = urllib.request.Request(
@@ -260,33 +280,76 @@ class WebSearcher:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 if resp.status != 200:
                     self._stats["errors"] += 1
-                    return self._empty(f"http_{resp.status}")
+                    return None, f"http_{resp.status}"
                 body = resp.read()
         except urllib.error.HTTPError as e:
             self._stats["errors"] += 1
             logger.warning(f"[WebSearcher] HTTP {e.code} для '{query}' (lang={lang}): {e.reason}")
-            return self._empty(f"http_{e.code}")
+            return None, f"http_{e.code}"
         except urllib.error.URLError as e:
             self._stats["errors"] += 1
             logger.warning(f"[WebSearcher] URL error для '{query}' (lang={lang}): {e.reason}")
-            return self._empty("network_error")
+            return None, "network_error"
         except (TimeoutError, OSError) as e:
             self._stats["errors"] += 1
             logger.warning(f"[WebSearcher] Timeout/OSError для '{query}' (lang={lang}): {e}")
-            return self._empty("timeout")
+            return None, "timeout"
         except Exception as e:
             # Неизвестная ошибка — никогда не валим цикл агента.
             self._stats["errors"] += 1
             logger.exception(f"[WebSearcher] Unexpected error для '{query}': {e}")
-            return self._empty("unknown_error")
+            return None, "unknown_error"
 
-        # Парсим JSON.
         try:
-            data = json.loads(body.decode("utf-8"))
+            return json.loads(body.decode("utf-8")), None
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             self._stats["errors"] += 1
             logger.warning(f"[WebSearcher] JSON decode error: {e}")
-            return self._empty("json_error")
+            return None, "json_error"
+
+    def _fetch(
+        self,
+        query: str,
+        lang: str,
+        *,
+        base_url: Optional[str] = None,
+        source: str = "wikipedia:title",
+        intro_only: bool = True,
+        relevance_query: Optional[str] = None,
+    ) -> dict:
+        """Один запрос «дать статью по названию» к MediaWiki API.
+
+        Использует action=query с prop=extracts|info для получения:
+        - extracts (краткое извлечение, plaintext)
+        - fullurl (канонический URL)
+
+        ``base_url`` позволяет ходить не только в Wikipedia, но и в
+        Викисловарь — API одинаковое. У словаря нет «введения», поэтому
+        для него ``intro_only=False``: берём весь extract, обрезку до
+        max_chars делает общий код ниже.
+
+        ``relevance_query`` — исходный запрос для проверки релевантности.
+        Полнотекстовый поиск подставляет сюда запрос пользователя: без
+        этого кандидат проверялся бы на совпадение с собственным
+        заголовком и проходил всегда.
+        """
+        params = {
+            "action": "query",
+            "prop": "extracts|info",
+            "explaintext": "1",      # plaintext, без HTML
+            "inprop": "url",
+            "redirects": "1",        # следовать за редиректами
+            "titles": query,
+            "format": "json",
+            "formatversion": "1",    # современный формат без обёртки ["query"]
+        }
+        if intro_only:
+            params["exintro"] = "1"  # только введение (2-3 параграфа)
+        url = (base_url or self.BASE_URL).format(lang=lang) + "?" + urllib.parse.urlencode(params)
+
+        data, error = self._request_json(url, lang=lang, query=query)
+        if error is not None or data is None:
+            return self._empty(error or "json_error")
 
         # Структура ответа: {"query": {"pages": {"<pageid>": {title, extract, fullurl}}}}
         pages = (data.get("query") or {}).get("pages") or {}
@@ -317,11 +380,12 @@ class WebSearcher:
             return self._empty("low_quality")
 
         # Статья должна хоть как-то относиться к запросу.
-        if not is_relevant(query, title, extract):
+        relevance_query = relevance_query or query
+        if not is_relevant(relevance_query, title, extract):
             self._stats["misses"] += 1
             logger.info(
-                f"[WebSearcher] Статья '{title}' не относится к '{query}' "
-                f"(lang={lang})"
+                f"[WebSearcher] Статья '{title}' не относится к "
+                f"'{relevance_query}' (lang={lang})"
             )
             return self._empty("irrelevant")
 
@@ -330,8 +394,10 @@ class WebSearcher:
             extract = extract[: self.max_chars].rsplit(" ", 1)[0] + "…"
 
         self._stats["found"] += 1
+        kind = self._SOURCE_KIND.get(source, "title")
+        self._stats["found_by"][kind] += 1
         logger.info(
-            f"[WebSearcher] '{query}' (lang={lang}) → '{title}', "
+            f"[WebSearcher] '{query}' (lang={lang}, {source}) → '{title}', "
             f"{len(extract)} символов"
         )
 
@@ -341,5 +407,65 @@ class WebSearcher:
             "extract": extract.strip(),
             "url": fullurl,
             "lang": lang,
+            "source": source,
             "error": None,
         }
+
+    def _search_fulltext(self, query: str, lang: str) -> dict:
+        """Полнотекстовый поиск: когда точного заголовка нет.
+
+        Wikipedia API ``list=search`` возвращает кандидатов по рангу.
+        Берём до SEARCH_CANDIDATES лучших и проверяем каждого теми же
+        фильтрами качества, что и точное совпадение.
+        """
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": str(self.SEARCH_CANDIDATES),
+            "format": "json",
+            "formatversion": "1",
+        }
+        url = self.BASE_URL.format(lang=lang) + "?" + urllib.parse.urlencode(params)
+
+        data, error = self._request_json(url, lang=lang, query=query)
+        if error is not None or data is None:
+            return self._empty(error or "json_error")
+
+        hits = (data.get("query") or {}).get("search") or []
+        if not hits:
+            self._stats["misses"] += 1
+            return self._empty("no_search_results")
+
+        last_error = "no_search_results"
+        for hit in hits[: self.SEARCH_CANDIDATES]:
+            title = str(hit.get("title") or "").strip()
+            if not title:
+                continue
+            candidate = self._fetch(
+                title, lang=lang,
+                source="wikipedia:search",
+                relevance_query=query,
+            )
+            if candidate["found"]:
+                return candidate
+            reason = candidate.get("error") or "not_found"
+            if reason not in self.NOT_FOUND_REASONS:
+                # Ошибка сети — не продолжаем перебор кандидатов.
+                return candidate
+            last_error = reason
+        return self._empty(last_error)
+
+    def _fetch_wiktionary(self, query: str, lang: str) -> dict:
+        """Викисловарь — второй источник: короткие словарные определения.
+
+        То же MediaWiki API, тот же разбор ответа и те же фильтры
+        качества — меняется только адрес и отсутствие exintro.
+        """
+        return self._fetch(
+            query,
+            lang=lang,
+            base_url=self.WIKTIONARY_BASE_URL,
+            source="wiktionary:title",
+            intro_only=False,
+        )

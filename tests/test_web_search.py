@@ -51,6 +51,18 @@ def _make_missing_extract_response() -> bytes:
     return json.dumps(payload).encode("utf-8")
 
 
+def _make_search_response(titles) -> bytes:
+    """Ответ полнотекстового поиска (list=search): кандидаты по рангу."""
+    payload = {
+        "batchcomplete": "",
+        "query": {
+            "searchinfo": {"totalhits": len(titles)},
+            "search": [{"title": t} for t in titles],
+        },
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
 class _FakeResponse:
     """Подделка HTTPResponse для urllib."""
     def __init__(self, body: bytes, status: int = 200):
@@ -179,25 +191,34 @@ class WebSearcherTests(unittest.TestCase):
     # ---------- Fallback RU → EN ----------
 
     def test_fallback_ru_to_en(self):
-        """Если RU не нашёл, пробуем EN."""
+        """Если вся RU-цепочка пуста (заголовок → поиск → словарь), пробуем EN."""
         empty_ru = _make_empty_response()
+        empty_search = _make_search_response([])
+        empty_wikt = _make_empty_response()
         en_body = _make_wiki_response(
             "Consciousness",
             "Consciousness is the state of being aware...",
             "https://en.wikipedia.org/wiki/Consciousness",
         )
 
-        # Первый вызов (RU) — пустой. Второй (EN) — найдено.
-        responses = [_FakeResponse(empty_ru), _FakeResponse(en_body)]
-        with patch("urllib.request.urlopen", side_effect=responses):
+        # RU заголовок → RU полнотекст → RU викисловарь → EN заголовок.
+        responses = [
+            _FakeResponse(empty_ru),
+            _FakeResponse(empty_search),
+            _FakeResponse(empty_wikt),
+            _FakeResponse(en_body),
+        ]
+        with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
             result = self.ws.search("Consciousness")
 
         self.assertTrue(result["found"])
         self.assertEqual(result["lang"], "en")
         self.assertEqual(result["title"], "Consciousness")
+        self.assertEqual(result["source"], "wikipedia:title")
+        self.assertEqual(mock_urlopen.call_count, 4)
 
     def test_fallback_disabled(self):
-        """Если fallback выключен — RU-only."""
+        """Если fallback_to_en выключен — вся цепочка остаётся на RU."""
         ws_no_fb = WebSearcher(
             lang="ru", timeout=2.0, rate_limit_sec=0.0,
             cache_size=0, fallback_to_en=False,
@@ -206,7 +227,12 @@ class WebSearcherTests(unittest.TestCase):
             result = ws_no_fb.search("xyzzz")
 
         self.assertFalse(result["found"])
-        self.assertEqual(mock_urlopen.call_count, 1)  # только RU, без EN
+        # RU заголовок + RU полнотекст + RU викисловарь — но ни одного EN.
+        self.assertEqual(mock_urlopen.call_count, 3)
+        for call in mock_urlopen.call_args_list:
+            url = call[0][0].full_url
+            self.assertIn("ru.", url)
+            self.assertNotIn("en.", url)
 
     # ---------- Ошибки ----------
 
@@ -319,6 +345,129 @@ class WebSearcherTests(unittest.TestCase):
         self.assertEqual(len(self.ws._cache), 1)
         self.ws.clear_cache()
         self.assertEqual(len(self.ws._cache), 0)
+
+
+class OmnivoreChainTests(unittest.TestCase):
+    """«Питание-1»: полнотекстовый поиск и Викисловарь как новые источники."""
+
+    def setUp(self):
+        self.ws = WebSearcher(
+            lang="ru", timeout=2.0, max_chars=500,
+            rate_limit_sec=0.0, cache_size=3, fallback_to_en=True,
+        )
+
+    def test_fulltext_fallback_found(self):
+        """Точного заголовка нет — полнотекстовый поиск находит статью."""
+        responses = [
+            _FakeResponse(_make_empty_response()),                # RU заголовок
+            _FakeResponse(_make_search_response(["Мышление"])),   # кандидаты
+            _FakeResponse(_make_wiki_response(
+                "Мышление",
+                "Мышление — психический процесс абстрактного отражения "
+                "действительности, высшая форма познания.",
+                "https://ru.wikipedia.org/wiki/Мышление",
+            )),
+        ]
+        with patch("urllib.request.urlopen", side_effect=responses):
+            result = self.ws.search("абстрактное мышление")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["title"], "Мышление")
+        self.assertEqual(result["source"], "wikipedia:search")
+        self.assertEqual(self.ws._stats["found_by"]["search"], 1)
+        self.assertEqual(self.ws._stats["found_by"]["title"], 0)
+
+    def test_fulltext_skips_irrelevant_candidate(self):
+        """Нерелевантный кандидат отбраковывается, берётся следующий по рангу."""
+        responses = [
+            _FakeResponse(_make_empty_response()),
+            _FakeResponse(_make_search_response(["Постороннее", "Мышление"])),
+            _FakeResponse(_make_wiki_response(
+                "Постороннее",
+                "Постороннее — страница про что-то совсем иное, без связи.",
+                "https://ru.wikipedia.org/wiki/Постороннее",
+            )),
+            _FakeResponse(_make_wiki_response(
+                "Мышление",
+                "Мышление — психический процесс абстрактного отражения "
+                "действительности.",
+                "https://ru.wikipedia.org/wiki/Мышление",
+            )),
+        ]
+        with patch("urllib.request.urlopen", side_effect=responses):
+            result = self.ws.search("абстрактное мышление")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["title"], "Мышление")
+
+    def test_wiktionary_fallback_found(self):
+        """Википедия пуста и поиск ничего не дал — Викисловарь кормит."""
+        responses = [
+            _FakeResponse(_make_empty_response()),      # RU заголовок
+            _FakeResponse(_make_search_response([])),   # полнотекст пуст
+            _FakeResponse(_make_wiki_response(
+                "прозрачность",
+                "Прозрачность — свойство среды пропускать свет; "
+                "переносно — открытость процессов.",
+                "https://ru.wiktionary.org/wiki/прозрачность",
+            )),
+        ]
+        with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
+            result = self.ws.search("прозрачность")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "wiktionary:title")
+        self.assertEqual(self.ws._stats["found_by"]["wiktionary"], 1)
+        # Третий запрос ушёл именно в Викисловарь.
+        wikt_url = mock_urlopen.call_args_list[2][0][0].full_url
+        self.assertIn("ru.wiktionary.org", wikt_url)
+
+    def test_wiktionary_rejects_disambiguation(self):
+        """Фильтры качества работают и для Викисловаря."""
+        responses = [
+            _FakeResponse(_make_empty_response()),
+            _FakeResponse(_make_search_response([])),
+            _FakeResponse(_make_wiki_response(
+                "Луна",
+                "Луна — может означать: спутник, богиня и прочее.",
+                "https://ru.wiktionary.org/wiki/Луна",
+            )),
+            _FakeResponse(_make_empty_response()),      # EN тоже пуст
+        ]
+        with patch("urllib.request.urlopen", side_effect=responses):
+            result = self.ws.search("луна")
+
+        self.assertFalse(result["found"])
+
+    def test_source_tag_on_title_hit(self):
+        """Точный заголовок: source='wikipedia:title', статистика диеты."""
+        fake_body = _make_wiki_response(
+            "Сознание",
+            "Сознание — состояние психической жизни человека.",
+            "https://ru.wikipedia.org/wiki/Сознание",
+        )
+        with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)):
+            result = self.ws.search("сознание")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "wikipedia:title")
+        stats = self.ws.get_stats()
+        self.assertEqual(stats["found_by"]["title"], 1)
+        self.assertEqual(stats["found_by"]["search"], 0)
+        self.assertEqual(stats["found_by"]["wiktionary"], 0)
+
+    def test_network_error_stops_chain(self):
+        """Ошибка сети обрывает цепочку на первом звене — без лишних запросов."""
+        import urllib.error
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("DNS failure"),
+        ) as mock_urlopen:
+            result = self.ws.search("сознание")
+
+        self.assertFalse(result["found"])
+        self.assertEqual(result["error"], "network_error")
+        self.assertEqual(mock_urlopen.call_count, 1)
 
 
 if __name__ == "__main__":

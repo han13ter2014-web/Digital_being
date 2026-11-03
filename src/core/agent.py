@@ -42,7 +42,12 @@ from src.core.subsystems import (
 from src.perception.user_interaction import UserInteraction
 # Импорт LongTermMemory через нормальный пакет (Этап 2.2).
 from src.memory import LongTermMemory
-from src.memory.knowledge_quality import REASON_TITLES, clean_knowledge_base
+from src.memory.knowledge_quality import (
+    REASON_TITLES,
+    STOP_WORDS,
+    clean_knowledge_base,
+    normalize_concept_name,
+)
 from src.core.paths import data_path
 # Bootstrap knowledge (родовые знания)
 from src.core.bootstrap_knowledge import load_initial_knowledge
@@ -467,6 +472,13 @@ class DigitalBeing:
         # {тема: cycle_count} — что уже рассказано человеку. Повтор одного
         # и того же — не общение, а шум; сериализуется в чекпоинт.
         self._shared_topics: Dict[str, int] = {}
+
+        # === «Охота-1»: след неудачной охоты ===
+        # {тема: cycle_count} — когда поиск в сети по теме промахнулся.
+        # Кулдаун не даёт долбить одну тему каждый цикл. Намеренно НЕ
+        # сериализуется: сон стирает след неудачной охоты, после
+        # перезапуска существо может попробовать снова.
+        self._hunt_misses: Dict[str, int] = {}
 
         # === «Собеседник-7»: саморазвитие диалоговых таблиц ===
         # Нераспознанные реплики копятся; повторные сущность уточняет у
@@ -2949,6 +2961,11 @@ class DigitalBeing:
         Действие ``web_search`` предлагалось мотивацией, но не
         исполнялось. При этом ``WebSearcher`` уже был подключён к
         мышлению — не хватало только вызова из петли.
+
+        «Охота-1»: промах по теме оставляет след (кулдаун повторной
+        охоты, не сериализуется — сон стирает след), а удачный заход на
+        соседнюю статью — след добычи: новая неуверенная концепция в
+        ментальных моделях.
         """
         searcher = getattr(self, "web_searcher", None)
         if searcher is None or not getattr(searcher, "is_enabled", False):
@@ -2960,6 +2977,25 @@ class DigitalBeing:
         if not target:
             return {"text": "Ответ: искать нечего — нет темы"}
 
+        # Кулдаун промаха: след неудачной охоты ещё свеж — не трогаем.
+        misses = getattr(self, "_hunt_misses", None)
+        if not isinstance(misses, dict):
+            misses = self._hunt_misses = {}
+        cooldown = int(getattr(LR_CONFIG, "HUNT_MISS_COOLDOWN_CYCLES", 200) or 0)
+        last_miss = misses.get(target)
+        if (
+            cooldown > 0
+            and last_miss is not None
+            and (self.cycle_count - last_miss) < cooldown
+        ):
+            return {
+                "target": target,
+                "text": (
+                    f"Ответ: про '{target}' уже охотился и промахнулся — "
+                    f"след ещё свеж"
+                ),
+            }
+
         try:
             result = searcher.search(target)
         except Exception as exc:
@@ -2970,6 +3006,7 @@ class DigitalBeing:
             }
 
         if not result.get("found"):
+            misses[target] = self.cycle_count
             reason = result.get("error") or "не найдено"
             return {
                 "target": target,
@@ -2979,6 +3016,7 @@ class DigitalBeing:
         extract = str(result.get("extract") or "")
         title = str(result.get("title") or target)
         if not extract:
+            misses[target] = self.cycle_count
             return {
                 "target": target,
                 "text": f"Ответ: нашёл '{title}', но без содержания",
@@ -2989,6 +3027,7 @@ class DigitalBeing:
             from src.memory.knowledge_quality import check_entry
 
             if check_entry(target, extract):
+                misses[target] = self.cycle_count
                 return {
                     "target": target,
                     "text": f"Ответ: результат по '{target}' отклонён как слабый",
@@ -3003,10 +3042,44 @@ class DigitalBeing:
                 "text": f"Ответ: нашёл '{title}', но не сохранил",
             }
 
+        # Добыча есть — след промаха по этой теме смываем.
+        misses.pop(target, None)
+
         self._record_will("web_searches", target, f"нашёл в сети: {title}")
+
+        # «Охота-1»: след добычи. Полнотекстовый поиск мог привести не к
+        # той концепции, что искали, а к соседней — она становится новой
+        # неуверенной темой. Фильтры те же, что у обычной встречи с
+        # неизвестным: не служебное слово, не метатема, достаточной длины.
+        trail = None
+        concept = normalize_concept_name(title)
+        if concept and concept != normalize_concept_name(target):
+            already_known = concept in getattr(self.mental_models, "concepts", {})
+            if (
+                not already_known
+                and len(concept) >= 3
+                and concept not in STOP_WORDS
+                and self._is_learnable(concept)
+                and not self._is_meta_topic(concept)
+            ):
+                try:
+                    self.mental_models.encounter_concept(
+                        concept_name=concept,
+                        context=f"след_охоты_цикл_{self.cycle_count}",
+                        outcome=f"Встретил по следам '{target}'",
+                        valence=0.0,
+                    )
+                    trail = concept
+                    get_logger().log(f"[HUNT] след добычи: '{target}' → '{concept}'")
+                except Exception as exc:
+                    get_logger().log(f"[HUNT] след не записан: {exc}")
+
+        text = f"Ответ: нашёл в сети «{title}» про '{target}'"
+        if trail:
+            text += f"; по следам — новая тема '{trail}'"
         return {
             "target": target,
-            "text": f"Ответ: нашёл в сети «{title}» про '{target}'",
+            "text": text,
         }
 
     def _act_hypothesis(self) -> Dict:
