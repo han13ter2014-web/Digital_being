@@ -312,6 +312,11 @@ class LongRunningConfig:
     # стало чуть легче.
     REST_RECOVERY_FATIGUE = 0.3             # Ниже этой усталости отдых окончен
     REST_RECOVERY_ATP_RATIO = 0.75          # И АТФ должен быть восстановлен
+
+    # === Эволюция-1: глаз/рука/проба/голос ===
+    EVOLUTION_ANALYSIS_INTERVAL = 150       # Раз в столько циклов — самоанализ
+    EVOLUTION_SIGNAL_THRESHOLD = 3          # Повторов сигнала подряд до черновика
+    EVOLUTION_PROPOSAL_COOLDOWN = 500       # Пауза между предложениями (циклы)
     REST_RECOVERY_ENERGY_RATIO = 0.5        # И энергия агента выше половины
 
     # === Консолидация во сне ===

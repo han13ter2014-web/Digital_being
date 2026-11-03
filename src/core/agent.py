@@ -2245,6 +2245,133 @@ class DigitalBeing:
             return ""
         return self.ACTION_ALIASES.get(key, key)
 
+    def _evolution_tick(self, cycle: int) -> Optional[Dict]:
+        """«Эволюция-1»: глаз → рука → проба → голос.
+
+        Раз в EVOLUTION_ANALYSIS_INTERVAL циклов существо меряет себя
+        (SelfEvolutionAnalyzer). Сигнал, повторившийся подряд
+        EVOLUTION_SIGNAL_THRESHOLD раз, дозревает до черновика
+        изменения конфигурации (только белый список безопасных рычагов,
+        честный diff из живого LR_CONFIG). Черновик проходит изолированную
+        пробу в подпроцессе и только тогда становится предложением
+        человеку. Применить его существо не может никогда: решение и
+        внедрение — за человеком. Трекер сигналов и отметки циклов живут
+        в памяти и не сериализуются: сон стирает след, как в охоте.
+        """
+        interval = int(getattr(LR_CONFIG, "EVOLUTION_ANALYSIS_INTERVAL", 150))
+        if cycle <= 0 or cycle % max(1, interval) != 0:
+            return None
+
+        from src.evolution.self_coding import SignalTracker, draft_config_change
+        from src.evolution.self_evolution_analyzer import SelfEvolutionAnalyzer
+
+        analyzer = getattr(self, "_evolution_analyzer", None)
+        if analyzer is None:
+            analyzer = SelfEvolutionAnalyzer(self)
+            self._evolution_analyzer = analyzer
+
+        try:
+            signals = analyzer.identify_improvements()
+        except Exception as e:
+            get_logger().log(f"[EVOLUTION] analysis error: {e}")
+            return {"error": str(e)}
+
+        report: Dict = {"signals": len(signals)}
+        tracker = getattr(self, "_evolution_tracker", None)
+        if tracker is None:
+            tracker = SignalTracker(
+                threshold=int(getattr(LR_CONFIG, "EVOLUTION_SIGNAL_THRESHOLD", 3))
+            )
+            self._evolution_tracker = tracker
+
+        categories = [str(s["category"]) for s in signals if s.get("category")]
+        ripe = tracker.observe(categories)
+        if ripe is None:
+            return report
+        report["ripe_signal"] = ripe
+
+        proposal_api = getattr(self, "architecture_proposal", None)
+        if proposal_api is None:
+            return report
+        # Не более одного ожидающего предложения: человек не должен
+        # тонуть в письмах. Следующее дозреет после решения.
+        if proposal_api.list_pending():
+            report["skipped"] = "есть ожидающее предложение"
+            return report
+        cooldown = int(getattr(LR_CONFIG, "EVOLUTION_PROPOSAL_COOLDOWN", 500))
+        last_cycle = getattr(self, "_last_evolution_proposal_cycle", -cooldown)
+        if cycle - last_cycle < cooldown:
+            report["skipped"] = "кулдаун"
+            return report
+
+        draft = draft_config_change(ripe)
+        if draft is None:
+            report["no_safe_lever"] = ripe
+            return report
+
+        from src.evolution.proposal_verifier import verify_config_change
+
+        verification = verify_config_change(draft["attr"], draft["new"])
+        description = (
+            f"Сигнал «{ripe}» повторялся {tracker.threshold} анализа подряд.\n"
+            f"Обоснование: {draft['rationale']}\n"
+            f"Проба в изолированном процессе: "
+            f"{'пройдена' if verification.get('passed') else 'НЕ пройдена'} "
+            f"({verification.get('cycles', 0)} тактов эволюции)."
+        )
+        created = self.propose_architecture_change(
+            "config_change", draft["title"], description,
+            code_snippet=draft["diff"],
+        )
+        if not created.get("created"):
+            report["proposal_failed"] = created.get("reason")
+            return report
+
+        # Дописываем пробу в файл предложения (extra пришёл бы раньше
+        # propose(); проба идёт после создания, чтобы id уже существовал).
+        proposal_id = created["proposal_id"]
+        try:
+            import json as _json
+            import os as _os
+            path = _os.path.join(
+                proposal_api.proposals_dir, f"{proposal_id}.json"
+            )
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = _json.load(fh)
+            payload["diff"] = draft["diff"]
+            payload["verification"] = verification
+            payload["category"] = ripe
+            with open(path, "w", encoding="utf-8") as fh:
+                _json.dump(payload, fh, indent=2, ensure_ascii=False)
+        except Exception as e:
+            get_logger().log(f"[EVOLUTION] proposal enrich error: {e}")
+
+        self._last_evolution_proposal_cycle = cycle
+        report["proposal_id"] = proposal_id
+        report["verification_passed"] = bool(verification.get("passed"))
+
+        interaction = getattr(self, "user_interaction", None)
+        if interaction is not None and hasattr(interaction, "send_message"):
+            verdict = (
+                "проверка в изолированной пробе пройдена"
+                if verification.get("passed")
+                else "проверка в пробе НЕ пройдена — честно говорю об этом"
+            )
+            interaction.send_message(
+                content=(
+                    f"Я предлагаю изменение для себя: {draft['title']}. "
+                    f"{draft['rationale']} Проба: {verdict}. "
+                    f"Решение за тобой: «одобри {proposal_id}» "
+                    f"или «отклони {proposal_id}»."
+                ),
+                msg_type="evolution_proposal",
+                tone="honest",
+                urgency=0.6,
+                context=f"evolution_proposal:{proposal_id}",
+                cycle=cycle,
+            )
+        return report
+
     def _emotions_from_death_risk(self, death_result: Dict) -> None:
         """«Эмоции-2»: сигнал риска структуры → страх.
 
@@ -5194,6 +5321,12 @@ class DigitalBeing:
             # причина страха. Кулдаун внутри EmotionalState не даёт
             # переживать один и тот же сигнал каждый цикл.
             self._emotions_from_death_risk(death_result)
+
+        # 6. Эволюция — глаз/рука/проба/голос (периодически, внутри
+        # свои пороги; None вне окна анализа).
+        evolution = self._evolution_tick(cycle)
+        if evolution is not None:
+            result["evolution"] = evolution
 
         return result
 

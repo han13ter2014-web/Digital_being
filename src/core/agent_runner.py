@@ -60,6 +60,7 @@ from src.core.dialogue_acts import (
     is_noise_input,
 )
 from src.core.dialogue_learning import DialogueLearning
+from src.evolution.self_coding import parse_proposal_decision
 
 
 logger = logging.getLogger(__name__)
@@ -317,6 +318,52 @@ class AgentRunner:
         ):
             await self._handle_learning_answer(pending, interaction, text)
             return
+
+        # === «Эволюция-1»: решение человека по предложению ===
+        # «одобри prop_…» / «отклони prop_…» (или без id — последнее
+        # ожидающее). Дверь срабатывает только при живом ожидающем
+        # предложении: иначе обычная речь («одобряю твой поступок»)
+        # не перехватывается.
+        decision_cmd = parse_proposal_decision(text)
+        if decision_cmd is not None:
+            proposal_api = getattr(self.agent, "architecture_proposal", None)
+            if proposal_api is not None:
+                target_id = decision_cmd[1]
+                if target_id is None:
+                    target_id = proposal_api.latest_pending().get("id")
+                if target_id:
+                    if interaction is not None:
+                        interaction.receive_user_message(
+                            text, cycle=self.agent.cycle_count
+                        )
+                    user_model = getattr(self.agent, "user_model", None)
+                    if user_model is not None:
+                        user_model.observe(text, cycle=self.agent.cycle_count)
+                    approved = decision_cmd[0] == "approve"
+                    outcome = proposal_api.decide(target_id, approved)
+                    if outcome.get("decided"):
+                        verdict = "одобрено" if approved else "отклонено"
+                        if approved:
+                            reply = (
+                                f"Записал твоё решение: предложение "
+                                f"«{outcome['title']}» {verdict}. "
+                                f"Внедрение — за тобой: я сам себя не меняю."
+                            )
+                        else:
+                            reply = (
+                                f"Записал твоё решение: предложение "
+                                f"«{outcome['title']}» {verdict}. Учту."
+                            )
+                    else:
+                        reply = (
+                            f"Предложение {target_id} не нашлось или уже "
+                            f"решено ({outcome.get('reason', '?')})."
+                        )
+                    await self._reply_to_user(
+                        reply, context="evolution_decision",
+                        source="architecture_proposal",
+                    )
+                    return
 
         # === «Собеседник-7»: «забудь фразу X» — до дверей ===
         # Фраза внутри команды может содержать социальный маркер
