@@ -191,21 +191,25 @@ class WebSearcherTests(unittest.TestCase):
     # ---------- Fallback RU → EN ----------
 
     def test_fallback_ru_to_en(self):
-        """Если вся RU-цепочка пуста (заголовок → поиск → словарь), пробуем EN."""
+        """Если вся RU-цепочка пуста (заголовок → поиск → словарь →
+        учебник), пробуем EN."""
         empty_ru = _make_empty_response()
         empty_search = _make_search_response([])
         empty_wikt = _make_empty_response()
+        empty_books = _make_empty_response()
         en_body = _make_wiki_response(
             "Consciousness",
             "Consciousness is the state of being aware...",
             "https://en.wikipedia.org/wiki/Consciousness",
         )
 
-        # RU заголовок → RU полнотекст → RU викисловарь → EN заголовок.
+        # RU заголовок → RU полнотекст → RU викисловарь → RU викибуки →
+        # EN заголовок.
         responses = [
             _FakeResponse(empty_ru),
             _FakeResponse(empty_search),
             _FakeResponse(empty_wikt),
+            _FakeResponse(empty_books),
             _FakeResponse(en_body),
         ]
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
@@ -215,7 +219,7 @@ class WebSearcherTests(unittest.TestCase):
         self.assertEqual(result["lang"], "en")
         self.assertEqual(result["title"], "Consciousness")
         self.assertEqual(result["source"], "wikipedia:title")
-        self.assertEqual(mock_urlopen.call_count, 4)
+        self.assertEqual(mock_urlopen.call_count, 5)
 
     def test_fallback_disabled(self):
         """Если fallback_to_en выключен — вся цепочка остаётся на RU."""
@@ -227,8 +231,9 @@ class WebSearcherTests(unittest.TestCase):
             result = ws_no_fb.search("xyzzz")
 
         self.assertFalse(result["found"])
-        # RU заголовок + RU полнотекст + RU викисловарь — но ни одного EN.
-        self.assertEqual(mock_urlopen.call_count, 3)
+        # RU заголовок + RU полнотекст + RU викисловарь + RU викибуки —
+        # но ни одного EN.
+        self.assertEqual(mock_urlopen.call_count, 4)
         for call in mock_urlopen.call_args_list:
             url = call[0][0].full_url
             self.assertIn("ru.", url)
@@ -432,6 +437,7 @@ class OmnivoreChainTests(unittest.TestCase):
                 "Луна — может означать: спутник, богиня и прочее.",
                 "https://ru.wiktionary.org/wiki/Луна",
             )),
+            _FakeResponse(_make_empty_response()),      # Викибуки пусты
             _FakeResponse(_make_empty_response()),      # EN тоже пуст
         ]
         with patch("urllib.request.urlopen", side_effect=responses):

@@ -117,6 +117,8 @@ BODY_LOAD: Dict[str, float] = {
     "reflection": 0.7,
     "web_search": 0.6,
     "draw": 0.5,
+    # чтение новостей — лёгкое: глаза бегут, тело почти не работает
+    "read_news": 0.4,
     # общение и решения
     "know_answer": 0.5,
     "ask_user": 0.5,
@@ -174,6 +176,8 @@ EMOTION_ACTION_BIAS: Dict[str, Dict[str, float]] = {
         "reflection": 1.25,
         "communicate": 1.15,
         "rest": 1.15,
+        # тихое чтение новостей — занятие для грустного настроения
+        "read_news": 1.1,
         "explore": 0.9,
         "play": 0.85,
     },
@@ -279,6 +283,8 @@ class DigitalBeing:
         "think_known": "know_answer",
         # поиск в сети (мотивация предлагает его как «web_search»)
         "web_search": "web_search",
+        # «Источники-2»: чтение новостей — окно в «сегодня»
+        "read_news": "read_news",
         # гипотеза и своя цель: мотивация предлагает их напрямую
         "hypothesis": "hypothesis",
         "set_own_goal": "set_own_goal",
@@ -482,6 +488,13 @@ class DigitalBeing:
         # сериализуется: сон стирает след неудачной охоты, после
         # перезапуска существо может попробовать снова.
         self._hunt_misses: Dict[str, int] = {}
+
+        # === «Источники-2»: след чтения новостей ===
+        # {тема: cycle_count} — когда тема новостей последний раз
+        # проверялась (прочитал или «не нашлось» — одинаково). Как и след
+        # охоты, не сериализуется: сон стирает след, после перезапуска
+        # ленту можно проверить снова.
+        self._news_reads: Dict[str, int] = {}
 
         # === «Творчество+»: рисунки и вторая игра ===
         # Каталог рисунков и текущая работа — как у текстовых черновиков;
@@ -1820,6 +1833,11 @@ class DigitalBeing:
             found = handler() if handler else None
             topic = (found or {}).get("target") or ""
             action = (found or {}).get("text") or action
+        elif action_type == "read_news":
+            handler = getattr(self, "_act_read_news", None)
+            news = handler() if handler else None
+            topic = (news or {}).get("target") or ""
+            action = (news or {}).get("text") or action
         elif action_type == "draw":
             handler = getattr(self, "_act_draw", None)
             drawn = handler() if handler else None
@@ -2051,6 +2069,13 @@ class DigitalBeing:
             if searcher is None:
                 return False
             return bool(getattr(searcher, "is_enabled", False))
+        if normalized == "read_news":
+            searcher = getattr(self, "web_searcher", None)
+            if searcher is None or not getattr(searcher, "is_enabled", False):
+                return False
+            # Нет темы — нечего читать; кулдаун по теме не отсекаем
+            # здесь: честный «уже читал» информативнее тихого отказа.
+            return self._pick_news_topic() is not None
         if normalized == "decomposition":
             # Декомпозиция полезна только пока есть что разложить и куда
             # положить результат: под-вопросы идут в очередь, а она не
@@ -3355,6 +3380,91 @@ class DigitalBeing:
             "text": text,
         }
 
+    def _pick_news_topic(self) -> Optional[str]:
+        """Тема новостей — то, что существо сейчас занимает.
+
+        Активная цель; если её нет — случайная известная концепция:
+        читают и о знакомом, не только о насущном. Поиск идёт по фразе
+        целиком — Викиновости сами разберут слова.
+        """
+        goal = getattr(self, "active_goal", None)
+        if isinstance(goal, dict):
+            title = str(goal.get("title") or "").strip()
+            if title:
+                return title[:60]
+        concepts = getattr(getattr(self, "mental_models", None), "concepts", None)
+        if isinstance(concepts, dict) and concepts:
+            learnable = [n for n in concepts if self._is_learnable(n)]
+            if learnable:
+                return random.choice(learnable)[:60]
+        return None
+
+    def _act_read_news(self) -> Dict:
+        """Прочитать новости по тому, что занимает.
+
+        «Источники-2»: окно в «сегодня». Новость — впечатление, а не
+        знание: в knowledge_base она не идёт (определение вечно, новость
+        — про сейчас); её след — эпизод дневника и запись в реестре
+        воли. Кулдаун по теме (читал или не нашлось — одинаково) живёт
+        только в памяти: сон стирает его.
+        """
+        searcher = getattr(self, "web_searcher", None)
+        if searcher is None or not getattr(searcher, "is_enabled", False):
+            return {"text": "Ответ: новости недоступны — поиск выключен"}
+
+        topic = self._pick_news_topic()
+        if not topic:
+            return {"text": "Ответ: новости не о чем читать — нет темы"}
+
+        reads = getattr(self, "_news_reads", None)
+        if not isinstance(reads, dict):
+            reads = self._news_reads = {}
+        cooldown = int(getattr(LR_CONFIG, "NEWS_READ_COOLDOWN_CYCLES", 300) or 0)
+        last_read = reads.get(topic)
+        if (
+            cooldown > 0
+            and last_read is not None
+            and (self.cycle_count - last_read) < cooldown
+        ):
+            return {
+                "target": topic,
+                "text": (
+                    f"Ответ: новости про '{topic}' недавно проверял — "
+                    f"вернусь позже"
+                ),
+            }
+
+        try:
+            result = searcher.search_news(topic)
+        except Exception as exc:
+            get_logger().log(f"[NEWS] чтение упало: {exc}")
+            return {
+                "target": topic,
+                "text": f"Ответ: новости по '{topic}' не удались",
+            }
+
+        if not result.get("found"):
+            reads[topic] = self.cycle_count
+            return {
+                "target": topic,
+                "text": f"Ответ: свежих новостей про '{topic}' не нашлось",
+            }
+
+        reads[topic] = self.cycle_count
+        title = str(result.get("title") or topic)
+        extract = str(result.get("extract") or "")
+        snippet = extract[:200]
+        if len(extract) > 200:
+            snippet = snippet.rsplit(" ", 1)[0] + "…"
+        self._record_will("news_reads", topic, f"прочитал новость: {title}")
+        return {
+            "target": topic,
+            "text": (
+                f"Ответ: прочитал новость про '{topic}': «{title}». "
+                f"{snippet}"
+            ),
+        }
+
     def _act_hypothesis(self) -> Dict:
         """Выдвинуть гипотезу о теме, в которой агент не уверен.
 
@@ -3957,6 +4067,7 @@ class DigitalBeing:
         "create_draft": "Творчество",
         "draw": "Творчество",
         "play": "Игра",
+        "read_news": "Исследование",
     }
 
     def _absorb_action_failure(self, action: str, error: str) -> Optional[Dict]:

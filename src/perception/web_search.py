@@ -16,7 +16,11 @@ WebSearcher — поиск информации в Wikipedia API.
 - In-memory LRU-кэш для повторных запросов.
 - «Всеядность» (Питание-1): если точного заголовка нет — полнотекстовый
   поиск (list=search, до 3 кандидатов по рангу), затем Викисловарь,
-  затем EN. Каждый шаг — только после «не нашли», не после ошибки сети.
+  затем Викибуки («Источники-2»), затем EN. Каждый шаг — только после
+  «не нашли», не после ошибки сети.
+- «Источники-2»: отдельное окно в «сегодня» — ``search_news`` читает
+  Викиновости. Новости — впечатления, не определения: в базу знаний и
+  кэш они не идут, фильтры качества у них свои.
 - Фильтры качества (is_valid_definition, is_relevant) применяются к
   каждому источнику одинаково: всеядность не значит «есть что попало».
 - Graceful degradation: любая ошибка → {"found": False}, агент продолжает жить.
@@ -54,6 +58,10 @@ class WebSearcher:
 
     BASE_URL = "https://{lang}.wikipedia.org/w/api.php"
     WIKTIONARY_BASE_URL = "https://{lang}.wiktionary.org/w/api.php"
+    # «Источники-2»: Викибуки — учебные тексты; Викиновости — не еда для
+    # базы знаний, а окно в «сегодня» (см. search_news).
+    WIKIBOOKS_BASE_URL = "https://{lang}.wikibooks.org/w/api.php"
+    WIKINEWS_BASE_URL = "https://{lang}.wikinews.org/w/api.php"
 
     # Сколько кандидатов полнотекстового поиска проверять по рангу.
     SEARCH_CANDIDATES = 3
@@ -71,6 +79,7 @@ class WebSearcher:
         "wikipedia:title": "title",
         "wikipedia:search": "search",
         "wiktionary:title": "wiktionary",
+        "wikibooks:title": "wikibooks",
     }
 
     def __init__(
@@ -117,7 +126,11 @@ class WebSearcher:
             "misses": 0,       # не найдено
             "errors": 0,       # сетевые/HTTP ошибки
             # Диета существа: из какого источника пришла находка.
-            "found_by": {"title": 0, "search": 0, "wiktionary": 0},
+            "found_by": {"title": 0, "search": 0, "wiktionary": 0,
+                         "wikibooks": 0},
+            # «Источники-2»: новости — не еда, а впечатления; считаются
+            # отдельно от находок в базу знаний.
+            "news_reads": 0,
         }
 
     # ============================================================
@@ -165,7 +178,8 @@ class WebSearcher:
                 "url": str,         # ссылка на статью
                 "lang": str,        # "ru" или "en"
                 "source": str|None, # "wikipedia:title" / "wikipedia:search" /
-                                    # "wiktionary:title"; None, если не найдено
+                                    # "wiktionary:title" / "wikibooks:title";
+                                    # None, если не найдено
                 "error": str|None,  # описание ошибки, если есть
             }
         """
@@ -193,9 +207,10 @@ class WebSearcher:
             return dict(self._cache[cache_key])
 
         # Цепочка источников — существо всеядно, но детерминировано:
-        # точный заголовок → полнотекстовый поиск → Викисловарь → EN.
-        # Каждый следующий шаг — только после «не нашли», а не после
-        # ошибки сети: при DNS-отказе цепочка обрывается на первом звене.
+        # точный заголовок → полнотекстовый поиск → Викисловарь →
+        # Викибуки → EN. Каждый следующий шаг — только после «не нашли»,
+        # а не после ошибки сети: при DNS-отказе цепочка обрывается на
+        # первом звене.
         result = self._fetch(query, lang=self.lang, source="wikipedia:title")
 
         if not result["found"] and result.get("error") in self.NOT_FOUND_REASONS:
@@ -203,6 +218,9 @@ class WebSearcher:
 
         if not result["found"] and result.get("error") in self.NOT_FOUND_REASONS:
             result = self._fetch_wiktionary(query, self.lang)
+
+        if not result["found"] and result.get("error") in self.NOT_FOUND_REASONS:
+            result = self._fetch_wikibooks(query, self.lang)
 
         if (
             not result["found"]
@@ -469,3 +487,125 @@ class WebSearcher:
             source="wiktionary:title",
             intro_only=False,
         )
+
+    def _fetch_wikibooks(self, query: str, lang: str) -> dict:
+        """Викибуки — четвёртое звено: учебные тексты.
+
+        Википедия отвечает «что это», Викибуки — «как это устроено
+        в деле»: для тем-навыков (садоводство, программирование) учебник
+        питательнее определения. Те же фильтры качества, intro_only=False:
+        у учебника нет «введения» в смысле extracts.
+        """
+        return self._fetch(
+            query,
+            lang=lang,
+            base_url=self.WIKIBOOKS_BASE_URL,
+            source="wikibooks:title",
+            intro_only=False,
+        )
+
+    # Минимальная длина новостного текста: короче — скорее анонс, чем
+    # новость, и впечатления не оставит.
+    NEWS_MIN_CHARS = 150
+    # Сколько новостных кандидатов проверять по рангу.
+    NEWS_CANDIDATES = 3
+
+    def search_news(self, query: str) -> dict:
+        """Прочитать новость по теме — окно в «сегодня», а не еда.
+
+        Новости сознательно НЕ идут в цепочку базы знаний: определение
+        вечно, новость — про сейчас. Поэтому здесь свои фильтры: не
+        «похоже ли на определение», а «непустой связный текст по теме».
+        Найденное не кэшируется: новость должна быть свежей при каждом
+        чтении. Любая ошибка — {"found": False}, цикл агента не валится.
+        """
+        if not self._enabled:
+            return self._empty("disabled")
+
+        query = normalize_concept_name((query or "").strip())
+        if not is_worth_searching(query):
+            self._stats["misses"] += 1
+            return self._empty("not_worth_searching")
+
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": str(self.NEWS_CANDIDATES),
+            "format": "json",
+            "formatversion": "1",
+        }
+        url = self.WIKINEWS_BASE_URL.format(lang=self.lang) + "?" + urllib.parse.urlencode(params)
+
+        data, error = self._request_json(url, lang=self.lang, query=query)
+        if error is not None or data is None:
+            return self._empty(error or "json_error")
+
+        hits = (data.get("query") or {}).get("search") or []
+        if not hits:
+            self._stats["misses"] += 1
+            return self._empty("no_search_results")
+
+        last_error = "no_search_results"
+        for hit in hits[: self.NEWS_CANDIDATES]:
+            title = str(hit.get("title") or "").strip()
+            if not title:
+                continue
+            candidate = self._fetch_news_extract(title, query)
+            if candidate["found"]:
+                self._stats["news_reads"] += 1
+                return candidate
+            reason = candidate.get("error") or "not_found"
+            if reason not in self.NOT_FOUND_REASONS:
+                return candidate  # сеть отвалилась — не долбим кандидатов
+            last_error = reason
+        self._stats["misses"] += 1
+        return self._empty(last_error)
+
+    def _fetch_news_extract(self, title: str, relevance_query: str) -> dict:
+        """Один новостной кандидат: текст + мягкие фильтры впечатления."""
+        params = {
+            "action": "query",
+            "prop": "extracts|info",
+            "explaintext": "1",
+            "inprop": "url",
+            "redirects": "1",
+            "titles": title,
+            "format": "json",
+            "formatversion": "1",
+        }
+        url = self.WIKINEWS_BASE_URL.format(lang=self.lang) + "?" + urllib.parse.urlencode(params)
+
+        data, error = self._request_json(url, lang=self.lang, query=title)
+        if error is not None or data is None:
+            return self._empty(error or "json_error")
+
+        pages = (data.get("query") or {}).get("pages") or {}
+        if not pages:
+            return self._empty("no_pages")
+        first_page = next(iter(pages.values()))
+        page_title = first_page.get("title", "")
+        extract = (first_page.get("extract") or "").strip()
+        fullurl = first_page.get("fullurl", "")
+
+        if len(extract) < self.NEWS_MIN_CHARS:
+            return self._empty("no_extract")
+        if not is_relevant(relevance_query, page_title, extract):
+            return self._empty("irrelevant")
+
+        if len(extract) > self.max_chars:
+            extract = extract[: self.max_chars].rsplit(" ", 1)[0] + "…"
+
+        logger.info(
+            f"[WebSearcher] новость по '{relevance_query}' → "
+            f"'{page_title}', {len(extract)} символов"
+        )
+        return {
+            "found": True,
+            "title": page_title,
+            "extract": extract,
+            "url": fullurl,
+            "lang": self.lang,
+            "source": "wikinews:search",
+            "error": None,
+        }

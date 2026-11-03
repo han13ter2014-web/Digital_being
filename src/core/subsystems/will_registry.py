@@ -40,6 +40,8 @@ class WillRegistry:
             "messages_sent": 0,
             "questions_asked": 0,
             "web_searches": 0,
+            # «Источники-2»: чтение новостей — тоже волевой акт, свой счётчик
+            "news_reads": 0,
             "goals_set": 0,
         }
         self._last_value_change_cycle = 0
@@ -99,7 +101,11 @@ class WillRegistry:
         """Восстанавливает журнал воли из сериализованного состояния."""
         registry = cls(agent_name=data.get("agent_name") or "agent")
         registry.entries = [dict(e) for e in (data.get("entries") or [])]
-        registry._counters = dict(data.get("counters") or {})
+        # Старые чекпоинты не знают новых счётчиков: сливаем с дефолтами,
+        # иначе появившийся позже тип акта переставал бы считаться.
+        counters = dict(registry._counters)
+        counters.update(data.get("counters") or {})
+        registry._counters = counters
         registry._last_value_change_cycle = int(data.get("last_value_change_cycle") or 0)
         raw_last_risk = data.get("last_risk_cycle", -1)
         registry._last_risk_cycle = (
