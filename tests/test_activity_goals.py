@@ -51,4 +51,4 @@ def test_own_goal_can_be_nonresearch_when_play_is_pressing():
     with patch.object(agent, "_pick_exploration_target", side_effect=AssertionError("not learning")) as picker:
         agent._act_set_own_goal()
     picker.assert_not_called()
-    assert agent.goals[-1]["activity"]["action"] in {"play", "create_draft"}
+    assert agent.goals[-1]["activity"]["action"] in {"play", "create_draft", "draw", "compose_music"}

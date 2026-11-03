@@ -44,6 +44,8 @@ class WillRegistry:
             "news_reads": 0,
             # «Интернет-1»: прогулки по открытому вебу — свой счётчик
             "web_browses": 0,
+            # «Музыка-1»: сочинённые мелодии — волевой акт, свой счётчик
+            "music_works": 0,
             "goals_set": 0,
         }
         self._last_value_change_cycle = 0

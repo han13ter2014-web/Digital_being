@@ -3,9 +3,10 @@
 from copy import deepcopy
 
 ACTIVITIES = {"play": "play", "create_draft": "create_draft", "creative_act": "create_draft",
-              "draw": "draw"}
+              "draw": "draw", "compose_music": "compose_music"}
 
-CRITERIA = {"play": "play_round", "create_draft": "draft_revision", "draw": "art_revision"}
+CRITERIA = {"play": "play_round", "create_draft": "draft_revision", "draw": "art_revision",
+            "compose_music": "music_revision"}
 
 
 def attach_activity(agent, goal_id, generated):
@@ -22,7 +23,7 @@ def activity_candidate(agent):
     if not goal or not isinstance(goal.get("activity"), dict):
         return None
     action = goal["activity"].get("action")
-    if action not in {"play", "create_draft", "draw"}:
+    if action not in {"play", "create_draft", "draw", "compose_music"}:
         return None
     return {"action": action, "source": "own_activity", "strength": 0.4,
             "params": {"activity_goal_id": goal["id"], "reason": goal["title"]}}
@@ -39,6 +40,8 @@ def record_activity_step(agent, intention, action, before, after):
         return
     if action == "draw" and after.get("status") == "left":
         return
+    if action == "compose_music" and after.get("status") == "left":
+        return
     # Факт шага не равен выполнению всего дела и не выдаёт награду за знание.
     goal["activity"]["last_step"] = {"cycle": agent.cycle_count,
                                      "artifact": deepcopy(after)}
@@ -47,7 +50,8 @@ def record_activity_step(agent, intention, action, before, after):
     satisfied = ((action == "play" and criterion == "play_round" and after.get("result") is not None)
                  or (action == "play" and criterion == "play_turn")
                  or (action == "create_draft" and criterion == "draft_revision")
-                 or (action == "draw" and criterion == "art_revision"))
+                 or (action == "draw" and criterion == "art_revision")
+                 or (action == "compose_music" and criterion == "music_revision"))
     if satisfied:
         goal["activity"]["satisfied_at"] = agent.cycle_count
         agent.complete_goal(goal_id)

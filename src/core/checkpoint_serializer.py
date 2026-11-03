@@ -270,6 +270,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "local_guess": deepcopy(getattr(agent, "_local_guess", None)),
         "art_catalog": deepcopy(getattr(agent, "_art_catalog", {})),
         "art_work": deepcopy(getattr(agent, "_art_work", None)),
+        "music_catalog": deepcopy(getattr(agent, "_music_catalog", {})),
+        "music_work": deepcopy(getattr(agent, "_music_work", None)),
         "waiting_intentions": deepcopy(getattr(agent, "_waiting_intentions", {})),
         "method_preferences": deepcopy(getattr(agent, "_method_preferences", {})),
         "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
@@ -514,6 +516,8 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent._local_guess = deepcopy(state.get("local_guess"))
     agent._art_catalog = deepcopy(state.get("art_catalog", {}))
     agent._art_work = deepcopy(state.get("art_work"))
+    agent._music_catalog = deepcopy(state.get("music_catalog", {}))
+    agent._music_work = deepcopy(state.get("music_work"))
     agent._waiting_intentions = deepcopy(state.get("waiting_intentions", {}))
     # Правила и история разобраны и проверены в фазе 1.
     agent._method_preferences = staged_method_preferences

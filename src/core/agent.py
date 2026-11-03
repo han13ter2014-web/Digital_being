@@ -117,6 +117,8 @@ BODY_LOAD: Dict[str, float] = {
     "reflection": 0.7,
     "web_search": 0.6,
     "draw": 0.5,
+    # сочинение мелодии — как рисунок: творческая, но не тяжёлая работа
+    "compose_music": 0.5,
     # чтение новостей — лёгкое: глаза бегут, тело почти не работает
     "read_news": 0.4,
     # «Интернет-1»: прогулка по открытому вебу — такая же лёгкая
@@ -173,6 +175,8 @@ EMOTION_ACTION_BIAS: Dict[str, Dict[str, float]] = {
         "communicate": 1.15,
         "explore": 1.1,
         "draw": 1.2,
+        # музыка — радостное занятие
+        "compose_music": 1.2,
     },
     "sadness": {
         "reflection": 1.25,
@@ -261,6 +265,8 @@ class DigitalBeing:
         # исследование — реальная работа с неизвестным
         "play": "play",
         "draw": "draw",
+        # «Музыка-1»: сочинение мелодии — отпечаток состояния в звуке
+        "compose_music": "compose_music",
         "explore": "explore",
         "exploration": "explore",
         "novelty_seeking": "explore",
@@ -509,6 +515,9 @@ class DigitalBeing:
         # сериализуются в чекпоинт.
         self._art_catalog: Dict[str, Dict] = {}
         self._art_work: Optional[Dict] = None
+        # «Музыка-1»: каталог мелодий и текущая работа — как у рисунков.
+        self._music_catalog: Dict[str, Dict] = {}
+        self._music_work: Optional[Dict] = None
         self._local_guess: Optional[Dict] = None
 
         # === «Собеседник-7»: саморазвитие диалоговых таблиц ===
@@ -1856,6 +1865,11 @@ class DigitalBeing:
             drawn = handler() if handler else None
             topic = (drawn or {}).get("target") or ""
             action = (drawn or {}).get("text") or action
+        elif action_type == "compose_music":
+            handler = getattr(self, "_act_compose_music", None)
+            composed = handler() if handler else None
+            topic = (composed or {}).get("target") or ""
+            action = (composed or {}).get("text") or action
         elif action_type == "hypothesis":
             handler = getattr(self, "_act_hypothesis", None)
             guess = handler() if handler else None
@@ -2075,6 +2089,10 @@ class DigitalBeing:
             from src.cognition.local_art import art_available
 
             return self._is_action_affordable(normalized) and art_available(getattr(self, "_art_work", None))
+        if normalized == "compose_music":
+            from src.cognition.local_music import music_available
+
+            return self._is_action_affordable(normalized) and music_available(getattr(self, "_music_work", None))
         if normalized == "ask_user":
             return self._can_ask_now(self.cycle_count) and self._has_question_target()
         if normalized == "web_search":
@@ -2902,6 +2920,81 @@ class DigitalBeing:
             return []
         return [dict(catalog[key]) for key in sorted(catalog)]
 
+    def _act_compose_music(self) -> Dict:
+        """Сочинить мелодию: отпечаток текущего состояния в звуке.
+
+        Настроение — доминирующая эмоция (у уже начатой работы оно
+        хранится с рождения и не переписывается), тема — то, что занимает
+        существо. Работа на лимите редакций оставляется с честной
+        причиной, и начинается новая.
+        """
+        from src.cognition.local_music import (
+            MOODS, MUSIC_LIMIT, leave_music, music_available, music_notation,
+            music_step,
+        )
+
+        work = getattr(self, "_music_work", None)
+        try:
+            if work is not None and (
+                work.get("status") == "left" or work.get("revision", 0) >= MUSIC_LIMIT
+            ):
+                if work.get("status") != "left":
+                    work = leave_music(work, "достигнут лимит редакций — работа завершена")
+                    catalog = getattr(self, "_music_catalog", None)
+                    if isinstance(catalog, dict):
+                        catalog[work["id"]] = dict(work)
+                    get_logger().log(
+                        f"[MUSIC] оставил «{work['theme']}» (лимит редакций)"
+                    )
+                work = None
+            if work is None and not music_available(None):
+                return {"text": "Ответ: сочинять негде — папка мелодий заполнена"}
+
+            if work is not None:
+                # Работа хранит настроение своего рождения.
+                mood = work["mood"]
+                theme = work["theme"]
+            else:
+                mood = "calm"
+                emotions = getattr(self, "emotional_state", None)
+                dominant = emotions.dominant() if emotions is not None else None
+                if dominant:
+                    mood = dominant["emotion"]
+                if mood not in MOODS:
+                    # Эмоций больше, чем ладов: незнакомое настроение
+                    # звучит как покой, а не как отказ творить.
+                    mood = "calm"
+                theme = self._pick_art_theme()
+
+            updated = music_step(work, mood=mood, theme=theme)
+            self._music_work = updated
+            catalog = getattr(self, "_music_catalog", None)
+            if not isinstance(catalog, dict):
+                catalog = self._music_catalog = {}
+            catalog[updated["id"]] = dict(updated)
+            self._record_will(
+                "music_works", updated["theme"],
+                f"мелодия, редакция {updated['revision']}, настроение {updated['mood']}",
+            )
+            notation = music_notation(updated)
+            return {
+                "target": updated["theme"],
+                "text": (
+                    f"Ответ: сочинил мелодию «{updated['theme']}», редакция "
+                    f"{updated['revision']} ({updated['mood']})\n{notation}"
+                ),
+            }
+        except Exception as exc:
+            get_logger().log(f"[MUSIC] не удалось сочинить: {exc}")
+            return {"text": "Ответ: хотел сочинить мелодию, но не получилось"}
+
+    def list_music_works(self) -> List[Dict]:
+        """Каталог собственных мелодий (для снимка жизни)."""
+        catalog = getattr(self, "_music_catalog", None)
+        if not isinstance(catalog, dict):
+            return []
+        return [dict(catalog[key]) for key in sorted(catalog)]
+
     def _act_explore(self, target=None) -> Dict:
         """Исследование как работа, а не как счётчик.
 
@@ -3640,10 +3733,11 @@ class DigitalBeing:
         motivation = getattr(self, "motivation_system", None)
         play_need = motivation.needs.get("play") if motivation is not None else None
         if play_need is not None and play_need.is_pressing():
-            activity = random.choice(["play", "creative_act", "draw"])
+            activity = random.choice(["play", "creative_act", "draw", "compose_music"])
             title = {"play": "Сыграть партию",
                      "creative_act": "Создать текстовую композицию",
-                     "draw": "Нарисовать картину"}[activity]
+                     "draw": "Нарисовать картину",
+                     "compose_music": "Сочинить мелодию"}[activity]
             if any(g.get("title") == title and g.get("status") != "completed" for g in self.goals):
                 return {"text": f"Ответ: дело '{title}' уже есть"}
             goal_id = self.set_goal(title, difficulty=1)
@@ -4187,6 +4281,7 @@ class DigitalBeing:
         "ask_user": "Диалог",
         "create_draft": "Творчество",
         "draw": "Творчество",
+        "compose_music": "Творчество",
         "play": "Игра",
         "read_news": "Исследование",
         "browse_web": "Исследование",
@@ -5398,7 +5493,7 @@ class DigitalBeing:
                 from copy import deepcopy
 
                 activity_attrs = {"play": "_local_play", "create_draft": "_creative_draft",
-                                  "draw": "_art_work"}
+                                  "draw": "_art_work", "compose_music": "_music_work"}
                 activity_before = deepcopy(
                     getattr(self, activity_attrs.get(chosen_action, "_creative_draft"), None)
                 )
@@ -5410,14 +5505,14 @@ class DigitalBeing:
 
                 last = getattr(self, "_last_action_outcome", None)
                 normalized_action = self._normalize_action(chosen_action)
-                if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft", "draw"}:
+                if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft", "draw", "compose_music"}:
                     generic_outcome = "performed"
                     if last is not None and last.reason.startswith("denied:"):
                         generic_outcome = "denied"
                     observe_method(self, normalized_action, outcome=generic_outcome,
                                had_effect=bool(last and last.had_effect),
                                emotional_valence=result.get("actual_valence", 0.0))
-                if normalized_action in {"play", "create_draft", "draw"}:
+                if normalized_action in {"play", "create_draft", "draw", "compose_music"}:
                     activity_state = getattr(self, activity_attrs[normalized_action], None)
                     activity_outcome = "left" if activity_state and activity_state.get("status") == "left" else "performed"
                     if last is not None and last.reason.startswith("denied:"):
@@ -5425,7 +5520,7 @@ class DigitalBeing:
                     observe_method(self, chosen_action, outcome=activity_outcome,
                                    had_effect=bool(last and last.had_effect),
                                    emotional_valence=result.get("actual_valence", 0.0))
-                if normalized_action in {"play", "create_draft", "draw"}:
+                if normalized_action in {"play", "create_draft", "draw", "compose_music"}:
                     from src.cognition.activity_goals import record_activity_step
 
                     activity_type = self._normalize_action(chosen_action)
