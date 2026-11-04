@@ -24,12 +24,14 @@ LABELS = {
     "network": "Интернет-поиск",
     "delamain": "Планирование задач",
     "effector": "Действия в рабочей папке",
+    "presence": "Присутствие",
 }
 
 HINTS = {
     "network": "искать сведения в интернете, когда своих знаний не хватает",
     "delamain": "разбирать большую задачу на выполнимые шаги",
     "effector": "создавать файлы только в отдельной рабочей папке профиля",
+    "presence": "замечать, что ты рядом, и чем примерно занят — без скриншотов и заголовков окон",
 }
 
 _KEYS = tuple(LABELS)
@@ -75,10 +77,12 @@ def current_state(agent: Any) -> Dict[str, bool]:
     network = getattr(getattr(agent, "web_searcher", None), "is_enabled", False)
     delamain = getattr(getattr(agent, "delamain", None), "enabled", False)
     effector = getattr(getattr(agent, "delamain_effector", None), "enabled", False)
+    presence = getattr(getattr(agent, "presence", None), "enabled", False)
     return {
         "network": bool(network),
         "delamain": bool(delamain),
         "effector": bool(effector),
+        "presence": bool(presence),
     }
 
 
@@ -114,6 +118,18 @@ def apply_choice(agent: Any, key: str, enabled: bool) -> Dict[str, Any]:
                         "error": str(result.get("error") or "не удалось включить")}
         else:
             subsystem.disable()
+        return {"ok": True, "error": None, "label": label}
+
+    if key == "presence":
+        # Орган создаётся лениво и выключен по умолчанию: пока человек
+        # не разрешил, ни одного вызова к ОС не делается вообще.
+        sense = getattr(agent, "presence", None)
+        if sense is None:
+            from src.perception.presence import PresenceSense
+
+            sense = PresenceSense(enabled=False)
+            agent.presence = sense
+        sense.enabled = value
         return {"ok": True, "error": None, "label": label}
 
     effector = getattr(agent, "delamain_effector", None)

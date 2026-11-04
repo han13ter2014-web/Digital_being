@@ -108,6 +108,7 @@ def test_current_state_reads_real_flags(tmp_path):
         "network": False,
         "delamain": True,
         "effector": True,
+        "presence": False,
     }
 
 

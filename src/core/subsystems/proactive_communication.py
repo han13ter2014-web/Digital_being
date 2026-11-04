@@ -220,6 +220,28 @@ class ProactiveCommunication:
         if agent is None or self.user_interaction is None:
             return None
 
+        # «Присутствие»: если человек сам разрешил наблюдение и он
+        # рядом (активен или тих), существо чувствует его — потребность
+        # в связи гаснет частично (наблюдение не заменяет разговор:
+        # ~2/3 затухания, не обнуление). Выключенное присутствие не
+        # трогает ОС и ничего не меняет — см. src/perception/presence.py.
+        near = False
+        presence = getattr(agent, "presence", None)
+        if presence is not None and getattr(presence, "enabled", False):
+            try:
+                from src.perception.presence import PresenceSense
+
+                near = PresenceSense.is_near(presence.snapshot())
+            except Exception:
+                near = False
+            if near:
+                motivation = getattr(agent, "motivation", None)
+                if motivation is not None:
+                    try:
+                        motivation.satisfy_need("social_connection", amount=0.008)
+                    except Exception:
+                        pass
+
         # Защита: deep sleep — молчим
         if hasattr(agent, "mind_dream") and agent.mind_dream.state == "deep_sleep":
             return None
@@ -271,21 +293,27 @@ class ProactiveCommunication:
             emotional_state = getattr(agent, "emotional_state", None)
             if (emotional_state is not None
                     and self._silence_felt_for_user_cycle != last_user_cycle):
-                self._silence_felt_for_user_cycle = last_user_cycle
-                scale = 1.0
-                if promise:
-                    trust = 0.5
-                    attachment = self.attachment or getattr(agent, "attachment", None)
-                    trust_factor = getattr(attachment, "trust_factor", None)
-                    if callable(trust_factor):
-                        try:
-                            trust = float(trust_factor("user"))
-                        except Exception:
-                            trust = 0.5
-                    scale = 1.0 - 0.6 * max(0.0, min(1.0, trust))
-                emotional_state.handle_event(
-                    "long_silence", cycle=cycle, scale=scale
-                )
+                if near:
+                    # Тихая близость: человек рядом, просто молчит — это
+                    # не разлука, укола нет. Эпизод НЕ помечается: когда
+                    # он отойдёт, честный укол разлуки случится тогда.
+                    pass
+                else:
+                    self._silence_felt_for_user_cycle = last_user_cycle
+                    scale = 1.0
+                    if promise:
+                        trust = 0.5
+                        attachment = self.attachment or getattr(agent, "attachment", None)
+                        trust_factor = getattr(attachment, "trust_factor", None)
+                        if callable(trust_factor):
+                            try:
+                                trust = float(trust_factor("user"))
+                            except Exception:
+                                trust = 0.5
+                        scale = 1.0 - 0.6 * max(0.0, min(1.0, trust))
+                    emotional_state.handle_event(
+                        "long_silence", cycle=cycle, scale=scale
+                    )
             if promise:
                 msg = self._compose_care_with_promise(agent, cycle)
             else:
