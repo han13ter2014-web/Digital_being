@@ -2573,6 +2573,37 @@ class DigitalBeing:
             return True
         return any(word in text.split() for word in self._META_TOPIC_WORDS)
 
+    # Местоимения-шум (TICKET-8, наблюдатели 2026-11-05): в старые
+    # сессии реплики диалога попадали в концепции и потом выбирались
+    # целями («Понять: ты»). Сами по себе — не тема исследования.
+    # Фильтруются ТОЛЬКО при выборе цели, как и метаслова: «я» в
+    # философском контексте остаётся легитимным узлом памяти.
+    _NOISE_TOPIC_WORDS = frozenset({
+        "я", "ты", "мы", "вы", "он", "она", "оно", "они", "это",
+    })
+
+    def _is_meaningful_topic(self, name: str) -> bool:
+        """Тема — содержание мира, а не шум диалога?
+
+        TICKET-8: среди живых целей всплыли «Понять: 🙂🙂🙂» и
+        «Понять: ты». Минимум две буквы; строка из одних местоимений —
+        не тема. Честное ограничение: осмысленный на вид мусор
+        («теминг тест») фильтр не отличит — источник такого мусора
+        закрыт «Собеседником-6», здесь добиваем буквенный шум.
+        """
+        text = str(name or "").strip()
+        letters = [ch for ch in text if ch.isalpha()]
+        if len(letters) < 2:
+            return False
+        words = [
+            word
+            for word in text.lower().split()
+            if any(ch.isalpha() for ch in word)
+        ]
+        if words and all(word in self._NOISE_TOPIC_WORDS for word in words):
+            return False
+        return True
+
     def _recently_explained_by_user(self, topic: str) -> bool:
         """Тема, объяснённая человеком недавно, не переспрашивается.
 
@@ -2602,7 +2633,11 @@ class DigitalBeing:
         recently = set(getattr(self, "_exploration_history", []) or [])
         candidates = []
         for name, node in concepts.items():
-            if not self._is_learnable(name) or self._is_meta_topic(name):
+            if (
+                not self._is_learnable(name)
+                or self._is_meta_topic(name)
+                or not self._is_meaningful_topic(name)
+            ):
                 continue
             if name in recently:
                 continue
@@ -2679,6 +2714,8 @@ class DigitalBeing:
         for topic in self._stimulus_topics():
             if topic in known or topic in recently:
                 continue
+            if not self._is_meaningful_topic(topic):
+                continue
             self._remember_exploration(topic)
             return topic
 
@@ -2696,6 +2733,7 @@ class DigitalBeing:
             for name in concepts
             if name not in recently
             and self._is_learnable(name)
+            and self._is_meaningful_topic(name)
             and not self._is_meta_topic(name)
             and not self._recently_explained_by_user(name)
             and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
@@ -2708,6 +2746,7 @@ class DigitalBeing:
                 name
                 for name in concepts
                 if self._is_learnable(name)
+                and self._is_meaningful_topic(name)
                 and not self._is_meta_topic(name)
                 and not self._recently_explained_by_user(name)
                 and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
@@ -3765,13 +3804,17 @@ class DigitalBeing:
             self._record_will("goals_set", title, f"своё дело #{goal_id}")
             return {"text": f"Ответ: выбрал дело '{title}' (#{goal_id})"}
         target = self._pick_exploration_target()
-        if not target:
+        if not target or not self._is_meaningful_topic(target):
             return {"text": "Ответ: свою цель ставить не из чего"}
 
         title = f"Понять: {target}"
-        # Не дублируем уже существующую цель.
+        # Не дублируем уже существующую цель. TICKET-8: сравнение по
+        # нормализованному тексту (нижний регистр, сжатые пробелы) —
+        # «Понять:  истина» и «Понять: истина» — одна цель.
+        normalized_title = " ".join(title.lower().split())
         for goal in getattr(self, "goals", []) or []:
-            if str(goal.get("title", "")).lower() == title.lower():
+            existing = " ".join(str(goal.get("title", "")).lower().split())
+            if existing == normalized_title:
                 return {
                     "target": target,
                     "text": f"Ответ: цель '{title}' уже есть",
