@@ -162,15 +162,17 @@ class SurvivalInstincts:
         for resource_type, thresholds in self.HOMEOSTATIC_THRESHOLDS.items():
             level = self.homeostasis_state[resource_type]["level"]
             
-            # Проверяем отклонение от оптимума
-            deviation = abs(level - thresholds["optimal"])
-            
-            if deviation > 10:  # Значительное отклонение
+            # Тревога — выход за пределы жизнеспособной полосы [min, max],
+            # а не отклонение от оптимума. Оптимум — цель, а не авария:
+            # раньше «полный бак» (энергия 100 при оптимуме 75) и
+            # стартовые уровни давали постоянные ложные тревоги, и волк
+            # кричал каждый цикл (TICKET-2, 2026-11-05).
+            if level < thresholds["min"] or level > thresholds["max"]:
                 alarms_raised.append({
                     "resource": resource_type,
                     "current": level,
-                    "optimal": thresholds["optimal"],
-                    "deviation": deviation
+                    "min": thresholds["min"],
+                    "max": thresholds["max"],
                 })
         
         return {

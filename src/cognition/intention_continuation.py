@@ -28,6 +28,11 @@ def continuation_candidate(agent):
         if key in seen:
             continue
         seen.add(key)
+        # «Нетерпеливый вопрос» (TICKET-2): тема в backoff после
+        # отложения — не предлагать продолжение, пока пауза не вышла.
+        deferred = getattr(agent, "_deferred_intentions", None) or {}
+        if agent.cycle_count < deferred.get(key, (0, 0))[0]:
+            continue
         durable = waits.get(waiting_key(action, target))
         if durable and durable.get("resolution"):
             continue

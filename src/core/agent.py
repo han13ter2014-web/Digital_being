@@ -3267,11 +3267,29 @@ class DigitalBeing:
         if result.get("status") != "queued":
             # Лимит вопросов или пауза — это нормально, не ошибка.
             reason = result.get("reason", "не сейчас")
+            # «Нетерпеливый вопрос» (TICKET-2): отложенное намерение не
+            # должно выбираться заново каждый цикл. Экспоненциальный
+            # backoff: 5, 10, 20, 40, максимум 50 циклов тишины — тема
+            # жива, но не крутится вхолостую.
+            deferrals: Dict[tuple, tuple] = {}
+            saved_deferrals = getattr(self, "_deferred_intentions", None)
+            if isinstance(saved_deferrals, dict):
+                deferrals = saved_deferrals
+            self._deferred_intentions = deferrals
+            key = ("ask_user", target)
+            _, count = deferrals.get(key, (0, 0))
+            count += 1
+            backoff = min(5 * (2 ** (count - 1)), 50)
+            deferrals[key] = (self.cycle_count + backoff, count)
             return {
                 "target": target,
                 "text": f"Ответ: вопрос про '{target}' отложен ({reason})",
             }
 
+        # Вопрос дошёл — backoff по этой теме сбрасывается.
+        cleared = getattr(self, "_deferred_intentions", None)
+        if cleared:
+            cleared.pop(("ask_user", target), None)
         self._record_will("questions_asked", target, "самостоятельный вопрос")
         return {
             "target": target,
