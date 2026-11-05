@@ -17,8 +17,8 @@ read-only оболочка, где можно увидеть, что реаль�
 Готовый установщик для Windows — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
 
 ```text
-DigitalBeing_Setup_v0.1.4.exe
-SHA-256: 5B064905636E444C915ED37268A6652B716911767855CAF988A0DDE69DCCAF71
+DigitalBeing_Setup_v0.1.4.1.exe
+SHA-256: 1A8DE50A4E845BA3688ED924C4385F82A1EBAC657AAE20B8FA349BA1C7BFFE17
 ```
 
 Запуск из исходников (Python 3.10+):
@@ -143,7 +143,7 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 ## Статус
 
-Текущая версия пакета: **0.1.4** — [релиз v0.1.4](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.4),
+Текущая версия пакета: **0.1.4.1** — [релиз v0.1.4.1](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.4.1),
 установлен и проверен на реальной машине
 ([отчёт приёмки](docs/RELEASE_VERIFICATION_v0.1.3.md)).
 
