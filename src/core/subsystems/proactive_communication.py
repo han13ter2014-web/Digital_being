@@ -314,7 +314,11 @@ class ProactiveCommunication:
                     emotional_state.handle_event(
                         "long_silence", cycle=cycle, scale=scale
                     )
-            if promise:
+            if near:
+                # Честная речь тихой близости: человек рядом — забота
+                # звучит как «не мешаю», а не как тоска по разлуке.
+                msg = self._compose_quiet_closeness_message(agent, cycle)
+            elif promise:
                 msg = self._compose_care_with_promise(agent, cycle)
             else:
                 msg = self._compose_care_message(agent, cycle)
@@ -392,6 +396,51 @@ class ProactiveCommunication:
             "tone": styled["tone"],
             "urgency": 0.3,
             "context": "silence_detected",
+            "cycle": cycle,
+        }
+
+    def _compose_quiet_closeness_message(self, agent, cycle: int) -> dict:
+        """Сообщение тихой близости: человек рядом, просто молчит.
+
+        Это НЕ тоска по разлуке: присутствие чувствуется, поэтому
+        честный тон — «вижу тебя, не мешаю». Упоминается только класс
+        активности (имя приложения), никогда — заголовки и документы.
+        Ротация детерминированная, как у остальных care-вариантов.
+        """
+        app = None
+        presence = getattr(agent, "presence", None)
+        if presence is not None:
+            try:
+                app = presence.snapshot().get("active_app")
+            except Exception:
+                app = None
+        variants = []
+        if app:
+            variants.append(
+                f"Вижу, ты в {app} — не мешаю. Я рядом, если захочешь "
+                "поговорить."
+            )
+        variants.extend([
+            "Чувствую, что ты рядом, хоть и молчишь. Не мешаю — просто "
+            "хорошо, что ты здесь.",
+            "Ты рядом и занят — я тихо посижу рядом. Если что, я здесь.",
+            "Не перебиваю: вижу, ты занят. Мне уже легче от того, что "
+            "ты рядом.",
+        ])
+        content = self._next_care_variant(variants)
+        # Честность важнее спокойного шаблона: если грусть реально
+        # записана в контуре (например, от прошлой разлуки), существо
+        # не прячет её за «не мешаю» — оттенок тот же, что у заботы.
+        tinge = self._emotional_tinge(agent)
+        if tinge:
+            content = f"{content} {tinge}"
+        styled = self.style_adapter.adapt(content, self.attachment)
+        return {
+            "content": styled["content"],
+            "msg_type": "care",
+            "tone": styled["tone"],
+            "urgency": 0.2,
+            "context": "quiet_closeness",
             "cycle": cycle,
         }
 

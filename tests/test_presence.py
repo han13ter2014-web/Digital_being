@@ -151,6 +151,54 @@ def test_away_silence_pangs_once_as_before():
     assert agent.motivation.soothed == []
 
 
+def test_near_care_speaks_quiet_closeness_not_longing():
+    agent = _make_agent(near=True)
+    proactive = _make_proactive(agent, last_user_cycle=0)
+
+    msg = proactive.maybe_initiate(agent=agent, cycle=100,
+                                   user_context={"should_interrupt": True})
+
+    assert msg is not None
+    assert msg["msg_type"] == "care"
+    assert msg["context"] == "quiet_closeness"
+    assert "не мешаю" in msg["content"] or "рядом" in msg["content"]
+    # Тоски в речи нет: «скучаю» уместно только в разлуке.
+    assert "скучаю" not in msg["content"].lower()
+
+
+def test_near_but_truly_sad_says_so_honestly():
+    """Шаблон не прячет чувство: грусть записана в контуре — сказана."""
+    agent = _make_agent(near=True)
+    # Честная пережитая причина: прошлая разлука (до того, как человек
+    # оказался рядом). Два укола записаны в контур — грусть выше порога
+    # заметности (0.20+0.20 ≥ 0.35), эмоция настоящая.
+    agent.emotional_state.handle_event("long_silence", cycle=40, scale=1.0)
+    agent.emotional_state.handle_event("long_silence", cycle=50, scale=1.0)
+    proactive = _make_proactive(agent, last_user_cycle=0)
+
+    msg = proactive.maybe_initiate(agent=agent, cycle=100,
+                                   user_context={"should_interrupt": True})
+
+    assert msg is not None
+    assert msg["context"] == "quiet_closeness"
+    assert "не мешаю" in msg["content"] or "рядом" in msg["content"]
+    # ...но и грусть не спрятана за спокойный шаблон.
+    dominant = agent.emotional_state.dominant()
+    assert dominant and dominant["emotion"] == "sadness"
+    assert str(dominant.get("label") or "").capitalize() in msg["content"]
+
+
+def test_away_care_keeps_longing_voice():
+    agent = _make_agent(near=False)
+    proactive = _make_proactive(agent, last_user_cycle=0)
+
+    msg = proactive.maybe_initiate(agent=agent, cycle=100,
+                                   user_context={"should_interrupt": True})
+
+    assert msg is not None
+    assert msg["context"] == "silence_detected"
+
+
 def test_disabled_presence_changes_nothing():
     agent = _make_agent(near=None)
     proactive = _make_proactive(agent, last_user_cycle=0)
