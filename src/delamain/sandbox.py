@@ -163,7 +163,9 @@ class Sandbox:
             raise SandboxError(f"file grew beyond the limit: {len(raw)} bytes > {limit}")
         if b"\x00" in raw[:4096]:
             raise SandboxError(f"binary files are not supported: {path}")
-        return raw.decode("utf-8", errors="replace")
+        # TICKET-7: чтение BOM-независимое — файл с UTF-8 BOM (экспорты
+        # из Windows-инструментов) читается так же чисто, как без BOM.
+        return raw.decode("utf-8-sig", errors="replace")
 
     def write_text(
         self,
