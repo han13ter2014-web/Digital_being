@@ -15,13 +15,17 @@ store transparently falls back to ``LIKE`` searches.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _utc_now_iso() -> str:
@@ -41,13 +45,82 @@ def _loads(value: Optional[str], default: Any = None) -> Any:
         return default
 
 
+class _ThreadSafeConnection:
+    """Сериализованная обёртка над ``sqlite3.Connection``.
+
+    Эффекторы и UI записывают эпизоды из своих потоков, а соединение
+    sqlite3 по умолчанию привязано к создавшему его потоку — каждая такая
+    запись падала с «SQLite objects created in a thread can only be used
+    in that same thread» (тикет V-3: эпизоды жизни терялись). Каждый вызов
+    сериализуется ``RLock``; совместное соединение разрешено через
+    ``check_same_thread=False`` (модуль sqlite3 собран с threadsafety=3).
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        object.__setattr__(self, "_wrapped", conn)
+        object.__setattr__(self, "_lock", threading.RLock())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_wrapped"), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._wrapped, name, value)
+
+    def execute(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        with self._lock:
+            return self._wrapped.execute(*args, **kwargs)
+
+    def executemany(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        with self._lock:
+            return self._wrapped.executemany(*args, **kwargs)
+
+    def executescript(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        with self._lock:
+            return self._wrapped.executescript(*args, **kwargs)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._wrapped.commit()
+
+    def rollback(self) -> None:
+        with self._lock:
+            self._wrapped.rollback()
+
+    def close(self) -> None:
+        with self._lock:
+            self._wrapped.close()
+
+    @property
+    def lock(self) -> threading.RLock:
+        """Общий замок соединения для целых логических операций."""
+        return self._lock
+
+
+def _atomic(method: F) -> F:
+    """Сериализовать целый метод ``MemoryStore`` общим замком соединения.
+
+    Замок реентрантен: ``record_life_episode`` внутри вызывает
+    ``record_episode``, а ``remember_fact`` — ``_sync_fts``, и вложенность
+    не приводит к взаимоблокировке.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: "MemoryStore", *args: Any, **kwargs: Any) -> Any:
+        with self._conn.lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
 class MemoryStore:
     """A small SQLite memory with explicit, typed operations."""
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn = _ThreadSafeConnection(
+            sqlite3.connect(str(self.db_path), check_same_thread=False)
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -170,6 +243,7 @@ class MemoryStore:
     # Episodes
     # ------------------------------------------------------------------
 
+    @_atomic
     def record_episode(
         self,
         *,
@@ -218,6 +292,7 @@ class MemoryStore:
             metadata={"life_id": life_id, "intention_id": intention_id, "status": status},
         )
 
+    @_atomic
     def recent_life_episodes(self, *, life_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
         limit = max(0, min(int(limit), 200))
         offset = max(0, int(offset))
@@ -230,6 +305,7 @@ class MemoryStore:
         ).fetchall()
         return [self._episode_dict(row) for row in rows]
 
+    @_atomic
     def legacy_life_episodes(self, *, intention_ids, limit=20):
         """Читать старые события только по ID намерений выбранного checkpoint.
 
@@ -266,6 +342,7 @@ class MemoryStore:
             "metadata": _loads(row["meta_json"], {}),
         }
 
+    @_atomic
     def recent_episodes(
         self,
         *,
@@ -306,6 +383,7 @@ class MemoryStore:
     # Facts (semantic memory)
     # ------------------------------------------------------------------
 
+    @_atomic
     def remember_fact(
         self,
         key: str,
@@ -365,6 +443,7 @@ class MemoryStore:
             (fact_id, key, value),
         )
 
+    @_atomic
     def recall_facts(self, query: str, *, limit: int = 10) -> List[Dict[str, Any]]:
         query = str(query).strip()
         limit = max(0, int(limit))
@@ -415,6 +494,7 @@ class MemoryStore:
             for row in rows
         ]
 
+    @_atomic
     def recent_facts(self, *, limit: int = 20) -> List[Dict[str, Any]]:
         limit = max(0, int(limit))
         if limit == 0:
@@ -438,6 +518,7 @@ class MemoryStore:
     # Self-model
     # ------------------------------------------------------------------
 
+    @_atomic
     def set_self_model(self, key: str, value: Any) -> None:
         key = str(key).strip()
         if not key:
@@ -454,6 +535,7 @@ class MemoryStore:
         )
         self._conn.commit()
 
+    @_atomic
     def get_self_model(self, key: Optional[str] = None, default: Any = None) -> Any:
         if key is not None:
             row = self._conn.execute(
@@ -469,6 +551,7 @@ class MemoryStore:
     # Goals
     # ------------------------------------------------------------------
 
+    @_atomic
     def save_goal(
         self,
         title: str,
@@ -501,6 +584,7 @@ class MemoryStore:
         self._conn.commit()
         return int(cursor.lastrowid)
 
+    @_atomic
     def update_goal_status(self, goal_id: int, status: str) -> bool:
         cursor = self._conn.execute(
             "UPDATE goals SET status = ?, updated_at = ? WHERE id = ?",
@@ -509,6 +593,7 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_atomic
     def update_goal(
         self,
         goal_id: int,
@@ -569,6 +654,7 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_atomic
     def list_goals(self, *, status: Optional[str] = None) -> List[Dict[str, Any]]:
         if status is None:
             rows = self._conn.execute(
@@ -593,6 +679,7 @@ class MemoryStore:
             for row in rows
         ]
 
+    @_atomic
     def get_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
         row = self._conn.execute(
             "SELECT * FROM goals WHERE id = ?", (int(goal_id),)
@@ -633,6 +720,7 @@ class MemoryStore:
             "metadata": _loads(row["meta_json"], {}),
         }
 
+    @_atomic
     def create_approval(
         self,
         *,
@@ -673,12 +761,14 @@ class MemoryStore:
         assert approval is not None
         return approval
 
+    @_atomic
     def get_approval(self, approval_id: str) -> Optional[Dict[str, Any]]:
         row = self._conn.execute(
             "SELECT * FROM approvals WHERE id = ?", (str(approval_id),)
         ).fetchone()
         return None if row is None else self._approval_from_row(row)
 
+    @_atomic
     def list_approvals(
         self,
         *,
@@ -705,6 +795,7 @@ class MemoryStore:
             ).fetchall()
         return [self._approval_from_row(row) for row in rows]
 
+    @_atomic
     def update_approval(
         self,
         approval_id: str,
@@ -750,6 +841,7 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_atomic
     def approve_approval(self, approval_id: str) -> Optional[Dict[str, Any]]:
         """Move a pending approval to ``approved`` exactly once."""
 
@@ -767,6 +859,7 @@ class MemoryStore:
             return None
         return self.get_approval(approval_id)
 
+    @_atomic
     def reject_approval(
         self,
         approval_id: str,
@@ -788,6 +881,7 @@ class MemoryStore:
             return None
         return self.get_approval(approval_id)
 
+    @_atomic
     def consume_approval(self, approval_id: str) -> bool:
         """Atomically consume an approved approval before execution."""
 
@@ -803,6 +897,7 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_atomic
     def count_approvals(self, *, status: Optional[str] = None) -> int:
         if status is None:
             row = self._conn.execute(
@@ -819,6 +914,7 @@ class MemoryStore:
     # Skills
     # ------------------------------------------------------------------
 
+    @_atomic
     def record_skill(
         self,
         name: str,
@@ -868,6 +964,7 @@ class MemoryStore:
         )
         self._conn.commit()
 
+    @_atomic
     def get_skill(self, name: str) -> Optional[Dict[str, Any]]:
         row = self._conn.execute(
             "SELECT * FROM skills WHERE name = ?", (str(name),)
@@ -883,6 +980,7 @@ class MemoryStore:
             "updated_at": row["updated_at"],
         }
 
+    @_atomic
     def list_skills(self, *, limit: int = 20) -> List[Dict[str, Any]]:
         limit = max(0, int(limit))
         if limit == 0:
