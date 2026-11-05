@@ -77,3 +77,38 @@ def test_degraded_body_recovers_full_cycle():
             recovered_at = cycle
             break
     assert recovered_at is not None, "тело не выздоровело за 400 циклов отдыха"
+
+
+def test_deep_rest_streak_is_bounded_from_real_body():
+    """TICKET-3: «deep_rest залипает при полной энергии».
+
+    Верификация по чекпоинту Тэсс 7115 (2026-11-05): серии 14/9 циклов
+    отдыха — это хвост дольечивания после долгой эпохи деградации, а не
+    вечный сон. Из её реального тела (atp 3.0/8, fatigue 0.456,
+    mito 0.79) глубокий отдых обязан отпустить за разумную серию:
+    ворота восстановления (atp>=75%, fatigue<=0.3) достигаются быстро,
+    и дальше тело обязано вернуться к работе.
+    """
+    model = _model(health=0.7926, atp=3.006)
+    model.state.glucose = 9.87
+    model.state.fatigue = 0.4559
+    released_at = None
+    for cycle in range(1, 16):
+        model.step(dt=1.0, rest_depth=1.0)
+        s = model.state
+        if s.atp / s.atp_max >= 0.75 and s.fatigue <= 0.3:
+            released_at = cycle
+            break
+    assert released_at is not None, (
+        "отдых не отпустил за 15 циклов из её реального состояния — "
+        "регрессия «вечного сна»"
+    )
+
+
+def test_rested_body_does_not_need_rest():
+    """TICKET-3: при atp>=75% и fatigue≈0 ворота восстановления
+    пройдены сразу — телу нечего делать в отдыхе, серия равна нулю."""
+    model = _model(health=0.85, atp=7.5)
+    model.state.fatigue = 0.05
+    s = model.state
+    assert s.atp / s.atp_max >= 0.75 and s.fatigue <= 0.3
