@@ -58,6 +58,7 @@ from src.core.dialogue_acts import (
     classify_user_text,
     extract_definition,
     is_noise_input,
+    is_question_text,
 )
 from src.core.dialogue_learning import DialogueLearning
 from src.evolution.self_coding import parse_proposal_decision
@@ -456,7 +457,15 @@ class AgentRunner:
 
         # Если Core задал пользователю прямой вопрос, обычный ответ должен
         # закрыть именно его, а не стать новой темой обучения.
-        if pending is not None:
+        # TICKET-5/6 (наблюдатели 2026-11-05): вопрос человека — не ответ.
+        # «Что тебе сейчас важно?» при открытом вопросе про «обучение»
+        # записывалось как «Записал про "обучение"», а висящий вопрос
+        # закрывался чужими словами. Вопрос пропускаем мимо двери: он
+        # идёт дальше по обычным дверям, вопрос сущности остаётся
+        # открытым. Ответ со встречным вопросом («Спокойно и тепло.
+        # А что тебя занимает?») ответом и остаётся — регрессия в
+        # test_plain_answer_still_closes_pending_question.
+        if pending is not None and not is_question_text(text):
             # «Собеседник-6»: «X — это Y» про другую тему — не ответ на
             # вопрос сущности, а самостоятельное объяснение. Живой день
             # 2026-11-02: «Запомни, пожалуйста: оптика — это…» при вопросе
@@ -514,8 +523,13 @@ class AgentRunner:
 
         # Если Core задал пользователю открытый вопрос, обычный ответ должен
         # закрыть этот вопрос, а не стать новой темой обучения.
+        # Вопрос человека ответом не является (TICKET-5/6, как выше).
         answerer = getattr(self.agent, "answer_open_question", None)
-        if callable(answerer) and self.agent.has_open_questions():
+        if (
+            callable(answerer)
+            and self.agent.has_open_questions()
+            and not is_question_text(text)
+        ):
             definition = extract_definition(text)
             if (
                 definition is not None

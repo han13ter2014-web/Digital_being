@@ -188,6 +188,49 @@ async def test_plain_answer_still_closes_pending_question():
 
 
 @pytest.mark.asyncio
+async def test_question_with_pending_does_not_close_question():
+    """TICKET-5/6 (наблюдатели 2026-11-05): вопрос человека — не ответ.
+
+    Живая сессия: «Что тебе сейчас важно?» при открытом вопросе про
+    «обучение» записывалось как «Записал про "обучение"», и вопрос
+    сущности закрывался чужими словами. Нераспознанный вопрос идёт
+    мимо двери ответа: висящий вопрос остаётся открытым, человек
+    получает честный отклик вместо ложного «Записал про…».
+    """
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Почему небо голубое?"})
+    )
+
+    assert ui.get_pending_question() is not None
+    assert ui.question_history == []
+    texts = _reply_texts(bus)
+    assert not any("Записал про" in t for t in texts)
+    assert any("не понимаю" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_about_self_question_with_pending_gets_honest_reply():
+    """TICKET-4/6: вопрос о сущности при висящем вопросе — честный
+    ответ о себе; висящий вопрос не перебивает разговор."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Чем ты сейчас занята?"})
+    )
+
+    assert ui.get_pending_question() is not None
+    texts = _reply_texts(bus)
+    assert any("Меня зовут" in t for t in texts)
+    assert not any("Записал про" in t for t in texts)
+
+
+@pytest.mark.asyncio
 async def test_unknown_text_gets_honest_reply_not_learning_material():
     """«Собеседник-6»: нераспознанный текст — честный отклик, не материал.
 

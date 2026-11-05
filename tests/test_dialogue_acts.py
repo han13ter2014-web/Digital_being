@@ -18,6 +18,7 @@ from src.core.dialogue_acts import (
     classify_user_text,
     extract_definition,
     is_noise_input,
+    is_question_text,
 )
 
 
@@ -56,6 +57,16 @@ from src.core.dialogue_acts import (
         ("Что ты сейчас изучаешь?", ACT_ASK_ABOUT_SELF),
         ("Что ты изучаешь?", ACT_ASK_ABOUT_SELF),
         ("Что изучаешь?", ACT_ASK_ABOUT_SELF),
+        # TICKET-4 (наблюдатели 2026-11-05): вопросы о текущем состоянии
+        # сущности падали в unknown и проглатывались висящим вопросом
+        ("Чем ты сейчас занята?", ACT_ASK_ABOUT_SELF),
+        ("Что ты сейчас делаешь?", ACT_ASK_ABOUT_SELF),
+        ("Что для тебя сейчас важно?", ACT_ASK_ABOUT_SELF),
+        ("Что тебе сейчас важно?", ACT_ASK_ABOUT_SELF),
+        ("Что тебе важно?", ACT_ASK_ABOUT_SELF),
+        ("О чём ты думаешь?", ACT_ASK_ABOUT_SELF),
+        ("О чем думаешь?", ACT_ASK_ABOUT_SELF),
+        ("Как ты себя чувствуешь?", ACT_ASK_ABOUT_SELF),
         # === тепло ===
         ("Скучаю по тебе.", ACT_SOCIAL),
         ("Спасибо тебе за разговор.", ACT_SOCIAL),
@@ -203,3 +214,32 @@ def test_extract_definition_topic_limit():
     assert extract_definition(f"{long_topic} — это тест") is None
     ok_topic = "т" * 60
     assert extract_definition(f"{ok_topic} — это тест") == (ok_topic, "тест")
+
+
+# ============================================================
+# TICKET-5/6: вопрос целиком — не ответ на висящий вопрос сущности
+# ============================================================
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # чистые вопросы — не ответы
+        ("Что тебе сейчас важно?", True),
+        ("Почему небо голубое?", True),
+        ("А что тебя занимает?", True),
+        ("И когда ты вернёшься?", True),
+        ("Как?", True),
+        ("Что?", True),
+        # ответ со встречным вопросом — остаётся ответом
+        ("Спокойно и тепло. А что тебя самого сейчас занимает?", False),
+        ("Тишина и покой.", False),
+        ("Думаю, что да?", False),
+        # «не знаю?» без вопросительного слова — нечестно глушить
+        ("не знаю?", False),
+        ("", False),
+        (None, False),
+        ("🙂?", False),
+    ],
+)
+def test_is_question_text(text, expected):
+    assert is_question_text(text) is expected
