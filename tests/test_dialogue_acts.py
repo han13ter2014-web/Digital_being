@@ -67,6 +67,9 @@ from src.core.dialogue_acts import (
         ("О чём ты думаешь?", ACT_ASK_ABOUT_SELF),
         ("О чем думаешь?", ACT_ASK_ABOUT_SELF),
         ("Как ты себя чувствуешь?", ACT_ASK_ABOUT_SELF),
+        # верификация 2026-11-06 (план Алисы): каждый шаблон вопроса
+        # распознаётся и получает ответ — не unknown_reply
+        ("Как ты сейчас?", ACT_SOCIAL),
         # === тепло ===
         ("Скучаю по тебе.", ACT_SOCIAL),
         ("Спасибо тебе за разговор.", ACT_SOCIAL),

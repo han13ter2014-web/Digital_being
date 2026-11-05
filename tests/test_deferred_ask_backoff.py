@@ -102,6 +102,32 @@ def test_successful_question_resets_backoff():
     assert ("ask_user", "обучение") not in agent._deferred_intentions
 
 
+def test_recently_explained_refusal_also_defers():
+    """V-1 (верификация 2026-11-06): «не переспрашиваю» гасит намерение.
+
+    Живой прогон: отказ «человек недавно объяснил 'обучение'» не писал
+    backoff — тема выбиралась 214 из 309 циклов, сжигая АТФ тела и
+    загоняя существо обратно в глубокий отдых. Теперь отказ встаёт на
+    ту же паузу, что и «отложен».
+    """
+    interaction = _OpenInteraction()
+    agent = _agent(interaction, cycle=100)
+    agent._recently_explained_by_user = lambda target: True
+
+    result = DigitalBeing._act_ask_user(agent, "обучение")
+
+    assert "не переспрашиваю" in result["text"]
+    assert interaction.asked == []  # вопрос не задавался
+    until, count = agent._deferred_intentions[("ask_user", "обучение")]
+    assert (until, count) == (105, 1)
+
+    # Повторный отказ наращивает паузу — тема не крутится вхолостую.
+    agent.cycle_count = 105
+    DigitalBeing._act_ask_user(agent, "обучение")
+    until, count = agent._deferred_intentions[("ask_user", "обучение")]
+    assert (until, count) == (115, 2)
+
+
 def test_continuation_skips_deferred_topic():
     """Пока backoff жив, continuation не предлагает тему заново."""
     from src.cognition.intention_continuation import continuation_candidate

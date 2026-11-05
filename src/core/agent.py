@@ -3254,6 +3254,27 @@ class DigitalBeing:
     # ПРОВОДКА: действия, которые раньше ничего не делали
     # ============================================================
 
+    def _defer_ask_intention(self, target: str) -> None:
+        """Пауза повторного выбора вопроса по теме (backoff 5..50).
+
+        «Нетерпеливый вопрос» (TICKET-2) и верификация 2026-11-06
+        (V-1): отказ — «отложен» или «не переспрашиваю» — не должен
+        выбираться заново каждый цикл. Без записи здесь намерение
+        крутилось вхолостую: 214 из 309 циклов живого прогона ушли на
+        выбор-отказ ask_user по одной теме, сжигая АТФ тела и загоняя
+        существо обратно в глубокий отдых.
+        """
+        deferrals: Dict[tuple, tuple] = {}
+        saved_deferrals = getattr(self, "_deferred_intentions", None)
+        if isinstance(saved_deferrals, dict):
+            deferrals = saved_deferrals
+        self._deferred_intentions = deferrals
+        key = ("ask_user", target)
+        _, count = deferrals.get(key, (0, 0))
+        count += 1
+        backoff = min(5 * (2 ** (count - 1)), 50)
+        deferrals[key] = (self.cycle_count + backoff, count)
+
     def _act_ask_user(self, target=None) -> Dict:
         """Спросить человека о том, что агенту непонятно.
 
@@ -3282,6 +3303,10 @@ class DigitalBeing:
             return {"text": "Ответ: не о чем спрашивать — всё понятно"}
 
         if self._recently_explained_by_user(target):
+            # V-1 (верификация 2026-11-06): отказ «не переспрашиваю»
+            # тоже гасит намерение — иначе тема выбиралась каждый цикл.
+            # через класс: act() работает и на лёгких тестовых объектах
+            DigitalBeing._defer_ask_intention(self, target)
             return {
                 "text": (
                     f"Ответ: человек недавно объяснил '{target}' — "
@@ -3310,16 +3335,8 @@ class DigitalBeing:
             # должно выбираться заново каждый цикл. Экспоненциальный
             # backoff: 5, 10, 20, 40, максимум 50 циклов тишины — тема
             # жива, но не крутится вхолостую.
-            deferrals: Dict[tuple, tuple] = {}
-            saved_deferrals = getattr(self, "_deferred_intentions", None)
-            if isinstance(saved_deferrals, dict):
-                deferrals = saved_deferrals
-            self._deferred_intentions = deferrals
-            key = ("ask_user", target)
-            _, count = deferrals.get(key, (0, 0))
-            count += 1
-            backoff = min(5 * (2 ** (count - 1)), 50)
-            deferrals[key] = (self.cycle_count + backoff, count)
+            # через класс: act() работает и на лёгких тестовых объектах
+            DigitalBeing._defer_ask_intention(self, target)
             return {
                 "target": target,
                 "text": f"Ответ: вопрос про '{target}' отложен ({reason})",
