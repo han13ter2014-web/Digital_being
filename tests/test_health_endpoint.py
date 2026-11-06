@@ -37,11 +37,11 @@ def _free_port() -> int:
 
 @pytest.fixture
 def dash():
-    """Запускает WebDashboard в отдельном потоке на свободном порту."""
+    """WebDashboard с подключённой заглушкой шины; standalone проверен в К10."""
     if not AIOHTTP_AVAILABLE:
         pytest.skip("aiohttp не установлен")
     port = _free_port()
-    d = WebDashboard(host="127.0.0.1", port=port)
+    d = WebDashboard(host="127.0.0.1", port=port, bus=object())
     d.start(in_thread=True)
     # Даём серверу время подняться
     time.sleep(0.5)

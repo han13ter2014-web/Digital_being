@@ -180,15 +180,17 @@ def test_action_is_always_403_and_state_is_unchanged(dashboard):
     assert state.life_snapshot() == before
 
 
-def test_html_has_no_mutation_controls(dashboard):
+def test_html_exposes_only_narrow_event_based_controls(dashboard):
     _, port, _ = dashboard
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
         body = response.read().decode("utf-8")
     assert body == DASHBOARD_HTML
-    assert "ЭТАП 1 · ТОЛЬКО НАБЛЮДЕНИЕ" in body
+    assert "ЭТАП 2 · СОБЫТИЯ ЯДРА" in body
     assert "fetch('/api/action'" not in body
-    assert "<input" not in body
+    assert "sendCommand('/api/dialogue'" in body
+    assert "sendCommand('/api/control/life/confirm'" in body
     assert "set_goal" not in body
+    assert "think(" not in body and "save_state(" not in body
 
 
 @pytest.mark.asyncio

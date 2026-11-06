@@ -1,16 +1,17 @@
-"""Read-only веб-наблюдатель поверх общих DTO оболочки (К9, этап 1).
+"""Локальный веб-интерфейс поверх общих DTO и существующего EventBus.
 
 Сервер не получает ``DigitalBeing`` и не читает Core. Runtime заранее собирает
-те же снимки, что передаёт Tk, и публикует их в :class:`SharedState`.
-HTTP отвечает только чтением; единственный прежний мутирующий маршрут
-``POST /api/action`` оставлен как явный барьер и всегда возвращает 403.
+те же снимки, что передаёт Tk, и публикует их в :class:`SharedState`. Мутации
+этапа 2 — только публикация тех же событий, что использует Tk; решения остаются
+в AgentRunner/LifeController/LifeGuard. Прежний общий ``POST /api/action``
+оставлен закрытым, чтобы не появился второй произвольный командный путь.
 
 Запуск standalone-предпросмотра без ядра::
 
     python -m src.ui.web_dashboard --host 127.0.0.1 --port 8765
 
-Рабочий экран рядом с Tk создаётся в ``main.py``. Транспорт — aiohttp и SSE;
-FastAPI/Tauri и канал отправки сообщений на этом этапе отсутствуют.
+Standalone честно показывает отсутствие ядра и не принимает мутации. Рабочий
+экран рядом с Tk создаётся в ``main.py``. Транспорт — aiohttp и SSE.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ except ImportError:  # необязательная зависимость: Tk �
 
 logger = logging.getLogger(__name__)
 STATE_KEY: web.AppKey = web.AppKey("state", Any) if AIOHTTP_AVAILABLE else None
+BUS_KEY: web.AppKey = web.AppKey("bus", Any) if AIOHTTP_AVAILABLE else None
 
 DIALOGUE_EVENTS = (
     "agent_question",
@@ -42,7 +44,14 @@ DIALOGUE_EVENTS = (
     "agent_web_result",
     "user_message",
 )
-READ_ONLY_MESSAGE = "этап 1 read-only: наблюдение без управления и отправки сообщений"
+CONTROL_EVENTS = ("life_prompt", "life_result")
+READ_ONLY_MESSAGE = "устаревший общий маршрут закрыт: используйте узкие команды этапа 2"
+MAX_JSON_BYTES = 16_384
+MAX_DIALOGUE_CHARS = 8_000
+MAX_REASON_CHARS = 500
+MAX_PHRASE_CHARS = 500
+ACCESS_KEYS = frozenset({"network", "delamain", "effector", "presence"})
+SPEED_MODES = frozenset({"live", "fast", "max"})
 
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>
@@ -76,12 +85,13 @@ pre{margin:0;max-height:540px;overflow:auto;white-space:pre-wrap;overflow-wrap:a
 #graph{width:100%;height:600px;background:#0e141d;border-radius:9px}.graph-label{fill:#dce7f5;font-size:11px}.graph-edge{stroke:#4d647f;stroke-opacity:.5}
 #dialogue-feed{max-height:680px;overflow:auto}.dialogue-agent{border-left:3px solid var(--green)}.dialogue-user{border-left:3px solid var(--blue)}.dialogue-thought{border-left:3px solid var(--muted)}
 .notice{color:var(--muted);margin:0 0 14px}.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px}
-@media(max-width:850px){.span-4,.span-6,.span-8{grid-column:span 12}main{padding:14px}header{padding:14px}.big{font-size:23px}#graph{height:480px}}
+[hidden]{display:none!important}.controls{display:flex;gap:8px;flex-wrap:wrap}.control-button,.control-select,.control-input,textarea{font:inherit;color:var(--text);background:var(--raised);border:1px solid var(--border);border-radius:8px;min-height:44px;padding:10px 13px}.control-button{cursor:pointer;transition:background-color .16s ease-out,border-color .16s ease-out}.control-button:hover:not(:disabled){background:#223146;border-color:#49617f}.control-button:active:not(:disabled){transform:translateY(1px)}.control-button:disabled,.control-select:disabled,.control-input:disabled,textarea:disabled{opacity:.45;cursor:not-allowed}.control-button:focus-visible,.control-select:focus-visible,.control-input:focus-visible,textarea:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.danger{border-color:#7e3d48;color:#ffafb5}.control-stack{display:grid;gap:12px}.control-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.control-input{min-width:0;flex:1}.phrase{font:600 16px/1.5 Consolas,monospace;color:var(--amber);overflow-wrap:anywhere}.feedback{min-height:24px;margin:10px 0 0;color:var(--muted);overflow-wrap:anywhere}.feedback.error{color:var(--danger)}.life-panel{margin-top:16px;padding:14px;border:1px solid #665535;border-radius:9px;background:#1d1c18}textarea{width:100%;min-height:96px;resize:vertical}.access-action{min-width:104px}.connection-off{color:var(--amber)}
+@media(max-width:850px){.span-4,.span-6,.span-8{grid-column:span 12}main{padding:14px}header{padding:14px}.big{font-size:23px}#graph{height:480px}.control-button{flex:1 1 130px}.access-action{flex:0 0 104px}}
 </style>
 </head>
 <body>
-<header><div class="brand"><h1 id="agent-name">Digital Being</h1><span class="cycle" id="cycle">цикл —</span><span class="badge">ЭТАП 1 · ТОЛЬКО НАБЛЮДЕНИЕ</span></div>
-<nav id="nav"><button data-page="now" class="active">Сейчас</button><button data-page="diary">Дневник</button><button data-page="activities">Занятия</button><button data-page="graph">Карта</button><button data-page="access">Доступы</button><button data-page="dialogue">Диалог</button></nav></header>
+<header><div class="brand"><h1 id="agent-name">Digital Being</h1><span class="cycle" id="cycle">цикл —</span><span class="badge">ЭТАП 2 · СОБЫТИЯ ЯДРА</span></div>
+<nav id="nav"><button data-page="now" class="active">Сейчас</button><button data-page="control">Управление</button><button data-page="diary">Дневник</button><button data-page="activities">Занятия</button><button data-page="graph">Карта</button><button data-page="access">Доступы</button><button data-page="dialogue">Диалог</button></nav></header>
 <main>
 <section id="page-now" class="page active"><div class="grid">
 <div class="card span-4"><h2>Состояние</h2><div class="big" id="life-state">—</div><div class="rows" id="life-rows"></div></div>
@@ -90,33 +100,45 @@ pre{margin:0;max-height:540px;overflow:auto;white-space:pre-wrap;overflow-wrap:a
 <div class="card span-6"><h2>Сейчас</h2><div id="now-activity"></div><h3>Объяснение выбора</h3><pre id="motivation">—</pre></div>
 <div class="card span-6"><h2>Намерения</h2><div id="intentions" class="list"></div></div>
 </div></section>
+<section id="page-control" class="page"><div class="grid">
+<div class="card span-6"><h2>Ритм и состояние</h2><p class="notice" id="core-connection">Проверяю соединение с ядром…</p><div class="control-stack"><div class="controls"><button id="pause-button" class="control-button needs-core" disabled>Пауза</button><button id="resume-button" class="control-button needs-core" disabled>Возобновить</button><button id="save-button" class="control-button needs-core" disabled>Сохранить</button></div><form id="speed-form" class="control-line"><label for="speed-mode">Темп жизни</label><select id="speed-mode" class="control-select needs-core" disabled><option value="live">Жизнь · 5 с</option><option value="fast">Ускорение · 0,5 с</option><option value="max">Лаборатория</option></select><button class="control-button needs-core" type="submit" disabled>Применить</button></form><div class="rows" id="control-facts"></div></div><p class="feedback" id="command-feedback" role="status"></p></div>
+<div class="card span-6"><h2>Сон и уход · решения LifeGuard</h2><p class="notice">Создание запроса ничего не подтверждает. Точную фразу нужно ввести отдельно после паузы, заданной ядром.</p><div class="controls"><button id="dream-button" class="control-button needs-core" disabled>Запросить сон</button><button id="wake-button" class="control-button needs-core" disabled>Пробудить</button><button id="terminate-button" class="control-button danger needs-core" disabled>Запросить уход</button></div><div id="life-panel" class="life-panel" hidden><h3 id="life-title">Требуется подтверждение</h3><p id="life-description"></p><p>Запрос: <span id="life-request-id" class="muted"></span></p><p>Точная фраза: <span id="life-phrase" class="phrase"></span></p><form id="life-confirm-form" class="control-stack"><label for="life-confirm-input">Введите фразу вручную</label><div class="control-line"><input id="life-confirm-input" class="control-input" autocomplete="off" required maxlength="500"><button class="control-button" type="submit">Подтвердить</button></div></form><button id="life-cancel-button" class="control-button">Отменить запрос</button></div><p class="feedback" id="life-result" role="status"></p></div>
+</div></section>
 <section id="page-diary" class="page"><div class="card"><h2>Дневник · новые записи первыми</h2><p class="notice" id="diary-cache"></p><div id="diary-list" class="list"></div><div class="pager"><button id="diary-prev">← Новее</button><span id="diary-position" class="muted"></span><button id="diary-next">Старее →</button></div></div></section>
 <section id="page-activities" class="page"><div class="grid" id="activity-cards"></div></section>
 <section id="page-graph" class="page"><div class="card"><h2>Карта жизни</h2><p class="notice" id="graph-note"></p><svg id="graph" role="img" aria-label="Карта связей жизни"></svg></div></section>
-<section id="page-access" class="page"><div class="grid"><div class="card span-6"><h2>Разрешения · фактическое состояние</h2><div id="access-list" class="rows"></div><p class="notice">В браузере переключателей нет: решения о доступах остаются в Tk.</p></div><div class="card span-6"><h2>Effector</h2><div id="effector-list" class="rows"></div></div></div></section>
-<section id="page-dialogue" class="page"><div class="card"><h2><span class="status-dot"></span>Диалог · живой поток</h2><p class="notice">Отправка сообщений отключена. При reconnect поток продолжается с последнего принятого sequence.</p><div id="dialogue-feed" class="list"></div></div></section>
+<section id="page-access" class="page"><div class="grid"><div class="card span-6"><h2>Разрешения · фактическое состояние</h2><div id="access-list" class="rows"></div><p class="notice">Кнопка отправляет существующую команду access. Индикация изменится только после фактического снимка.</p></div><div class="card span-6"><h2>Effector</h2><div id="effector-list" class="rows"></div></div></div></section>
+<section id="page-dialogue" class="page"><div class="card"><h2><span class="status-dot"></span>Диалог · живой поток</h2><p class="notice">Сообщение уходит через USER_MESSAGE. Лента пополняется только событием шины; reconnect продолжается с последнего sequence.</p><form id="dialogue-form" class="control-stack"><label for="dialogue-input">Сообщение сущности</label><textarea id="dialogue-input" class="needs-core" maxlength="8000" required disabled placeholder="Ядро не подключено"></textarea><div class="control-line"><button id="dialogue-send" class="control-button needs-core" type="submit" disabled>Отправить через EventBus</button><span id="dialogue-feedback" class="feedback" role="status"></span></div></form><div id="dialogue-feed" class="list"></div></div></section>
 </main>
 <script>
 'use strict';
-const $=id=>document.getElementById(id);let diaryOffset=0,diaryLimit=20,lastSequence=0,eventSource=null;
+const $=id=>document.getElementById(id);let diaryOffset=0,diaryLimit=20,lastSequence=0,eventSource=null,latestControl=null,renderedRequestId=null;
 const value=v=>v===null||v===undefined||v===''?'—':String(v);const number=v=>Number.isFinite(Number(v))?Number(v).toFixed(2):'—';
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el}
 function rows(target,items){const el=$(target);el.replaceChildren();for(const [k,v] of items){const r=node('div','','row');r.append(node('span',k),node('span',value(v)));el.append(r)}if(!items.length)el.append(node('div','Нет данных','empty'))}
 async function getJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(`${r.status} ${url}`);return r.json()}
+async function postJSON(url,body={}){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.message||`${r.status}`);return data}
+function feedback(id,text,error=false){const el=$(id);el.textContent=text||'';el.classList.toggle('error',error)}
+async function sendCommand(url,body={},target='command-feedback'){try{const result=await postJSON(url,body);feedback(target,result.message);setTimeout(()=>{refreshControl();refreshNow()},250);return result}catch(e){feedback(target,e.message,true);return null}}
+function renderAccess(access){const box=$('access-list');box.replaceChildren();for(const key of ['network','delamain','effector','presence']){const item=access[key];if(!item)continue;const row=node('div','','row'),text=node('span',`${item.label||key}: ${item.enabled?'включено':'выключено'}`),button=node('button',item.enabled?'Выключить':'Включить','control-button access-action');button.type='button';button.disabled=!latestControl?.bus_connected;button.setAttribute('aria-label',`${item.enabled?'Выключить':'Включить'} ${item.label||key}`);button.onclick=()=>sendCommand('/api/access',{key,state:item.enabled?'off':'on'});row.append(text,button);box.append(row)}if(!box.children.length)box.append(node('div',latestControl?.bus_connected?'Нет данных':'Ядро не подключено','empty'))}
 async function refreshNow(){try{const [status,life]=await Promise.all([getJSON('/api/status'),getJSON('/api/life')]);const p=status.panel||{};$('agent-name').textContent=life.name||p.name||'Digital Being';$('cycle').textContent=`цикл ${life.life?.cycle??p.cycle??'—'}`;$('life-state').textContent=life.life?.state_label||'—';rows('life-rows',[['Энергия',`${number(life.life?.energy)} / ${number(p.max_energy)}`],['Режим',life.life?.speed_mode],['Пауза',life.life?.paused?'да':'нет'],['Семя',life.life?.seed_folder],['RSS, МБ',number(p.rss_mb)]]);
 const emotions=life.emotions||{},levels=emotions.levels||{};$('emotion-dominant').textContent=emotions.dominant?.label||'спокойный фон';const box=$('emotion-levels');box.replaceChildren();for(const [name,raw] of Object.entries(levels)){const label=node('div',`${name} · ${number(raw)}`,'muted');const meter=node('div','','meter'),bar=node('i');bar.style.width=`${Math.max(0,Math.min(1,Number(raw)||0))*100}%`;meter.append(bar);box.append(label,meter)}if(!Object.keys(levels).length)box.append(node('div','Нет данных','empty'));
 const body=life.body||{};$('fatigue').textContent=body.fatigue_level||'—';rows('body-rows',[['Усталость',number(body.fatigue)],['АТФ',number(body.atp)],['АТФ, доля',number(body.atp_ratio)],['Глюкоза',number(body.glucose)],['Митохондрии',number(body.mitochondrial_health)],['Нужен отдых',body.needs_rest?'да':'нет']]);const activity=life.now?.activity;$('now-activity').replaceChildren(node('h3',activity?`${value(activity.action)} · ${value(activity.target)}`:'Свободный цикл'),node('div',activity?value(activity.reason||activity.source):'Нет активного намерения','muted'));$('motivation').textContent=JSON.stringify(life.motivation||{},null,2);const intents=$('intentions');intents.replaceChildren();for(const item of (life.intentions?.recent||[]).slice(-8).reverse()){const e=node('div','','entry');e.append(node('div',`${value(item.action)} · ${value(item.target)}`),node('div',`${value(item.status)} · цикл ${value(item.cycle)}`,'meta'));intents.append(e)}if(!intents.children.length)intents.append(node('div','Пока нет записанных намерений','empty'));
-rows('access-list',Object.entries(life.access||{}).filter(([k])=>k!=='workspace').map(([,v])=>[v.label,v.enabled?'включено':'выключено']));const effectorRows=[...Object.entries(life.effector?.counts||{}),['Последняя ошибка',life.effector?.last_error]];if(life.access?.workspace)effectorRows.unshift(['Рабочая область',life.access.workspace.path]);rows('effector-list',effectorRows);renderActivities(life.activities||{});}catch(e){console.warn(e)}}
-function renderAccessNote(life){if(!life.access?.workspace)return}
+renderAccess(life.access||{});const effectorRows=[...Object.entries(life.effector?.counts||{}),['Последняя ошибка',life.effector?.last_error]];if(life.access?.workspace)effectorRows.unshift(['Рабочая область',life.access.workspace.path]);rows('effector-list',effectorRows);renderActivities(life.activities||{});}catch(e){console.warn(e)}}
 function renderActivities(a){const box=$('activity-cards');box.replaceChildren();for(const [key,title] of [['creative','Тексты'],['art','Рисунки'],['music','Музыка'],['game','Игра'],['guess_game','Угадывание']]){const card=node('div','','card span-6');card.append(node('h2',title));const item=a[key];if(item&&typeof item==='object'&&!Array.isArray(item)){const count=item.count??((key==='game'||key==='guess_game')?'активна':'—');card.append(node('div',String(count),'big'));const pre=node('pre',JSON.stringify(item,null,2));card.append(pre)}else card.append(node('div',value(item),'muted'));box.append(card)}if(!box.children.length)box.append(node('div','Нет данных','empty'))}
+async function refreshControl(){try{const c=await getJSON('/api/control');latestControl=c;document.querySelectorAll('.needs-core').forEach(el=>{el.disabled=!c.bus_connected});$('core-connection').textContent=c.bus_connected?'Ядро подключено. Команды идут через EventBus; ответ здесь означает только приём события.':'Ядро не подключено. Это standalone-превью: команды отключены.';$('core-connection').classList.toggle('connection-off',!c.bus_connected);$('dialogue-input').placeholder=c.bus_connected?'Напишите сообщение…':'Ядро не подключено';$('pause-button').disabled=!c.bus_connected||c.paused!==false;$('resume-button').disabled=!c.bus_connected||c.paused!==true;$('dream-button').disabled=!c.bus_connected||c.life_state!=='alive';$('terminate-button').disabled=!c.bus_connected||c.life_state!=='alive';$('wake-button').disabled=!c.bus_connected||c.life_state!=='dormant';if(c.speed_mode&&document.activeElement!==$('speed-mode'))$('speed-mode').value=c.speed_mode;const save=c.last_save_at?new Date(c.last_save_at*1000).toLocaleTimeString():'—';rows('control-facts',[['Фактическая пауза',c.paused===null||c.paused===undefined?'—':c.paused?'да':'нет'],['Фактический темп',c.speed_mode],['Состояние жизни',c.life_state],['Последнее сохранение',c.last_save_ok===null||c.last_save_ok===undefined?'ещё не было':`${save} · ${c.last_save_ok?'успешно':'ошибка'}`]]);const prompt=c.life_prompt;$('life-panel').hidden=!prompt;if(prompt){if(renderedRequestId!==prompt.request_id){$('life-confirm-input').value='';renderedRequestId=prompt.request_id}$('life-title').textContent=prompt.kind==='terminate'?'Подтверждение необратимого ухода':'Подтверждение сна';$('life-description').textContent=prompt.description||'Ядро ожидает явное подтверждение.';$('life-request-id').textContent=prompt.request_id;$('life-phrase').textContent=prompt.phrase||'—'}else renderedRequestId=null;const result=c.life_result;$('life-result').textContent=result?`${result.ok?'Результат: успешно':'Результат: отклонено'} · ${result.message||''}`:'';$('life-result').classList.toggle('error',!!result&&!result.ok);renderAccess(c.access||{})}catch(e){feedback('command-feedback',e.message,true)}}
 async function refreshDiary(){try{const d=await getJSON(`/api/diary?offset=${diaryOffset}&limit=${diaryLimit}`),list=$('diary-list');list.replaceChildren();for(const item of d.episodes){const e=node('div','','entry');e.append(node('time',`цикл ${value(item.ts)} · ${value(item.action)} · ${item.ok?'завершено':'не завершено'}`));const args=item.args?.target?` · ${item.args.target}`:'';e.append(node('p',`${value(item.task)}${args}`));if(item.error)e.append(node('div',String(item.error),'warn'));list.append(e)}if(!d.episodes.length)list.append(node('div','Записей в этом окне нет','empty'));$('diary-cache').textContent=`В read-only кэше: ${d.stored} из максимум ${d.cache_limit}. Более старые записи могут существовать вне кэша.`;$('diary-position').textContent=`${d.returned?d.offset+1:0}–${d.offset+d.returned} / ${d.stored}`;$('diary-prev').disabled=d.offset===0;$('diary-next').disabled=!d.has_more}catch(e){console.warn(e)}}
 async function refreshGraph(){try{const g=await getJSON('/api/graph'),svg=$('graph');svg.replaceChildren();const nodes=g.nodes||[],edges=g.edges||[],w=1100,h=600,cx=w/2,cy=h/2,r=Math.min(w,h)*.39,positions={};svg.setAttribute('viewBox',`0 0 ${w} ${h}`);nodes.forEach((n,i)=>{const a=(Math.PI*2*i/Math.max(1,nodes.length))-Math.PI/2;positions[n.id]=[cx+r*Math.cos(a),cy+r*Math.sin(a)]});const ns='http://www.w3.org/2000/svg';for(const e of edges){const p=positions[e.source],q=positions[e.target];if(!p||!q)continue;const line=document.createElementNS(ns,'line');line.setAttribute('x1',p[0]);line.setAttribute('y1',p[1]);line.setAttribute('x2',q[0]);line.setAttribute('y2',q[1]);line.setAttribute('class','graph-edge');svg.append(line)}nodes.forEach(n=>{const [x,y]=positions[n.id],group=document.createElementNS(ns,'g'),circle=document.createElementNS(ns,'circle'),label=document.createElementNS(ns,'text');circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',String(5+10*(n.weight||0)));circle.setAttribute('fill',n.kind==='concept'?'#69a9ff':n.kind==='intention'?'#63d6a4':'#e8bd68');label.setAttribute('x',x+12);label.setAttribute('y',y+4);label.setAttribute('class','graph-label');label.textContent=String(n.label).slice(0,28);group.append(circle,label);svg.append(group)});$('graph-note').textContent=`Узлов: ${nodes.length}; связей: ${edges.length}; скрыто сверх лимита: ${g.omitted||0}`}catch(e){console.warn(e)}}
-function addDialogue(item){if(!item||item.sequence<=lastSequence)return;lastSequence=Math.max(lastSequence,item.sequence);const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${item.kind}`),node('p',item.text||JSON.stringify(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
+function addDialogue(item){if(!item||item.sequence<=lastSequence)return;lastSequence=Math.max(lastSequence,item.sequence);if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${item.kind}`),node('p',item.text||JSON.stringify(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
 async function startDialogue(){try{const d=await getJSON('/api/dialogue?limit=50');for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
 function connectDialogue(){if(eventSource)eventSource.close();eventSource=new EventSource(`/stream/dialogue?after=${lastSequence}`);eventSource.onmessage=e=>{try{addDialogue(JSON.parse(e.data))}catch(err){console.warn(err)}};eventSource.onerror=()=>{/* EventSource reconnects with Last-Event-ID; sequence also deduplicates. */}}
-$('nav').addEventListener('click',e=>{const button=e.target.closest('button[data-page]');if(!button)return;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===`page-${button.dataset.page}`));if(button.dataset.page==='diary')refreshDiary();if(button.dataset.page==='graph')refreshGraph()});
+$('nav').addEventListener('click',e=>{const button=e.target.closest('button[data-page]');if(!button)return;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===`page-${button.dataset.page}`));if(button.dataset.page==='diary')refreshDiary();if(button.dataset.page==='graph')refreshGraph();if(button.dataset.page==='control')refreshControl()});
 $('diary-prev').onclick=()=>{diaryOffset=Math.max(0,diaryOffset-diaryLimit);refreshDiary()};$('diary-next').onclick=()=>{diaryOffset+=diaryLimit;refreshDiary()};
-refreshNow();refreshDiary();refreshGraph();startDialogue();setInterval(refreshNow,3000);setInterval(refreshGraph,5000);
+$('pause-button').onclick=()=>sendCommand('/api/control/pause');$('resume-button').onclick=()=>sendCommand('/api/control/resume');$('save-button').onclick=()=>sendCommand('/api/control/save');$('dream-button').onclick=()=>sendCommand('/api/control/life/request',{kind:'dream',reason:'запрос из окна'},'life-result');$('terminate-button').onclick=()=>sendCommand('/api/control/life/request',{kind:'terminate',reason:'запрос из окна'},'life-result');$('wake-button').onclick=()=>sendCommand('/api/control/life/wake',{},'life-result');
+$('speed-form').onsubmit=e=>{e.preventDefault();sendCommand('/api/control/speed',{mode:$('speed-mode').value})};
+$('dialogue-form').onsubmit=async e=>{e.preventDefault();const input=$('dialogue-input'),text=input.value.trim();if(!text){feedback('dialogue-feedback','Сообщение не должно быть пустым',true);return}const result=await sendCommand('/api/dialogue',{text},'dialogue-feedback');if(result){input.value='';input.focus()}};
+$('life-confirm-form').onsubmit=e=>{e.preventDefault();const prompt=latestControl?.life_prompt;if(!prompt){feedback('life-result','Активного запроса ядра нет',true);return}sendCommand('/api/control/life/confirm',{request_id:prompt.request_id,phrase:$('life-confirm-input').value},'life-result')};$('life-cancel-button').onclick=()=>{const prompt=latestControl?.life_prompt;if(prompt)sendCommand('/api/control/life/cancel',{request_id:prompt.request_id},'life-result')};
+refreshNow();refreshControl();refreshDiary();refreshGraph();startDialogue();setInterval(refreshNow,3000);setInterval(refreshControl,1000);setInterval(refreshGraph,5000);
 </script></body></html>"""
 
 
@@ -135,6 +157,8 @@ class SharedState:
         self._diary: Dict[str, Any] = {"episodes": [], "count": 0,
                                        "cache_limit": max_diary}
         self._subsystem_status: Dict[str, Any] = {}
+        self._life_prompt: Optional[Dict[str, Any]] = None
+        self._life_result: Optional[Dict[str, Any]] = None
         self._last_update_ts = 0.0
         self._sequence = 0
         self._events: Deque[Dict[str, Any]] = deque(maxlen=max_thoughts)
@@ -182,7 +206,7 @@ class SharedState:
     def push_event(self, name: str, data: Any, *, source: str = "agent",
                    timestamp: Optional[float] = None,
                    cycle: Optional[int] = None) -> None:
-        """Добавить одно событие диалога с монотонным SSE sequence."""
+        """Добавить событие с монотонным SSE sequence и отразить life-протокол."""
         payload = deepcopy(data) if isinstance(data, dict) else {"text": str(data or "")}
         ts = float(timestamp or time.time())
         kind = {
@@ -192,7 +216,16 @@ class SharedState:
         }.get(name, name)
         text = (payload.get("content") or payload.get("text")
                 or payload.get("question") or payload.get("title")
-                or payload.get("extract") or "")
+                or payload.get("extract") or payload.get("description")
+                or payload.get("message") or "")
+        with self._lock:
+            if name == "life_prompt":
+                self._life_prompt = deepcopy(payload)
+                self._life_result = None
+            elif name == "life_result":
+                self._life_result = deepcopy(payload)
+                if payload.get("ok") is True:
+                    self._life_prompt = None
         if cycle is None:
             try:
                 cycle = int(payload["cycle"]) if payload.get("cycle") is not None else None
@@ -313,6 +346,28 @@ class SharedState:
         with self._lock:
             return deepcopy(self._life.get(name, {}))
 
+    def control_snapshot(self, *, bus_connected: bool) -> Dict[str, Any]:
+        """Только наблюдаемые DTO: никакого optimistic UI после команд."""
+        with self._lock:
+            status = deepcopy(self._status)
+            return {
+                "bus_connected": bool(bus_connected),
+                "paused": status.get("paused"),
+                "speed_mode": status.get("speed_mode"),
+                "available_speeds": sorted(SPEED_MODES),
+                "life_state": status.get("life_state", "unknown"),
+                "pending_life_request": deepcopy(status.get("pending_life_request")),
+                "life_prompt": deepcopy(self._life_prompt),
+                "life_result": deepcopy(self._life_result),
+                "last_save_ok": status.get("last_save_ok"),
+                "last_save_at": status.get("last_save_at"),
+                "access": deepcopy(self._life.get("access", {})),
+            }
+
+    def current_life_prompt(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return deepcopy(self._life_prompt)
+
     def diary_page(self, offset: int = 0, limit: int = 20) -> Dict[str, Any]:
         offset = max(0, int(offset))
         limit = max(1, min(100, int(limit)))
@@ -393,17 +448,171 @@ async def handle_dialogue(request: Any) -> Any:
     return _json_response(state.dialogue_history(after, limit))
 
 
+class CommandError(ValueError):
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+async def _read_json_object(request: Any) -> Dict[str, Any]:
+    if request.content_type != "application/json":
+        raise CommandError("ожидается application/json", status=415)
+    if request.content_length is not None and request.content_length > MAX_JSON_BYTES:
+        raise CommandError("слишком большой запрос", status=413)
+    raw = await request.content.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise CommandError("слишком большой запрос", status=413)
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CommandError("некорректный JSON") from exc
+    if not isinstance(data, dict):
+        raise CommandError("тело запроса должно быть JSON-объектом")
+    return data
+
+
+def _publish_event(request: Any, name: str, data: Dict[str, Any]) -> Any:
+    """Единственная мутация веба: опубликовать существующее событие Tk."""
+    bus = request.app[BUS_KEY]
+    if bus is None:
+        return _json_response({
+            "status": "unavailable", "message": "ядро не подключено; команда не отправлена",
+        }, status=503)
+    accepted = bus.publish_sync(name, data, source="web")
+    if not accepted:
+        return _json_response({
+            "status": "unavailable", "message": "очередь событий недоступна; команда не принята",
+        }, status=503)
+    return _json_response({
+        "status": "accepted", "event": name,
+        "message": "событие принято; результат появится в следующем снимке",
+    }, status=202)
+
+
+async def handle_dialogue_send(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        text = str(data.get("text", "")).strip()
+        if not text:
+            raise CommandError("сообщение не должно быть пустым")
+        if len(text) > MAX_DIALOGUE_CHARS:
+            raise CommandError(f"сообщение длиннее {MAX_DIALOGUE_CHARS} символов")
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.USER_MESSAGE, {"text": text})
+
+
+async def handle_control(request: Any) -> Any:
+    return _json_response(request.app[STATE_KEY].control_snapshot(
+        bus_connected=request.app[BUS_KEY] is not None,
+    ))
+
+
+async def handle_pause(request: Any) -> Any:
+    from src.core.event_bus import Events
+    return _publish_event(request, Events.PAUSE_REQUESTED, {})
+
+
+async def handle_resume(request: Any) -> Any:
+    from src.core.event_bus import Events
+    return _publish_event(request, Events.RESUME_REQUESTED, {})
+
+
+async def handle_save(request: Any) -> Any:
+    from src.core.event_bus import Events
+    return _publish_event(request, Events.SAVE_REQUESTED, {})
+
+
+async def handle_speed(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        mode = str(data.get("mode", "")).strip().lower()
+        if mode not in SPEED_MODES:
+            raise CommandError("темп должен быть live, fast или max")
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.SPEED_CHANGED, {"mode": mode})
+
+
+async def handle_life_request(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        kind = str(data.get("kind", "dream")).strip().lower()
+        reason = str(data.get("reason", "") or "запрос из окна").strip()
+        if kind not in {"dream", "terminate"}:
+            raise CommandError("kind должен быть dream или terminate")
+        if not reason or len(reason) > MAX_REASON_CHARS:
+            raise CommandError("причина пуста или слишком длинна")
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.LIFE_REQUEST, {"kind": kind, "reason": reason})
+
+
+async def handle_life_confirm(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        request_id = str(data.get("request_id", "")).strip()
+        phrase = str(data.get("phrase", "")).strip()
+        if not request_id or not phrase or len(phrase) > MAX_PHRASE_CHARS:
+            raise CommandError("нужны request_id и непустая фраза допустимой длины")
+        prompt = request.app[STATE_KEY].current_life_prompt()
+        if not prompt or str(prompt.get("request_id", "")) != request_id:
+            raise CommandError("сначала дождитесь подтверждающего запроса ядра", status=409)
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.LIFE_CONFIRM, {
+        "request_id": request_id, "phrase": phrase,
+    })
+
+
+async def handle_life_cancel(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        request_id = str(data.get("request_id", "")).strip()
+        prompt = request.app[STATE_KEY].current_life_prompt()
+        if not request_id or not prompt or str(prompt.get("request_id", "")) != request_id:
+            raise CommandError("активный запрос с таким request_id не найден", status=409)
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.LIFE_CANCEL, {"request_id": request_id})
+
+
+async def handle_life_wake(request: Any) -> Any:
+    from src.core.event_bus import Events
+    return _publish_event(request, Events.LIFE_WAKE, {})
+
+
+async def handle_access(request: Any) -> Any:
+    from src.core.event_bus import Events
+    try:
+        data = await _read_json_object(request)
+        key = str(data.get("key", "")).strip().lower()
+        state = str(data.get("state", "")).strip().lower()
+        if key not in ACCESS_KEYS or state not in {"on", "off"}:
+            raise CommandError("нужны известный доступ и состояние on/off")
+    except CommandError as exc:
+        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+    return _publish_event(request, Events.USER_COMMAND, {"command": f"access {key} {state}"})
+
+
 async def handle_health(request: Any) -> Any:
     snapshot = request.app[STATE_KEY].snapshot()
     now = time.time()
     updated = snapshot.get("last_update_ts", 0)
-    responsive = bool(updated and now - updated < 60)
+    bus_connected = request.app[BUS_KEY] is not None
+    responsive = bool(bus_connected and updated and now - updated < 60)
     age = now - updated if updated else None
     if request.query.get("check", "live").lower() == "ready":
         if not responsive:
+            reason = "ядро не подключено" if not bus_connected else "no agent update in 60+ seconds"
             return _json_response({"status": "not_ready", "agent_responsive": False,
                                    "last_update_age_sec": age,
-                                   "reason": "no agent update in 60+ seconds"}, status=503)
+                                   "reason": reason}, status=503)
         return _json_response({"status": "ready", "agent_responsive": True,
                                "last_update_age_sec": round(age, 2)})
     return _json_response({"status": "ok", "agent_responsive": responsive,
@@ -508,19 +717,20 @@ async def _write_sse(response: Any, item: Dict[str, Any]) -> None:
 
 
 class WebDashboard:
-    """aiohttp-сервер наблюдения; в конструктор передаются только DTO-state и адрес."""
+    """aiohttp-сервер DTO и узких EventBus-команд; Core здесь недоступен."""
 
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8765
 
     def __init__(self, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
-                 state: Optional[SharedState] = None) -> None:
+                 state: Optional[SharedState] = None, bus: Optional[Any] = None) -> None:
         if not AIOHTTP_AVAILABLE:
             raise RuntimeError("aiohttp не установлен; веб отключён, Tk может работать")
         if host not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("этап 1 разрешает только localhost")
+            raise ValueError("веб разрешает только localhost")
         self.host, self.port = host, port
         self.state = state or SharedState()
+        self.bus = bus
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.BaseSite] = None
         self._thread: Optional[threading.Thread] = None
@@ -582,6 +792,7 @@ class WebDashboard:
     def _install_app(self, loop: asyncio.AbstractEventLoop) -> None:
         app = web.Application()
         app[STATE_KEY] = self.state
+        app[BUS_KEY] = self.bus
         app.router.add_get("/", handle_index)
         app.router.add_get("/health", handle_health)
         app.router.add_get("/metrics", handle_metrics)
@@ -589,6 +800,17 @@ class WebDashboard:
         app.router.add_get("/api/life", handle_life)
         app.router.add_get("/api/diary", handle_diary)
         app.router.add_get("/api/dialogue", handle_dialogue)
+        app.router.add_post("/api/dialogue", handle_dialogue_send)
+        app.router.add_get("/api/control", handle_control)
+        app.router.add_post("/api/control/pause", handle_pause)
+        app.router.add_post("/api/control/resume", handle_resume)
+        app.router.add_post("/api/control/speed", handle_speed)
+        app.router.add_post("/api/control/save", handle_save)
+        app.router.add_post("/api/control/life/request", handle_life_request)
+        app.router.add_post("/api/control/life/confirm", handle_life_confirm)
+        app.router.add_post("/api/control/life/cancel", handle_life_cancel)
+        app.router.add_post("/api/control/life/wake", handle_life_wake)
+        app.router.add_post("/api/access", handle_access)
         app.router.add_get("/api/subsystems", handle_subsystems)
         app.router.add_get("/api/thoughts", handle_thoughts_history)
         app.router.add_get("/api/graph", handle_life_section)
@@ -601,7 +823,7 @@ class WebDashboard:
         loop.run_until_complete(self._runner.setup())
         self._site = web.TCPSite(self._runner, host=self.host, port=self.port)
         loop.run_until_complete(self._site.start())
-        logger.info("Read-only веб: http://%s:%s/", self.host, self.port)
+        logger.info("Веб-интерфейс: http://%s:%s/", self.host, self.port)
 
     async def _shutdown_async(self) -> None:
         if self._site is not None:
