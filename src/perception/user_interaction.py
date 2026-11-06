@@ -61,6 +61,10 @@ def _is_meta_topic_context(context: str) -> bool:
 class UserInteraction:
     """Обрабатывает взаимодействие между пользователем и агентом."""
 
+    # Кольцевой след исходящих публикаций в чекпоинте. Это не очередь UI:
+    # восстановленная история не показывается повторно после рестарта.
+    OUTGOING_TRACE_MAX = 100
+
     # Стандартные приложения, в которых не нужно беспокоить
     DEFAULT_QUIET_APPS = [
         "VSCode", "PyCharm", "IntelliJ IDEA", "Terminal",
@@ -589,12 +593,19 @@ class UserInteraction:
         полями цепочек сложных вопросов (complex/sub) — иначе после
         рестарта сущность забывала разговор, а синтез цепочки ломался
         на середине. Плюс оба маркера цикла: кулдаун вопросов и «когда
-        пользователь писал последний раз» (детектор тишины).
+        пользователь писал последний раз» (детектор тишины). К5: последние
+        OUTGOING_TRACE_MAX исходящих реплик сохраняются как след публикаций;
+        одинаковые тексты и id не дедуплицируются.
         """
+        outgoing = [
+            dict(entry) for entry in self.message_history
+            if isinstance(entry, dict) and entry.get("sender") == "agent"
+        ]
         return {
             "question_history": [
                 dict(entry) for entry in self.question_history[-50:]
             ],
+            "outgoing_messages": outgoing[-self.OUTGOING_TRACE_MAX:],
             "pending_questions": [
                 {
                     "id": q["id"],
@@ -692,6 +703,29 @@ class UserInteraction:
                 })
             if restored_pending:
                 self.pending_questions = restored_pending
+
+        saved_outgoing = data.get("outgoing_messages")
+        if isinstance(saved_outgoing, list):
+            restored_outgoing = []
+            for entry in saved_outgoing:
+                if not isinstance(entry, dict) or entry.get("sender") != "agent":
+                    continue
+                content = entry.get("content")
+                msg_id = entry.get("id")
+                cycle = entry.get("cycle")
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                if not isinstance(msg_id, str) or not msg_id:
+                    continue
+                if not isinstance(cycle, (int, float)) or isinstance(cycle, bool):
+                    continue
+                restored_entry = dict(entry)
+                restored_entry["cycle"] = int(cycle)
+                restored_outgoing.append(restored_entry)
+            self.message_history = restored_outgoing[-self.OUTGOING_TRACE_MAX:]
+            # След публикаций — не непрочитанные сообщения. Старые реплики
+            # нельзя возвращать в очередь: иначе UI покажет их повторно.
+            self.message_queue = []
 
         last_question = data.get("last_question_cycle")
         if isinstance(last_question, (int, float)) and not isinstance(last_question, bool):

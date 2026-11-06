@@ -8,6 +8,8 @@
 вопрос.
 """
 
+import json
+
 from src.core.agent import DigitalBeing
 from src.core.checkpoint_serializer import (
     apply_state_to_agent,
@@ -203,3 +205,96 @@ def test_restore_drops_meta_topic_and_duplicate_pending():
     assert ui.get_pending_question()["question"].startswith(
         "Я разбираюсь с темой «понимать»"
     )
+
+
+def test_outgoing_trace_survives_json_checkpoint_without_replay():
+    """К5: две одинаковые публикации остаются двумя записями после
+    рестарта; входные реплики не попадают в след, старая очередь не
+    показывается повторно, а новые сообщения продолжают историю."""
+    original = DigitalBeing(name="DT")
+    ui = original.user_interaction
+    question = "Хочешь переименовать меня?"
+    context = "naming_dialogue"
+    ui.send_reply(question, context=context, cycle=8150)
+    ui.send_reply(question, context=context, cycle=8150)
+    ui.receive_user_message("Нет", cycle=8151)
+
+    state = json.loads(json.dumps(
+        build_state_from_agent(original), ensure_ascii=False,
+    ))
+    validate_checkpoint_state(state)
+    saved = state["user_interaction"]["outgoing_messages"]
+    assert len(saved) == 2
+    assert all(entry["sender"] == "agent" for entry in saved)
+    assert all(
+        {"id", "content", "cycle", "context"} <= entry.keys()
+        for entry in saved
+    )
+
+    restored = DigitalBeing(name="DT")
+    apply_state_to_agent(restored, state)
+    rui = restored.user_interaction
+    assert rui.message_queue == []
+
+    trace = rui.to_checkpoint_dict()["outgoing_messages"]
+    matching = [
+        entry for entry in trace
+        if entry["content"] == question and entry["context"] == context
+    ]
+    assert len(matching) == 2
+    assert [entry["cycle"] for entry in matching] == [8150, 8150]
+
+    rui.send_reply(question, context=context, cycle=8152)
+    trace = rui.to_checkpoint_dict()["outgoing_messages"]
+    assert len([
+        entry for entry in trace
+        if entry["content"] == question and entry["context"] == context
+    ]) == 3
+
+
+def test_outgoing_trace_is_bounded_to_latest_messages(monkeypatch):
+    """К5: чекпоинт хранит кольцо последних публикаций, а не всю жизнь."""
+    ui = DigitalBeing(name="DR").user_interaction
+    monkeypatch.setattr(ui, "OUTGOING_TRACE_MAX", 3)
+    for index in range(5):
+        ui.send_reply(f"Реплика {index}", context="ring", cycle=index)
+
+    saved = ui.to_checkpoint_dict()["outgoing_messages"]
+    assert [entry["content"] for entry in saved] == [
+        "Реплика 2", "Реплика 3", "Реплика 4",
+    ]
+
+    restored = DigitalBeing(name="DR").user_interaction
+    restored.restore_from_checkpoint({"outgoing_messages": saved})
+    assert [
+        entry["content"] for entry in restored.message_history
+    ] == ["Реплика 2", "Реплика 3", "Реплика 4"]
+
+
+def test_outgoing_trace_restore_skips_corrupt_entries_and_legacy_payload():
+    """К5: старый чекпоинт без нового поля и мусор в новом поле безопасны."""
+    ui = DigitalBeing(name="DL").user_interaction
+    ui.restore_from_checkpoint({"question_history": []})
+    assert ui.message_history == []
+
+    ui.restore_from_checkpoint({
+        "outgoing_messages": [
+            "мусор",
+            {"id": "u1", "sender": "user", "content": "Вход", "cycle": 1},
+            {"id": "", "sender": "agent", "content": "Нет id", "cycle": 2},
+            {"id": "a1", "sender": "agent", "content": "", "cycle": 3},
+            {
+                "id": "a2", "sender": "agent", "content": "Битый цикл",
+                "cycle": "нет",
+            },
+            {
+                "id": "a3", "sender": "agent", "content": "Сохранить",
+                "cycle": 4, "context": "test",
+            },
+        ],
+    })
+    assert ui.message_queue == []
+    assert ui.message_history == [{
+        "id": "a3", "sender": "agent", "content": "Сохранить",
+        "cycle": 4, "context": "test",
+    }]
