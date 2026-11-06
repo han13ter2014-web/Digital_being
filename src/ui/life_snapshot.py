@@ -80,22 +80,20 @@ def _last_finished(history: List[Dict]) -> Optional[Dict]:
 
 def _access_section(agent: Any) -> Dict[str, Any]:
     """Текущие доступы. Не описываем то, чего у Core нет."""
-    from src.app.access_control import LABELS
+    from src.app.access_control import LABELS, current_state
 
-    network = getattr(getattr(agent, "web_searcher", None), "is_enabled", False)
+    states = current_state(agent)
     delamain_subsystem = _own(agent, "delamain", None)
-    delamain = getattr(delamain_subsystem, "enabled", False)
-    effector = getattr(_own(agent, "delamain_effector", None), "enabled", False)
     workspace = getattr(delamain_subsystem, "workspace", None)
-    return {
-        "network": {"enabled": bool(network), "label": LABELS["network"]},
-        "delamain": {"enabled": bool(delamain), "label": LABELS["delamain"]},
-        "effector": {"enabled": bool(effector), "label": LABELS["effector"]},
-        "workspace": {
-            "path": str(workspace) if workspace else "—",
-            "label": "Творческая рабочая область",
-        },
+    section: Dict[str, Any] = {
+        key: {"enabled": states[key], "label": LABELS[key]}
+        for key in ("network", "delamain", "effector", "presence")
     }
+    section["workspace"] = {
+        "path": str(workspace) if workspace else "—",
+        "label": "Творческая рабочая область",
+    }
+    return section
 
 
 def _effector_section(agent: Any) -> Dict[str, Any]:
@@ -207,33 +205,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     }
 
     current = _current_intention(history)
-    diary_episodes = recent_life_episodes(agent)
-    recorded_ids = {
-        str(item.get("task_id")) for item in diary_episodes
-        if isinstance(item, dict) and item.get("task_id")
-    }
-    # Автономные занятия принадлежат Core даже без подключённого Delamain.
-    # Представляем их в том же read-only формате, не создавая запись памяти
-    # из UI и не выдавая незавершённое намерение за событие.
-    for entry in reversed(history):
-        if (not isinstance(entry, dict)
-                or entry.get("status") == "started"
-                or str(entry.get("id")) in recorded_ids):
-            continue
-        outcome = entry.get("outcome")
-        diary_episodes.append({
-            "id": f"core:{entry.get('id')}",
-            "ts": entry.get("cycle"),
-            "task_id": entry.get("id"),
-            "task": "digital_life",
-            "action": entry.get("action"),
-            "args": {"target": entry.get("target")},
-            "ok": entry.get("status") == "performed",
-            "output": deepcopy(outcome),
-            "error": (outcome or {}).get("error") if isinstance(outcome, dict) else None,
-            "metadata": {"status": entry.get("status"), "source": "core_history"},
-        })
-    diary_episodes = diary_episodes[:RECENT_EPISODES]
+    diary_episodes = _combined_diary(agent, history, RECENT_EPISODES)
     return {
         "name": str(getattr(agent, "name", "?")),
         "life": {
@@ -255,6 +227,8 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
             "loop": _status_of(_own(agent, "loop_closer", None)),
         },
         "motivation": _status_of(_own(agent, "motivation_system", None)),
+        "emotions": _status_of(_own(agent, "emotional_state", None)),
+        "body": interoception,
         "intentions": {
             "active": current,
             "waiting": waiting_entries,
@@ -272,6 +246,46 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     }
 
 
+def build_diary_snapshot(agent: Any, limit: int = 500) -> Dict[str, Any]:
+    """Расширенный кэш дневника для веб-пагинации.
+
+    Использует тот же сборщик, что и Tk, но не уменьшает окно Tk с 20 записей.
+    HTTP-слой получает уже готовый список и не обращается к SQLite сам.
+    """
+    history: List[Dict] = list(_own(agent, "_intention_history", []) or [])
+    episodes = _combined_diary(agent, history, limit)
+    return {"episodes": episodes, "count": len(episodes), "cache_limit": max(0, int(limit))}
+
+
+def _combined_diary(agent: Any, history: List[Dict], limit: int) -> List[Dict[str, Any]]:
+    diary_episodes = recent_life_episodes(agent, limit)
+    recorded_ids = {
+        str(item.get("task_id")) for item in diary_episodes
+        if isinstance(item, dict) and item.get("task_id")
+    }
+    # Автономные занятия принадлежат Core даже без подключённого Delamain.
+    # Незавершённое намерение не выдаётся за событие дневника.
+    for entry in reversed(history):
+        if (not isinstance(entry, dict)
+                or entry.get("status") == "started"
+                or str(entry.get("id")) in recorded_ids):
+            continue
+        outcome = entry.get("outcome")
+        diary_episodes.append({
+            "id": f"core:{entry.get('id')}",
+            "ts": entry.get("cycle"),
+            "task_id": entry.get("id"),
+            "task": "digital_life",
+            "action": entry.get("action"),
+            "args": {"target": entry.get("target")},
+            "ok": entry.get("status") == "performed",
+            "output": deepcopy(outcome),
+            "error": (outcome or {}).get("error") if isinstance(outcome, dict) else None,
+            "metadata": {"status": entry.get("status"), "source": "core_history"},
+        })
+    return diary_episodes[:max(0, int(limit))]
+
+
 def recent_life_episodes(agent: Any, limit: int = RECENT_EPISODES) -> List[Dict[str, Any]]:
     """Прочитать автобиографические эпизоды Core из SQLite Delamain.
 
@@ -283,7 +297,7 @@ def recent_life_episodes(agent: Any, limit: int = RECENT_EPISODES) -> List[Dict[
     if not callable(reader):
         return []
     try:
-        bounded_limit = max(0, min(int(limit), RECENT_EPISODES))
+        bounded_limit = max(0, min(int(limit), 500))
         episodes = [deepcopy(dict(row)) for row in reader(
             life_id=str(getattr(agent, "life_id", getattr(agent, "name", "?"))),
             limit=bounded_limit,

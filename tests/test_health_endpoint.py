@@ -41,7 +41,7 @@ def dash():
     if not AIOHTTP_AVAILABLE:
         pytest.skip("aiohttp не установлен")
     port = _free_port()
-    d = WebDashboard(agent=None, host="127.0.0.1", port=port)
+    d = WebDashboard(host="127.0.0.1", port=port)
     d.start(in_thread=True)
     # Даём серверу время подняться
     time.sleep(0.5)

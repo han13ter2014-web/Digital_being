@@ -145,21 +145,6 @@ def test_shared_state_thoughts_capped_at_maxlen():
     assert items[-1]["text"] == "msg_9999"
 
 
-@long_run
-def test_shared_state_actions_capped_at_maxlen():
-    """10000 push_action() не должны занять больше max_actions памяти."""
-    from src.ui.web_dashboard import SharedState
-
-    state = SharedState(max_actions=20)
-    for i in range(10000):
-        state.push_action("dummy")
-    # Можем забрать только 20, остальные отброшены.
-    popped = 0
-    while state.pop_action() is not None:
-        popped += 1
-    assert popped == 20
-
-
 # ============================================================
 # 3. Concurrency — потокобезопасность SharedState
 # ============================================================

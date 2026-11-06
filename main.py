@@ -98,6 +98,10 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     )
     parser.add_argument("--stimuli", choices=("quiet", "pool"), default="quiet",
                         help="quiet — без искусственных вопросов; pool — лабораторный пул")
+    parser.add_argument("--web-port", type=int, default=8765,
+                        help="Read-only веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)")
+    parser.add_argument("--no-web", action="store_true",
+                        help="Не запускать read-only веб рядом с Tk")
     # Совместимость с прежним main_tray.py
     parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
@@ -130,13 +134,15 @@ def resolve_speed(interval: str) -> str:
 
 
 class Runtime:
-    """Всё, что живёт в потоке asyncio."""
+    """Всё, что живёт в потоке asyncio, включая read-only публикацию в веб."""
 
-    def __init__(self, agent, bus, runner, window=None):
+    def __init__(self, agent, bus, runner, window=None, dashboard=None):
         self.agent = agent
         self.bus = bus
         self.runner = runner
         self.window = window
+        self.dashboard = dashboard
+        self.dashboard_error: Optional[str] = None
         self.started_at = time.time()
         self.shutdown = asyncio.Event()
         self._thread: Optional[threading.Thread] = None
@@ -164,6 +170,7 @@ class Runtime:
             self.error = str(exc)
             logger.exception("Цикл жизни упал")
         finally:
+            self._stop_dashboard()
             try:
                 loop.close()
             except Exception:
@@ -175,6 +182,40 @@ class Runtime:
             if self.window is not None:
                 self.window.request_close()
 
+    def _subscribe_dashboard(self) -> None:
+        """Пересылать существующие события шины в журнал без обратного канала."""
+        if self.dashboard is None:
+            return
+        from src.ui.web_dashboard import DIALOGUE_EVENTS
+
+        for name in DIALOGUE_EVENTS:
+            async def on_event(event, event_name=name) -> None:
+                self.dashboard.publish_event(
+                    event_name, event.data, source=event.source,
+                    timestamp=event.timestamp,
+                )
+
+            self.bus.subscribe(name, on_event)
+
+    def _start_dashboard(self) -> None:
+        if self.dashboard is None:
+            return
+        try:
+            self.dashboard.start(in_thread=True)
+        except Exception as exc:
+            # Занятый порт или отсутствующий aiohttp не останавливает жизнь/Tk.
+            self.dashboard_error = str(exc)
+            logger.warning("Веб-наблюдатель недоступен; Tk продолжает работу: %s", exc)
+
+    def _stop_dashboard(self) -> None:
+        dashboard = getattr(self, "dashboard", None)
+        if dashboard is None:
+            return
+        try:
+            dashboard.stop()
+        except Exception as exc:
+            logger.warning("Остановка веб-наблюдателя: %s", exc)
+
     async def _main(self, speed_mode: str) -> None:
         from src.core.event_bus import Events
 
@@ -184,6 +225,7 @@ class Runtime:
             self.shutdown.set()
 
         bus.subscribe(Events.SHUTDOWN_REQUESTED, on_shutdown)
+        self._subscribe_dashboard()
 
         await bus.start()
         bus.attach_loop(asyncio.get_running_loop())
@@ -197,12 +239,13 @@ class Runtime:
         # Первый чекпоинт сразу после старта: если окно закроют или
         # процесс упадёт, жизнь не исчезнет целиком.
         self.runner.save_now()
+        self._start_dashboard()
 
         tasks = [
             asyncio.create_task(bus.run(), name="EventBus"),
             asyncio.create_task(self.runner.run_forever(), name="AgentRunner"),
         ]
-        if self.window is not None:
+        if self.window is not None or self.dashboard is not None:
             tasks.append(
                 asyncio.create_task(self._status_loop(), name="StatusLoop")
             )
@@ -235,6 +278,7 @@ class Runtime:
         self.saved_on_stop = self.runner.save_now()
         if not self.saved_on_stop:
             self.error = self.error or "Не удалось сохранить состояние при остановке"
+        self._stop_dashboard()
         try:
             from src.delamain.biography import record_graceful_shutdown
 
@@ -251,31 +295,37 @@ class Runtime:
             pass
 
     async def _status_loop(self) -> None:
-        """Отдаёт окну снимок показателей дважды в секунду, карту — реже."""
+        """Один DTO за тик передаётся и Tk, и вебу — это основа паритета."""
         from src.app.status import build_status_snapshot
         from src.ui.graph_view import build_life_graph
-        from src.ui.life_snapshot import build_life_snapshot
+        from src.ui.life_snapshot import build_diary_snapshot, build_life_snapshot
 
         tick = 0
         while not self.shutdown.is_set():
             try:
-                self.window.push_status(
-                    build_status_snapshot(
-                        self.agent, self.runner, started_at=self.started_at
-                    )
+                status = build_status_snapshot(
+                    self.agent, self.runner, started_at=self.started_at
                 )
-                # Снимок жизни — отдельный поток данных для экрана «Сейчас»:
-                # он читает Core, но не меняет его.
                 life = build_life_snapshot(self.agent, self.runner)
-                push_life = getattr(self.window, "push_life_status", None)
-                if callable(push_life):
-                    push_life(life)
-                # Карта тяжелее карточек: раз в 10 тиков (≈5 с) достаточно,
-                # чтобы она выглядела живой, и не грузит поток Tk.
+                if self.window is not None:
+                    self.window.push_status(status)
+                    push_life = getattr(self.window, "push_life_status", None)
+                    if callable(push_life):
+                        push_life(life)
+                if self.dashboard is not None:
+                    self.dashboard.publish_status(status)
+                    self.dashboard.publish_life(life)
+                # Карта и расширенный кэш дневника обновляются реже карточек.
                 if tick % 10 == 0:
-                    push_graph = getattr(self.window, "push_graph", None)
-                    if callable(push_graph):
-                        push_graph(build_life_graph(self.agent, life))
+                    graph = build_life_graph(self.agent, life)
+                    diary = build_diary_snapshot(self.agent)
+                    if self.window is not None:
+                        push_graph = getattr(self.window, "push_graph", None)
+                        if callable(push_graph):
+                            push_graph(graph)
+                    if self.dashboard is not None:
+                        self.dashboard.publish_graph(graph)
+                        self.dashboard.publish_diary(diary)
             except Exception as exc:
                 logger.debug("status push: %s", exc)
             tick += 1
@@ -425,7 +475,20 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             hide_on_close=False,
         )
 
-    runtime = Runtime(agent, bus, runner, window)
+    dashboard = None
+    if window is not None and not getattr(args, "no_web", False):
+        try:
+            from src.ui.web_dashboard import AIOHTTP_AVAILABLE, WebDashboard
+
+            if AIOHTTP_AVAILABLE:
+                dashboard = WebDashboard(host="127.0.0.1", port=args.web_port)
+            else:
+                logger.warning("aiohttp не установлен; read-only веб отключён, Tk работает")
+        except Exception as exc:
+            # Ошибка сборки необязательного наблюдателя не мешает основному окну.
+            logger.warning("Read-only веб отключён: %s", exc)
+
+    runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
     runtime.report = report  # type: ignore[attr-defined]
     runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
 
