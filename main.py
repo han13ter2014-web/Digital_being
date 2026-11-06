@@ -236,6 +236,14 @@ class Runtime:
         if not self.saved_on_stop:
             self.error = self.error or "Не удалось сохранить состояние при остановке"
         try:
+            from src.delamain.biography import record_graceful_shutdown
+
+            record_graceful_shutdown(
+                self.agent, run_id=getattr(self, "process_run_id", None)
+            )
+        except Exception as exc:
+            logger.warning("Штатное завершение не записано в биографию: %s", exc)
+        try:
             from src.core.buffered_logger import flush_logs
 
             flush_logs()
@@ -320,6 +328,11 @@ def graceful_exit_save(runtime: Runtime, *, wait_timeout: float = 5.0) -> bool:
         return True
     try:
         runtime.agent.save_state(force=True)
+        from src.delamain.biography import record_graceful_shutdown
+
+        record_graceful_shutdown(
+            runtime.agent, run_id=getattr(runtime, "process_run_id", None)
+        )
         return True
     except Exception:
         return False
@@ -365,6 +378,15 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         seed=args.seed,
         expected_life_id=expected_life_id,
     )
+    # Биография фиксирует сам запуск процесса. Первая версия журнала не
+    # дорисовывает разрывы прошлого; следующий запуск увидит этот run_id.
+    try:
+        from src.delamain.biography import begin_biography_run
+
+        report["process_run"] = begin_biography_run(agent)
+    except Exception as exc:
+        logger.warning("Журнал запуска биографии недоступен: %s", exc)
+        report["process_run"] = {"status": "error", "error": str(exc)}
     # Указатель пишется сразу, а не через минуты до первого сохранения:
     # иначе следующий запуск снова искал бы жизнь по изменяемому имени.
     try:
@@ -405,6 +427,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
 
     runtime = Runtime(agent, bus, runner, window)
     runtime.report = report  # type: ignore[attr-defined]
+    runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
 
     # Знакомство — после создания окна, чтобы приветствие было видно.
     if window is not None:
