@@ -193,6 +193,28 @@ def build_life_graph(
             add_edge(f"intention:{entry_id}", activity_id, "uses",
                      "породило", 0.6)
 
+    # --- Разрывы процесса: те же автобиографические эпизоды, что и дневник ---
+    # Никаких рёбер без основания: запись фиксирует границы опыта, но не
+    # утверждает причинную связь с темами или намерениями.
+    episodes = (snapshot.get("diary") or {}).get("episodes") or []
+    for episode in episodes:
+        if not isinstance(episode, dict):
+            continue
+        metadata = episode.get("metadata") or {}
+        output = episode.get("output") or {}
+        if (not isinstance(metadata, dict) or metadata.get("kind") != "biography_seam"
+                or not isinstance(output, dict) or not output.get("text")):
+            continue
+        episode_id = str(episode.get("id") or "")
+        if not episode_id:
+            continue
+        add_node(f"episode:{episode_id}", "biography_seam", output["text"], 0.9, {
+            "начало разрыва": output.get("gap_started_at"),
+            "конец разрыва": output.get("gap_ended_at"),
+            "причина": output.get("reason"),
+            "источник": "автобиографическая память",
+        })
+
     # --- Ценности ядра: реальные ключи innate_values, без выдуманных ---
     values = getattr(agent, "innate_values", None) or {}
     if isinstance(values, dict):

@@ -293,6 +293,127 @@ class MemoryStore:
         )
 
     @_atomic
+    def begin_biography_run(
+        self, *, life_id: str, run_id: str, started_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Зафиксировать запуск и добавить разрыв предыдущего запуска в биографию.
+
+        Отсутствие журнала запусков означает версию до появления маркеров:
+        старую историю не дорисовываем. Запись маркера и нового запуска
+        атомарна, повтор того же ``run_id`` ничего не добавляет.
+        """
+        life_id = str(life_id).strip()
+        run_id = str(run_id).strip()
+        if not life_id or not run_id:
+            raise ValueError("biography run requires life_id and run_id")
+        started_at = str(started_at or _utc_now_iso())
+        key = f"biography.process_run:{life_id}"
+        row = self._conn.execute(
+            "SELECT value_json FROM self_model WHERE key = ?", (key,)
+        ).fetchone()
+        previous = _loads(row["value_json"], {}) if row is not None else {}
+        if previous.get("run_id") == run_id:
+            return {**previous, "marker_created": False}
+
+        marker_id = None
+        previous_run_id = previous.get("run_id")
+        if isinstance(previous_run_id, str) and previous_run_id:
+            last = self._conn.execute(
+                "SELECT ts FROM episodes WHERE task = 'digital_life' "
+                "AND json_extract(meta_json, '$.life_id') = ? ORDER BY id DESC LIMIT 1",
+                (life_id,),
+            ).fetchone()
+            gap_started_at = (
+                str(last["ts"]) if last is not None
+                else str(previous.get("started_at") or started_at)
+            )
+            shutdown = previous.get("shutdown")
+            graceful = isinstance(shutdown, dict) and shutdown.get("kind") == "graceful_shutdown"
+            reason = "graceful_shutdown" if graceful else "external_interruption"
+            reason_text = (
+                "штатное завершение предыдущего процесса" if graceful
+                else "внешнее прерывание предыдущего процесса"
+            )
+            text = (
+                "Жизнь прерывалась, опыт восстановлен. "
+                f"Разрыв: {gap_started_at} — {started_at}. "
+                f"Причина: {reason_text}."
+            )
+            intention_id = f"biography-seam:{previous_run_id}"
+            output = {
+                "text": text,
+                "gap_started_at": gap_started_at,
+                "gap_ended_at": started_at,
+                "reason": reason,
+            }
+            metadata = {
+                "life_id": life_id,
+                "intention_id": intention_id,
+                "status": "performed",
+                "kind": "biography_seam",
+                "schema_version": 1,
+                "previous_run_id": previous_run_id,
+                "current_run_id": run_id,
+                **output,
+            }
+            cursor = self._conn.execute(
+                """
+                INSERT INTO episodes
+                    (ts, task_id, task, action, args_json, ok, output_json, error, meta_json)
+                VALUES (?, ?, 'digital_life', 'biography_seam', ?, 1, ?, NULL, ?)
+                """,
+                (started_at, intention_id, _json({"target": text}), _json(output), _json(metadata)),
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("biography seam was not assigned an episode id")
+            marker_id = int(lastrowid)
+
+        current = {
+            "run_id": run_id,
+            "life_id": life_id,
+            "started_at": started_at,
+            "previous_run_id": previous_run_id,
+            "marker_id": marker_id,
+        }
+        self._conn.execute(
+            """
+            INSERT INTO self_model (key, value_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            (key, _json(current), started_at),
+        )
+        self._conn.commit()
+        return {**current, "marker_created": marker_id is not None}
+
+    @_atomic
+    def record_graceful_shutdown(
+        self, *, life_id: str, run_id: str, ended_at: Optional[str] = None,
+    ) -> bool:
+        """Сохранить доказанный факт штатного завершения текущего запуска."""
+        key = f"biography.process_run:{life_id}"
+        row = self._conn.execute(
+            "SELECT value_json FROM self_model WHERE key = ?", (key,)
+        ).fetchone()
+        current = _loads(row["value_json"], {}) if row is not None else {}
+        if current.get("run_id") != str(run_id) or current.get("life_id") != str(life_id):
+            return False
+        shutdown = current.get("shutdown")
+        if isinstance(shutdown, dict) and shutdown.get("kind") == "graceful_shutdown":
+            return True
+        ended_at = str(ended_at or _utc_now_iso())
+        current["shutdown"] = {"kind": "graceful_shutdown", "ts": ended_at}
+        self._conn.execute(
+            "UPDATE self_model SET value_json = ?, updated_at = ? WHERE key = ?",
+            (_json(current), ended_at, key),
+        )
+        self._conn.commit()
+        return True
+
+    @_atomic
     def recent_life_episodes(self, *, life_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
         limit = max(0, min(int(limit), 200))
         offset = max(0, int(offset))
