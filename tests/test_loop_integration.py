@@ -211,6 +211,88 @@ def test_loop_state_survives_checkpoint(agent):
     assert reborn._exploration_history == agent._exploration_history
 
 
+def _restart_with_loop_state(source):
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    state = build_state_from_agent(source)
+    reborn = DigitalBeing(name=source.name)
+    searcher = getattr(reborn, "web_searcher", None)
+    if searcher is not None:
+        searcher.toggle(False)
+    apply_state_to_agent(reborn, state)
+    return reborn
+
+
+def test_deep_rest_no_effect_streak_survives_restart(agent):
+    """К4: рестарт сам по себе не объявляет неудачи успехами."""
+    from config.simulation_config import LR_CONFIG
+
+    agent._accumulate_sleep = lambda units: {}
+    agent.energy = float(LR_CONFIG.ENERGY_MAX)
+    for _ in range(2):
+        agent.act("deep_rest")
+
+    assert agent._last_action_outcome.confirmed_result is False
+    assert agent._last_action_outcome.had_effect is False
+    assert agent.loop_closer.no_effect_streak("deep_rest") == 2
+
+    reborn = _restart_with_loop_state(agent)
+    assert reborn.loop_closer.no_effect_streak("deep_rest") == 2
+
+
+def test_deep_rest_recovery_resets_streak_and_restart_preserves_zero(agent, monkeypatch):
+    """К4: N неудач → прирост энергии → 0, включая рестарт."""
+    from config.simulation_config import LR_CONFIG
+    from src.cognition.action_expectations import ActionExpectations
+
+    # Изолируем канал энергии: иначе новая гипотеза о теле дала бы свой
+    # непустой WorldDelta, и тест прошёл бы без подтверждения recovered > 0.
+    monkeypatch.setattr(ActionExpectations, "begin", lambda *args, **kwargs: None)
+    agent._accumulate_sleep = lambda units: {}
+    agent.energy = float(LR_CONFIG.ENERGY_MAX)
+    for _ in range(2):
+        agent.act("deep_rest")
+    assert agent.loop_closer.no_effect_streak("deep_rest") == 2
+
+    agent.energy = 50.0
+    energy_before = agent.energy
+    result = agent.act("deep_rest")
+    outcome = agent._last_action_outcome
+
+    assert agent.energy > energy_before
+    assert "восстановил" in result
+    assert outcome.confirmed_result is True
+    assert outcome.had_effect is True
+    assert outcome.delta.is_empty is True
+    assert agent.loop_closer.no_effect_streak("deep_rest") == 0
+
+    reborn = _restart_with_loop_state(agent)
+    assert reborn.loop_closer.no_effect_streak("deep_rest") == 0
+
+
+def test_play_turn_resets_no_effect_streak(agent):
+    """К4: игровой ход — результат, но не вымышленное знание."""
+    from src.core.world_delta import WorldSignature
+
+    empty = WorldSignature()
+    for _ in range(2):
+        agent.loop_closer.observe("play", empty, empty)
+    assert agent.loop_closer.no_effect_streak("play") == 2
+    knowledge_before = agent.mental_models.to_storage_dict()
+
+    agent.act("play")
+    outcome = agent._last_action_outcome
+
+    assert agent._local_play["turns"] == 1
+    assert outcome.confirmed_result is True
+    assert outcome.delta.is_empty is True
+    assert agent.loop_closer.no_effect_streak("play") == 0
+    assert agent.mental_models.to_storage_dict() == knowledge_before
+
+
 # ============================================================
 # 6. Прогресс только по теме цели
 # ============================================================

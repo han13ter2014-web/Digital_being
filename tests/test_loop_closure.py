@@ -123,6 +123,50 @@ def test_effect_resets_streak():
     assert no_change.is_empty is True
 
 
+def test_confirmed_result_resets_streak_without_faking_world_delta():
+    """К4: восстановление ресурса — результат, но не прирост знаний."""
+    closer = LoopCloser(max_no_effect=3)
+    empty = WorldSignature()
+    closer.observe("deep_rest", empty, empty)
+    closer.observe("deep_rest", empty, empty)
+    assert closer.no_effect_streak("deep_rest") == 2
+
+    outcome = closer.observe(
+        "deep_rest",
+        empty,
+        empty,
+        confirmed_result=True,
+        result_description="энергия восстановлена на 30",
+    )
+
+    assert outcome.had_effect is True
+    assert outcome.confirmed_result is True
+    assert outcome.delta.is_empty is True
+    assert outcome.summary == "энергия восстановлена на 30"
+    assert outcome.as_dict()["summary"] == outcome.summary
+    assert closer.no_effect_streak("deep_rest") == 0
+    assert closer.effect_count("deep_rest") == 1
+    assert closer.total_with_effect == 1
+
+
+def test_denial_cannot_be_marked_as_confirmed_result():
+    closer = LoopCloser()
+    empty = WorldSignature()
+
+    outcome = closer.observe(
+        "deep_rest",
+        empty,
+        empty,
+        reason="denied:body",
+        confirmed_result=True,
+    )
+
+    assert outcome.confirmed_result is False
+    assert outcome.had_effect is False
+    assert closer.no_effect_streak("deep_rest") == 0
+    assert closer.denied_streak("deep_rest") == 1
+
+
 def test_action_becomes_stuck_after_limit():
     closer = LoopCloser(max_no_effect=3)
     empty = WorldSignature()

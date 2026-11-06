@@ -57,10 +57,24 @@ class ActionOutcome:
     topic: str = ""
     credited: bool = False
     reason: str = ""
+    # Некоторые действия имеют собственный проверяемый результат, который
+    # не является изменением знаний: отдых вернул энергию, игра приняла ход.
+    # Такое свидетельство передаёт только обработчик этого действия; общая
+    # подпись мира не раздувается посторонними изменениями энергии или игры.
+    confirmed_result: bool = False
+    result_description: str = ""
 
     @property
     def had_effect(self) -> bool:
-        return not self.delta.is_empty
+        return not self.delta.is_empty or self.confirmed_result
+
+    @property
+    def summary(self) -> str:
+        if not self.delta.is_empty:
+            return self.delta.summary()
+        if self.confirmed_result:
+            return self.result_description or "подтверждённый результат действия"
+        return self.delta.summary()
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -69,8 +83,10 @@ class ActionOutcome:
             "had_effect": self.had_effect,
             "credited": self.credited,
             "reason": self.reason,
+            "confirmed_result": self.confirmed_result,
+            "result_description": self.result_description,
             "delta": self.delta.as_dict(),
-            "summary": self.delta.summary(),
+            "summary": self.summary,
         }
 
 
@@ -134,22 +150,32 @@ class LoopCloser:
         *,
         topic: str = "",
         reason: str = "",
+        confirmed_result: bool = False,
+        result_description: str = "",
     ) -> ActionOutcome:
         """Регистрирует исход действия.
+
+        ``confirmed_result`` предназначен только для результата, который
+        подтвердил сам обработчик, но который не выражается в ``WorldDelta``
+        (например, фактически восстановленная энергия). Это не разрешение
+        объявлять успех по тексту действия или по факту его вызова.
 
         Returns:
             ``ActionOutcome`` с признаком ``had_effect``.
         """
         delta = between(before, after)
+        denied = str(reason).startswith("denied:")
+        confirmed = bool(confirmed_result) and not denied
         outcome = ActionOutcome(
             action=str(action),
             delta=delta,
             topic=str(topic or ""),
             reason=str(reason or ""),
+            confirmed_result=confirmed,
+            result_description=str(result_description or "") if confirmed else "",
         )
 
         key = str(action)
-        denied = str(reason).startswith("denied:")
         if denied:
             # Отказ — не «действие без результата», а «действие не
             # выполнялось». Для непродуктивных действий (вопрос,
@@ -166,7 +192,7 @@ class LoopCloser:
             productive = self.is_productive(key)
             if productive:
                 self._productive_total += 1
-            if not delta.is_empty:
+            if outcome.had_effect:
                 self._total_with_effect += 1
                 if productive:
                     self._productive_effect_total += 1
@@ -174,7 +200,7 @@ class LoopCloser:
                 # действовать: старые отказы больше не актуальны.
                 self._denied_streak.clear()
 
-        if delta.is_empty:
+        if not outcome.had_effect:
             # Отказ не делает действие «бесплодным»: оно не выполнялось.
             # Раньше отказ увеличивал и этот счётчик, поэтому после
             # восстановления тела действие оставалось тупиковым по
@@ -202,6 +228,8 @@ class LoopCloser:
         *,
         topic: str = "",
         reason: str = "",
+        confirmed_result: bool = False,
+        result_description: str = "",
     ) -> ActionOutcome:
         """Удобная обёртка: снимает подпись после действия сама."""
         return self.observe(
@@ -210,6 +238,8 @@ class LoopCloser:
             capture(agent),
             topic=topic,
             reason=reason,
+            confirmed_result=confirmed_result,
+            result_description=result_description,
         )
 
     # ------------------------------------------------------------------
@@ -458,7 +488,7 @@ class LoopCloser:
         return {
             "last_action": self._last.action if self._last else None,
             "last_effect": self._last.had_effect if self._last else None,
-            "last_summary": self._last.delta.summary() if self._last else "",
+            "last_summary": self._last.summary if self._last else "",
             "stuck_actions": self.stuck_actions(),
             "effective_actions": self.effective_actions(),
             "total_actions": self.total_actions,
