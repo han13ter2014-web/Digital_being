@@ -1702,6 +1702,11 @@ class DigitalBeing:
 
         expectation_trial = None
         expectations = None
+        # Узкое доказательство результата для действий, чей полезный эффект
+        # не выражается в общей подписи знаний. Заполняет только обработчик
+        # после фактического изменения; сам вызов действия успехом не считается.
+        confirmed_result = False
+        result_description = ""
         if action_type in ("rest", "deep_rest") and getattr(self, "mental_models", None) is not None:
             from src.cognition.action_expectations import ActionExpectations
 
@@ -1729,6 +1734,8 @@ class DigitalBeing:
             consolidated = consolidate(1.0) if consolidate else {}
             parts = []
             if recovered:
+                confirmed_result = True
+                result_description = f"энергия восстановлена на {recovered:.0f}"
                 parts.append(
                     f"восстановил {recovered:.0f} энергии (теперь {self.energy:.0f})"
                 )
@@ -1795,6 +1802,10 @@ class DigitalBeing:
                 action = f"Ответ: сыграл ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
                 if turn["result"] is not None:
                     action += f"; партия завершена: {turn['result']}"
+            # Вернувшийся ход уже изменил состояние выбранной игры. Исход
+            # партии не требуется: проигрыш и ничья — тоже результат хода.
+            confirmed_result = True
+            result_description = f"выполнен игровой ход в партии {turn['round']}"
         elif action_type == "explore":
             # Раньше «explore» ничего не делал: тип «default», энергия
             # списывалась, мир не менялся. Теперь это настоящая работа —
@@ -1887,13 +1898,18 @@ class DigitalBeing:
         outcome = None
         if loop_closer is not None:
             outcome = loop_closer.observe_agent_action(
-                self, action_type, world_before, topic=topic
+                self,
+                action_type,
+                world_before,
+                topic=topic,
+                confirmed_result=confirmed_result,
+                result_description=result_description,
             )
             self._last_action_outcome = outcome
 
         if outcome is not None and outcome.had_effect:
             get_logger().log(
-                f"[LOOP] {action_type} дал результат: {outcome.delta.summary()}"
+                f"[LOOP] {action_type} дал результат: {outcome.summary}"
             )
             # Прогресс цели засчитывается по доказанному результату, а не
             # по факту «пошевелился». Тема — то, над чем шла работа.
