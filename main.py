@@ -99,9 +99,9 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     parser.add_argument("--stimuli", choices=("quiet", "pool"), default="quiet",
                         help="quiet — без искусственных вопросов; pool — лабораторный пул")
     parser.add_argument("--web-port", type=int, default=8765,
-                        help="Read-only веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)")
+                        help="Локальный веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)")
     parser.add_argument("--no-web", action="store_true",
-                        help="Не запускать read-only веб рядом с Tk")
+                        help="Не запускать локальный веб рядом с Tk")
     # Совместимость с прежним main_tray.py
     parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
@@ -183,12 +183,12 @@ class Runtime:
                 self.window.request_close()
 
     def _subscribe_dashboard(self) -> None:
-        """Пересылать существующие события шины в журнал без обратного канала."""
+        """Пересылать существующие события шины в наблюдаемый веб-журнал."""
         if self.dashboard is None:
             return
-        from src.ui.web_dashboard import DIALOGUE_EVENTS
+        from src.ui.web_dashboard import CONTROL_EVENTS, DIALOGUE_EVENTS
 
-        for name in DIALOGUE_EVENTS:
+        for name in (*DIALOGUE_EVENTS, *CONTROL_EVENTS):
             async def on_event(event, event_name=name) -> None:
                 self.dashboard.publish_event(
                     event_name, event.data, source=event.source,
@@ -481,12 +481,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             from src.ui.web_dashboard import AIOHTTP_AVAILABLE, WebDashboard
 
             if AIOHTTP_AVAILABLE:
-                dashboard = WebDashboard(host="127.0.0.1", port=args.web_port)
+                dashboard = WebDashboard(host="127.0.0.1", port=args.web_port, bus=bus)
             else:
-                logger.warning("aiohttp не установлен; read-only веб отключён, Tk работает")
+                logger.warning("aiohttp не установлен; веб отключён, Tk работает")
         except Exception as exc:
             # Ошибка сборки необязательного наблюдателя не мешает основному окну.
-            logger.warning("Read-only веб отключён: %s", exc)
+            logger.warning("Веб отключён: %s", exc)
 
     runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
     runtime.report = report  # type: ignore[attr-defined]

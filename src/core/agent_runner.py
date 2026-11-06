@@ -200,6 +200,8 @@ class AgentRunner:
         self._stop_requested = False
         self._tick_count = 0
         self._last_auto_save_ts = time.time()
+        self._last_save_ok: Optional[bool] = None
+        self._last_save_at: Optional[float] = None
         self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
 
@@ -1261,8 +1263,12 @@ class AgentRunner:
 
             remember_active_name(data_dir(), self.agent.name, getattr(self.agent, "life_id", None))
             flush_logs()
+            self._last_save_ok = True
+            self._last_save_at = time.time()
             return True
         except Exception as e:
+            self._last_save_ok = False
+            self._last_save_at = time.time()
             logger.exception(f"[{self.name}] Ошибка сохранения: {e}")
             return False
 

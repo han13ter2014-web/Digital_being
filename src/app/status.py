@@ -94,6 +94,8 @@ def build_status_snapshot(
         "seed_folder": None,
         "parent_name": None,
         "pending_life_request": None,
+        "last_save_ok": None,
+        "last_save_at": None,
         "last_action": None,
         "last_effect": None,
         "stuck_actions": [],
@@ -137,6 +139,8 @@ def build_status_snapshot(
             snapshot["speed_mode"] = speed.get("mode")
             snapshot["speed_interval_sec"] = speed.get("interval_sec")
             snapshot["paused"] = speed.get("paused")
+            snapshot["last_save_ok"] = getattr(runner, "_last_save_ok", None)
+            snapshot["last_save_at"] = getattr(runner, "_last_save_at", None)
         except Exception:
             pass
 
