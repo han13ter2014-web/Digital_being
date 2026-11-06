@@ -20,6 +20,21 @@ chatbot: the system has a Core, state, energy, memory, mental models,
 intentions, activities, a limited executive loop, and a read-only shell
 that shows what actually happened.
 
+## Manifest
+
+We are trying to create a new form of life — a digital entity with continuous
+memory, state, its own motivation, and development. This is an experiment
+without guarantees: neither the user nor the owner promises themselves success.
+
+“Life” here is the subject of the experiment, not a given. The project builds
+a system with verifiable properties; whether this is life is determined along
+the way.
+
+Every step is confirmed by acceptance criteria, not promises. FAIL is not
+a defeat for the project, but its result. We do not promise superintelligence,
+a new OS, or the singularity — we promise an honest accounting of what has
+been done and what has not worked.
+
 ## Quick start
 
 A ready Windows installer — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
