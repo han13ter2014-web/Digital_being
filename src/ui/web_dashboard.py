@@ -92,7 +92,7 @@ h2{margin:0 0 16px;color:var(--cyan-soft);font-size:13px;font-weight:650;line-he
 .list{display:grid;gap:10px}.entry{padding:12px 14px;overflow-wrap:anywhere;border:1px solid oklch(0.45 0.06 240 / .32);border-radius:3px;background:oklch(0.24 0.033 255 / .82)}.entry time,.entry .meta{color:var(--muted);font-size:12px;line-height:1.5}.entry p{margin:7px 0 0;white-space:pre-wrap}.empty{padding:18px 0;color:var(--muted);font-style:normal}
 pre{max-height:540px;margin:12px 0 0;overflow:auto;color:oklch(0.84 0.035 230);font:13px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .pager{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}.pager button{border-color:var(--border);background:var(--control-bg)}.pager button:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan)}.pager button:disabled{opacity:.4;cursor:not-allowed}
-#graph{width:100%;height:600px;border:1px solid oklch(0.45 0.06 240 / .35);border-radius:3px;background:oklch(0.145 0.025 255)}.graph-label{fill:var(--text);font:12px/1.4 Bahnschrift,"Arial Narrow",sans-serif}.graph-edge{stroke:var(--cyan-soft);stroke-opacity:.38}
+.graph-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}.graph-toolbar .control-button{min-width:44px;flex:0 0 44px;padding:8px}.graph-toolbar #graph-reset{flex:0 1 150px;padding:8px 14px}.graph-zoom{min-width:58px;text-align:center;color:var(--cyan);font:600 14px/1.4 Consolas,monospace}.graph-help{margin:0 0 12px;color:var(--muted);font-size:13px}.graph-stage{position:relative}#graph{display:block;width:100%;height:600px;border:1px solid oklch(0.45 0.06 240 / .35);border-radius:3px;background:oklch(0.145 0.025 255);touch-action:none;user-select:none;cursor:grab}#graph:active{cursor:grabbing}#graph:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}.graph-label{fill:var(--text);font:12px/1.4 Bahnschrift,"Arial Narrow",sans-serif;paint-order:stroke;stroke:oklch(0.145 0.025 255);stroke-width:4px;stroke-linejoin:round;pointer-events:none}.graph-label.is-active{fill:var(--red-soft);font-weight:650}.graph-edge{stroke:var(--cyan-soft);stroke-opacity:.25;stroke-width:.8;transition:opacity .16s ease-out,stroke .16s ease-out}.graph-node{cursor:pointer;transition:opacity .16s ease-out}.graph-node circle{stroke:oklch(0.9 0.03 220 / .16);stroke-width:.7}.graph-node.is-dim{opacity:.12}.graph-edge.is-dim{opacity:.06}.graph-node.is-hot circle{stroke:var(--text);stroke-width:1.8}.graph-edge.is-hot{stroke:var(--red-soft);stroke-opacity:.95;stroke-width:1.8;opacity:1}
 #dialogue-feed{max-height:680px;margin-top:16px;overflow:auto}.dialogue-agent{border-left:1px solid var(--green)}.dialogue-user{border-left:1px solid var(--cyan)}.dialogue-thought{border-left:1px solid var(--muted)}
 .notice{margin:0 0 16px;color:var(--muted);max-width:75ch}.status-dot{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px oklch(0.82 0.11 165 / .55)}
 [hidden]{display:none!important}.controls{display:flex;gap:8px;flex-wrap:wrap}.control-button,.control-select,.control-input,textarea{min-height:44px;padding:10px 14px;border:1px solid var(--border);border-radius:3px;background:var(--control-bg);color:var(--text);font:16px/1.5 Bahnschrift,"Arial Narrow",sans-serif}.control-button{font-size:14px;font-weight:600;letter-spacing:.025em;cursor:pointer;transition:color .16s ease-out,background-color .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out,transform .16s ease-out}.control-button:hover:not(:disabled){border-color:var(--cyan);background:oklch(0.32 0.06 225);color:var(--cyan);box-shadow:0 0 16px oklch(0.86 0.15 195 / .1)}.control-button:active:not(:disabled){transform:translateY(1px)}.control-button:disabled,.control-select:disabled,.control-input:disabled,textarea:disabled{opacity:.48;cursor:not-allowed}.danger{border-color:oklch(0.68 0.24 25 / .65);color:var(--red-soft)}.danger:hover:not(:disabled){border-color:var(--red);background:oklch(0.3 0.07 25);color:var(--red-soft);box-shadow:0 0 16px oklch(0.68 0.24 25 / .12)}.control-stack{display:grid;gap:12px}.control-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.control-input{min-width:0;flex:1}.phrase{color:var(--amber);font:600 16px/1.5 Consolas,monospace;overflow-wrap:anywhere}.feedback{min-height:24px;margin:10px 0 0;color:var(--muted);overflow-wrap:anywhere}.feedback.error{color:var(--danger)}.life-panel{margin-top:16px;padding:16px;border:1px solid oklch(0.84 0.12 85 / .45);border-radius:3px;background:oklch(0.23 0.04 80 / .55)}textarea{width:100%;min-height:112px;resize:vertical}.access-action{min-width:112px}.connection-off{color:var(--amber)}
@@ -117,7 +117,7 @@ pre{max-height:540px;margin:12px 0 0;overflow:auto;color:oklch(0.84 0.035 230);f
 </div></section>
 <section id="page-diary" class="page"><div class="card"><h2>Дневник · новые записи первыми</h2><p class="notice" id="diary-cache"></p><div id="diary-list" class="list"></div><div class="pager"><button id="diary-prev">← Новее</button><span id="diary-position" class="muted"></span><button id="diary-next">Старее →</button></div></div></section>
 <section id="page-activities" class="page"><div class="grid" id="activity-cards"></div></section>
-<section id="page-graph" class="page"><div class="card"><h2>Карта жизни</h2><p class="notice" id="graph-note"></p><svg id="graph" role="img" aria-label="Карта связей жизни"></svg></div></section>
+<section id="page-graph" class="page"><div class="card"><h2>Карта жизни</h2><div class="graph-toolbar" aria-label="Управление видом карты"><button id="graph-zoom-out" class="control-button" type="button" aria-label="Уменьшить карту">−</button><span id="graph-zoom" class="graph-zoom" aria-live="polite">100%</span><button id="graph-zoom-in" class="control-button" type="button" aria-label="Приблизить карту">+</button><button id="graph-reset" class="control-button" type="button">Сброс вида</button></div><p class="notice" id="graph-note"></p><p class="graph-help">Колесо или щипок — масштаб · перетаскивание — панорама · наведение или тап — связи узла · тап по пустому месту — сброс подсветки</p><div class="graph-stage"><svg id="graph" role="img" aria-label="Карта связей жизни" tabindex="0"></svg></div></div></section>
 <section id="page-access" class="page"><div class="grid"><div class="card span-6"><h2>Разрешения · фактическое состояние</h2><div id="access-list" class="rows"></div><p class="notice">Кнопка отправляет существующую команду access. Индикация изменится только после фактического снимка.</p></div><div class="card span-6"><h2>Effector</h2><div id="effector-list" class="rows"></div></div></div></section>
 <section id="page-dialogue" class="page"><div class="card"><h2><span class="status-dot"></span>Диалог · живой поток</h2><p class="notice">Сообщение уходит через USER_MESSAGE. Лента пополняется только событием шины; reconnect продолжается с последнего sequence.</p><form id="dialogue-form" class="control-stack"><label for="dialogue-input">Сообщение сущности</label><textarea id="dialogue-input" class="needs-core" maxlength="8000" required disabled placeholder="Ядро не подключено"></textarea><div class="control-line"><button id="dialogue-send" class="control-button needs-core" type="submit" disabled>Отправить через EventBus</button><span id="dialogue-feedback" class="feedback" role="status"></span></div></form><div id="dialogue-feed" class="list"></div></div></section>
 </main>
@@ -139,22 +139,108 @@ renderAccess(life.access||{});const effectorRows=[...Object.entries(life.effecto
 function renderActivities(a){const box=$('activity-cards');box.replaceChildren();for(const [key,title] of [['creative','Тексты'],['art','Рисунки'],['music','Музыка'],['game','Игра'],['guess_game','Угадывание']]){const card=node('div','','card span-6');card.append(node('h2',title));const item=a[key];if(item&&typeof item==='object'&&!Array.isArray(item)){const count=item.count??((key==='game'||key==='guess_game')?'активна':'—');card.append(node('div',String(count),'big'));const pre=node('pre',JSON.stringify(item,null,2));card.append(pre)}else card.append(node('div',value(item),'muted'));box.append(card)}if(!box.children.length)box.append(node('div','Нет данных','empty'))}
 async function refreshControl(){try{const c=await getJSON('/api/control');latestControl=c;document.querySelectorAll('.needs-core').forEach(el=>{el.disabled=!c.bus_connected});$('core-connection').textContent=c.bus_connected?'Ядро подключено. Команды идут через EventBus; ответ здесь означает только приём события.':'Ядро не подключено. Это standalone-превью: команды отключены.';$('core-connection').classList.toggle('connection-off',!c.bus_connected);$('dialogue-input').placeholder=c.bus_connected?'Напишите сообщение…':'Ядро не подключено';$('pause-button').disabled=!c.bus_connected||c.paused!==false;$('resume-button').disabled=!c.bus_connected||c.paused!==true;$('dream-button').disabled=!c.bus_connected||c.life_state!=='alive';$('terminate-button').disabled=!c.bus_connected||c.life_state!=='alive';$('wake-button').disabled=!c.bus_connected||c.life_state!=='dormant';if(c.speed_mode&&document.activeElement!==$('speed-mode'))$('speed-mode').value=c.speed_mode;const save=c.last_save_at?new Date(c.last_save_at*1000).toLocaleTimeString():'—';rows('control-facts',[['Фактическая пауза',c.paused===null||c.paused===undefined?'—':c.paused?'да':'нет'],['Фактический темп',c.speed_mode],['Состояние жизни',c.life_state],['Последнее сохранение',c.last_save_ok===null||c.last_save_ok===undefined?'ещё не было':`${save} · ${c.last_save_ok?'успешно':'ошибка'}`]]);const prompt=c.life_prompt;$('life-panel').hidden=!prompt;if(prompt){if(renderedRequestId!==prompt.request_id){$('life-confirm-input').value='';renderedRequestId=prompt.request_id}$('life-title').textContent=prompt.kind==='terminate'?'Подтверждение необратимого ухода':'Подтверждение сна';$('life-description').textContent=prompt.description||'Ядро ожидает явное подтверждение.';$('life-request-id').textContent=prompt.request_id;$('life-phrase').textContent=prompt.phrase||'—'}else renderedRequestId=null;const result=c.life_result;$('life-result').textContent=result?`${result.ok?'Результат: успешно':'Результат: отклонено'} · ${result.message||''}`:'';$('life-result').classList.toggle('error',!!result&&!result.ok);renderAccess(c.access||{})}catch(e){feedback('command-feedback',e.message,true)}}
 async function refreshDiary(){try{const d=await getJSON(`/api/diary?offset=${diaryOffset}&limit=${diaryLimit}`),list=$('diary-list');list.replaceChildren();for(const item of d.episodes){const e=node('div','','entry');e.append(node('time',`цикл ${value(item.ts)} · ${value(item.action)} · ${item.ok?'завершено':'не завершено'}`));const args=item.args?.target?` · ${item.args.target}`:'';e.append(node('p',`${value(item.task)}${args}`));if(item.error)e.append(node('div',String(item.error),'warn'));list.append(e)}if(!d.episodes.length)list.append(node('div','Записей в этом окне нет','empty'));$('diary-cache').textContent=`В read-only кэше: ${d.stored} из максимум ${d.cache_limit}. Более старые записи могут существовать вне кэша.`;$('diary-position').textContent=`${d.returned?d.offset+1:0}–${d.offset+d.returned} / ${d.stored}`;$('diary-prev').disabled=d.offset===0;$('diary-next').disabled=!d.has_more}catch(e){console.warn(e)}}
-async function refreshGraph(){try{
-const g=await getJSON('/api/graph'),svg=$('graph');svg.replaceChildren();
-const nodes=g.nodes||[],edges=g.edges||[],w=Math.max(320,Math.round(svg.clientWidth||1100)),h=Math.max(320,Math.round(svg.clientHeight||600)),cx=w/2,cy=h/2,r=Math.min(w,h)*.39,positions={};
-svg.setAttribute('viewBox',`0 0 ${w} ${h}`);
-nodes.forEach((n,i)=>{const a=(Math.PI*2*i/Math.max(1,nodes.length))-Math.PI/2;positions[n.id]=[cx+r*Math.cos(a),cy+r*Math.sin(a)]});
-const ns='http://www.w3.org/2000/svg';
-for(const e of edges){const p=positions[e.source],q=positions[e.target];if(!p||!q)continue;const line=document.createElementNS(ns,'line');line.setAttribute('x1',p[0]);line.setAttribute('y1',p[1]);line.setAttribute('x2',q[0]);line.setAttribute('y2',q[1]);line.setAttribute('class','graph-edge');svg.append(line)}
-nodes.forEach(n=>{
-const [x,y]=positions[n.id],group=document.createElementNS(ns,'g'),circle=document.createElementNS(ns,'circle'),label=document.createElementNS(ns,'text'),compact=w<500,labelBelow=compact&&y>cy+20,labelOnLeft=!labelBelow&&x>cx;
-circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',String(5+10*(n.weight||0)));
-circle.setAttribute('fill',n.kind==='concept'?'var(--graph-concept)':n.kind==='intention'?'var(--graph-intention)':'var(--graph-other)');
-label.setAttribute('x',labelBelow?x:labelOnLeft?x-12:x+12);label.setAttribute('y',labelBelow?y+24:y+4);label.setAttribute('text-anchor',labelBelow?'middle':labelOnLeft?'end':'start');label.setAttribute('class','graph-label');
-label.textContent=String(n.label).slice(0,w<500?12:28);group.append(circle,label);svg.append(group)
+const GRAPH_NS='http://www.w3.org/2000/svg';
+let graphData={nodes:[],edges:[]},graphPositions={},graphSize={w:0,h:0},graphZoom=1,graphPan={x:0,y:0},graphSelected=null,graphHovered=null,graphGesture=null;
+const graphPointers=new Map(),graphClamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+function graphRadius(n){return 5+10*Math.max(0,Math.min(1,Number(n.weight)||0))+(n.kind==='value'?2:0)}
+function graphColor(n){return n.kind==='concept'?'var(--graph-concept)':n.kind==='intention'?'var(--graph-intention)':'var(--graph-other)'}
+function graphLayout(nodes,w,h){
+ const cx=w/2,cy=h/2,maxRadius=Math.max(40,Math.min(w,h)/2-26),groups={},positions={};
+ for(const n of nodes){const kind=String(n.kind||'other');if(!groups[kind])groups[kind]=[];groups[kind].push(n)}
+ function place(items,radius,offset){items.forEach((n,i)=>{const a=offset+Math.PI*2*i/Math.max(1,items.length);positions[n.id]=[cx+radius*Math.cos(a),cy+radius*Math.sin(a)]})}
+ const concepts=(groups.concept||[]).slice().sort((a,b)=>(Number(b.weight)||0)-(Number(a.weight)||0)||String(a.id).localeCompare(String(b.id)));
+ const rings=[[0,1],[.26,7],[.44,12],[.60,18],[.73,24],[.84,30]];let index=0;
+ rings.forEach(([fraction,capacity],ringIndex)=>{const chunk=concepts.slice(index,index+capacity);index+=capacity;place(chunk,maxRadius*fraction,.4*(ringIndex+1))});
+ const groupRings={forgotten:[.60,.70],intention:[.68,.78],activity:[.82,.90],value:[.96,1.0]},offsets={forgotten:.9,intention:1.7,activity:2.5,value:3.3};
+ for(const [kind,[inner,outer]] of Object.entries(groupRings)){
+  const items=(groups[kind]||[]).slice().sort((a,b)=>(Number(b.weight)||0)-(Number(a.weight)||0)||String(a.id).localeCompare(String(b.id)));
+  place(items.slice(0,16),maxRadius*inner,offsets[kind]);place(items.slice(16),maxRadius*outer,offsets[kind]+.3);
+ }
+ const known=new Set(['concept',...Object.keys(groupRings)]);
+ for(const kind of Object.keys(groups).filter(kind=>!known.has(kind)).sort())place(groups[kind],maxRadius*.5,0);
+ return positions;
+}
+const graphMeasure=document.createElement('canvas').getContext('2d');
+function graphLabelText(n){const limit=graphSize.w<500?(graphZoom>=1.9?18:12):(graphZoom>=1.9?34:24),text=String(n.label||n.id);return text.length<=limit?text:text.slice(0,limit-1)+'…'}
+function graphLabelThreshold(){if(graphZoom<.7)return .92;if(graphZoom<1.15)return .68;if(graphZoom<1.75)return .45;if(graphZoom<2.5)return .28;return 0}
+function graphBoxesOverlap(a,b,padding=3){return !(a[2]+padding<b[0]||b[2]+padding<a[0]||a[3]+padding<b[1]||b[3]+padding<a[1])}
+function graphRenderLabels(){
+ const layer=$('graph-labels');if(!layer)return;layer.replaceChildren();
+ const active=graphHovered||graphSelected,neighbors=new Set(),threshold=graphLabelThreshold(),{w,h}=graphSize,cx=w/2,cy=h/2;
+ if(active)for(const e of graphData.edges||[]){if(e.source===active)neighbors.add(e.target);if(e.target===active)neighbors.add(e.source)}
+ const centers=(graphData.nodes||[]).map(n=>{const p=graphPositions[n.id];return p?[p[0],p[1],graphRadius(n),n.id]:null}).filter(Boolean);
+ const candidates=(graphData.nodes||[]).filter(n=>n.id===active||(active&&neighbors.has(n.id)&&(Number(n.weight)||0)>=.15)||(Number(n.weight)||0)>=threshold);
+ candidates.sort((a,b)=>(a.id===active?-1:b.id===active?1:0)||(Number(b.weight)||0)-(Number(a.weight)||0)||String(a.id).localeCompare(String(b.id)));
+ graphMeasure.font='12px Bahnschrift, Arial Narrow, sans-serif';
+ const used=[],margin=4/graphZoom,bounds=[-graphPan.x/graphZoom+margin,-graphPan.y/graphZoom+margin,(w-graphPan.x)/graphZoom-margin,(h-graphPan.y)/graphZoom-margin];
+ function hitsNode(box,ownId){for(const [x,y,r,id] of centers){if(id===ownId)continue;const nx=Math.min(Math.max(x,box[0]),box[2]),ny=Math.min(Math.max(y,box[1]),box[3]);if((nx-x)**2+(ny-y)**2<(r+4)**2)return true}return false}
+ for(const n of candidates){
+  const position=graphPositions[n.id];if(!position)continue;
+  const [x,y]=position,r=graphRadius(n),text=graphLabelText(n),textWidth=graphMeasure.measureText(text).width+10,textHeight=18,base=Math.atan2(y-cy,x-cx),angles=[0,.72,-.72,Math.PI/2,-Math.PI/2,Math.PI-.72,-Math.PI+.72,Math.PI];
+  let fallback=null,placed=null;
+  for(const offset of angles){
+   const angle=base+offset,distance=r+9+Math.min(textWidth*.45,26),labelX=x+Math.cos(angle)*distance,labelY=y+Math.sin(angle)*distance;
+   const box=[labelX-textWidth/2,labelY-textHeight/2,labelX+textWidth/2,labelY+textHeight/2];
+   if(box[0]<bounds[0]||box[1]<bounds[1]||box[2]>bounds[2]||box[3]>bounds[3])continue;
+   if(!fallback)fallback={box,text};
+   if(n.id!==active&&hitsNode(box,n.id))continue;
+   if(used.some(other=>graphBoxesOverlap(box,other)))continue;
+   placed={box,text};break;
+  }
+  if(!placed&&fallback&&!used.some(other=>graphBoxesOverlap(fallback.box,other)))placed=fallback;
+  if(!placed)continue;
+  const [left,top,right,bottom]=placed.box,label=document.createElementNS(GRAPH_NS,'text');
+  label.setAttribute('x',String((left+right)/2));label.setAttribute('y',String((top+bottom)/2+4));label.setAttribute('text-anchor','middle');
+  label.setAttribute('class',`graph-label${n.id===active?' is-active':''}`);label.dataset.id=n.id;label.textContent=placed.text;layer.append(label);used.push(placed.box);
+ }
+ $('graph-note').textContent=`Узлов: ${(graphData.nodes||[]).length}; связей: ${(graphData.edges||[]).length}; подписей: ${layer.children.length}; скрыто сверх лимита: ${graphData.omitted||0}`;
+}
+function graphUpdate(){
+ const viewport=$('graph-viewport');if(!viewport)return;
+ viewport.setAttribute('transform',`translate(${graphPan.x} ${graphPan.y}) scale(${graphZoom})`);$('graph-zoom').textContent=`${Math.round(graphZoom*100)}%`;
+ const active=graphHovered||graphSelected,neighbors=new Set();if(active)neighbors.add(active);
+ for(const line of $('graph-edges').children){
+  const hot=active&&(line.dataset.source===active||line.dataset.target===active);
+  if(hot)neighbors.add(line.dataset.source===active?line.dataset.target:line.dataset.source);
+  line.classList.toggle('is-hot',!!hot);line.classList.toggle('is-dim',!!active&&!hot);
+ }
+ for(const group of $('graph-nodes').children){const related=!active||neighbors.has(group.dataset.id);group.classList.toggle('is-dim',!related);group.classList.toggle('is-hot',group.dataset.id===active)}
+ graphRenderLabels();
+}
+function graphRender(){
+ const svg=$('graph'),w=Math.max(320,Math.round(svg.clientWidth||0)),h=Math.max(320,Math.round(svg.clientHeight||0));if(!svg.clientWidth)return;
+ graphSize={w,h};graphPositions=graphLayout(graphData.nodes||[],w,h);svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.replaceChildren();
+ const viewport=document.createElementNS(GRAPH_NS,'g');viewport.id='graph-viewport';
+ const edges=document.createElementNS(GRAPH_NS,'g');edges.id='graph-edges';
+ const nodes=document.createElementNS(GRAPH_NS,'g');nodes.id='graph-nodes';
+ const labels=document.createElementNS(GRAPH_NS,'g');labels.id='graph-labels';
+ for(const e of graphData.edges||[]){const p=graphPositions[e.source],q=graphPositions[e.target];if(!p||!q)continue;const line=document.createElementNS(GRAPH_NS,'line');line.setAttribute('x1',p[0]);line.setAttribute('y1',p[1]);line.setAttribute('x2',q[0]);line.setAttribute('y2',q[1]);line.setAttribute('class','graph-edge');line.dataset.source=e.source;line.dataset.target=e.target;edges.append(line)}
+ for(const n of graphData.nodes||[]){const position=graphPositions[n.id];if(!position)continue;const [x,y]=position,group=document.createElementNS(GRAPH_NS,'g'),circle=document.createElementNS(GRAPH_NS,'circle'),title=document.createElementNS(GRAPH_NS,'title');group.setAttribute('class','graph-node');group.dataset.id=n.id;circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',String(graphRadius(n)));circle.setAttribute('fill',graphColor(n));title.textContent=String(n.label||n.id);group.append(circle,title);nodes.append(group)}
+ viewport.append(edges,nodes,labels);svg.append(viewport);graphUpdate();
+}
+async function refreshGraph(){try{if(!$('page-graph').classList.contains('active')||!$('graph').clientWidth)return;graphData=await getJSON('/api/graph');graphRender()}catch(e){console.warn(e)}}
+function graphPoint(event){const rect=$('graph').getBoundingClientRect();return{x:event.clientX-rect.left,y:event.clientY-rect.top}}
+function graphZoomAt(next,point=null){const svg=$('graph');if(!svg.clientWidth)return;const p=point||{x:svg.clientWidth/2,y:svg.clientHeight/2},zoom=graphClamp(next,.45,4.5),worldX=(p.x-graphPan.x)/graphZoom,worldY=(p.y-graphPan.y)/graphZoom;graphPan={x:p.x-worldX*zoom,y:p.y-worldY*zoom};graphZoom=zoom;graphUpdate()}
+function graphResetView(){graphZoom=1;graphPan={x:0,y:0};graphSelected=null;graphHovered=null;graphUpdate()}
+$('graph-zoom-in').onclick=()=>graphZoomAt(graphZoom*1.35);$('graph-zoom-out').onclick=()=>graphZoomAt(graphZoom/1.35);$('graph-reset').onclick=graphResetView;
+$('graph').addEventListener('wheel',event=>{event.preventDefault();graphZoomAt(graphZoom*Math.exp(-event.deltaY*.0015),graphPoint(event))},{passive:false});
+$('graph').addEventListener('keydown',event=>{const moves={ArrowLeft:[40,0],ArrowRight:[-40,0],ArrowUp:[0,40],ArrowDown:[0,-40]};if(event.key==='+'||event.key==='='){event.preventDefault();graphZoomAt(graphZoom*1.35)}else if(event.key==='-'){event.preventDefault();graphZoomAt(graphZoom/1.35)}else if(event.key==='0'){event.preventDefault();graphResetView()}else if(moves[event.key]){event.preventDefault();const [dx,dy]=moves[event.key];graphPan={x:graphPan.x+dx,y:graphPan.y+dy};graphUpdate()}});
+$('graph').addEventListener('pointerover',event=>{if(event.pointerType!=='mouse')return;const group=event.target.closest('.graph-node');if(group&&group.dataset.id!==graphHovered){graphHovered=group.dataset.id;graphUpdate()}});
+$('graph').addEventListener('pointerout',event=>{if(event.pointerType!=='mouse')return;const group=event.target.closest('.graph-node');if(group&&group.contains(event.relatedTarget))return;if(graphHovered){graphHovered=null;graphUpdate()}});
+$('graph').addEventListener('pointerdown',event=>{if(event.pointerType==='mouse'&&event.button!==0)return;const svg=$('graph'),point=graphPoint(event),group=event.target.closest('.graph-node');svg.setPointerCapture(event.pointerId);graphPointers.set(event.pointerId,point);
+ if(graphPointers.size===1)graphGesture={last:point,start:point,moved:false,nodeId:group?.dataset.id||null,pinch:false};
+ else if(graphPointers.size===2){const [a,b]=[...graphPointers.values()];graphGesture={pinch:true,moved:true,lastDistance:Math.hypot(a.x-b.x,a.y-b.y)}}
 });
-$('graph-note').textContent=`Узлов: ${nodes.length}; связей: ${edges.length}; скрыто сверх лимита: ${g.omitted||0}`
-}catch(e){console.warn(e)}}
+$('graph').addEventListener('pointermove',event=>{if(!graphPointers.has(event.pointerId))return;const point=graphPoint(event);graphPointers.set(event.pointerId,point);
+ if(graphPointers.size===2){const [a,b]=[...graphPointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y),center={x:(a.x+b.x)/2,y:(a.y+b.y)/2};if(graphGesture?.lastDistance>0)graphZoomAt(graphZoom*distance/graphGesture.lastDistance,center);graphGesture={pinch:true,moved:true,lastDistance:distance};return}
+ if(!graphGesture||graphGesture.pinch)return;const dx=point.x-graphGesture.last.x,dy=point.y-graphGesture.last.y;if(Math.hypot(point.x-graphGesture.start.x,point.y-graphGesture.start.y)>4)graphGesture.moved=true;if(graphGesture.moved){graphPan={x:graphPan.x+dx,y:graphPan.y+dy};graphUpdate()}graphGesture.last=point;
+});
+function graphPointerEnd(event){if(!graphPointers.has(event.pointerId))return;const wasTap=graphPointers.size===1&&graphGesture&&!graphGesture.moved,nodeId=graphGesture?.nodeId;graphPointers.delete(event.pointerId);
+ if(wasTap){if(nodeId)graphSelected=graphSelected===nodeId?null:nodeId;else graphSelected=null;graphHovered=null;graphUpdate()}
+ if(graphPointers.size===1){const [point]=[...graphPointers.values()];graphGesture={last:point,start:point,moved:true,nodeId:null,pinch:false}}else graphGesture=null;
+}
+$('graph').addEventListener('pointerup',graphPointerEnd);$('graph').addEventListener('pointercancel',graphPointerEnd);
+if(window.ResizeObserver){const observer=new ResizeObserver(()=>{if(!$('page-graph').classList.contains('active'))return;const w=Math.round($('graph').clientWidth),h=Math.round($('graph').clientHeight);if(w&&h&&(w!==graphSize.w||h!==graphSize.h))graphRender()});observer.observe($('graph'))}
 function addDialogue(item){if(!item||item.sequence<=lastSequence)return;lastSequence=Math.max(lastSequence,item.sequence);if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${item.kind}`),node('p',item.text||JSON.stringify(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
 async function startDialogue(){try{const d=await getJSON('/api/dialogue?limit=50');for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
 function connectDialogue(){if(eventSource)eventSource.close();eventSource=new EventSource(`/stream/dialogue?after=${lastSequence}`);eventSource.onmessage=e=>{try{addDialogue(JSON.parse(e.data))}catch(err){console.warn(err)}};eventSource.onerror=()=>{/* EventSource reconnects with Last-Event-ID; sequence also deduplicates. */}}
