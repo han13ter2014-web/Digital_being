@@ -247,7 +247,7 @@ def access_rows(snapshot: Dict[str, Any]) -> List[Row]:
     """Что реально разрешено. Только существующие переключатели."""
     access = snapshot.get("access") or {}
     rows: List[Row] = []
-    for key in ("network", "delamain", "effector"):
+    for key in ("network", "delamain", "effector", "presence"):
         item = access.get(key)
         if isinstance(item, dict):
             rows.append((str(item.get("label") or key),

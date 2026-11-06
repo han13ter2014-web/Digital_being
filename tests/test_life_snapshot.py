@@ -153,3 +153,35 @@ def test_diary_snapshot_reads_episodes_without_mutating_core():
     snapshot["diary"]["episodes"][0]["args"]["target"] = "изменено"
     assert rows[0]["args"]["target"] == "партия"
     assert set(agent.__dict__) == before
+
+
+def test_snapshot_exposes_existing_emotions_body_and_presence():
+    agent = _agent("BodyAndEmotions")
+    agent.emotional_state.handle_event("intention_completed", cycle=1, cause="тест")
+    agent.presence = SimpleNamespace(enabled=True)
+
+    snapshot = build_life_snapshot(agent)
+
+    assert snapshot["emotions"] == agent.emotional_state.get_status()
+    assert snapshot["body"] == agent.interoception.get_status()
+    assert snapshot["access"]["presence"] == {"enabled": True, "label": "Присутствие"}
+    assert snapshot["body"]["atp"] == agent.interoception.get_status()["atp"]
+
+
+def test_extended_diary_uses_same_collector_without_changing_tk_window():
+    from src.ui.life_snapshot import build_diary_snapshot
+
+    agent = _agent("DiaryPages")
+    rows = [{"id": index, "action": "play", "args": {"target": str(index)}}
+            for index in range(30)]
+    agent.delamain = SimpleNamespace(runtime=SimpleNamespace(
+        memory=SimpleNamespace(recent_life_episodes=lambda **kwargs: rows[-kwargs["limit"]:])
+    ))
+
+    tk_snapshot = build_life_snapshot(agent)
+    web_snapshot = build_diary_snapshot(agent)
+
+    assert len(tk_snapshot["diary"]["episodes"]) == 20
+    assert len(web_snapshot["episodes"]) == 30
+    assert web_snapshot["episodes"][:20] == tk_snapshot["diary"]["episodes"]
+    assert web_snapshot["cache_limit"] == 500

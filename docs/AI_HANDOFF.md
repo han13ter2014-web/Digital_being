@@ -85,6 +85,16 @@ check-then-act на UNIQUE и execute/fetchall у читателей устра�
 
 Гейт: **2059 passed, 2 skipped**; mypy паритет 41=41.
 
+## К6 закрыт 2026-11-06 — две двери знаний
+
+Знания из `web_search` записываются в `knowledge_base.json`. Ответы пользователя
+на вопросы сущности идут другим путём: `record_user_answer → encounter_concept`
+и сохраняются в `mental_models.concepts[*].experiences` как свидетельство
+(`evidence_kind="testimony"`, `source="user"`, `evidence_strength=0.4`).
+Подтверждение «Записал…» относится именно к этому свидетельству, а не к
+перезаписи словарного определения в `knowledge_base.json`. Живой след найден
+в чекпоинте 8151; улики: `k6_dialogue_knowledge_path_2026-11-06/`.
+
 ## К5 закрыт 2026-11-06 — след исходящих сообщений переживает рестарт
 
 `UserInteraction.to_checkpoint_dict()` сохраняет `outgoing_messages`: последние

@@ -1721,7 +1721,7 @@ class MainWindow(ChatWindow):
             fg=theme.MUTED,
             anchor="w",
         ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
-        for key in ("network", "delamain", "effector"):
+        for key in ("network", "delamain", "effector", "presence"):
             var = tk.BooleanVar(value=False)
             self._access_vars[key] = var
             row = tk.Frame(switches, bg=theme.SURFACE)
