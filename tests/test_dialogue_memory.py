@@ -63,7 +63,7 @@ def test_act_communicate_sends_topic_once():
     ui = agent.user_interaction
 
     result = agent._act_communicate()
-    assert "рассказал человеку" in result["text"]
+    assert "рассказала человеку" in result["text"]
     assert ui.message_history
     assert "«число»" in ui.message_history[-1]["content"]
 

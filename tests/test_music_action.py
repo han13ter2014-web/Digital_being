@@ -177,7 +177,7 @@ def test_compose_music_action_creates_melody():
     agent = DigitalBeing(name="MusicTest")
     result = agent.act("compose_music")
 
-    assert "сочинил мелодию" in result
+    assert "сочинила мелодию" in result
     work = agent._music_work
     assert work is not None
     assert work["revision"] == 1
@@ -219,7 +219,7 @@ def test_music_limit_leaves_work_with_reason():
     agent._music_catalog[first["id"]] = dict(agent._music_work)
 
     result = agent.act("compose_music")
-    assert "сочинил мелодию" in result
+    assert "сочинила мелодию" in result
     # Начата новая работа, старая оставлена с честной причиной.
     assert agent._music_work["id"] != first["id"]
     works = {w["id"]: w for w in agent.list_music_works()}

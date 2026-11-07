@@ -280,23 +280,18 @@ def test_load_from_tolerates_corruption():
 
 
 @pytest.mark.asyncio
-async def test_repeated_unknown_phrase_produces_proposal_question():
-    """Вторая нераспознанная фраза — вопрос-уточнение, а не отклик."""
+async def test_first_unknown_phrase_produces_proposal_question():
+    """K13: первая нераспознанная фраза — вопрос-уточнение, не отклик."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
-
-    await _say(runner, PHRASE)
-    assert ui.get_pending_question() is None
-    assert _replies(bus)[-1]["context"] == "unknown_reply"
 
     await _say(runner, PHRASE)
     pending = ui.get_pending_question()
     assert pending is not None
     assert DialogueLearning.is_proposal_context(pending["context"])
     assert DialogueLearning.phrase_from_context(pending["context"]) == PHRASE
-    # вопрос опубликован, общий отклик «не понимаю» второй раз не слали
     assert _questions(bus)
-    assert [r["context"] for r in _replies(bus)] == ["unknown_reply"]
+    assert _replies(bus) == []
 
 
 @pytest.mark.asyncio
@@ -304,7 +299,6 @@ async def test_teaching_answer_digit_not_swallowed_by_noise_door():
     """«2» — без букв, но это обучающий ответ, а не шум (регрессия)."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
-    await _say(runner, PHRASE)
     await _say(runner, PHRASE)
     assert ui.get_pending_question() is not None
 
@@ -322,7 +316,6 @@ async def test_learned_social_phrase_routes_to_social_door():
     """Выученная фраза классифицируется и получает социальный отклик."""
     agent, runner, bus = _make_runner()
     await _say(runner, PHRASE)
-    await _say(runner, PHRASE)
     await _say(runner, "1")
     assert agent.dialogue_learning.learned[PHRASE]["act"] == ACT_SOCIAL
 
@@ -337,7 +330,6 @@ async def test_suppressed_phrase_never_proposed_again():
     """«4 — не учить»: фраза остаётся непонятной, но не переспрашивается."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
-    await _say(runner, PHRASE)
     await _say(runner, PHRASE)
     await _say(runner, "4")
 
@@ -356,7 +348,6 @@ async def test_suppressed_phrase_never_proposed_again():
 async def test_unclear_teaching_answer_learns_nothing():
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
-    await _say(runner, PHRASE)
     await _say(runner, PHRASE)
     await _say(runner, "сложно объяснить это словами")
 
@@ -382,7 +373,7 @@ async def test_forget_command_reaches_door_despite_social_marker():
     assert _replies(bus)[-1]["context"] == "dialogue_forget"
 
     await _say(runner, "забудь фразу моя фраза")
-    assert "не учил" in _replies(bus)[-1]["content"]
+    assert "не учила" in _replies(bus)[-1]["content"]
 
 
 @pytest.mark.asyncio

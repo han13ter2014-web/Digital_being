@@ -389,7 +389,7 @@ def test_rest_reports_consolidation_in_action_text(agent):
 
     result = agent.act("deep_rest")
 
-    assert "осмыслил накопленное" in result
+    assert "осмыслила накопленное" in result
 
 
 def test_consolidation_state_survives_checkpoint(agent):

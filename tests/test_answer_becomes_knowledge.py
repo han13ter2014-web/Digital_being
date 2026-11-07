@@ -223,7 +223,7 @@ def test_ask_user_action_still_asks_fresh_topic():
 
     result = agent._act_ask_user(target="новая тема")
 
-    assert "спросил человека про 'новая тема'" in result.get("text", "")
+    assert "спросила человека про 'новая тема'" in result.get("text", "")
     pending = agent.user_interaction.pending_questions
     assert len(pending) == 1
     assert pending[0]["context"] == (
@@ -250,7 +250,7 @@ async def test_direct_answer_becomes_knowledge_with_citation():
     assert agent._user_explained_topics == {"вопрос": agent.cycle_count}
 
     texts = _reply_texts(bus)
-    reply = next(t for t in texts if "Записал про" in t)
+    reply = next(t for t in texts if "Записала про" in t)
     assert "«вопрос»" in reply
     assert ANSWER in reply
 

@@ -186,7 +186,7 @@ async def test_runner_answer_triggers_synthesis_and_reports_it():
         },
     )
     texts = _reply_texts(bus)
-    text = next(t for t in texts if "свёл воедино" in t)
+    text = next(t for t in texts if "свела воедино" in t)
     assert "жизнь" in text
     assert ui.get_pending_question() is None
 

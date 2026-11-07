@@ -83,7 +83,7 @@ def test_ask_user_queues_real_question(agent):
     pending = agent.user_interaction.get_pending_question()
     assert pending is not None, "вопрос не поставлен в очередь"
     assert "Я разбираюсь с темой" in pending["question"]
-    assert "спросил человека" in result
+    assert "спросила человека" in result
 
 
 def test_ask_user_has_observable_effect(agent):
@@ -137,7 +137,7 @@ def test_communicate_sends_message(agent):
     assert any(
         m.get("msg_type") == "statement" for m in messages
     )
-    assert "рассказал человеку" in result
+    assert "рассказала человеку" in result
 
 
 def test_communicate_has_observable_effect(agent):
@@ -156,7 +156,7 @@ def test_communicate_has_observable_effect(agent):
 def test_communicate_without_news_does_nothing(agent):
     """Нечем делиться — честно говорит об этом, а не выдумывает."""
     result = agent.act("communicate")
-    assert "нечего рассказать" in result or "рассказал" in result
+    assert "нечего рассказать" in result or "рассказала" in result
 
 
 # ============================================================

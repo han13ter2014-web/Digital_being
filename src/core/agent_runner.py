@@ -33,6 +33,8 @@ AgentRunner — оркестратор жизни агента в трей-ре�
 """
 
 import asyncio
+from datetime import datetime, timezone
+import json
 import logging
 import os
 import time
@@ -61,6 +63,10 @@ from src.core.dialogue_acts import (
     is_question_text,
 )
 from src.core.dialogue_learning import DialogueLearning
+from src.core.dialogue_memory import (
+    build_known_topic_reply,
+    build_persistent_fact_reply,
+)
 from src.evolution.self_coding import parse_proposal_decision
 
 
@@ -348,13 +354,13 @@ class AgentRunner:
                         verdict = "одобрено" if approved else "отклонено"
                         if approved:
                             reply = (
-                                f"Записал твоё решение: предложение "
+                                f"Записала твоё решение: предложение "
                                 f"«{outcome['title']}» {verdict}. "
-                                f"Внедрение — за тобой: я сам себя не меняю."
+                                f"Внедрение — за тобой: я сама себя не меняю."
                             )
                         else:
                             reply = (
-                                f"Записал твоё решение: предложение "
+                                f"Записала твоё решение: предложение "
                                 f"«{outcome['title']}» {verdict}. Учту."
                             )
                     else:
@@ -380,13 +386,41 @@ class AgentRunner:
                         text, cycle=self.agent.cycle_count
                     )
                 if learning.forget(forget_phrase):
-                    reply = f"Забыл фразу «{forget_phrase}» — больше не использую."
+                    reply = f"Забыла фразу «{forget_phrase}» — больше не использую."
                 else:
-                    reply = f"Фразы «{forget_phrase}» я не учил — забывать нечего."
+                    reply = f"Фразы «{forget_phrase}» я не учила — забывать нечего."
                 await self._reply_to_user(
                     reply, context="dialogue_forget", source="dialogue_learning"
                 )
                 return
+
+        # K13: сначала читаем уже сохранённые факты и знания. Эти мосты
+        # стоят после naming/обучающего протокола, но до общего about_self
+        # и unknown fallback: записанное не должно становиться «незнакомым».
+        persistent_reply = build_persistent_fact_reply(self.agent, text)
+        known_topic_reply = (
+            build_known_topic_reply(self.agent, text)
+            if persistent_reply is None else None
+        )
+        if persistent_reply is not None or known_topic_reply is not None:
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            if persistent_reply is not None:
+                await self._reply_to_user(
+                    persistent_reply,
+                    context="persistent_fact",
+                    source="dialogue_memory",
+                )
+            else:
+                await self._reply_to_user(
+                    known_topic_reply,
+                    context="known_topic",
+                    source="dialogue_memory",
+                )
+            return
 
         # Вопрос о самой сущности — честный ответ из read-only Core.
         if act.kind == ACT_ASK_ABOUT_SELF:
@@ -461,7 +495,7 @@ class AgentRunner:
         # закрыть именно его, а не стать новой темой обучения.
         # TICKET-5/6 (наблюдатели 2026-11-05): вопрос человека — не ответ.
         # «Что тебе сейчас важно?» при открытом вопросе про «обучение»
-        # записывалось как «Записал про "обучение"», а висящий вопрос
+        # записывалось как «Записала про "обучение"», а висящий вопрос
         # закрывался чужими словами. Вопрос пропускаем мимо двери: он
         # идёт дальше по обычным дверям, вопрос сущности остаётся
         # открытым. Ответ со встречным вопросом («Спокойно и тепло.
@@ -586,6 +620,10 @@ class AgentRunner:
             user_model.observe(text, cycle=self.agent.cycle_count)
         if learning is not None:
             candidate = learning.observe(text, cycle=self.agent.cycle_count)
+            if candidate is None:
+                candidate = learning.immediate_candidate(
+                    text, cycle=self.agent.cycle_count
+                )
             if candidate is not None and interaction is not None:
                 proposal = learning.build_proposal(
                     candidate, cycle=self.agent.cycle_count
@@ -654,14 +692,14 @@ class AgentRunner:
                 ACT_REQUEST: "просьбу, которой я не умею",
             }[outcome["act"]]
             reply = (
-                f"Понял: «{phrase}» — теперь буду воспринимать это как "
+                f"Поняла: «{phrase}» — теперь буду воспринимать это как "
                 f"{label}."
             )
         elif outcome["status"] == "suppressed":
             reply = f"Хорошо: «{phrase}» учить не буду."
         else:
             reply = (
-                "Не понял ответ — оставлю эту фразу как есть. "
+                "Не поняла ответ — оставлю эту фразу как есть. "
                 "Если захочешь, объясни позже."
             )
         await self._reply_to_user(
@@ -712,7 +750,7 @@ class AgentRunner:
         )
         if saved:
             await self._reply_to_user(
-                f"Записал: «{saved} — это {body}». "
+                f"Записала: «{saved} — это {body}». "
                 "Теперь я знаю это от тебя — переспрашивать не буду.",
                 context="user_definition", source="dialogue_acts",
             )
@@ -847,7 +885,7 @@ class AgentRunner:
         if phase == "considering":
             alt = getattr(naming, "_alternative_name", "") or "другое имя"
             hint = (
-                f"Я предложил(а) «{alt}». Скажи «да» или «нет» — "
+                f"Я предложила «{alt}». Скажи «да» или «нет» — "
                 "или напиши другое имя отдельно."
             )
         else:
@@ -929,10 +967,10 @@ class AgentRunner:
         )
         if muted:
             return (
-                f"Ты прав — я спрашивал об этом, вопрос снимаю. "
-                f"К теме «{muted}» сам больше не вернусь."
+                f"Ты прав — я спрашивала об этом, вопрос снимаю. "
+                f"К теме «{muted}» сама больше не вернусь."
             )
-        return "Ты прав — вопрос снимаю и сам к нему больше не вернусь."
+        return "Ты прав — вопрос снимаю и сама к нему больше не вернусь."
 
     def _format_request_refusal(self) -> str:
         """Честный отказ на просьбу о невозможном — без выдуманных умений.
@@ -996,7 +1034,7 @@ class AgentRunner:
             if isinstance(traits, dict) and traits:
                 first_trait = next(iter(traits.values()))
                 parts.append(
-                    "Про тебя я записал: "
+                    "Про тебя я записала: "
                     f"«{self._short_quote(first_trait, 100)}»."
                 )
         return " ".join(parts)
@@ -1024,18 +1062,18 @@ class AgentRunner:
         status = result.get("status")
         if status == "answered":
             if result.get("answer_kind") == "unknown":
-                return "Понял: «не знаю» — я запомню это как твой ответ, а не как факт."
+                return "Поняла: «не знаю» — я запомню это как твой ответ, а не как факт."
             if topic and answer_text:
                 quote = AgentRunner._short_quote(answer_text)
                 if quote:
                     return (
-                        f"Записал про «{topic}»: «{quote}» — "
+                        f"Записала про «{topic}»: «{quote}» — "
                         "буду проверять на своём опыте."
                     )
             if result.get("synthesis_needed"):
                 return (
                     "Ответ записан. Части сложены в целое — "
-                    f"я свёл воедино «{result.get('complex_question', '')}»."
+                    f"я свела воедино «{result.get('complex_question', '')}»."
                 )
             if result.get("next_sub_question"):
                 return "Ответ записан. Есть ещё один уточняющий вопрос."
@@ -1508,6 +1546,9 @@ class AgentRunner:
             if self._speed_mode == "max":
                 self._accelerated_cycles += 1
         finally:
+            # K13: диалог фиксируется после каждого цикла, даже если цикл
+            # завершился ошибкой или отменой. Журнал отделён от checkpoint.
+            self._save_dialogue_cycle_snapshot()
             # === Watchdog: конец цикла — в любой развилке ===
             self.watchdog.on_cycle_end()
 
@@ -1519,6 +1560,42 @@ class AgentRunner:
         if (time.time() - self._last_auto_save_ts) >= LR_CONFIG.TRAY_AUTO_SAVE_INTERVAL_SEC:
             self._save_state_safe()
             self._last_auto_save_ts = time.time()
+
+    def _save_dialogue_cycle_snapshot(self) -> None:
+        """Добавить снапшот диалога в JSONL и сразу сбросить его на диск.
+
+        Файл журнала пополняется после рестарта, а Core-checkpoint не
+        раздувается. Последние 100 реплик включают обе стороны диалога;
+        ``to_checkpoint_dict`` сохраняет вопросы и исходящий след K5.
+        Ошибка журнала не останавливает жизненный цикл.
+        """
+        try:
+            interaction = getattr(self.agent, "user_interaction", None)
+            if interaction is None:
+                return
+            dialogue = interaction.to_checkpoint_dict()
+            history = getattr(interaction, "message_history", []) or []
+            history_limit = int(getattr(interaction, "OUTGOING_TRACE_MAX", 100))
+            dialogue["messages"] = [
+                dict(entry) for entry in history[-history_limit:]
+                if isinstance(entry, dict)
+            ]
+            record = {
+                "schema_version": 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "agent_name": str(getattr(self.agent, "name", self.name)),
+                "cycle": int(getattr(self.agent, "cycle_count", 0)),
+                "tick": int(self._tick_count),
+                "ledger": dict(getattr(self, "_last_tick_ledger", {}) or {}),
+                "dialogue": dialogue,
+            }
+            path = data_path("logs", "dialogue_cycles.jsonl")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+                stream.flush()
+        except Exception as exc:
+            logger.warning(f"[{self.name}] dialogue snapshot failed: {exc}")
 
     def set_stimulus_mode(self, mode: str) -> None:
         if mode not in {"quiet", "pool"}:
@@ -1613,8 +1690,8 @@ class AgentRunner:
             f"неудач (этап {stage}): {error}"
         )
         confession = (
-            f"Я {MAX_STIMULUS_RETRIES} раза пытался разобрать "
-            f"«{preview}» и не смог — отпускаю это. "
+            f"Я {MAX_STIMULUS_RETRIES} раза пыталась разобрать "
+            f"«{preview}» и не смогла — отпускаю это. "
             "Если это было твоё сообщение, напиши его ещё раз."
         )
         # «Собеседник-6»: реплика адресована человеку — канал диалога.
@@ -1813,7 +1890,7 @@ class AgentRunner:
                     "energy": self.agent.energy,
                     "percent": self.energy_policy.energy_percent,
                     "message": (
-                        f"Я очень устал (энергия {self.agent.energy:.0f}). "
+                        f"Я очень устала (энергия {self.agent.energy:.0f}). "
                         f"Я не умру — просто замедлюсь и буду отдыхать."
                     ),
                 },
@@ -1839,7 +1916,7 @@ class AgentRunner:
                 {
                     "energy": self.agent.energy,
                     "percent": self.energy_policy.energy_percent,
-                    "message": "Я снова полон сил!",
+                    "message": "Я снова полна сил!",
                 },
                 source="energy_policy",
                 priority=1,
@@ -1958,7 +2035,7 @@ class AgentRunner:
                 return "⚠️ Интернет-поиск выключен (/web on чтобы включить)."
             if reason in ("network_error", "timeout"):
                 return f"🌐 Интернет недоступен ({reason})."
-            return f"🌐 Ничего не нашёл по «{query}» ({reason})."
+            return f"🌐 Ничего не нашла по «{query}» ({reason})."
         if cmd == "web":
             ws = getattr(self.agent, "web_searcher", None)
             if ws is None:

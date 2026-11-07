@@ -276,7 +276,7 @@ class BrowseWebActionTests(unittest.TestCase):
         second = agent._act_browse_web()
 
         self.assertEqual(len(searcher.compass_calls), 1)
-        self.assertIn("недавно обошёл", second["text"])
+        self.assertIn("недавно обошла", second["text"])
 
     def test_compass_miss_cools_down_honestly(self):
         searcher = _make_web_searcher(compass=_MISS)
@@ -288,7 +288,7 @@ class BrowseWebActionTests(unittest.TestCase):
 
         self.assertIn("ничего не подсказал", first["text"])
         self.assertEqual(len(searcher.compass_calls), 1)
-        self.assertIn("недавно обошёл", second["text"])
+        self.assertIn("недавно обошла", second["text"])
 
     def test_unreadable_page_is_honest(self):
         searcher = _make_web_searcher(page=_MISS)

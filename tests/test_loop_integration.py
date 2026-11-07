@@ -41,7 +41,7 @@ def test_explore_changes_the_world(agent):
     # Либо появилась новая концепция, либо выросла уверенность.
     assert outcome.had_effect is True
     assert after >= before
-    assert "изучил" in result or "исследовал" in result
+    assert "изучила" in result or "исследовала" in result
 
 
 def test_explore_picks_different_targets(agent):

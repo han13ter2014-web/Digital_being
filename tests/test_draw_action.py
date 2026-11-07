@@ -22,7 +22,7 @@ def _clean_art_artifacts():
 def test_draw_action_creates_artwork():
     agent = DigitalBeing(name="DrawTest")
     result = agent.act("draw")
-    assert "нарисовал" in result
+    assert "нарисовала" in result
     work = agent._art_work
     assert work is not None
     assert work["revision"] == 1
