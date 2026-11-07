@@ -412,7 +412,7 @@ class NamingDialogue:
         if random.random() < 0.3:
             current = getattr(agent, "name", self.agent_name) if agent else self.agent_name
             content = (
-                f"Подумал. «{candidate}» — красивое имя, но я ещё не готов "
+                f"Подумала. «{candidate}» — красивое имя, но я ещё не готова "
                 f"расстаться с «{current}».\n\n"
                 f"Останусь «{current}». Спасибо, что предложил(а)."
             )

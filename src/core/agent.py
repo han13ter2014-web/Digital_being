@@ -1669,7 +1669,7 @@ class DigitalBeing:
                 # действие не гаснет и выбирается снова и снова.
                 step_body(self, action_type, performed=False)
                 record_denied_outcome(self, action_type, world_before, "too_tired")
-                return f"Ответ: Слишком устал для {action_type}"
+                return f"Ответ: Слишком устала для {action_type}"
         else:
             cost = base_cost
 
@@ -1737,11 +1737,11 @@ class DigitalBeing:
                 confirmed_result = True
                 result_description = f"энергия восстановлена на {recovered:.0f}"
                 parts.append(
-                    f"восстановил {recovered:.0f} энергии (теперь {self.energy:.0f})"
+                    f"восстановила {recovered:.0f} энергии (теперь {self.energy:.0f})"
                 )
             if consolidated:
                 parts.append(
-                    f"осмыслил накопленное: связей {consolidated.get('links', 0)}, "
+                    f"осмыслила накопленное: связей {consolidated.get('links', 0)}, "
                     f"формулировок {consolidated.get('definitions', 0)}"
                 )
             if parts:
@@ -1759,14 +1759,14 @@ class DigitalBeing:
             params = intention or {}
             values = params.get("params", {})
             decision = resolve_wait(self, values.get("action", "explore"), values.get("topic", ""),
-                                    kind="forgotten", reason=values.get("reason", "сам решил отпустить"))
-            action = f"Ответ: отпустил намерение '{values.get('topic', '')}' ({decision['status']})"
+                                    kind="forgotten", reason=values.get("reason", "сама решила отпустить"))
+            action = f"Ответ: отпустила намерение '{values.get('topic', '')}' ({decision['status']})"
         elif action_type == "create_draft":
             from src.cognition.creative_catalog import perform_creative
 
             mode, identifier, reason = creative_choice
             draft = perform_creative(self, mode, identifier, reason)
-            verb = "оставил" if mode == "leave" else "создал" if mode == "new" else "продолжил"
+            verb = "оставила" if mode == "leave" else "создала" if mode == "new" else "продолжила"
             action = f"Ответ: {verb} черновик «{draft['theme']}», версия {draft['revision']}"
         elif action_type == "play":
             from src.cognition.local_play import (
@@ -1785,7 +1785,7 @@ class DigitalBeing:
                 turn = guess_turn(guess)
                 self._last_play_result = turn
                 action = (
-                    f"Ответ: угадываю число — назвал {turn['guess']} "
+                    f"Ответ: угадываю число — назвала {turn['guess']} "
                     f"({turn['hint']}), попытка {turn['attempts']}"
                 )
                 if turn["result"] is not None:
@@ -1799,7 +1799,7 @@ class DigitalBeing:
                     state = self._local_play = new_game()
                 turn = play_turn(state)
                 self._last_play_result = turn
-                action = f"Ответ: сыграл ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
+                action = f"Ответ: сыграла ход {turn['chosen_cell'] + 1}; поле {''.join(turn['board'])}"
                 if turn["result"] is not None:
                     action += f"; партия завершена: {turn['result']}"
             # Вернувшийся ход уже изменил состояние выбранной игры. Исход
@@ -1823,11 +1823,11 @@ class DigitalBeing:
             parts = []
             if recovered:
                 parts.append(
-                    f"восстановил {recovered:.0f} энергии (теперь {self.energy:.0f})"
+                    f"восстановила {recovered:.0f} энергии (теперь {self.energy:.0f})"
                 )
             if consolidated:
                 parts.append(
-                    f"осмыслил накопленное: связей {consolidated.get('links', 0)}, "
+                    f"осмыслила накопленное: связей {consolidated.get('links', 0)}, "
                     f"формулировок {consolidated.get('definitions', 0)}"
                 )
             if parts:
@@ -1858,7 +1858,7 @@ class DigitalBeing:
             action = (told or {}).get("text") or action
         elif action_type == "web_search":
             handler = getattr(self, "_act_web_search", None)
-            found = handler() if handler else None
+            found = (handler(target=selected_target) if selected_target else handler()) if handler else None
             topic = (found or {}).get("target") or ""
             action = (found or {}).get("text") or action
         elif action_type == "read_news":
@@ -2034,7 +2034,7 @@ class DigitalBeing:
                     continue
                 explored = len(item.get("explorations") or [])
                 limit = int(item.get("max_explorations") or 5)
-                # Агент уже пробовал сам и не смог — время спросить.
+                # Агент уже пробовала сама и не смогла — время спросить.
                 if explored >= max(1, limit - 1):
                     candidates.append({
                         "source": "social",
@@ -2926,7 +2926,7 @@ class DigitalBeing:
                     if isinstance(catalog, dict):
                         catalog[work["id"]] = dict(work)
                     get_logger().log(
-                        f"[ART] оставил «{work['theme']}» (лимит редакций)"
+                        f"[ART] оставила «{work['theme']}» (лимит редакций)"
                     )
                 work = None
             if work is None and not art_available(None):
@@ -2960,13 +2960,13 @@ class DigitalBeing:
             return {
                 "target": updated["theme"],
                 "text": (
-                    f"Ответ: нарисовал «{updated['theme']}», редакция "
+                    f"Ответ: нарисовала «{updated['theme']}», редакция "
                     f"{updated['revision']} ({updated['palette']})\n{thumb}"
                 ),
             }
         except Exception as exc:
             get_logger().log(f"[ART] не удалось нарисовать: {exc}")
-            return {"text": "Ответ: хотел нарисовать, но не получилось"}
+            return {"text": "Ответ: хотела нарисовать, но не получилось"}
 
     def list_art_works(self) -> List[Dict]:
         """Каталог собственных рисунков (для снимка жизни)."""
@@ -2999,7 +2999,7 @@ class DigitalBeing:
                     if isinstance(catalog, dict):
                         catalog[work["id"]] = dict(work)
                     get_logger().log(
-                        f"[MUSIC] оставил «{work['theme']}» (лимит редакций)"
+                        f"[MUSIC] оставила «{work['theme']}» (лимит редакций)"
                     )
                 work = None
             if work is None and not music_available(None):
@@ -3035,13 +3035,13 @@ class DigitalBeing:
             return {
                 "target": updated["theme"],
                 "text": (
-                    f"Ответ: сочинил мелодию «{updated['theme']}», редакция "
+                    f"Ответ: сочинила мелодию «{updated['theme']}», редакция "
                     f"{updated['revision']} ({updated['mood']})\n{notation}"
                 ),
             }
         except Exception as exc:
             get_logger().log(f"[MUSIC] не удалось сочинить: {exc}")
-            return {"text": "Ответ: хотел сочинить мелодию, но не получилось"}
+            return {"text": "Ответ: хотела сочинить мелодию, но не получилось"}
 
     def list_music_works(self) -> List[Dict]:
         """Каталог собственных мелодий (для снимка жизни)."""
@@ -3075,14 +3075,14 @@ class DigitalBeing:
             get_logger().log(f"[EXPLORE] ошибка мышления по '{target}': {exc}")
             return {
                 "target": target,
-                "text": f"Ответ: попытался изучить '{target}', но не смог: {exc}",
+                "text": f"Ответ: попыталась изучить '{target}', но не смогла: {exc}",
             }
 
         short = str(thought).replace("\n", " ")[:100]
         return {
             "target": target,
             "thought": thought,
-            "text": f"Ответ: изучил '{target}' — {short}",
+            "text": f"Ответ: изучила '{target}' — {short}",
         }
 
     def _act_decompose(self, target=None) -> Dict:
@@ -3121,7 +3121,7 @@ class DigitalBeing:
             "parts": list(parts)[:5],
             "queued": queued,
             "text": (
-                f"Ответ: разобрал '{target}' на {len(parts)} частей: "
+                f"Ответ: разобрала '{target}' на {len(parts)} частей: "
                 + "; ".join(str(p) for p in parts[:3])
                 + suffix
             ),
@@ -3243,7 +3243,7 @@ class DigitalBeing:
 
         return {
             "target": target,
-            "text": f"Ответ: синтезировал '{target}' через {names}",
+            "text": f"Ответ: синтезировала '{target}' через {names}",
         }
 
     def _act_reflect(self) -> Dict:
@@ -3261,7 +3261,7 @@ class DigitalBeing:
         description = str(first.get("description", ""))[:80]
         return {
             "text": (
-                f"Ответ: заметил паттерн — {description} "
+                f"Ответ: заметила паттерн — {description} "
                 f"(уверенность {float(first.get('confidence', 0)):.0%})"
             )
         }
@@ -3298,10 +3298,10 @@ class DigitalBeing:
         как «ask_question») доходило до ``act()`` и молча заканчивалось:
         подсистема ``UserInteraction`` умеет задавать вопросы, публикует
         события, окно их показывает — но никто не вызывал её из петли.
-        Агент «хотел спросить» и не спрашивал.
+        Агент «хотела спросить» и не спрашивал.
 
         Вопрос задаётся только по реальной нужде: берётся тема, в которой
-        агент не уверен. Спрашивать о том, что уже знает, — шум.
+        агент не уверена. Спрашивать о том, что уже знает, — шум.
         """
         interaction = getattr(self, "user_interaction", None)
         if interaction is None:
@@ -3331,7 +3331,7 @@ class DigitalBeing:
             }
 
         question = (
-            f"Я разбираюсь с темой «{target}» и пока не уверен, "
+            f"Я разбираюсь с темой «{target}» и пока не уверена, "
             f"что понимаю её правильно. Можешь объяснить своими словами?"
         )
         try:
@@ -3342,7 +3342,7 @@ class DigitalBeing:
             )
         except Exception as exc:
             get_logger().log(f"[ASK] не удалось спросить: {exc}")
-            return {"text": f"Ответ: хотел спросить про '{target}', но не смог"}
+            return {"text": f"Ответ: хотела спросить про '{target}', но не смогла"}
 
         if result.get("status") != "queued":
             # Лимит вопросов или пауза — это нормально, не ошибка.
@@ -3365,7 +3365,7 @@ class DigitalBeing:
         self._record_will("questions_asked", target, "самостоятельный вопрос")
         return {
             "target": target,
-            "text": f"Ответ: спросил человека про '{target}'",
+            "text": f"Ответ: спросила человека про '{target}'",
         }
 
     def _act_communicate(self) -> Dict:
@@ -3388,16 +3388,16 @@ class DigitalBeing:
                 msg_type="statement",
                 tone="casual",
                 urgency=0.4,
-                context="делюсь тем, что узнал",
+                context="делюсь тем, что узнала",
                 cycle=self.cycle_count,
             )
         except Exception as exc:
             get_logger().log(f"[COMMUNICATE] не удалось отправить: {exc}")
-            return {"text": f"Ответ: хотел рассказать, но не смог: {exc}"}
+            return {"text": f"Ответ: хотела рассказать, но не смогла: {exc}"}
 
         self._record_will("messages_sent", "share", "делюсь знанием")
         self._last_share_cycle = self.cycle_count
-        return {"text": f"Ответ: рассказал человеку: {message[:60]}"}
+        return {"text": f"Ответ: рассказала человеку: {message[:60]}"}
 
     def _compose_share_message(self, record: bool = False) -> str:
         """Текст сообщения: о самом свежем или самом слабом знании.
@@ -3439,7 +3439,7 @@ class DigitalBeing:
         if record:
             self._remember_shared_topic(name)
         definition = str(getattr(node, "definition_hypothesis", ""))[:200]
-        return f"Я разобрался с темой «{name}»: {definition}"
+        return f"Я разобралась с темой «{name}»: {definition}"
 
     def _remember_shared_topic(self, topic: str) -> None:
         """Запомнить, что тему уже рассказали человеку (шапка 50)."""
@@ -3454,8 +3454,8 @@ class DigitalBeing:
             )[: len(shared) - 50]:
                 shared.pop(old_topic, None)
 
-    def _act_web_search(self) -> Dict:
-        """Найти в сети то, чего нет в своей памяти.
+    def _act_web_search(self, target: Optional[str] = None) -> Dict:
+        """Найти в сети тему намерения, а при его отсутствии — новую тему.
 
         Действие ``web_search`` предлагалось мотивацией, но не
         исполнялось. При этом ``WebSearcher`` уже был подключён к
@@ -3472,7 +3472,9 @@ class DigitalBeing:
                 "text": "Ответ: поиск в сети недоступен или выключен"
             }
 
-        target = self._pick_exploration_target()
+        # K13: выбранное намерение имеет приоритет над селектором новизны.
+        # Случайная/слабая тема допустима только для поиска без намерения.
+        target = str(target).strip() if target is not None else self._pick_exploration_target()
         if not target:
             return {"text": "Ответ: искать нечего — нет темы"}
 
@@ -3490,7 +3492,7 @@ class DigitalBeing:
             return {
                 "target": target,
                 "text": (
-                    f"Ответ: про '{target}' уже охотился и промахнулся — "
+                    f"Ответ: про '{target}' уже охотилась и промахнулась — "
                     f"след ещё свеж"
                 ),
             }
@@ -3518,7 +3520,7 @@ class DigitalBeing:
             misses[target] = self.cycle_count
             return {
                 "target": target,
-                "text": f"Ответ: нашёл '{title}', но без содержания",
+                "text": f"Ответ: нашла '{title}', но без содержания",
             }
 
         # Сохраняем как знание: без записи поиск ничего не изменил бы.
@@ -3538,13 +3540,13 @@ class DigitalBeing:
             get_logger().log(f"[WEB] не удалось сохранить: {exc}")
             return {
                 "target": target,
-                "text": f"Ответ: нашёл '{title}', но не сохранил",
+                "text": f"Ответ: нашла '{title}', но не сохранила",
             }
 
         # Добыча есть — след промаха по этой теме смываем.
         misses.pop(target, None)
 
-        self._record_will("web_searches", target, f"нашёл в сети: {title}")
+        self._record_will("web_searches", target, f"нашла в сети: {title}")
 
         # «Охота-1»: след добычи. Полнотекстовый поиск мог привести не к
         # той концепции, что искали, а к соседней — она становится новой
@@ -3565,7 +3567,7 @@ class DigitalBeing:
                     self.mental_models.encounter_concept(
                         concept_name=concept,
                         context=f"след_охоты_цикл_{self.cycle_count}",
-                        outcome=f"Встретил по следам '{target}'",
+                        outcome=f"Встретила по следам '{target}'",
                         valence=0.0,
                     )
                     trail = concept
@@ -3573,7 +3575,7 @@ class DigitalBeing:
                 except Exception as exc:
                     get_logger().log(f"[HUNT] след не записан: {exc}")
 
-        text = f"Ответ: нашёл в сети «{title}» про '{target}'"
+        text = f"Ответ: нашла в сети «{title}» про '{target}'"
         if trail:
             text += f"; по следам — новая тема '{trail}'"
         return {
@@ -3630,7 +3632,7 @@ class DigitalBeing:
             return {
                 "target": topic,
                 "text": (
-                    f"Ответ: новости про '{topic}' недавно проверял — "
+                    f"Ответ: новости про '{topic}' недавно проверяла — "
                     f"вернусь позже"
                 ),
             }
@@ -3657,11 +3659,11 @@ class DigitalBeing:
         snippet = extract[:200]
         if len(extract) > 200:
             snippet = snippet.rsplit(" ", 1)[0] + "…"
-        self._record_will("news_reads", topic, f"прочитал новость: {title}")
+        self._record_will("news_reads", topic, f"прочитала новость: {title}")
         return {
             "target": topic,
             "text": (
-                f"Ответ: прочитал новость про '{topic}': «{title}». "
+                f"Ответ: прочитала новость про '{topic}': «{title}». "
                 f"{snippet}"
             ),
         }
@@ -3697,7 +3699,7 @@ class DigitalBeing:
             return {
                 "target": topic,
                 "text": (
-                    f"Ответ: интернет про '{topic}' недавно обошёл — "
+                    f"Ответ: интернет про '{topic}' недавно обошла — "
                     f"вернусь позже"
                 ),
             }
@@ -3759,18 +3761,18 @@ class DigitalBeing:
         if len(extract) > 200:
             snippet = snippet.rsplit(" ", 1)[0] + "…"
         self._record_will(
-            "web_browses", topic, f"погулял по интернету: {title}"
+            "web_browses", topic, f"погуляла по интернету: {title}"
         )
         return {
             "target": topic,
             "text": (
-                f"Ответ: погулял по интернету про '{topic}': «{title}». "
+                f"Ответ: погуляла по интернету про '{topic}': «{title}». "
                 f"{snippet}"
             ),
         }
 
     def _act_hypothesis(self) -> Dict:
-        """Выдвинуть гипотезу о теме, в которой агент не уверен.
+        """Выдвинуть гипотезу о теме, в которой агент не уверена.
 
         Мотивация предлагает это действие («Понять: {concept}»), но
         раньше оно уходило в «default»: агент «выдвигал гипотезу» и
@@ -3835,7 +3837,7 @@ class DigitalBeing:
 
             attach_activity(self, goal_id, {"source": "self", "need": "play", "action_hint": activity})
             self._record_will("goals_set", title, f"своё дело #{goal_id}")
-            return {"text": f"Ответ: выбрал дело '{title}' (#{goal_id})"}
+            return {"text": f"Ответ: выбрала дело '{title}' (#{goal_id})"}
         target = self._pick_exploration_target()
         if not target or not self._is_meaningful_topic(target):
             return {"text": "Ответ: свою цель ставить не из чего"}
@@ -3859,13 +3861,13 @@ class DigitalBeing:
             get_logger().log(f"[OWN_GOAL] не удалось поставить цель: {exc}")
             return {
                 "target": target,
-                "text": f"Ответ: хотел поставить цель '{title}', но не смог",
+                "text": f"Ответ: хотела поставить цель '{title}', но не смогла",
             }
 
         self._record_will("goals_set", target, f"своя цель #{goal_id}")
         return {
             "target": target,
-            "text": f"Ответ: поставил себе цель '{title}' (#{goal_id})",
+            "text": f"Ответ: поставила себе цель '{title}' (#{goal_id})",
         }
 
     def _record_will(self, will_type: str, topic: str, reason: str) -> None:
@@ -5591,7 +5593,7 @@ class DigitalBeing:
                 activity_before = deepcopy(
                     getattr(self, activity_attrs.get(chosen_action, "_creative_draft"), None)
                 )
-                if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "create_draft"} and selected_intention.get("params"):
+                if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "web_search", "create_draft"} and selected_intention.get("params"):
                     action_result = self.act(chosen_action, intention=selected_intention)
                 else:
                     action_result = self.act(chosen_action)

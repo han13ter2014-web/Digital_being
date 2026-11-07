@@ -113,7 +113,7 @@ class HuntCooldownTests(unittest.TestCase):
         agent._hunt_misses["энтелехия"] = 100  # старый, остывший след
 
         result = agent._act_web_search()
-        self.assertIn("нашёл в сети", result["text"])
+        self.assertIn("нашла в сети", result["text"])
         self.assertNotIn("энтелехия", agent._hunt_misses)
         self.assertIn("энтелехия", agent.knowledge_base)
 

@@ -148,6 +148,25 @@ class DialogueLearning:
             return None
         return phrase
 
+    def immediate_candidate(self, text, cycle: int = 0) -> Optional[str]:
+        """Фраза для уточнения с первого входа (K13), без автообучения.
+
+        Порог повторов в ``observe`` остаётся прежним и нужен старому
+        контуру. Здесь проверяются только запреты и кулдаун: категорию
+        спрашиваем сразу, но маркер по-прежнему возникает лишь после
+        явного ответа человека в ``resolve``.
+        """
+        phrase = normalize_phrase(text)
+        if (
+            not phrase
+            or is_noise_input(phrase)
+            or phrase in self.learned
+            or phrase in self.suppressed
+            or cycle - self.last_proposal_cycle < PROPOSAL_COOLDOWN_CYCLES
+        ):
+            return None
+        return phrase
+
     def _is_collectable(self, phrase: str) -> bool:
         if not phrase or len(phrase) < PHRASE_MIN_LEN:
             return False
@@ -181,10 +200,11 @@ class DialogueLearning:
         через mark_proposed после фактической постановки вопроса.
         """
         entry = self.buffer.get(phrase, {})
-        count = int(entry.get("count", REPEAT_THRESHOLD))
+        count = int(entry.get("count", 1))
+        displayed = phrase if len(phrase) <= PHRASE_MAX_LEN else phrase[: PHRASE_MAX_LEN - 1] + "…"
         return {
             "question": (
-                f"Ты уже {count} раз(а) говоришь «{phrase}», а я этого "
+                f"Ты уже {count} раз(а) говоришь «{displayed}», а я этого "
                 "не понимаю. Как мне это воспринимать? Ответь числом: "
                 "1 — обычный разговор, 2 — вопрос ко мне, "
                 "3 — просьба, которой я не умею, 4 — неважно, не учить."

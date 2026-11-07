@@ -184,7 +184,7 @@ async def test_plain_answer_still_closes_pending_question():
 
     assert ui.get_pending_question() is None
     texts = _reply_texts(bus)
-    assert any("Записал про «вопрос»" in t for t in texts)
+    assert any("Записала про «вопрос»" in t for t in texts)
 
 
 @pytest.mark.asyncio
@@ -208,7 +208,7 @@ async def test_question_with_pending_does_not_close_question():
     assert ui.get_pending_question() is not None
     assert ui.question_history == []
     texts = _reply_texts(bus)
-    assert not any("Записал про" in t for t in texts)
+    assert not any("Записала про" in t for t in texts)
     assert any("не понимаю" in t for t in texts)
 
 
@@ -227,16 +227,15 @@ async def test_about_self_question_with_pending_gets_honest_reply():
     assert ui.get_pending_question() is not None
     texts = _reply_texts(bus)
     assert any("Меня зовут" in t for t in texts)
-    assert not any("Записал про" in t for t in texts)
+    assert not any("Записала про" in t for t in texts)
 
 
 @pytest.mark.asyncio
-async def test_unknown_text_gets_honest_reply_not_learning_material():
-    """«Собеседник-6»: нераспознанный текст — честный отклик, не материал.
+async def test_unknown_text_asks_clarification_not_learning_material():
+    """K13: непонятая реплика сразу вызывает протокол уточнения 1–4.
 
-    Раньше текст падал в очередь стимулов и изучался как тема
-    («Не нашел файл для 'фраза'»); живой день 2026-11-02 показал эхо
-    таких тем в share-сообщениях.
+    Автообучения и постановки фразы в стимулы по-прежнему нет: сначала
+    человек выбирает категорию, и лишь его ответ разрешает дальнейший путь.
     """
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
@@ -248,8 +247,11 @@ async def test_unknown_text_gets_honest_reply_not_learning_material():
     assert agent._user_explained_topics == {}
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = _reply_texts(bus)
-    assert any("слышу" in t.lower() for t in texts)
+    pending = ui.get_pending_question()
+    assert pending is not None
+    assert "1 — обычный разговор" in pending["question"]
+    assert "4 — неважно, не учить" in pending["question"]
+    assert _reply_texts(bus) == []
     assert not _thoughts(bus)
 
 
@@ -369,7 +371,7 @@ async def test_definition_without_question_becomes_knowledge():
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
     texts = _reply_texts(bus)
-    reply = next(t for t in texts if "Записал" in t)
+    reply = next(t for t in texts if "Записала" in t)
     assert "Git" in reply
     assert "переспрашивать не буду" in reply
     assert not _thoughts(bus)
@@ -408,7 +410,7 @@ async def test_definition_with_polite_prefix_records_topic():
     assert "оптика" in agent._user_explained_topics
     assert "понимать" not in agent._user_explained_topics
     texts = _reply_texts(bus)
-    assert any("Записал" in t and "оптика" in t for t in texts)
+    assert any("Записала" in t and "оптика" in t for t in texts)
 
 
 @pytest.mark.asyncio
@@ -436,7 +438,7 @@ async def test_definition_with_unrelated_pending_diverts_to_definition_door():
     # вопрос сущности не съеден чужим определением
     assert ui.get_pending_question() is not None
     texts = _reply_texts(bus)
-    assert any("Записал" in t and "Погода" in t for t in texts)
+    assert any("Записала" in t and "Погода" in t for t in texts)
 
 
 @pytest.mark.asyncio
