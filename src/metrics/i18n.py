@@ -3,7 +3,7 @@ i18n — базовый менеджер локализаций Digital Being (�
 
 Архитектурное решение:
 - Простой key-value словарь переводов, без внешних зависимостей.
-- Загрузка из JSON-файлов в `data/i18n/{lang}.json`.
+- Загрузка из JSON-файлов в `data_bootstrap/i18n/{lang}.json`.
 - Fallback на язык `default` (русский) при отсутствии ключа.
 - Потокобезопасен (RLock).
 - Поддержка интерполяции: `t("hello", name="Lucy")` → "Привет, Lucy!".
@@ -28,11 +28,16 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-# Базовый путь к локализациям
-_DEFAULT_LOCALE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "data",
-    "i18n",
+# Базовый путь к неизменяемым локализациям. В исходниках они отделены от
+# живого data/; в PyInstaller-совместимом fallback сохранён путь data/i18n.
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_BOOTSTRAP_LOCALE_DIR = os.path.join(_PROJECT_ROOT, "data_bootstrap", "i18n")
+_DEFAULT_LOCALE_DIR = (
+    _BOOTSTRAP_LOCALE_DIR
+    if os.path.isdir(_BOOTSTRAP_LOCALE_DIR)
+    else os.path.join(_PROJECT_ROOT, "data", "i18n")
 )
 
 

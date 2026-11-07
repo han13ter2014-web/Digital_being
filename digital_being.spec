@@ -38,9 +38,9 @@ a = Analysis(
         # агента, в него попадают следы самообучения; bootstrap.py при первом
         # запуске копирует бандлный сид в каталог данных пользователя).
         ('data_bootstrap/knowledge_base.json', 'data'),
-        ('data/initial_knowledge.json', 'data'),
-        # Локализации (i18n: src/metrics/i18n.py грузит data/i18n/{lang}.json)
-        ('data/i18n', 'data/i18n'),
+        ('data_bootstrap/initial_knowledge.json', 'data'),
+        # Локализации — только из неизменяемого стартового набора.
+        ('data_bootstrap/i18n', 'data/i18n'),
         # База знаний (каталог может отсутствовать в свежем clone; данные
         # загружаются через knowledge_base.json, поэтому не делаем его
         # обязательным source для PyInstaller.)

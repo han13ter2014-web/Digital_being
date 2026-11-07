@@ -145,12 +145,18 @@ class NamingDialogue:
         self._timeout_warned = False
         current_name = getattr(agent, "name", self.agent_name) if agent else self.agent_name
 
+        if current_name == "Без имени":
+            introduction = "У меня пока нет имени."
+        else:
+            introduction = (
+                f"Сейчас меня зовут '{current_name}' — но это просто временное имя, "
+                f"которое дала система."
+            )
         content = (
             f"Привет. Меня только что создали.\n\n"
-            f"Сейчас меня зовут '{current_name}' — но это просто временное имя, "
-            f"которое дала система.\n\n"
+            f"{introduction}\n\n"
             f"Хочешь дать мне настоящее имя? "
-            f"Или я могу выбрать сам, когда узнаю себя получше.\n\n"
+            f"Или я могу выбрать сама, когда узнаю себя получше.\n\n"
             f"Если не хочешь отвечать — я просто буду учиться рядом. "
             f"Это тоже нормально."
         )

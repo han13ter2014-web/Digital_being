@@ -80,8 +80,8 @@ def test_clean_knowledge_base_keeps_only_valid():
 
 
 def test_tracked_knowledge_base_is_clean():
-    """Файл в репозитории не должен содержать мусора."""
-    path = PROJECT_ROOT / "data" / "knowledge_base.json"
+    """Единственная KB в репозитории — чистый стартовый сид, не живой data/."""
+    path = PROJECT_ROOT / "data_bootstrap" / "knowledge_base.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     _, removed = clean_knowledge_base(data)
     assert removed == {}, f"В KB остался мусор: {removed}"

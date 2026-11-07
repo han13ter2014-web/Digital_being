@@ -16,13 +16,17 @@ def load_initial_knowledge(agent, knowledge_path: str = None) -> bool:
     
     Args:
         agent: Экземпляр DigitalBeing
-        knowledge_path: Путь к JSON файлу (по умолчанию data/initial_knowledge.json)
+        knowledge_path: Путь к JSON (по умолчанию data_bootstrap/initial_knowledge.json)
     
     Returns:
         True если загрузка прошла успешно, False если знания уже загружены или ошибка
     """
     if knowledge_path is None:
-        knowledge_path = Path(__file__).parent.parent.parent / "data" / "initial_knowledge.json"
+        root = Path(__file__).parent.parent.parent
+        bundled = root / "data_bootstrap" / "initial_knowledge.json"
+        # В исходниках ресурс живёт в data_bootstrap; PyInstaller кладёт его
+        # в data/ внутри _MEIPASS. Живой data/ пользователя здесь не читается.
+        knowledge_path = bundled if bundled.is_file() else root / "data" / "initial_knowledge.json"
     
     # Проверяем маркер "уже загружено" в ментальных моделях
     if agent.mental_models.concepts.get("_bootstrap_loaded"):

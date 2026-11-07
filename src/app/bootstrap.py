@@ -270,7 +270,10 @@ def create_agent(
     knowledge_file = os.path.join(env.data_root, "knowledge_base.json")
     os.makedirs(os.path.dirname(knowledge_file), exist_ok=True)
     if not os.path.isfile(knowledge_file):
-        bundled = os.path.join(env.base_dir, "data", "knowledge_base.json")
+        bundled = os.path.join(env.base_dir, "data_bootstrap", "knowledge_base.json")
+        if not os.path.isfile(bundled):
+            # PyInstaller раскладывает стартовый сид в data/ внутри _MEIPASS.
+            bundled = os.path.join(env.base_dir, "data", "knowledge_base.json")
         if os.path.isfile(bundled):
             try:
                 shutil.copy2(bundled, knowledge_file)

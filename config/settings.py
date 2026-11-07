@@ -70,7 +70,8 @@ class Settings(metaclass=_SettingsMeta):
     """Глобальные настройки проекта."""
 
     # === Идентификация агента по умолчанию ===
-    DEFAULT_AGENT_NAME = os.environ.get("DIGITAL_BEING_NAME", "Alpha")
+    # Техническая метка до выбора имени, а не унаследованная личность.
+    DEFAULT_AGENT_NAME = os.environ.get("DIGITAL_BEING_NAME", "Без имени")
 
     # Пути — вычисляемые свойства (см. _SettingsMeta): они всегда
     # соответствуют текущему окружению.

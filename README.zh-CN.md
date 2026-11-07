@@ -34,8 +34,8 @@ Digital Being 是一个关于「可观察的数字生命」的实验。它不是
 Windows 安装包 — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest)：
 
 ```text
-DigitalBeing_Setup_v0.1.5.exe
-SHA-256：6204347F33D69E00BFCAA3ABF24246F93AE840B76930BB886241521D8A78C898
+DigitalBeing_Setup_v0.1.5.1.exe
+SHA-256：5248706697B36A62AFBE6FEF6DF0A15884694DD9BF27C060772DDE79FBD44788
 ```
 
 从源码运行（Python 3.10+）：
@@ -141,12 +141,11 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 ## 状态
 
-当前包版本：**0.1.5** — [v0.1.5 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5)。
+当前包版本：**0.1.5.1** — [v0.1.5.1 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5.1)。
 
-本版本加入对话记忆、按当前意图搜索、在本地服务器启动后自动打开的
-网页界面，以及更清晰的生命地图。最终代码的完整测试：
-**2114 passed, 2 skipped**；网页与自动打开专项测试：**54 passed**。
-合并后主分支的 K13 验收：**8/8 PASS**。
+新实体不会继承他人的名字或记忆。安装包仅包含基础知识；实时 `data/`
+已从 git 和构建中排除。保留对话记忆、按意图搜索、自动打开的网页界面
+和清晰的生命地图。存在缺陷的 v0.1.5 已转为草稿。
 
 本项目不声称证明了意识或主观性。它构建的是可验证的状态、记忆、选择、
 经验与受限行动的模型。

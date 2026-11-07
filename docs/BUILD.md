@@ -81,9 +81,9 @@ digital_being/
 
 | Параметр | Значение | Зачем |
 |---|---|---|
-| `datas` | `config/`, `data/knowledge_base.json` | Конфигурация и базовые знания внутри exe |
+| `datas` | `config/`, `data_bootstrap/` | Конфигурация и только чистые стартовые ресурсы внутри exe; живой `data/` не читается |
 | `hiddenimports` | `pystray._win32`, `plyer.platforms.win.notification`, `tkinter.*` | Windows-специфичные модули, которые PyInstaller не находит автоматически |
-| `excludes` | `matplotlib`, `numpy.tests`, `pytest`, `aiohttp` | Уменьшаем размер (они не нужны для tray-режима) |
+| `excludes` | `matplotlib`, `numpy.tests`, `pytest` | Уменьшаем размер; `aiohttp` включается для веб-интерфейса |
 | `console=False` | — | `--windowed`: без чёрной консоли при запуске |
 | `icon='assets/icon.ico'` | — | Иконка приложения и трея |
 

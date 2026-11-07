@@ -164,7 +164,7 @@ WATCHDOG_MAX_CYCLE_SEC = 30.0  # Если цикл дольше — пропус
 **Переменные окружения:**
 
 ```bash
-DIGITAL_BEING_NAME="Alpha"        # Имя агента (по умолчанию Alpha)
+DIGITAL_BEING_NAME="Имя"          # Явное имя; без него стартовая метка «Без имени»
 DIGITAL_BEING_LOG_LEVEL="INFO"    # Уровень логирования
 DIGITAL_BEING_LOG_JSON="1"        # JSON-формат логов
 DIGITAL_BEING_DEBUG="1"           # Режим отладки

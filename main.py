@@ -519,7 +519,7 @@ def _default_name() -> str:
 
         return SETTINGS.DEFAULT_AGENT_NAME
     except Exception:
-        return "Alpha"
+        return "Без имени"
 
 
 # ============================================================

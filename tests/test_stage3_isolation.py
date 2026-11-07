@@ -66,7 +66,13 @@ def test_knowledge_save_does_not_touch_repo_file():
     from src.core.subsystems.knowledge_base import KnowledgeSubsystem
 
     repo_kb = PROJECT_ROOT / "data" / "knowledge_base.json"
-    before = (repo_kb.stat().st_size, repo_kb.stat().st_mtime_ns)
+    # В чистом clone файла нет; у владельца живой ignored-файл может быть.
+    # В обоих случаях тест обязан оставить его нетронутым.
+    before = (
+        (repo_kb.stat().st_size, repo_kb.stat().st_mtime_ns)
+        if repo_kb.exists()
+        else None
+    )
 
     kb = KnowledgeSubsystem(agent_name="isolation_probe")
     kb.add_definition(
@@ -75,7 +81,11 @@ def test_knowledge_save_does_not_touch_repo_file():
     )
     kb.save()
 
-    after = (repo_kb.stat().st_size, repo_kb.stat().st_mtime_ns)
+    after = (
+        (repo_kb.stat().st_size, repo_kb.stat().st_mtime_ns)
+        if repo_kb.exists()
+        else None
+    )
     assert before == after, "Тест изменил data/knowledge_base.json рабочей копии"
     assert Path(kb.knowledge_file).exists()
 

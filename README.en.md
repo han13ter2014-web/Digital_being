@@ -40,8 +40,8 @@ been done and what has not worked.
 A ready Windows installer — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
 
 ```text
-DigitalBeing_Setup_v0.1.5.exe
-SHA-256: 6204347F33D69E00BFCAA3ABF24246F93AE840B76930BB886241521D8A78C898
+DigitalBeing_Setup_v0.1.5.1.exe
+SHA-256: 5248706697B36A62AFBE6FEF6DF0A15884694DD9BF27C060772DDE79FBD44788
 ```
 
 Running from source (Python 3.10+):
@@ -155,13 +155,12 @@ map of everything else.
 
 ## Status
 
-Current package version: **0.1.5** — [release v0.1.5](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5).
+Current package version: **0.1.5.1** — [release v0.1.5.1](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5.1).
 
-This release adds dialogue memory, intention-targeted web search, a web
-interface that opens automatically after its local server starts, and a
-readable life map. Final-code full gate: **2114 passed, 2 skipped**;
-web and auto-open profile gate: **54 passed**. Merged-main K13 acceptance:
-**8/8 PASS**.
+A new entity starts without an inherited name or someone else's memory. The
+installer contains only seed knowledge; live `data/` is excluded from git and
+builds. Dialogue memory, intention-targeted search, the auto-opening web UI,
+and the readable life map are preserved. The defective v0.1.5 is now a draft.
 
 The project does not claim to have proven consciousness or subjectivity. It
 builds a verifiable model of state, memory, choice, experience, and bounded

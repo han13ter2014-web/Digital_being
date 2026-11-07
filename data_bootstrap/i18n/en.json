@@ -1,0 +1,48 @@
+{
+  "dashboard.title": "Digital Being — Dashboard",
+  "dashboard.status": "Status",
+  "dashboard.controls": "Controls",
+  "dashboard.thoughts": "Thought stream (SSE)",
+  "dashboard.subsystems": "Subsystems",
+  "dashboard.metrics": "Metrics graphs",
+
+  "stat.name": "Name",
+  "stat.energy": "Energy",
+  "stat.intelligence": "Intelligence",
+  "stat.cycles": "Cycles",
+  "stat.goals": "Goals completed",
+  "stat.concepts": "Concepts",
+  "stat.rss": "RSS (MB)",
+  "stat.subsystems": "Subsystems",
+  "stat.alive": "Alive",
+
+  "btn.pause": "⏸ Pause",
+  "btn.resume": "▶ Resume",
+  "btn.save": "💾 Save",
+  "btn.reflect": "🔍 Reflect",
+  "btn.status": "📋 Full status",
+  "btn.thought": "💭 Ask a thought",
+  "btn.shutdown": "🛑 Shutdown",
+
+  "msg.paused": "paused",
+  "msg.resumed": "resumed",
+  "msg.saved": "saved",
+  "msg.reflected": "reflection done",
+  "msg.shutting_down": "shutdown requested",
+  "msg.thought_prefix": "thought from {name}",
+
+  "agent.born": "🌅 NEW LIFE! Agent {name} initialized.",
+  "agent.died": "💀 Agent {name} ceased to exist",
+  "agent.cycle_banner": "🤖 [{name}] Cycle {cycle} | Intelligence: {intelligence} | Energy: {energy}",
+
+  "error.invalid_json": "invalid JSON",
+  "error.action_required": "action required",
+  "error.unknown_action": "unknown action: {action}",
+  "error.title_required": "set_goal requires args.title",
+  "error.app_required": "add_quiet_app requires args.app",
+
+  "ok.queued": "queued",
+
+  "footer.disconnect": "SSE disconnected, retrying...",
+  "footer.last_n": "Last {n} thoughts"
+}
