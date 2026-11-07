@@ -34,8 +34,8 @@ Digital Being 是一个关于「可观察的数字生命」的实验。它不是
 Windows 安装包 — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest)：
 
 ```text
-DigitalBeing_Setup_v0.1.3.exe
-SHA-256：F850AAB181A2FE7002CAEF1E6739285783A1C801A4B840D714044048B21E2F13
+DigitalBeing_Setup_v0.1.5.exe
+SHA-256：6204347F33D69E00BFCAA3ABF24246F93AE840B76930BB886241521D8A78C898
 ```
 
 从源码运行（Python 3.10+）：
@@ -105,9 +105,9 @@ UI — 观察，而不是第二真理来源
 ## 有何不同
 
 - 生命回路是确定性的：内部没有语言模型；
-- 外壳只读取状态：UI 无法改变生命；
+- 外壳接收 DTO，只通过 EventBus 发送明确命令，不会成为第二个事实来源；
 - 对外部的动作都要经过 policy、approval 和 sandbox；
-- 论断可检验：用验收演示和 1700+ 测试代替承诺。
+- 论断可检验：用验收演示和 2100+ 测试代替承诺。
 
 ## 验收演示
 
@@ -141,20 +141,12 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 ## 状态
 
-当前包版本：**0.1.3** — [v0.1.3 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.3)，
-已在真实机器上安装并验证（[验收报告](docs/RELEASE_VERIFICATION_v0.1.3.md)）。
+当前包版本：**0.1.5** — [v0.1.5 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5)。
 
-v1 已在商定的有限范围内关闭；开发继续推进「对话者」部分：诚实的对话、
-对话记忆、诚实的拒绝。
-
-近期计划：
-
-- 「对话者」第一阶段已于 2026-11-01 关闭，验收 4/4；
-- 第二、三阶段已在仓库中，等待各自的验收；
-- v0.1.4 会把这些发布后的批次合入新的安装包。
-
-最近一次完整测试：**1735 passed, 2 skipped**（不含 benchmarks；
-之后又新增 36 个回归测试；`main` 分支 CI 为绿色）。
+本版本加入对话记忆、按当前意图搜索、在本地服务器启动后自动打开的
+网页界面，以及更清晰的生命地图。最终代码的完整测试：
+**2114 passed, 2 skipped**；网页与自动打开专项测试：**54 passed**。
+合并后主分支的 K13 验收：**8/8 PASS**。
 
 本项目不声称证明了意识或主观性。它构建的是可验证的状态、记忆、选择、
 经验与受限行动的模型。

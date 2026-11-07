@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from main import Runtime
+from main import Runtime, parse_args
 from src.core.event_bus import EventBus, Events
 
 
@@ -74,6 +74,62 @@ def test_bind_failure_does_not_escape_to_tk():
     runtime._start_dashboard()
     assert "порт занят" in runtime.dashboard_error
     assert runtime.error is None
+
+
+def test_successful_dashboard_start_opens_local_web(monkeypatch):
+    dashboard = Mock(host="127.0.0.1", port=8765)
+    opened = []
+    monkeypatch.setattr(
+        "webbrowser.open", lambda url, new=0: opened.append((url, new)) or True
+    )
+    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime.open_browser = True
+
+    runtime._start_dashboard()
+
+    dashboard.start.assert_called_once_with(in_thread=True)
+    assert opened == [("http://127.0.0.1:8765/", 2)]
+    assert runtime.dashboard_error is None
+
+
+def test_failed_dashboard_start_never_opens_browser(monkeypatch):
+    dashboard = Mock(host="127.0.0.1", port=8765)
+    dashboard.start.side_effect = OSError("порт занят")
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: opened.append(a))
+    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime.open_browser = True
+
+    runtime._start_dashboard()
+
+    assert opened == []
+    assert "порт занят" in runtime.dashboard_error
+
+
+def test_no_web_open_flag_disables_only_browser_opening(monkeypatch):
+    dashboard = Mock(host="127.0.0.1", port=8765)
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda *a, **k: opened.append(a))
+    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime.open_browser = not parse_args(["--no-web-open"]).no_web_open
+
+    runtime._start_dashboard()
+
+    dashboard.start.assert_called_once_with(in_thread=True)
+    assert opened == []
+    assert parse_args([]).no_web_open is False
+
+
+def test_browser_failure_does_not_escape_to_life(monkeypatch):
+    dashboard = Mock(host="127.0.0.1", port=8765)
+    monkeypatch.setattr("webbrowser.open", Mock(side_effect=OSError("нет браузера")))
+    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime.open_browser = True
+
+    runtime._start_dashboard()
+
+    assert runtime.error is None
+    assert runtime.dashboard_error is None
 
 
 def test_dashboard_stop_is_idempotent_after_failed_start():

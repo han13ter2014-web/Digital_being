@@ -40,8 +40,8 @@ been done and what has not worked.
 A ready Windows installer — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
 
 ```text
-DigitalBeing_Setup_v0.1.3.exe
-SHA-256: F850AAB181A2FE7002CAEF1E6739285783A1C801A4B840D714044048B21E2F13
+DigitalBeing_Setup_v0.1.5.exe
+SHA-256: 6204347F33D69E00BFCAA3ABF24246F93AE840B76930BB886241521D8A78C898
 ```
 
 Running from source (Python 3.10+):
@@ -117,9 +117,10 @@ as finished work, and does not turn hypotheses into knowledge.
 ## How this differs
 
 - the life loop is deterministic: no language models inside;
-- the shell only reads state: the UI cannot change the life;
+- the shell receives DTOs and sends only explicit commands through the
+  EventBus, without becoming a second source of truth;
 - actions toward the outside pass policy, approval, and sandbox;
-- claims are checkable: acceptance demos and 1700+ tests instead of promises.
+- claims are checkable: acceptance demos and 2100+ tests instead of promises.
 
 ## Acceptance demo
 
@@ -154,22 +155,13 @@ map of everything else.
 
 ## Status
 
-Current package version: **0.1.3** — [release v0.1.3](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.3),
-installed and verified on a real machine
-([acceptance report](docs/RELEASE_VERIFICATION_v0.1.3.md)).
+Current package version: **0.1.5** — [release v0.1.5](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5).
 
-v1 is closed in the agreed limited scope; development continues with the
-"Interlocutor" track: honest dialogue, conversation memory, honest refusals.
-
-Near-term plans:
-
-- stage 1 of the "Interlocutor" was closed on 2026-11-01 with a 4/4
-  acceptance run;
-- stages 2–3 are already in the repository and await their acceptance runs;
-- v0.1.4 will bundle these post-release batches into a new installer.
-
-Last full test run: **1735 passed, 2 skipped**, no benchmarks
-(36 more regression tests were added afterwards; CI on `main` is green).
+This release adds dialogue memory, intention-targeted web search, a web
+interface that opens automatically after its local server starts, and a
+readable life map. Final-code full gate: **2114 passed, 2 skipped**;
+web and auto-open profile gate: **54 passed**. Merged-main K13 acceptance:
+**8/8 PASS**.
 
 The project does not claim to have proven consciousness or subjectivity. It
 builds a verifiable model of state, memory, choice, experience, and bounded

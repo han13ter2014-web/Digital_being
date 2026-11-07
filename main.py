@@ -102,6 +102,8 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
                         help="Локальный веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)")
     parser.add_argument("--no-web", action="store_true",
                         help="Не запускать локальный веб рядом с Tk")
+    parser.add_argument("--no-web-open", action="store_true",
+                        help="Запустить веб, но не открывать браузер автоматически")
     # Совместимость с прежним main_tray.py
     parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
@@ -206,6 +208,18 @@ class Runtime:
             # Занятый порт или отсутствующий aiohttp не останавливает жизнь/Tk.
             self.dashboard_error = str(exc)
             logger.warning("Веб-наблюдатель недоступен; Tk продолжает работу: %s", exc)
+            return
+        if not getattr(self, "open_browser", False):
+            return
+        try:
+            import webbrowser
+
+            url = f"http://{self.dashboard.host}:{self.dashboard.port}/"
+            if not webbrowser.open(url, new=2):
+                logger.warning("Браузер не принял адрес веб-интерфейса: %s", url)
+        except Exception as exc:
+            # Ошибка браузера не влияет ни на уже запущенный веб, ни на жизнь.
+            logger.warning("Не удалось открыть веб-интерфейс в браузере: %s", exc)
 
     def _stop_dashboard(self) -> None:
         dashboard = getattr(self, "dashboard", None)
@@ -489,6 +503,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             logger.warning("Веб отключён: %s", exc)
 
     runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
+    runtime.open_browser = not getattr(args, "no_web_open", False)  # type: ignore[attr-defined]
     runtime.report = report  # type: ignore[attr-defined]
     runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
 

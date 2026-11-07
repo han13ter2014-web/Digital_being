@@ -67,7 +67,6 @@ a = Analysis(
         'numpy.tests',
         'pytest',
         'pytest_asyncio',
-        'aiohttp',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
