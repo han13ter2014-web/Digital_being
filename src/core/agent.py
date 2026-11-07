@@ -196,6 +196,30 @@ from src.core.agent_handlers import (
     _act_set_own_goal_impl,
     _record_will_impl,
 )
+from src.core.agent_exploration import (
+    _is_learnable_impl,
+    _is_meta_topic_impl,
+    _is_meaningful_topic_impl,
+    _recently_explained_by_user_impl,
+    _pick_shallow_concept_impl,
+    _pick_exploration_target_impl,
+    _decomposable_targets_impl,
+    _pick_decomposable_target_impl,
+    _stimulus_topics_impl,
+    _remember_exploration_impl,
+)
+from src.core.agent_creative import (
+    leave_creative_draft_impl,
+    list_creative_drafts_impl,
+    _pick_art_theme_impl,
+    _art_richness_impl,
+    _act_draw_impl,
+    list_art_works_impl,
+    _act_compose_music_impl,
+    list_music_works_impl,
+    _reward_creative_success_impl,
+    _record_creative_failure_impl,
+)
 
 
 class AgentDeadSignal(Exception):
@@ -1881,21 +1905,7 @@ class DigitalBeing:
         }
 
     def _is_learnable(self, name: str) -> bool:
-        """Годится ли концепция как тема для изучения и вопросов.
-
-        Служебные узлы (``_bootstrap_loaded``) и врождённые убеждения
-        (``убеждение_1``) — не темы для исследования: спрашивать человека
-        про «_bootstrap_loaded» бессмысленно, а «изучать» собственный
-        маркер загрузки — имитация работы.
-        """
-        text = str(name or "").strip()
-        if not text:
-            return False
-        if text.startswith("_"):
-            return False
-        if text.startswith("убеждение_"):
-            return False
-        return True
+        return _is_learnable_impl(self, name)
 
     # Метаслова диалога (сингуляр и множественное число): узнанные
     # пайплайном «Собеседника» слова о самом разговоре. Фильтруются
@@ -1905,15 +1915,7 @@ class DigitalBeing:
     _META_TOPIC_WORDS = _META_TOPIC_WORDS
 
     def _is_meta_topic(self, name: str) -> bool:
-        """Тема состоит из метаслов диалога, а не из содержания мира?
-
-        Проверка по целым словам: «ответственный» — обычная тема,
-        «вопрос» и «открытый вопрос» — метаслово.
-        """
-        text = str(name or "").strip().lower()
-        if not text:
-            return True
-        return any(word in text.split() for word in self._META_TOPIC_WORDS)
+        return _is_meta_topic_impl(self, name)
 
     # Местоимения-шум (TICKET-8, наблюдатели 2026-11-05): в старые
     # сессии реплики диалога попадали в концепции и потом выбирались
@@ -1923,456 +1925,54 @@ class DigitalBeing:
     _NOISE_TOPIC_WORDS = _NOISE_TOPIC_WORDS
 
     def _is_meaningful_topic(self, name: str) -> bool:
-        """Тема — содержание мира, а не шум диалога?
-
-        TICKET-8: среди живых целей всплыли «Понять: 🙂🙂🙂» и
-        «Понять: ты». Минимум две буквы; строка из одних местоимений —
-        не тема. Честное ограничение: осмысленный на вид мусор
-        («теминг тест») фильтр не отличит — источник такого мусора
-        закрыт «Собеседником-6», здесь добиваем буквенный шум.
-        """
-        text = str(name or "").strip()
-        letters = [ch for ch in text if ch.isalpha()]
-        if len(letters) < 2:
-            return False
-        words = [
-            word
-            for word in text.lower().split()
-            if any(ch.isalpha() for ch in word)
-        ]
-        if words and all(word in self._NOISE_TOPIC_WORDS for word in words):
-            return False
-        return True
+        return _is_meaningful_topic_impl(self, name)
 
     def _recently_explained_by_user(self, topic: str) -> bool:
-        """Тема, объяснённая человеком недавно, не переспрашивается.
-
-        Ответ пользователя записан как свидетельство — знание уже есть.
-        «Ты же спрашивал про это» после собственного объяснения — то, что
-        живой прогон 2026-11-01 показал на сущности Тэсс.
-        """
-        stamps = getattr(self, "_user_explained_topics", None)
-        if not isinstance(stamps, dict) or not stamps:
-            return False
-        stamped = stamps.get(str(topic or "").strip())
-        if stamped is None:
-            return False
-        cooldown = float(
-            getattr(LR_CONFIG, "USER_EXPLAINED_COOLDOWN_CYCLES", 200) or 0
-        )
-        return cooldown > 0 and (self.cycle_count - stamped) < cooldown
+        return _recently_explained_by_user_impl(self, topic)
 
     def _pick_shallow_concept(self, concepts: Dict) -> Optional[str]:
-        """Неуверенная тема вне текущего круга: формулировка ещё не знание.
-
-        Это только кандидат на исследование, не обязательство закрыть
-        пробел. Доля углубления и арбитр по-прежнему допускают иной выбор.
-        """
-        if not isinstance(concepts, dict):
-            return None
-        recently = set(getattr(self, "_exploration_history", []) or [])
-        candidates = []
-        for name, node in concepts.items():
-            if (
-                not self._is_learnable(name)
-                or self._is_meta_topic(name)
-                or not self._is_meaningful_topic(name)
-            ):
-                continue
-            if name in recently:
-                continue
-            if self._recently_explained_by_user(name):
-                continue
-            experiences = len(getattr(node, "experiences", []) or [])
-            confidence = float(getattr(node, "confidence", 0.0))
-            if experiences < 1 or confidence > 0.4:
-                continue
-            candidates.append((experiences, name))
-
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: (item[0], -len(item[1])))
-        return candidates[0][1]
+        return _pick_shallow_concept_impl(self, concepts)
 
     def _pick_exploration_target(self) -> Optional[str]:
-        """Выбирает, что исследовать: то, чего агент ещё не изучал.
-
-        Порядок приоритетов:
-        1. Открытый вопрос без ответа — человек его задал, это важно.
-        2. Иногда — возврат к уже встреченной теме (углубление): без этого
-           агент только расширял охват, а собственная формулировка требует
-           вернуться к теме минимум дважды.
-        3. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
-           а не пережёвывает известное.
-        4. Концепция с наименьшей уверенностью, ещё не изученная в этом
-           круге.
-
-        Важно: цель не повторяется, пока не исчерпан круг. Иначе агент
-        «изучает» одну и ту же концепцию, ничего не узнаёт (уверенность не
-        растёт без новой информации) и застревает — именно это и
-        происходило до замыкания петли.
-
-        Returns:
-            Название темы или ``None``, если исследовать нечего.
-        """
-        history = getattr(self, "_exploration_history", None)
-        if not isinstance(history, list):
-            history = []
-            self._exploration_history = history
-        recently = set(history)
-        concepts = getattr(self.mental_models, "concepts", None)
-
-        # 1. Открытые вопросы
-        questions = getattr(self, "_open_questions", None)
-        if isinstance(questions, list):
-            for item in questions:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("answered"):
-                    continue
-                text = str(item.get("text") or "").strip()
-                if text and text not in recently:
-                    self._remember_exploration(text)
-                    return text
-
-        # 2. Иногда возвращаемся к теме, чтобы углубить её.
-        # Проверяем ДО поиска новых тем: иначе при непустом пуле стимулов
-        # глубина не наступала бы никогда — агент только расширял охват,
-        # у каждой концепции оставалась одна встреча, а собственная
-        # формулировка требует минимум двух.
-        depth_ratio = float(
-            getattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.35) or 0.0
-        )
-        if depth_ratio > 0 and random.random() < depth_ratio:
-            shallow = self._pick_shallow_concept(concepts)
-            if shallow is not None:
-                self._remember_exploration(shallow)
-                return shallow
-
-        # 3. Неизвестная тема из пула стимулов
-        known = set(concepts) if isinstance(concepts, dict) else set()
-        for topic in self._stimulus_topics():
-            if topic in known or topic in recently:
-                continue
-            if not self._is_meaningful_topic(topic):
-                continue
-            self._remember_exploration(topic)
-            return topic
-
-        # 4. Слабая концепция, ещё не тронутая в этом круге
-        if not isinstance(concepts, dict) or not concepts:
-            return None
-
-        def weakness(node) -> tuple:
-            confidence = float(getattr(node, "confidence", 0.0) or 0.0)
-            experiences = len(getattr(node, "experiences", []) or [])
-            return (confidence, experiences)
-
-        fresh = [
-            name
-            for name in concepts
-            if name not in recently
-            and self._is_learnable(name)
-            and self._is_meaningful_topic(name)
-            and not self._is_meta_topic(name)
-            and not self._recently_explained_by_user(name)
-            and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
-        ]
-        if not fresh:
-            # Круг исчерпан: начинаем заново, но теперь это осознанный
-            # повторный визит, а не топтание на месте.
-            history.clear()
-            fresh = [
-                name
-                for name in concepts
-                if self._is_learnable(name)
-                and self._is_meaningful_topic(name)
-                and not self._is_meta_topic(name)
-                and not self._recently_explained_by_user(name)
-                and float(getattr(concepts[name], "confidence", 0.0) or 0.0) < 0.9
-            ]
-        if not fresh:
-            return None
-
-        target = min(fresh, key=lambda name: weakness(concepts[name]))
-        self._remember_exploration(target)
-        return target
+        return _pick_exploration_target_impl(self)
 
     def _decomposable_targets(self) -> List[str]:
-        """Кандидаты на декомпозицию в порядке приоритета, без побочных эффектов.
-
-        Отдельный список, потому что у декомпозиции другое требование, чем
-        у исследования: ей нужно не «что угодно неизученное», а «то, что
-        делится на части». Раньше она брала первую попавшуюся цель и в
-        большинстве случаев возвращала «не разбивается на части» — цикл
-        потрачен, мир не изменился.
-        """
-        targets: List[str] = []
-
-        questions = getattr(self, "_open_questions", None)
-        if isinstance(questions, list):
-            for item in questions:
-                if not isinstance(item, dict) or item.get("answered"):
-                    continue
-                text = str(item.get("text") or "").strip()
-                if text:
-                    targets.append(text)
-
-        concepts = getattr(self.mental_models, "concepts", None)
-        known = set(concepts) if isinstance(concepts, dict) else set()
-        for topic in self._stimulus_topics():
-            if topic not in known:
-                targets.append(topic)
-
-        if isinstance(concepts, dict):
-            for name in concepts:
-                if not self._is_learnable(name):
-                    continue
-                confidence = float(
-                    getattr(concepts[name], "confidence", 0.0) or 0.0
-                )
-                if confidence < 0.9:
-                    targets.append(name)
-
-        # Порядок важен: первый разложимый — самый приоритетный.
-        return list(dict.fromkeys(targets))
+        return _decomposable_targets_impl(self)
 
     def _pick_decomposable_target(self, remember: bool = True) -> Optional[str]:
-        """Первая тема, которую действительно есть на что разложить."""
-        for target in self._decomposable_targets():
-            try:
-                parts = self._decompose_query(target)
-            except Exception:
-                continue
-            if not parts:
-                continue
-            if remember:
-                self._remember_exploration(target)
-            return target
-        return None
+        return _pick_decomposable_target_impl(self, remember)
 
     def _stimulus_topics(self) -> List[str]:
-        """Темы из пула стимулов, приведённые к виду концепций."""
-        pool = getattr(LR_CONFIG, "STIMULI_POOL", None) or []
-        topics = []
-        for raw in pool:
-            text = str(raw).strip()
-            if not text:
-                continue
-            # «вопрос: что такое время» → «что такое время»
-            if ":" in text:
-                text = text.split(":", 1)[1].strip()
-            if text:
-                topics.append(text)
-        return topics
+        return _stimulus_topics_impl(self)
 
     def _remember_exploration(self, target: str) -> None:
-        """Запоминает изученную тему, чтобы не брать её снова подряд."""
-        history = getattr(self, "_exploration_history", None)
-        if not isinstance(history, list):
-            history = []
-            self._exploration_history = history
-        if target in history:
-            history.remove(target)
-        history.append(target)
-        # Ограничиваем память: помним только последний круг.
-        limit = max(10, int(getattr(LR_CONFIG, "EXPLORATION_HISTORY_SIZE", 200)))
-        if len(history) > limit:
-            del history[: len(history) - limit]
+        return _remember_exploration_impl(self, target)
 
     def leave_creative_draft(self, reason: str) -> Dict:
-        state = getattr(self, "_creative_draft", None)
-        if state is None:
-            return {"status": "not_found"}
-        from src.cognition.creative_catalog import perform_creative
-
-        perform_creative(self, "leave", state["id"], reason)
-        return {"status": "left", "draft_id": state["id"]}
+        return leave_creative_draft_impl(self, reason)
 
     def list_creative_drafts(self) -> List[Dict]:
-        from src.cognition.creative_catalog import catalog_for
-
-        catalog = catalog_for(self)
-        return [catalog[identifier] for identifier in sorted(catalog)]
+        return list_creative_drafts_impl(self)
 
     # === «Творчество+»: рисование ===
 
     def _pick_art_theme(self) -> str:
-        """Тема картины — из собственной жизни, а не из чужого списка.
-
-        Активная цель, а если её нет — самая слабая известная концепция:
-        существо рисует то, что его сейчас занимает.
-        """
-        goal = getattr(self, "active_goal", None)
-        if isinstance(goal, dict):
-            title = str(goal.get("title") or "").strip()
-            if title:
-                return title[:60]
-        concepts = getattr(getattr(self, "mental_models", None), "concepts", None)
-        if isinstance(concepts, dict) and concepts:
-            weakest = min(
-                (name for name in concepts if self._is_learnable(name)),
-                key=lambda name: float(getattr(concepts[name], "confidence", 0.0) or 0.0),
-                default=None,
-            )
-            if weakest:
-                return weakest[:60]
-        from src.cognition.local_art import DEFAULT_THEMES
-
-        return random.choice(DEFAULT_THEMES)
+        return _pick_art_theme_impl(self)
 
     def _art_richness(self) -> int:
-        """Густота мазков: запас сил тела — видимый в работе факт."""
-        max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200) or 200)
-        ratio = float(self.energy) / max_energy if max_energy > 0 else 0.0
-        return 3 + int(6 * max(0.0, min(1.0, ratio)))
+        return _art_richness_impl(self)
 
     def _act_draw(self) -> Dict:
-        """Нарисовать картину: отпечаток текущего внутреннего состояния.
-
-        Палитра — доминирующая эмоция (у уже начатой работы палитра
-        хранится с рождения и не переписывается), тема — то, что
-        занимает существо, густота — запас сил. Работа на лимите
-        редакций оставляется с честной причиной, и начинается новая.
-        """
-        from src.cognition.local_art import (
-            ART_LIMIT, art_available, art_step, art_thumbnail, leave_art,
-        )
-
-        work = getattr(self, "_art_work", None)
-        try:
-            if work is not None and (
-                work.get("status") == "left" or work.get("revision", 0) >= ART_LIMIT
-            ):
-                if work.get("status") != "left":
-                    work = leave_art(work, "достигнут лимит редакций — работа завершена")
-                    catalog = getattr(self, "_art_catalog", None)
-                    if isinstance(catalog, dict):
-                        catalog[work["id"]] = dict(work)
-                    get_logger().log(
-                        f"[ART] оставила «{work['theme']}» (лимит редакций)"
-                    )
-                work = None
-            if work is None and not art_available(None):
-                return {"text": "Ответ: рисовать негде — папка работ заполнена"}
-
-            if work is not None:
-                # Работа хранит настроение своего рождения.
-                palette = work["palette"]
-                theme = work["theme"]
-            else:
-                palette = "calm"
-                emotions = getattr(self, "emotional_state", None)
-                dominant = emotions.dominant() if emotions is not None else None
-                if dominant:
-                    palette = dominant["emotion"]
-                theme = self._pick_art_theme()
-
-            updated = art_step(
-                work, palette=palette, theme=theme, richness=self._art_richness()
-            )
-            self._art_work = updated
-            catalog = getattr(self, "_art_catalog", None)
-            if not isinstance(catalog, dict):
-                catalog = self._art_catalog = {}
-            catalog[updated["id"]] = dict(updated)
-            self._record_will(
-                "art_works", updated["theme"],
-                f"рисунок, редакция {updated['revision']}, палитра {updated['palette']}",
-            )
-            thumb = art_thumbnail(updated)
-            return {
-                "target": updated["theme"],
-                "text": (
-                    f"Ответ: нарисовала «{updated['theme']}», редакция "
-                    f"{updated['revision']} ({updated['palette']})\n{thumb}"
-                ),
-            }
-        except Exception as exc:
-            get_logger().log(f"[ART] не удалось нарисовать: {exc}")
-            return {"text": "Ответ: хотела нарисовать, но не получилось"}
+        return _act_draw_impl(self)
 
     def list_art_works(self) -> List[Dict]:
-        """Каталог собственных рисунков (для снимка жизни)."""
-        catalog = getattr(self, "_art_catalog", None)
-        if not isinstance(catalog, dict):
-            return []
-        return [dict(catalog[key]) for key in sorted(catalog)]
+        return list_art_works_impl(self)
 
     def _act_compose_music(self) -> Dict:
-        """Сочинить мелодию: отпечаток текущего состояния в звуке.
-
-        Настроение — доминирующая эмоция (у уже начатой работы оно
-        хранится с рождения и не переписывается), тема — то, что занимает
-        существо. Работа на лимите редакций оставляется с честной
-        причиной, и начинается новая.
-        """
-        from src.cognition.local_music import (
-            MOODS, MUSIC_LIMIT, leave_music, music_available, music_notation,
-            music_step,
-        )
-
-        work = getattr(self, "_music_work", None)
-        try:
-            if work is not None and (
-                work.get("status") == "left" or work.get("revision", 0) >= MUSIC_LIMIT
-            ):
-                if work.get("status") != "left":
-                    work = leave_music(work, "достигнут лимит редакций — работа завершена")
-                    catalog = getattr(self, "_music_catalog", None)
-                    if isinstance(catalog, dict):
-                        catalog[work["id"]] = dict(work)
-                    get_logger().log(
-                        f"[MUSIC] оставила «{work['theme']}» (лимит редакций)"
-                    )
-                work = None
-            if work is None and not music_available(None):
-                return {"text": "Ответ: сочинять негде — папка мелодий заполнена"}
-
-            if work is not None:
-                # Работа хранит настроение своего рождения.
-                mood = work["mood"]
-                theme = work["theme"]
-            else:
-                mood = "calm"
-                emotions = getattr(self, "emotional_state", None)
-                dominant = emotions.dominant() if emotions is not None else None
-                if dominant:
-                    mood = dominant["emotion"]
-                if mood not in MOODS:
-                    # Эмоций больше, чем ладов: незнакомое настроение
-                    # звучит как покой, а не как отказ творить.
-                    mood = "calm"
-                theme = self._pick_art_theme()
-
-            updated = music_step(work, mood=mood, theme=theme)
-            self._music_work = updated
-            catalog = getattr(self, "_music_catalog", None)
-            if not isinstance(catalog, dict):
-                catalog = self._music_catalog = {}
-            catalog[updated["id"]] = dict(updated)
-            self._record_will(
-                "music_works", updated["theme"],
-                f"мелодия, редакция {updated['revision']}, настроение {updated['mood']}",
-            )
-            notation = music_notation(updated)
-            return {
-                "target": updated["theme"],
-                "text": (
-                    f"Ответ: сочинила мелодию «{updated['theme']}», редакция "
-                    f"{updated['revision']} ({updated['mood']})\n{notation}"
-                ),
-            }
-        except Exception as exc:
-            get_logger().log(f"[MUSIC] не удалось сочинить: {exc}")
-            return {"text": "Ответ: хотела сочинить мелодию, но не получилось"}
+        return _act_compose_music_impl(self)
 
     def list_music_works(self) -> List[Dict]:
-        """Каталог собственных мелодий (для снимка жизни)."""
-        catalog = getattr(self, "_music_catalog", None)
-        if not isinstance(catalog, dict):
-            return []
-        return [dict(catalog[key]) for key in sorted(catalog)]
+        return list_music_works_impl(self)
 
     def _act_explore(self, target=None) -> Dict:
         return _act_explore_impl(self, target)
@@ -2435,21 +2035,10 @@ class DigitalBeing:
         return perform_forgetting_impl(self)
     
     def _reward_creative_success(self):
-        """Поощряет креативный успех."""
-        self._creative_wins += 1
-        if self._creative_wins >= 5:  # Каждые 5 успешных креативных действий
-            self.energy += LR_CONFIG.CREATIVITY_BONUS_ENERGY * 2
-            get_logger().flush_immediate(f"🎨 Креативность окупилась! +{LR_CONFIG.CREATIVITY_BONUS_ENERGY * 2} энергии")
-            self._creative_wins = 0
-    
+        return _reward_creative_success_impl(self)
+
     def _record_creative_failure(self):
-        """Записывает неудачу креативного действия."""
-        self._creative_losses += 1
-        if self._creative_losses >= 3:
-            # Если слишком много неудач — снижаем ε (меньше случайности)
-            LR_CONFIG.EPSILON_GREEDY = max(0.05, LR_CONFIG.EPSILON_GREEDY - 0.02)
-            get_logger().log(f"Снижаю ε-greedy до {LR_CONFIG.EPSILON_GREEDY:.0%} (слишком много неудач)")
-            self._creative_losses = 0
+        return _record_creative_failure_impl(self)
 
     # === Прунинг knowledge_base (вызывается из __init__ и save_state) ===
     def _prune_knowledge_base(self) -> None:
