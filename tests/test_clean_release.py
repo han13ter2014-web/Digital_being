@@ -16,6 +16,10 @@ def test_default_profile_is_unnamed_and_contains_only_seed_knowledge(
     tmp_path, monkeypatch,
 ):
     monkeypatch.delenv("DIGITAL_BEING_NAME", raising=False)
+    # В полном CI Settings уже импортирован с DIGITAL_BEING_NAME=TestAgent.
+    # Воспроизводим свежий процесс без переменной, не меняя runtime-контур.
+    from config.settings import SETTINGS
+    monkeypatch.setattr(SETTINGS, "DEFAULT_AGENT_NAME", "Без имени")
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     env = setup_environment(chdir=False, console=False)
 

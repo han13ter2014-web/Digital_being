@@ -11,7 +11,8 @@ from src.ui.diary_view import diary_rows, episode_title
 from src.ui.graph_view import build_life_graph
 from src.ui.life_snapshot import build_life_snapshot
 
-LIFE = "3fddabf8-c63f-499c-98e7-cd1e1db43864"
+PLACEHOLDER_LIFE_ID = "00000000-0000-0000-0000-000000000000"
+LIFE = PLACEHOLDER_LIFE_ID
 
 
 def _store(tmp_path):

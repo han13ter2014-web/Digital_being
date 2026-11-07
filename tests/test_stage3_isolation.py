@@ -22,7 +22,8 @@ def _is_inside(path: Path, root: Path) -> bool:
         return False
 
 
-def test_session_data_dir_is_temporary_and_exists():
+def test_session_data_dir_is_temporary_and_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path))
     root = Path(data_dir())
     assert root.is_absolute()
     assert root != (PROJECT_ROOT / "data").resolve()
