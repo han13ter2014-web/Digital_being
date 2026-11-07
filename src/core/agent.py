@@ -136,6 +136,14 @@ from src.core.agent_persistence import (
     save_mental_models_impl,
     load_mental_models_impl,
 )
+from src.core.agent_properties import (
+    energy_get_impl,
+    energy_set_impl,
+    knowledge_base_get_impl,
+    knowledge_base_set_impl,
+    open_questions_get_impl,
+    open_questions_set_impl,
+)
 from src.core.agent_effector import (
     _record_core_life_episode_impl,
     _complete_effector_intention_impl,
@@ -1019,16 +1027,11 @@ class DigitalBeing:
 
     @property
     def energy(self) -> float:
-        if hasattr(self, "energy_subsystem") and self.energy_subsystem is not None:
-            return self.energy_subsystem.energy
-        return getattr(self, "_legacy_energy", 0)
+        return energy_get_impl(self)
 
     @energy.setter
     def energy(self, value: float) -> None:
-        if hasattr(self, "energy_subsystem") and self.energy_subsystem is not None:
-            self.energy_subsystem.energy = value
-        else:
-            self._legacy_energy = value
+        return energy_set_impl(self, value)
 
     # === Единый источник правды для knowledge_base ===
     # self.knowledge_base читается/пишется через knowledge_subsystem,
@@ -1036,16 +1039,11 @@ class DigitalBeing:
 
     @property
     def knowledge_base(self) -> Dict[str, str]:
-        if hasattr(self, "knowledge_subsystem") and self.knowledge_subsystem is not None:
-            return self.knowledge_subsystem.knowledge_base
-        return getattr(self, "_legacy_knowledge_base", {})
+        return knowledge_base_get_impl(self)
 
     @knowledge_base.setter
     def knowledge_base(self, value: Dict[str, str]) -> None:
-        if hasattr(self, "knowledge_subsystem") and self.knowledge_subsystem is not None:
-            self.knowledge_subsystem.knowledge_base = value
-        else:
-            self._legacy_knowledge_base = value
+        return knowledge_base_set_impl(self, value)
 
     def perceive(self, stimulus: str) -> str:
         """Восприятие стимула с приоритизацией.
@@ -2487,30 +2485,11 @@ class DigitalBeing:
 
     @property
     def _open_questions(self) -> list:
-        """Backward-compat property: возвращает очередь OpenQuestionsManager.
-
-        Позволяет существующему коду (``for q in self._open_questions:``,
-        ``self._open_questions.append(...)``) работать без изменений.
-        Изменения через этот property проксируются в manager.queue.
-        """
-        if not hasattr(self, "_open_questions_manager"):
-            return []
-        return self._open_questions_manager.queue
+        return open_questions_get_impl(self)
 
     @_open_questions.setter
     def _open_questions(self, value) -> None:
-        """Backward-compat setter: заменяет очередь целиком.
-
-        Используется в тестах для сброса (``a._open_questions = []``) и в
-        legacy-коде, который не знает про OpenQuestionsManager. После
-        присвоения все методы Open Questions будут работать с новой очередью.
-        """
-        if not hasattr(self, "_open_questions_manager"):
-            return
-        if value is None:
-            self._open_questions_manager.queue = []
-        else:
-            self._open_questions_manager.queue = list(value)
+        return open_questions_set_impl(self, value)
 
     def ask_user(self, text: str, source: str = "user",
                  max_explorations: Optional[int] = None) -> Dict:
