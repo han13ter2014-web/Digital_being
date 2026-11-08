@@ -188,7 +188,10 @@ DEFAULT_NEEDS = {
         base_level=0.4, current_level=0.3, decay_rate=0.01,
         threshold=0.25, priority=0.8,
         related_concepts=["игра", "эксперимент", "попробовать", "творчество", "фантазия"],
-        related_actions=["play", "creative_act"]
+        # «Органы-2» (k16-04): draw/compose_music в конце — прямые
+        # предложения возможны, но не вытесняют игру и текстовую
+        # композицию: кандидаты берутся из related_actions[:2].
+        related_actions=["play", "creative_act", "draw", "compose_music"]
     ),
     "meaning": Need(
         name="meaning", label="Смысл / Понимание своего места",
@@ -296,7 +299,11 @@ DEFAULT_DRIVES = {
         name="creativity", label="Творчество / Самореализация",
         contributing_needs={"curiosity": 0.4, "autonomy": 0.3, "play": 0.3},
         activation_threshold=0.35,
-        goal_types=["creative_act", "play"]
+        # «Органы-2» (k16-04): полный набор творческих органов. Кандидаты
+        # драйва берутся из goal_types[:2], поэтому прямые органы стоят
+        # после play/creative_act — состав кандидатов расширяется, порядок
+        # силы прежний.
+        goal_types=["creative_act", "play", "draw", "compose_music"]
     ),
     "mastery": Drive(
         name="mastery", label="Мастерство / Совершенствование",
@@ -353,6 +360,13 @@ NEED_GOAL_TEMPLATES = {
     "play": [
         {"title": "Сыграть партию", "type": "play", "action": "play"},
         {"title": "Создать текстовую композицию: {domain}", "type": "creative", "action": "creative_act"},
+        # «Органы-2»: рисование и мелодия — тот же творческий порыв.
+        # Раньше проводка была односторонней: ACTION_ALIASES умел
+        # УДОВЛЕТВОРЯТЬ play-нужду исполнением draw/compose_music, но
+        # предлагать эти органы мотивация не умела никогда — органы
+        # оставались «живыми, но не выбираемыми» (тикет k16-02).
+        {"title": "Нарисовать: {domain}", "type": "creative", "action": "draw"},
+        {"title": "Сочинить мелодию: {domain}", "type": "creative", "action": "compose_music"},
     ],
     "meaning": [
         {"title": "Найти смысл в: {activity}", "type": "reflection", "action": "reflect"},
@@ -370,6 +384,11 @@ DRIVE_GOAL_TEMPLATES = {
     "creativity": [
         {"title": "Создать текстовую композицию: {domain}", "type": "creative", "action": "creative_act"},
         {"title": "Поиграть с возможными ходами", "type": "play", "action": "play"},
+        # «Органы-2»: симметрия предложения — творческий драйв ведёт ко
+        # всем творческим органам, а не только к тексту и игре
+        # (k16-02: до правки draw/compose_music не выбирались вовсе).
+        {"title": "Нарисовать: {domain}", "type": "creative", "action": "draw"},
+        {"title": "Сочинить мелодию: {domain}", "type": "creative", "action": "compose_music"},
     ],
     "mastery": [
         {"title": "Достичь мастерства в: {skill}", "type": "mastery", "action": "synthesize_understanding"},
@@ -746,8 +765,13 @@ class UnifiedMotivationSystem:
                 for need_name in drive.contributing_needs:
                     if need_name in self.needs:
                         action_hints.extend(self.needs[need_name].related_actions)
-            
-            for rank, action_hint in enumerate(action_hints[:2]):
+
+            # «Органы-2» (k16-04): окно 4 вместо прежних 2. У драйва
+            # creativity теперь четыре органа (creative_act, play, draw,
+            # compose_music) — все должны попадать в кандидатов, иначе
+            # draw/compose_music остаются предложением только на бумаге.
+            # Сила по-прежнему убывает с рангом: прямое действие сильнее.
+            for rank, action_hint in enumerate(action_hints[:4]):
                 hint_strength = strength * 0.8 * (1.0 if rank == 0 else 0.7)
                 candidates.append({
                     "source": "motivation",
