@@ -29,6 +29,7 @@
 | [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальная память и исполнение Delamain |
 | [WILL.md](WILL.md) | права, отказ, этические ограничения |
 | [EVOLUTION.md](EVOLUTION.md) | изменение агента и его состояния |
+| [verifier_selfcheck_matrix.md](verifier_selfcheck_matrix.md) | матрица verify_*.py: historical/eternal, что ловит каждый |
 | [LIFE_V1_PLAN.md](LIFE_V1_PLAN.md) | исходные границы целостной v1 |
 
 ## Контракты и отдельные подсистемы

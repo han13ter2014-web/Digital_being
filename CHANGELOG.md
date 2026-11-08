@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-08 — спринт k15: шумы гейта, verifier self-check, идентичность, каркасы social_reply
+
+* **Чистка шумов гейта** — `logging.raiseExceptions = False` в
+  `atexit_save` и `pytest.warns` в shim-тесте: во всех частях полного
+  гейта 0 warnings (было: 4 `--- Logging error ---` в части 2 и 2
+  DeprecationWarning).
+* **Verifier self-check** — `tests/test_verifier_selfcheck.py`
+  авто-обнаруживает `verify_*.py` из evidence-папок и проверяет
+  eternal-верификаторы на испорченных копиях; матрица в
+  `docs/verifier_selfcheck_matrix.md`.
+* **Имя в само-модели** — вопросы узнавания («Ты Афродита?», «ты не X?»)
+  и «ты кто?» распознаются и отвечают да/нет из актуального `agent.name`;
+  rename-механика не тронута.
+* **Каркасы social_reply** — приветствие, вопрос о состоянии и прочее
+  социальное получают разные честные отклики вместо одного шаблона;
+  тон прежний, без LLM.
+* **Проверка** — полный гейт **2168 passed, 2 skipped, 0 warnings**;
+  живой `data/` не тронут (сверка SHA-256 после каждого тикета); CI
+  success на коммитах `1b8801f`, `c6c6860`, `c73eb5a`, `40fbabe`, `62bb7ac`.
+
 ### 2026-11-07 — v0.1.5.1: чистая новая жизнь
 
 * **Релиз не содержит чужой жизни** — живой `data/` исключён из git и
