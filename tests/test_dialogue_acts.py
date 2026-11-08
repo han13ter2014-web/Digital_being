@@ -15,11 +15,15 @@ from src.core.dialogue_acts import (
     ACT_REQUEST,
     ACT_SOCIAL,
     ACT_UNKNOWN,
+    SOCIAL_KIND_GREETING,
+    SOCIAL_KIND_OTHER,
+    SOCIAL_KIND_STATE,
     classify_user_text,
     extract_definition,
     extract_identity_check,
     is_noise_input,
     is_question_text,
+    social_reply_kind,
 )
 
 
@@ -191,6 +195,33 @@ def test_extract_identity_check_positive(text, expected):
 )
 def test_extract_identity_check_rejects_non_recognition(text):
     assert extract_identity_check(text) is None
+
+
+# ============================================================
+# Т4: каркасы social_reply — тип входа для выбора отклика
+# ============================================================
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Привет!", SOCIAL_KIND_GREETING),
+        ("привет", SOCIAL_KIND_GREETING),
+        ("Здравствуй.", SOCIAL_KIND_GREETING),
+        ("Доброй ночи.", SOCIAL_KIND_GREETING),
+        ("Ну привет!", SOCIAL_KIND_GREETING),
+        ("Как дела?", SOCIAL_KIND_STATE),
+        ("Привет, как дела?", SOCIAL_KIND_STATE),
+        ("Как настроение?", SOCIAL_KIND_STATE),
+        # присутствие с приветствием — не чистое приветствие
+        ("Привет! Я рядом.", SOCIAL_KIND_OTHER),
+        ("Ты повторяешь.", SOCIAL_KIND_OTHER),
+        ("Скучаю по тебе.", SOCIAL_KIND_OTHER),
+        ("", SOCIAL_KIND_OTHER),
+        (None, SOCIAL_KIND_OTHER),
+    ],
+)
+def test_social_reply_kind(text, expected):
+    assert social_reply_kind(text) == expected
 
 
 @pytest.mark.parametrize(

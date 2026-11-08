@@ -418,6 +418,62 @@ async def test_non_identity_text_keeps_unknown_path():
 
 
 @pytest.mark.asyncio
+async def test_social_greeting_gets_greeting_reply():
+    """Т4: чистое приветствие — каркас приветствия, не нейтральный."""
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Привет!"})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("Привет. Рада тебя слышать." in t for t in texts)
+    assert not any("Спасибо, что ты рядом" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_social_state_question_gets_state_reply():
+    """Т4: «Как дела?» — каркас состояния без выдуманных деталей."""
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Как дела?"})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("всё ровно" in t for t in texts)
+    assert not any("Спасибо, что ты рядом" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_social_warmth_keeps_neutral_reply():
+    """Т4: прочее социальное (тепло) — прежний нейтральный каркас."""
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Скучаю по тебе."})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("Я слышу тебя. Спасибо, что ты рядом." in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_social_with_pending_keeps_open_question_note():
+    """Т4: социальная реплика при висящем вопросе — прежняя заметка."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Привет!"})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("остаётся открытым" in t for t in texts)
+
+
+@pytest.mark.asyncio
 async def test_definition_without_question_becomes_knowledge():
     """«X — это Y» без вопроса сущности — свидетельство, не материал."""
     agent, runner, bus = _make_runner()

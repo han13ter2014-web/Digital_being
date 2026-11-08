@@ -206,6 +206,62 @@ _SOCIAL_MARKERS = (
 )
 
 
+# Каркасы ответа на социальный акт: раньше отклик был один на всё —
+# «Привет!», «Как дела?» и «скучаю» получали одну и ту же реплику.
+# Выбор по типу входа: приветствие — вся реплика, кроме пунктуации и
+# связок «а/и/ну», является приветствием (якорно: «Привет! Я рядом.» —
+# присутствие с приветствием, не чистое приветствие); вопрос о
+# состоянии — маркер внутри реплики («Привет, как дела?» — вопрос как
+# содержание); прочее социальное — прежний нейтральный каркас.
+SOCIAL_KIND_GREETING = "greeting"
+SOCIAL_KIND_STATE = "state"
+SOCIAL_KIND_OTHER = "other"
+
+_SOCIAL_GREETING_EXACTS = (
+    "привет",
+    "здравствуй",
+    "здравствуйте",
+    "доброе утро",
+    "добрый день",
+    "добрый вечер",
+    "доброй ночи",
+)
+
+_SOCIAL_STATE_MARKERS = (
+    "как дела",
+    "как ты",
+    "как настроение",
+)
+
+_SOCIAL_GREETING_RE = re.compile(
+    r"^(?:а|и|ну)?\s*(?:"
+    + "|".join(
+        re.escape(phrase)
+        for phrase in sorted(_SOCIAL_GREETING_EXACTS, key=len, reverse=True)
+    )
+    + r")\s*[!.,;:…]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def social_reply_kind(text) -> str:
+    """Тип социального акта для выбора каркаса ответа.
+
+    Приветствие — реплика целиком (без пунктуации). Вопрос о
+    состоянии — маркер внутри реплики. Остальное социальное — прежний
+    нейтральный каркас.
+    """
+    normalized = " ".join(str(text or "").lower().split())
+    if not normalized:
+        return SOCIAL_KIND_OTHER
+    for marker in _SOCIAL_STATE_MARKERS:
+        if marker in normalized:
+            return SOCIAL_KIND_STATE
+    if _SOCIAL_GREETING_RE.match(normalized):
+        return SOCIAL_KIND_GREETING
+    return SOCIAL_KIND_OTHER
+
+
 @dataclass(frozen=True)
 class DialogueAct:
     """Распознанный акт пользователя.

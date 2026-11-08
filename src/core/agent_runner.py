@@ -57,11 +57,14 @@ from src.core.dialogue_acts import (
     ACT_ASK_ABOUT_SELF,
     ACT_REQUEST,
     ACT_SOCIAL,
+    SOCIAL_KIND_GREETING,
+    SOCIAL_KIND_STATE,
     classify_user_text,
     extract_definition,
     extract_identity_check,
     is_noise_input,
     is_question_text,
+    social_reply_kind,
 )
 from src.core.dialogue_learning import DialogueLearning
 from src.core.dialogue_memory import (
@@ -488,7 +491,7 @@ class AgentRunner:
                 response = self._handle_repeat_protest(pending, interaction)
                 reply_context = "repeat_protest"
             else:
-                response = self._format_social_reply(pending)
+                response = self._format_social_reply(text, pending)
                 reply_context = "social_reply"
             if response:
                 await self._reply_to_user(
@@ -936,12 +939,14 @@ class AgentRunner:
         return None
 
     @staticmethod
-    def _format_social_reply(pending) -> str:
-        """Честный отклик на социальный акт без выдуманного понимания.
+    def _format_social_reply(text, pending) -> str:
+        """Каркас отклика на социальный акт — по типу входа.
 
-        Если у Core открыт прямой вопрос — сущность говорит, что вопрос
-        остаётся открытым; тема берётся из контекста, который кладёт
-        ``_act_ask_user``. Без темы — нейтральный отклик.
+        Прежде отклик был один на всё: приветствие, вопрос о состоянии
+        и тепло получали одну и ту же реплику. Теперь каркасов три:
+        приветствие, вопрос о состоянии, прочее социальное. Тон
+        прежний, выдумки нет; при открытом вопросе сущности — прежняя
+        честная заметка о висящем вопросе.
         """
         topic = AgentRunner._topic_from_pending(pending)
         if topic:
@@ -950,6 +955,11 @@ class AgentRunner:
                 f"Вопрос про «{topic}» остаётся открытым — "
                 "ответишь, когда захочешь."
             )
+        kind = social_reply_kind(text)
+        if kind == SOCIAL_KIND_GREETING:
+            return "Привет. Рада тебя слышать."
+        if kind == SOCIAL_KIND_STATE:
+            return "Со мной всё ровно, спасибо. Учусь потихоньку."
         return "Я слышу тебя. Спасибо, что ты рядом."
 
     def _handle_repeat_protest(self, pending, interaction) -> str:
