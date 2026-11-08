@@ -728,6 +728,10 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     def atexit_save() -> None:
+        # К моменту выхода процесса потоки логов pytest-капчера уже закрыты;
+        # emit падает с ValueError («--- Logging error ---»). Гасим только
+        # отчёт об ошибке emit'а; логика сохранения не меняется (тикет T1).
+        logging.raiseExceptions = False
         graceful_exit_save(runtime)
 
     atexit.register(atexit_save)
