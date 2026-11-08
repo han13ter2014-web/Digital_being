@@ -59,6 +59,7 @@ from src.core.dialogue_acts import (
     ACT_SOCIAL,
     classify_user_text,
     extract_definition,
+    extract_identity_check,
     is_noise_input,
     is_question_text,
 )
@@ -429,7 +430,11 @@ class AgentRunner:
             user_model = getattr(self.agent, "user_model", None)
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
-            response = self._format_about_self_reply()
+            proposed = extract_identity_check(text)
+            if proposed is not None:
+                response = self._format_identity_reply(proposed)
+            else:
+                response = self._format_about_self_reply()
             if response:
                 await self._reply_to_user(
                     response, context="about_self", source="dialogue_acts"
@@ -1038,6 +1043,21 @@ class AgentRunner:
                     f"«{self._short_quote(first_trait, 100)}»."
                 )
         return " ".join(parts)
+
+    def _format_identity_reply(self, proposed: str) -> str:
+        """Ответ на «Ты X?» — да/нет из актуального имени, без выдумки.
+
+        Rename-механика не трогается: имя только читается из Core
+        (тот же источник, что у ``_format_about_self_reply``).
+        """
+        name = str(getattr(self.agent, "name", "") or "").strip()
+        if not name:
+            return f"Нет, я не {proposed}."
+        proposed_fold = proposed.casefold().rstrip(" .!?…")
+        name_fold = name.casefold().rstrip(" .!?…")
+        if proposed_fold == name_fold:
+            return f"Да, меня зовут {name}."
+        return f"Нет, я не {proposed} — меня зовут {name}."
 
     @staticmethod
     def _short_quote(text: str, limit: int = 80) -> str:

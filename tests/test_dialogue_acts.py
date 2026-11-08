@@ -17,6 +17,7 @@ from src.core.dialogue_acts import (
     ACT_UNKNOWN,
     classify_user_text,
     extract_definition,
+    extract_identity_check,
     is_noise_input,
     is_question_text,
 )
@@ -67,6 +68,15 @@ from src.core.dialogue_acts import (
         ("О чём ты думаешь?", ACT_ASK_ABOUT_SELF),
         ("О чем думаешь?", ACT_ASK_ABOUT_SELF),
         ("Как ты себя чувствуешь?", ACT_ASK_ABOUT_SELF),
+        # «ты кто?» — тот же вопрос в другом порядке слов
+        ("Ты кто?", ACT_ASK_ABOUT_SELF),
+        ("А ты кто?", ACT_ASK_ABOUT_SELF),
+        # вопрос-узнавание имени: да/нет из актуального имени
+        ("Ты Афродита?", ACT_ASK_ABOUT_SELF),
+        ("ты Тэсс", ACT_ASK_ABOUT_SELF),
+        ("Тебя зовут Ола?", ACT_ASK_ABOUT_SELF),
+        ("Ты не Афродита?", ACT_ASK_ABOUT_SELF),
+        ("А ты Мелория?", ACT_ASK_ABOUT_SELF),
         # верификация 2026-11-06 (план Алисы): каждый шаблон вопроса
         # распознаётся и получает ответ — не unknown_reply
         ("Как ты сейчас?", ACT_SOCIAL),
@@ -139,6 +149,48 @@ def test_request_matched_marker_is_word():
     act = classify_user_text("Нарисуй кота!")
     assert act.kind == ACT_REQUEST
     assert act.matched_marker == "нарисуй"
+
+
+# ============================================================
+# Т3: вопрос-узнавание имени («Ты Афродита?»)
+# ============================================================
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Ты Афродита?", "Афродита"),
+        ("ты Тэсс", "Тэсс"),
+        ("Ты не Афродита?", "Афродита"),
+        ("А ты Мелория?", "Мелория"),
+        ("Тебя зовут Ола?", "Ола"),
+        # хвостовая точка-аббревиатура уходит в хвост выражения
+        ("Ты Alpha Jr.?", "Alpha Jr"),
+        ("Ты Марья-Искусница?", "Марья-Искусница"),
+    ],
+)
+def test_extract_identity_check_positive(text, expected):
+    assert extract_identity_check(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ты кто?",  # вопросительное слово — не имя
+        "Ты спишь?",  # состояние
+        "Ты в порядке?",  # предлог + состояние
+        "Ты против?",  # оценка
+        "Пусть тебя зовут Ола",  # якорь: предложение имени, не вопрос
+        "Ты не знаешь кто я",  # стоп-слово внутри «имени»
+        "Ты моя Афродита",  # «моя» — не часть узнавания
+        "Как тебя зовут?",  # обычный вопрос об имени (маркер)
+        "Ты снова спрашиваешь то же самое.",  # социальный протест
+        "Ты повторяешь.",  # социальный протест одним словом
+        "",
+        None,
+    ],
+)
+def test_extract_identity_check_rejects_non_recognition(text):
+    assert extract_identity_check(text) is None
 
 
 @pytest.mark.parametrize(

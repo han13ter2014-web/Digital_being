@@ -355,6 +355,69 @@ async def test_ask_about_self_reports_occupation_and_memory():
 
 
 @pytest.mark.asyncio
+async def test_identity_recognition_confirms_actual_name():
+    """Т3: «Ты Афродита?» при совпадении имени — «Да», не unknown."""
+    agent, runner, bus = _make_runner()
+    agent.name = "Афродита"
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Ты Афродита?"})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("Да, меня зовут Афродита" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_identity_recognition_denies_wrong_name():
+    """Т3: «Ты Афродита?» при другом имени — честное «Нет» и имя."""
+    agent, runner, bus = _make_runner()
+    agent.name = "Тэсс"
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Ты Афродита?"})
+    )
+
+    texts = _reply_texts(bus)
+    reply = next(t for t in texts if "Нет, я не Афродита" in t)
+    assert "меня зовут Тэсс" in reply
+
+
+@pytest.mark.asyncio
+async def test_identity_questions_follow_rename():
+    """Т3: после переименования «кто ты?» и «ты X?» — новое имя."""
+    agent, runner, bus = _make_runner()
+    agent.name = "Омелла"
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Кто ты?"})
+    )
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Ты Тэсс?"})
+    )
+
+    texts = _reply_texts(bus)
+    assert any("Меня зовут Омелла" in t for t in texts)
+    assert any("Нет, я не Тэсс" in t and "Омелла" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_non_identity_text_keeps_unknown_path():
+    """Т3: не-идентификационный текст — прежний путь (уточнение)."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+
+    await runner._on_user_message(
+        SimpleNamespace(
+            data={"text": "Квантовая запутанность и коллапс волновой функции."}
+        )
+    )
+
+    assert ui.get_pending_question() is not None
+    assert _reply_texts(bus) == []
+
+
+@pytest.mark.asyncio
 async def test_definition_without_question_becomes_knowledge():
     """«X — это Y» без вопроса сущности — свидетельство, не материал."""
     agent, runner, bus = _make_runner()
