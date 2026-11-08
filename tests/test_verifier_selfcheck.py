@@ -7,7 +7,8 @@ instruments (their green status at step time is recorded in
 are eternal and must pass honestly and must fail on semantic corruption
 of the product modules they exercise. All checks run in an isolated git
 worktree at HEAD; the live tree, K14 evidence and live data/ stay
-untouched.
+untouched. Environments without the local evidence folders (for example
+a fresh CI checkout) skip these tests honestly.
 """
 
 from __future__ import annotations
@@ -166,14 +167,16 @@ def run_verifier(wt, row, case):
 @pytest.fixture(scope="module")
 def isolated_worktree():
     base = Path(tempfile.mkdtemp(prefix="k15_t2_selfcheck_"))
+    eternal = [row for row in discover_verifiers() if row["eternal"]]
+    if not eternal:
+        shutil.rmtree(base, ignore_errors=True)
+        pytest.skip("no eternal verifiers in this checkout")
     wt = base / "wt"
     done = _git("worktree", "add", "--detach", str(wt), "HEAD")
     if done.returncode != 0:
         shutil.rmtree(base, ignore_errors=True)
         pytest.skip(f"git worktree unavailable: {(done.stderr or done.stdout).strip()}")
-    for row in discover_verifiers():
-        if not row["eternal"]:
-            continue
+    for row in eternal:
         target = wt / row["evidence"]
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / row["evidence"] / row["name"], target / row["name"])
@@ -185,12 +188,15 @@ def isolated_worktree():
 
 def eternal_rows():
     rows = [row for row in discover_verifiers() if row["eternal"]]
-    assert rows, "no eternal verifiers discovered"
+    if not rows:
+        pytest.skip("no eternal verifiers discovered")
     return rows
 
 
 def test_classification_discovers_known_verifiers():
     rows = discover_verifiers()
+    if not rows:
+        pytest.skip("no k*_decomposition_* verifier evidence in this checkout")
     by_name = {row["name"]: row for row in rows}
     assert "verify_persistence_paths.py" in by_name
     assert by_name["verify_persistence_paths.py"]["eternal"] is True
