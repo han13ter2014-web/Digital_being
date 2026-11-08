@@ -26,7 +26,7 @@ FAIL по критериям приёмки — это результат, а н
 > Это **не** инструкция для Digital Being и **не** пользовательская
 > документация. Для самой жизни предназначен `LIFE_LETTER.md`.
 
-Дата актуализации: **2026-11-07**
+Дата актуализации: **2026-11-08**
 
 Репозиторий: `C:\digital_being`
 
@@ -51,6 +51,55 @@ FAIL по критериям приёмки — это результат, а н
 `5248706697B36A62AFBE6FEF6DF0A15884694DD9BF27C060772DDE79FBD44788`.
 Архив содержит только четыре стартовых ресурса; isolated frozen smoke
 подтвердил «Без имени» и 47 записей, совпадающих с сидом.
+
+## K14 — декомпозиция монолита завершена (2026-11-08)
+
+Проект K14 выполнен полностью: все 15 шагов ревизии
+`k14_decomposition_2026-11-07/revised_plan.md` перенесены и приняты
+владельцем. Текущий план — `k14_decomposition_2026-11-07/revised_plan.md`;
+отчёты каждого шага — `k14_decomposition_2026-11-07/stage0_report.md` …
+`stage15_report.md` (этап 0 — диагностика и инвентарь монолита
+`remaining_monolith_inventory.json`).
+
+- HEAD: `d6a3c3e3f8f03eca33dd2284e230d2fb240c69c3`
+  (`K14: extract creation contour`); локальный HEAD и `origin/main`
+  совпадают.
+- GitHub CI: run № 99, id `42426391990`, `completed/success`, 8/8 jobs
+  (Security scan; lint 3.10/3.11/3.12; tests Ubuntu/Windows 3.10/3.12).
+- Полный локальный гейт шага 15 (песочница `step15_gate_data`):
+  **2116 passed, 2 skipped, 2 warnings, 0 failed, 0 errors** — равен
+  базлайну шага 13.
+- `src/core/agent.py`: **4050 → 1757 строк** — композиционное ядро
+  (`act`-dispatcher, `_step_body`, properties, `perceive`,
+  ThinkingPipeline wrappers, `log_activity`, тонкие wrappers и публичные
+  re-export имена, class-level данные включая `SUBSYSTEM_SPECS` и
+  `ACTION_ALIASES`).
+- Новые модули `src/core/agent_*.py` по шагам ревизии:
+  - шаг 1 — `agent_reflection.py`;
+  - шаг 2 — `agent_goals.py`;
+  - шаг 3 — `agent_body.py`;
+  - шаг 4 — `agent_persistence.py`;
+  - шаг 5 — `agent_effector.py`;
+  - шаг 6 — `agent_selection.py`;
+  - шаг 7 — `agent_communication.py`;
+  - шаг 8 — `agent_handlers.py` (включая web-обработчики);
+  - шаг 9 — `agent_creative.py` и `agent_exploration.py`;
+  - шаг 10 — `agent_emotional.py`;
+  - шаг 11 — `agent_evolution.py`;
+  - шаг 12 — `agent_properties.py`;
+  - шаг 13 — `agent_act.py`;
+  - шаг 14 — `agent_autonomous_tick.py`;
+  - шаг 15 — `agent_creation.py`.
+- Сохранность живого состояния: на каждом шаге сверка живого `data/`
+  против `stage1_data_before.json` давала **98/98 SHA-256**; живая
+  Афродита в ходе K14 не запускалась.
+- Известные неисправимости (бэклог вне K14, не трогались): четыре
+  atexit logging errors из `main.py:381` и `main.py:387` при return
+  code 0 (в текущей нумерации — `atexit_save`, строка 731) после части 2
+  полного гейта; два DeprecationWarning из `tests/test_main_tray_shim.py`.
+- Живой финальный запуск Афродиты — отдельный ритуал владельца
+  (лично, после приёмки шага 15); на момент этой актуализации после K14
+  не выполнялся.
 
 Прежняя v0.1.5 (2026-11-07): память диалога, намерение в `web_search`,
 веб-интерфейс рядом с Tk и читаемая большая карта. После успешного старта
