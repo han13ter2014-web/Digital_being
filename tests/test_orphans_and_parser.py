@@ -10,6 +10,7 @@ ACTION_ALIASES — исполнение вхолостую; (2) «не нашё�
 from types import SimpleNamespace
 
 from src.core.agent import DigitalBeing
+from src.core.agent_act import classify_decision
 from src.core.agent_effector import _record_core_life_episode_impl
 from src.delamain.memory import MemoryStore
 
@@ -61,9 +62,8 @@ def test_legacy_and_helping_others_stay_honest_default():
 
 # === 2. Коллизия парсера ===
 # «Единство-1» (k16-14): зеркала больше нет — тест импортирует тот же
-# classify_decision, которым пользуется парсер act() и фильтр кандидатов.
-
-from src.core.agent_act import classify_decision
+# classify_decision, которым пользуется парсер act() и фильтр кандидатов
+# (импорт — в шапке файла).
 
 
 def test_negative_found_is_miss_not_know_answer():

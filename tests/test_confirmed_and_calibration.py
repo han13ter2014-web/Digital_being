@@ -63,6 +63,28 @@ def test_create_draft_confirms_written_revision():
     assert "редакция" in outcome.result_description
 
 
+def test_leaving_draft_is_not_effectual_success():
+    """mode='leave' — сознательное оставление работы: не достижение.
+
+    Флага confirmed_result нет (k16-02: валентность для leave — ноль),
+    в описании результата нет «редакции» — описание результата
+    зарезервировано за подтверждённым фактом записанной ревизии.
+    """
+    agent = DigitalBeing(name="ConfirmDraftLeave")
+    closer = agent.loop_closer
+
+    # Контраст: само создание черновика флаг получает.
+    agent.act("create_draft")
+    assert closer.last_outcome.confirmed_result
+
+    agent.act("create_draft", intention={"params": {
+        "draft_mode": "leave", "reason": "остыла",
+    }})
+    outcome = closer.last_outcome
+    assert not outcome.confirmed_result
+    assert "редакция" not in outcome.result_description
+
+
 def test_set_own_goal_confirms_created_id():
     agent = DigitalBeing(name="ConfirmGoal")
     closer = agent.loop_closer
