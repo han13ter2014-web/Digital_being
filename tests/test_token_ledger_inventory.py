@@ -23,8 +23,6 @@ from src.delamain.models import ActionSpec
 from src.delamain.planner import FallbackPlanner, HeuristicPlanner, PlannerError
 from src.delamain.subsystem import DelamainSubsystem
 
-SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
-
 ACTION_SPECS = [
     ActionSpec(
         name="read_file",
@@ -42,36 +40,10 @@ def _make_planner(requester: Any) -> OllamaPlanner:
 
 # === 1. Пины отсутствия (контракт до k16-32+) ===
 
-
-def test_no_token_ledger_module_yet() -> None:
-    """Модуля-счётчика токенов / журнала обращений не существует.
-
-    Ни файла с характерным именем в src/, ни импортируемого модуля.
-    Когда k16-32+ введёт механику, этот тест заменяется на проверку
-    нового контракта.
-    """
-    forbidden_stems = (
-        "token_ledger",
-        "llm_ledger",
-        "usage_ledger",
-        "call_journal",
-        "token_budget",
-    )
-    hits = [
-        path
-        for path in SRC_ROOT.rglob("*.py")
-        if any(stem in path.stem.lower() for stem in forbidden_stems)
-    ]
-    assert hits == []
-
-    import importlib.util
-
-    for name in (
-        "src.core.token_ledger",
-        "src.delamain.token_ledger",
-        "src.delamain.call_journal",
-    ):
-        assert importlib.util.find_spec(name) is None, name
+# Пин test_no_token_ledger_module_yet снят в k16-33 (поправка Алисы):
+# модуль src/core/token_ledger.py создан, пин противоречил бы сам себе.
+# Существование модуля и синглтон покрывает
+# tests/test_token_ledger.py::test_singleton_under_race.
 
 
 def test_ollama_planner_has_no_token_accounting() -> None:

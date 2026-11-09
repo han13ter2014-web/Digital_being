@@ -18,8 +18,11 @@
 - **Журнала обращений нет**: каждый вызов не записывается никуда; observable-состояние
   — только `last_error` и `status()` (179–186) с прошлым/последним исходом.
 
-**Точка создания — одна:** `DelamainSubsystem._build_planner()`
-(`src/delamain/subsystem.py:466–488`). При `llm_enabled=False` (дефолт,
+**Точки создания — две:** в жизненном контуре — одна,
+`DelamainSubsystem._build_planner()` (`src/delamain/subsystem.py:466–488`);
+standalone CLI (`src/delamain/__main__.py:114–123`, `--llm` →
+`FallbackPlanner(OllamaPlanner(...))`) собирает стек вне жизненного контура
+DigitalBeing. При `llm_enabled=False` (дефолт,
 `DELAMAIN_LLM_ENABLED`, subsystem.py:281–287) планнер-стек не создаётся вовсе
 (`None` → heuristic); при включённом флаге — `FallbackPlanner(OllamaPlanner, HeuristicPlanner)`.
 Канон `docs/DECISION_NO_LLM_LIFE.md` соблюдён: LLM — только планнер Delamain,
