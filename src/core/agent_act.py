@@ -86,15 +86,19 @@ def act_impl(self, decision: str, *, intention=None, DigitalBeing, record_denied
         action_type = "hypothesis"
     elif "декомпозиц" in decision_str:
         action_type = "decomposition"
+    elif ("не нашел" in decision_str
+          or "не нашёл" in decision_str
+          or "не найдено" in decision_str):
+        # «Сироты-1» (k16-10): отрицательные формулировки проверяются
+        # РАНЬШЕ «нашёл ответ». Раньше подстрока «нашёл» матчила внутри
+        # «не нашёл», и промах классифицировался как know_answer —
+        # успех молча и неверно.
+        action_type = "search_miss"
     elif ("ментальная модель" in decision_str
           or "знаю ответ" in decision_str
           or "нашел ответ" in decision_str
           or "нашёл ответ" in decision_str):
         action_type = "know_answer"
-    elif ("не нашел" in decision_str
-          or "не нашёл" in decision_str
-          or "не найдено" in decision_str):
-        action_type = "search_miss"
     elif "пользователь ответил" in decision_str:
         action_type = "user_answer"
     elif "repair" in decision_str or "ремонт" in decision_str:

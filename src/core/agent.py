@@ -356,6 +356,23 @@ class DigitalBeing:
         "user_answer": "communicate",
         "teach_other": "communicate",
         "propose_alternative": "communicate",
+        # «Сироты-1» (k16-10): имена из related_actions/DRIVE_GOAL_TEMPLATES,
+        # которые предлагались мотивацией, но никогда не ловились здесь —
+        # действие исполнялось вхолостую (default) и сжигало цикл.
+        # social_interaction — rank-1 способ нужды connection
+        # (unified_motivation.py:184), teaching — шаблон connection и
+        # драйва self_transcendence; оба — общение по смыслу.
+        "social_interaction": "communicate",
+        "teaching": "communicate",
+        # contribution — «создать ресурс для других» (шаблон
+        # self_transcendence): сборка смысла из известного — синтез.
+        # Мост удовлетворения проверен: communicate гасит
+        # connection+competence, synthesis — curiosity/competence/
+        # meaning/coherence.
+        "contribution": "synthesis",
+        # legacy и helping_others НЕ маппим сознательно: это вопрос
+        # личности, решает владелец. Они продолжают давать честный
+        # default (исполнение впустую → sadness, k16-03).
         # явные «ничего не делать»
         "wait": "wait",
         "none": "wait",

@@ -11,6 +11,14 @@ def _record_core_life_episode_impl(self, entry):
     memory = getattr(getattr(self, "delamain", None), "runtime", None)
     memory = getattr(memory, "memory", None)
     if memory is None:
+        # «Сироты-1» (k16-10): молча проглатывать потерю эпизода
+        # нельзя — биография сущности не должна исчезать бесследно.
+        # Ошибка не пробрасывается (живой цикл важнее одной записи),
+        # но факт потери остаётся в логе.
+        get_logger().log(
+            "[LIFE_EPISODE] память недоступна: эпизод "
+            f"{entry.get('action')} не записан"
+        )
         return None
     try:
         return memory.record_life_episode(
