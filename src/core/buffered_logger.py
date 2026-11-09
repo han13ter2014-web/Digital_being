@@ -10,6 +10,7 @@
 
 import os
 import atexit
+import sys
 import threading
 from datetime import datetime
 
@@ -37,6 +38,12 @@ class BufferedLogger:
         self.buffer = []
         self.max_bytes = max_bytes
         self.backup_count = backup_count
+
+        # k16-23: счётчик тихих потерь — сколько строк журнала потеряно
+        # при ошибках записи в flush(). Увеличивается под локом, читается
+        # без лока (чтение int атомарно). Автоматически не сбрасывается.
+        self.silent_losses = 0
+
         # «Харднинг-1» (k16-21): один RLock на инстанс. RLock, а не Lock:
         # log() держит лок при append и вызывает flush() из-под него
         # (авто-flush по переполнении) — на обычном Lock это взаимная
@@ -110,6 +117,11 @@ class BufferedLogger:
         open(append)-хендла имеют независимые указатели и перекрывают
         байты друг друга — строки теряются молча. Reentrant-вызов из
         log() безопасен: RLock, не Lock.
+
+        k16-23: при ошибке записи чанк теряется осознанно (как и раньше),
+        но потеря наблюдаема — счётчик ``silent_losses`` на инстансе и
+        одна строка в stderr. Сам логгер в себя не пишет: рекурсия и
+        повторная ошибка ни к чему.
         """
         with self._lock:
             if not self.buffer:
@@ -119,10 +131,24 @@ class BufferedLogger:
                 self._rotate_if_needed()
                 with open(self.log_file, 'a', encoding='utf-8') as f:
                     f.writelines(chunk)
-            except Exception:
+            except Exception as e:
                 # Если не удалось записать - теряем чанк осознанно
                 # (чтобы agent не зависал на ошибках диска), как и раньше.
-                pass
+                # k16-23: но теперь потеря наблюдаема (см. docstring).
+                self.silent_losses += len(chunk)
+                detail = " ".join(str(e).split())
+                suffix = f": {detail}" if detail else ""
+                try:
+                    print(
+                        f"buffered_logger: потерян чанк из {len(chunk)} строк"
+                        f" при flush: {type(e).__name__}{suffix}",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    # stderr может быть закрыт или отсутствовать (pythonw,
+                    # teardown) — печать не должна уронить flush, чтобы
+                    # swallow-семантика сохранялась целиком.
+                    pass
     
     def flush_immediate(self, message: str):
         """Мгновенная запись (для важных событий)."""
