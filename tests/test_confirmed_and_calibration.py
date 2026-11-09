@@ -164,10 +164,16 @@ def test_cooldown_allows_new_peak_after_fade():
     assert state.levels["joy"] == 0.40
     # В окне кулдауна — тишина.
     assert state.handle_event("intention_completed", cycle=100) is None
-    # После кулдауна — новый честный всплеск.
+    # Между пиками — жизнь идёт: радость затухает полностью
+    # (0.40 / 0.002 = 200 циклов, здесь тиков больше).
+    for cycle in range(11, 400):
+        state.tick(cycle)
+    assert state.levels["joy"] == 0.0
+    # После кулдауна — новый честный всплеск на одну интенсивность,
+    # а не накопление поверх незатухшего остатка (k16-29).
     episode = state.handle_event("intention_completed", cycle=400)
     assert episode is not None
-    assert state.levels["joy"] == 0.80
+    assert state.levels["joy"] == 0.40
 
 
 def test_rare_events_still_fire_every_time():
