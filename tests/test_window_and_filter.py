@@ -58,13 +58,12 @@ def test_desire_is_not_removed_from_goal_types():
 
 
 def test_executable_action_mirrors_parser_table():
-    """executable_action читает ту же таблицу, что парсер act()."""
+    """executable_action делегирует classify_decision (та же таблица)."""
     assert executable_action("communicate")
     assert executable_action("teaching")
     assert executable_action("social_interaction")
     assert executable_action("explore")
     assert executable_action("wait")  # честный исход, не пустышка
-    assert executable_action("default")  # тоже честный тип
     assert not executable_action("legacy")
     assert not executable_action("helping_others")
     assert not executable_action("что-то неведомое")

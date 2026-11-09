@@ -60,26 +60,21 @@ def test_legacy_and_helping_others_stay_honest_default():
 
 
 # === 2. Коллизия парсера ===
+# «Единство-1» (k16-14): зеркала больше нет — тест импортирует тот же
+# classify_decision, которым пользуется парсер act() и фильтр кандидатов.
 
-def _classify(decision: str) -> str:
-    decision_str = str(decision).lower()
-    if "не нашел" in decision_str or "не нашёл" in decision_str or "не найдено" in decision_str:
-        return "search_miss"
-    if ("ментальная модель" in decision_str or "знаю ответ" in decision_str
-            or "нашел ответ" in decision_str or "нашёл ответ" in decision_str):
-        return "know_answer"
-    return "other"
+from src.core.agent_act import classify_decision
 
 
 def test_negative_found_is_miss_not_know_answer():
-    assert _classify("Ответ: не нашёл ответ про 'энтелехия'") == "search_miss"
-    assert _classify("не нашел ничего") == "search_miss"
-    assert _classify("в сети ничего не найдено") == "search_miss"
+    assert classify_decision("Ответ: не нашёл ответ про 'энтелехия'") == "search_miss"
+    assert classify_decision("не нашел ничего") == "search_miss"
+    assert classify_decision("в сети ничего не найдено") == "search_miss"
 
 
 def test_positive_found_is_know_answer():
-    assert _classify("нашёл ответ в своих записях") == "know_answer"
-    assert _classify("знаю ответ заранее") == "know_answer"
+    assert classify_decision("нашёл ответ в своих записях") == "know_answer"
+    assert classify_decision("знаю ответ заранее") == "know_answer"
 
 
 # === 3. Наблюдаемость и запись эпизодов ===
