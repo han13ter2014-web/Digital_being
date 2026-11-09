@@ -12,15 +12,37 @@ against the live action registry and executed inside the Delamain sandbox.
 from __future__ import annotations
 
 import json
+import sys
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .models import ActionRequest, ActionSpec
 from .planner import PlannerError
 
 
 Requester = Callable[[str, Dict[str, Any], float], Dict[str, Any]]
+
+
+def _extract_usage(payload: Mapping[str, Any]) -> Optional[Tuple[int, int]]:
+    """Извлечь usage из ответа ``/api/chat``: ``(in, out)`` или None.
+
+    Берём ``prompt_eval_count`` (in) и ``eval_count`` (out), только если
+    оба присутствуют и являются настоящими неотрицательными int
+    (bool отсекается первым — это не int для учёта). Отсутствие или
+    невалидность usage → None: нет данных ≠ потеря данных (k16-36).
+    """
+    prompt = payload.get("prompt_eval_count")
+    if isinstance(prompt, bool) or not isinstance(prompt, int) or prompt < 0:
+        return None
+    completion = payload.get("eval_count")
+    if (
+        isinstance(completion, bool)
+        or not isinstance(completion, int)
+        or completion < 0
+    ):
+        return None
+    return (prompt, completion)
 
 
 def _post_json(url: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
@@ -73,6 +95,7 @@ class OllamaPlanner:
         max_task_chars: int = 8000,
         requester: Optional[Requester] = None,
         action_specs: Optional[Sequence[ActionSpec]] = None,
+        token_ledger: Optional[Any] = None,
     ) -> None:
         self.base_url = str(base_url).strip().rstrip("/")
         self.model = str(model).strip()
@@ -86,7 +109,15 @@ class OllamaPlanner:
         self.max_task_chars = max(1, int(max_task_chars))
         self._requester = requester or _post_json
         self._action_specs: List[ActionSpec] = list(action_specs or ())
+        # Телеметрия токенов (k16-36): инъецированный леджер хранится как
+        # есть; None резолвится в get_token_ledger() лениво — только в
+        # момент реального вызова _plan с валидным usage, не при
+        # конструировании и не при импорте модуля.
+        self._token_ledger = token_ledger
         self.last_error: Optional[str] = None
+        # Отказ телеметрии (k16-36, фоллоу-ап 2): наблюдаем, не влияет на
+        # план. Липкий, как silent_losses: успешная запись не сбрасывает.
+        self.last_ledger_error: Optional[str] = None
 
     def bind_registry(self, registry: Any) -> None:
         """Read the action schema from a live ``ActionRegistry``."""
@@ -164,6 +195,36 @@ class OllamaPlanner:
                 payload,
                 self.timeout,
             )
+        except PlannerError as exc:
+            self.last_error = str(exc)
+            raise
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            raise PlannerError(f"LLM planner failed: {self.last_error}") from exc
+
+        # Телеметрия (k16-36): успешный ответ /api/chat с валидным
+        # usage — единственная врезка токен-журнала. Токены потреблены
+        # самим ответом, поэтому запись идёт до парсинга плана и не
+        # зависит от его исхода. Фоллоу-ап 2: отказ телеметрии пассивен
+        # и наблюдаем — last_ledger_error + одна строка stderr, без
+        # ре-рейза; парсинг продолжается, исполнитель не меняется.
+        try:
+            usage = _extract_usage(data)
+            if usage is not None:
+                self._record_usage(usage)
+        except Exception as exc:
+            self.last_ledger_error = repr(exc)
+            try:
+                print(
+                    f"token_ledger: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+            except Exception:
+                # stderr может быть закрыт (pythonw, teardown) — печать
+                # не должна уронить планирование (конвенция k16-23).
+                pass
+
+        try:
             content = self._extract_content(data)
             plan = self._parse_plan(content)
         except PlannerError as exc:
@@ -175,6 +236,20 @@ class OllamaPlanner:
 
         self.last_error = None
         return plan
+
+    def _record_usage(self, usage: Tuple[int, int]) -> None:
+        """Записать потребление токенов в единый журнал (k16-36).
+
+        Ленивый резолв синглтона — только здесь, в момент реального
+        вызова _plan с валидным usage; не при конструировании и не при
+        импорте модуля. Прод — синглтон, тесты — инъецированный фейк.
+        """
+        ledger = self._token_ledger
+        if ledger is None:
+            from src.core.token_ledger import get_token_ledger
+
+            ledger = get_token_ledger()
+        ledger.record("planner", usage[0], usage[1], cycle=None)
 
     def status(self) -> Dict[str, Any]:
         return {

@@ -45,9 +45,9 @@ from typing import Any, Dict, Optional, Tuple
 from src.core.buffered_logger import BufferedLogger
 from src.core.paths import data_path
 
-# Закрытый набор меток источников. v1: перехвата LLM-вызовов ещё нет,
-# все записи приходят от внешнего вызывающего кода без привязки.
-TOKEN_SOURCES = frozenset({"unmapped"})
+# Закрытый набор меток источников. "unmapped" — записи без привязки;
+# "planner" — телеметрия OllamaPlanner (k16-36, врезка в _plan).
+TOKEN_SOURCES = frozenset({"unmapped", "planner"})
 
 # Тело строки журнала с префиксом BufferedLogger. Полный матч: всё,
 # что не соответствует формату, при replay считается битой строкой.
