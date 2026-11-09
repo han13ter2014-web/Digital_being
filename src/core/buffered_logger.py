@@ -10,9 +10,16 @@
 
 import os
 import atexit
+import threading
 from datetime import datetime
 
 from src.core.paths import data_path
+
+
+# «Харднинг-1» (k16-21): защита создания глобального логгера — race в
+# get_logger() при первом вызове из двух потоков давал бы два инстанса
+# и два независимых буфера (потери и дубли записи).
+_GET_LOGGER_LOCK = threading.Lock()
 
 
 class BufferedLogger:
@@ -30,6 +37,14 @@ class BufferedLogger:
         self.buffer = []
         self.max_bytes = max_bytes
         self.backup_count = backup_count
+        # «Харднинг-1» (k16-21): один RLock на инстанс. RLock, а не Lock:
+        # log() держит лок при append и вызывает flush() из-под него
+        # (авто-flush по переполнении) — на обычном Lock это взаимная
+        # блокировка. Раньше append в log() и check-then-act в flush()
+        # шли без синхронизации — при concurrent-писателях (runner-
+        # потоки, tray) возможны были дубли/потери строк и перемежение
+        # чанков.
+        self._lock = threading.RLock()
 
         # Гарантирует что директория существует
         log_dir = os.path.dirname(self.log_file)
@@ -47,12 +62,13 @@ class BufferedLogger:
         """Добавляет запись в буфер. Когда буфер полон - пишет на диск."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
-        
-        self.buffer.append(log_entry)
-        
-        # Когда буфер полон - flush
-        if len(self.buffer) >= self.buffer_size:
-            self.flush()
+
+        with self._lock:
+            self.buffer.append(log_entry)
+
+            # Когда буфер полон - flush (лок отпущен перед I/O: см. flush)
+            if len(self.buffer) >= self.buffer_size:
+                self.flush()
 
     def _rotate_if_needed(self) -> None:
         """Сдвигает файлы лога, если текущий достиг ``max_bytes``.
@@ -84,34 +100,45 @@ class BufferedLogger:
         except OSError:
             # Диск занят/нет прав — пишем дальше в текущий файл.
             pass
-    
+
     def flush(self):
-        """Записывает весь буфер на диск и очищает его."""
-        if not self.buffer:
-            return
-        
-        try:
-            self._rotate_if_needed()
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.writelines(self.buffer)
-            # Очищаем буфер ПОСЛЕ записи
-            self.buffer = []
-        except Exception as e:
-            # Если не удалось записать - просто очищаем буфер
-            # (чтобы agent не зависал на ошибках диска)
-            self.buffer = []
+        """Записывает весь буфер на диск и очищает его.
+
+        Вся последовательность «снять чанк → писать в файл» — под одним
+        локом. Иначе два flush() параллельно: чанки меняются местами
+        (порядок событий в автобиографии ломается), а на Windows два
+        open(append)-хендла имеют независимые указатели и перекрывают
+        байты друг друга — строки теряются молча. Reentrant-вызов из
+        log() безопасен: RLock, не Lock.
+        """
+        with self._lock:
+            if not self.buffer:
+                return
+            chunk, self.buffer = self.buffer, []
+            try:
+                self._rotate_if_needed()
+                with open(self.log_file, 'a', encoding='utf-8') as f:
+                    f.writelines(chunk)
+            except Exception:
+                # Если не удалось записать - теряем чанк осознанно
+                # (чтобы agent не зависал на ошибках диска), как и раньше.
+                pass
     
     def flush_immediate(self, message: str):
         """Мгновенная запись (для важных событий)."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
-        
-        try:
-            self._rotate_if_needed()
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry)
-        except Exception:
-            pass
+
+        # «Харднинг-1» (k16-21): под тем же локом, что буфер — иначе
+        # немедленная строка может вклиниться МЕЖДУ чанком буфера и
+        # записью, ломая порядок событий в автобиографии.
+        with self._lock:
+            try:
+                self._rotate_if_needed()
+                with open(self.log_file, 'a', encoding='utf-8') as f:
+                    f.write(log_entry)
+            except Exception:
+                pass
     
     def __del__(self):
         """Гарантирует что буфер будет записан при удалении."""
@@ -122,10 +149,16 @@ class BufferedLogger:
 _logger = None
 
 def get_logger(buffer_size=10) -> BufferedLogger:
-    """Получает или создает глобальный логгер."""
+    """Получает или создает глобальный логгер.
+
+    «Харднинг-1» (k16-21): создание под глобальным локом — race при
+    первом одновременном вызове давал бы два инстанса и два буфера.
+    """
     global _logger
     if _logger is None:
-        _logger = BufferedLogger(buffer_size=buffer_size)
+        with _GET_LOGGER_LOCK:
+            if _logger is None:  # double-check: другой поток успел первым
+                _logger = BufferedLogger(buffer_size=buffer_size)
     return _logger
 
 
