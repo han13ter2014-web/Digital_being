@@ -151,7 +151,12 @@ class BufferedLogger:
                     pass
     
     def flush_immediate(self, message: str):
-        """Мгновенная запись (для важных событий)."""
+        """Мгновенная запись (для важных событий).
+
+        k16-27: ошибка записи не молчит — счётчик ``silent_losses``
+        и одна строка в stderr (семантика и формат общие с k16-23
+        для flush()); единица потерь здесь — одна строка, не чанк.
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
 
@@ -163,8 +168,24 @@ class BufferedLogger:
                 self._rotate_if_needed()
                 with open(self.log_file, 'a', encoding='utf-8') as f:
                     f.write(log_entry)
-            except Exception:
-                pass
+            except Exception as e:
+                # Если не удалось записать - теряем строку осознанно,
+                # как и раньше, но теперь потеря наблюдаема.
+                self.silent_losses += 1
+                detail = " ".join(str(e).split())
+                suffix = f": {detail}" if detail else ""
+                try:
+                    print(
+                        f"buffered_logger: потеряна строка"
+                        f" при flush_immediate: {type(e).__name__}{suffix}",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    # stderr может быть закрыт или отсутствовать (pythonw,
+                    # teardown) — печать не должна уронить
+                    # flush_immediate, чтобы swallow-семантика
+                    # сохранялась целиком.
+                    pass
     
     def __del__(self):
         """Гарантирует что буфер будет записан при удалении."""
