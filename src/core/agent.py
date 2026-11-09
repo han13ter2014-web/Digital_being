@@ -239,7 +239,7 @@ from src.core.agent_evolution import (
     evolve_impl,
     _evolve_legacy_impl,
 )
-from src.core.agent_act import act_impl
+from src.core.agent_act import act_impl, _set_aliases_table
 from src.core.agent_autonomous_tick import (
     _record_active_inference_experience_impl,
     _ingest_motivation_goals_impl,
@@ -1772,3 +1772,10 @@ class DigitalBeing:
         evidence: Optional[WorldDelta] = None,
     ) -> Dict:
         return _check_goal_progress_impl(self, topic, answered, evidence)
+
+
+# «Окно-1» (k16-07): единый источник правды о ловимости действий.
+# Фильтр кандидатов мотивации (executable_action) сверяется с той же
+# таблицей, по которой работает парсер act() — иначе фильтр и парсер
+# неминуемо разойдутся (именно так появились сироты k16-09).
+_set_aliases_table(DigitalBeing.ACTION_ALIASES)

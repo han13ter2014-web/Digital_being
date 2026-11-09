@@ -439,7 +439,10 @@ ACTION_ALIASES: Dict[str, List[str]] = {
     # общение
     "ask_user": ["ask_question", "ask_user", "user_answer", "social_interaction"],
     "user_answer": ["user_answer", "ask_user", "communicate", "social_interaction"],
-    "communicate": ["communicate", "teach_other", "social_interaction", "user_answer"],
+    # «Сироты-1» (k16-10, фоллоу-ап k16-07): teaching — имя шаблона
+    # connection и драйва self_transcendence; DigitalBeing.ACTION_ALIASES
+    # ловит его в communicate, мост должен знать то же имя.
+    "communicate": ["communicate", "teach_other", "teaching", "social_interaction", "user_answer"],
     # поиск
     "web_search": ["web_search", "search_miss"],
     # автономия и рефлексия
@@ -451,6 +454,18 @@ ACTION_ALIASES: Dict[str, List[str]] = {
     "checkpoint_now": ["checkpoint_now", "checkpoint"],
     "default": ["default"],
 }
+
+
+def _executable_action(action) -> bool:
+    """«Окно-1» (k16-07): делегат к парсер-таблице контура исполнения.
+
+        Локальная обёртка вместо верхнеуровневого импорта: agent_act
+        лежит выше по зависимостям ядра, прямые связи модулей не
+        расширяем (см. границы facade в agent.py).
+        """
+    from src.core.agent_act import executable_action
+
+    return executable_action(action)
 
 
 class UnifiedMotivationSystem:
@@ -766,12 +781,22 @@ class UnifiedMotivationSystem:
                     if need_name in self.needs:
                         action_hints.extend(self.needs[need_name].related_actions)
 
-            # «Органы-2» (k16-04): окно 4 вместо прежних 2. У драйва
-            # creativity теперь четыре органа (creative_act, play, draw,
-            # compose_music) — все должны попадать в кандидатов, иначе
-            # draw/compose_music остаются предложением только на бумаге.
-            # Сила по-прежнему убывает с рангом: прямое действие сильнее.
-            for rank, action_hint in enumerate(action_hints[:4]):
+            # «Окно-1» (k16-07): окно 4 вместо прежних 2 — канонизация
+            # k16-04 (у creativity четыре органа; без окна draw/
+            # compose_music остаются предложением на бумаге). Решение
+            # против per-drive-окон: одно окно в одном месте, сила всё
+            # равно убывает рангом, а топ-5-обрезка ниже всё срежет.
+            # Сюда же фильтр «Сироты-1» (k16-07): имя без алиаса и без
+            # парсер-матча (сейчас это legacy/helping_others) — не
+            # исполняемое действие, в оффер как исполняемое не идёт.
+            # Желание НЕ изымается: имя остаётся в goal_types и в
+            # генерации целей (_generate_goal_for_need читает шаблоны,
+            # а не этот список) — арбитр лишь не получает пустышку.
+            action_hints = [
+                hint for hint in action_hints[:4]
+                if _executable_action(hint)
+            ]
+            for rank, action_hint in enumerate(action_hints):
                 hint_strength = strength * 0.8 * (1.0 if rank == 0 else 0.7)
                 candidates.append({
                     "source": "motivation",
