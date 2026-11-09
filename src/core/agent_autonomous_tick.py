@@ -106,6 +106,8 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
 
     from src.cognition.method_preferences import apply as apply_method_preferences
+    from src.core.agent_act import _wire_execution_exception_emotion
+
     candidates = apply_method_preferences(self, candidates)
 
     from src.cognition.activity_goals import activity_candidate
@@ -555,6 +557,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             absolution = self._absorb_action_failure(chosen_action, str(e))
             if absolution:
                 result["will_fail_absolution"] = absolution
+
+            # «Эмоции-1» (k16-03): падение исполнения — тоже промах.
+            _wire_execution_exception_emotion(self, chosen_action)
 
             # P1.2: Failed action - negative valence
             if hasattr(self, "motivation_system"):
