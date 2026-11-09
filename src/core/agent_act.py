@@ -12,6 +12,16 @@ from src.core.agent_body import ESSENTIAL_ACTIONS, RECOVERY_ACTIONS, step_body
 from src.core.buffered_logger import get_logger
 from src.core.world_delta import capture
 
+# «Окно-1» (k16-07): таблица алиасов для executable_action(). Заполняется
+# facade'ом при импорте (agent.py определяет класс после этого модуля) —
+# поэтому читается лениво через callable, а не копией словаря.
+ACTION_ALIASES_TABLE = None
+
+
+def _set_aliases_table(table) -> None:
+    global ACTION_ALIASES_TABLE
+    ACTION_ALIASES_TABLE = table
+
 
 def _wire_action_outcome_emotion(agent, action_type: str, outcome) -> None:
     """«Эмоции-1» (k16-03): окрашивать исход исполненного действия.
@@ -49,6 +59,42 @@ def _wire_execution_exception_emotion(agent, action) -> None:
     emotional_state.handle_event(
         "intention_failed", cycle=agent.cycle_count,
         cause=str(action),
+    )
+
+
+def executable_action(action) -> bool:
+    """«Окно-1» (k16-07): поймает ли контур исполнения это имя.
+
+        Проверяет то же, что парсер act(): алиас в ACTION_ALIASES или
+        подстрочный матч. Единственный источник правды о ловимости —
+        иначе фильтр кандидатов разойдётся с парсером. Служебные
+        имена-не-действия («wait», «none», «default») — True: это
+        честные исходы, а не пустышки.
+        """
+    key = str(action or "").strip().lower()
+    if not key:
+        return False
+    if key in ("wait", "none", "default"):
+        return True
+    if ACTION_ALIASES_TABLE is not None and key in ACTION_ALIASES_TABLE:
+        return True
+    decision_str = str(key)
+    return (
+        "гипотеза" in decision_str
+        or "декомпозиц" in decision_str
+        or "не нашел" in decision_str
+        or "не нашёл" in decision_str
+        or "не найдено" in decision_str
+        or "ментальная модель" in decision_str
+        or "знаю ответ" in decision_str
+        or "нашел ответ" in decision_str
+        or "нашёл ответ" in decision_str
+        or "пользователь ответил" in decision_str
+        or "repair" in decision_str
+        or "ремонт" in decision_str
+        or "deep_rest" in decision_str
+        or "глубокий отдых" in decision_str
+        or "checkpoint" in decision_str
     )
 
 
