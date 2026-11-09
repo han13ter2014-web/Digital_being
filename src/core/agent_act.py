@@ -13,6 +13,45 @@ from src.core.buffered_logger import get_logger
 from src.core.world_delta import capture
 
 
+def _wire_action_outcome_emotion(agent, action_type: str, outcome) -> None:
+    """«Эмоции-1» (k16-03): окрашивать исход исполненного действия.
+
+        success (эффект есть) — joy, промах после исполнения — sadness.
+        Вызывается только для исполненных действий: отказы (denied)
+        выходят из act() раньше и не переживаются — эмоция окрашивает
+        факт, а не намерение. Guard обязателен: act() работает и в
+        лёгких объектах без emotional_state.
+        """
+    emotional_state = getattr(agent, "emotional_state", None)
+    if emotional_state is None or outcome is None:
+        return
+    if outcome.had_effect:
+        emotional_state.handle_event(
+            "intention_completed", cycle=agent.cycle_count,
+            cause=action_type,
+        )
+    else:
+        emotional_state.handle_event(
+            "intention_failed", cycle=agent.cycle_count,
+            cause=action_type,
+        )
+
+
+def _wire_execution_exception_emotion(agent, action) -> None:
+    """«Эмоции-1» (k16-03): падение исполнения — тоже промах.
+
+        Событие то же, что у исполненного-впустую действия (k15: ветка
+        исключений не имела проводки). Guard обязателен.
+        """
+    emotional_state = getattr(agent, "emotional_state", None)
+    if emotional_state is None:
+        return
+    emotional_state.handle_event(
+        "intention_failed", cycle=agent.cycle_count,
+        cause=str(action),
+    )
+
+
 def act_impl(self, decision: str, *, intention=None, DigitalBeing, record_denied_outcome) -> str:
     """Действие на основе мышления с учетом разных затрат энергии.
 
@@ -196,7 +235,10 @@ def act_impl(self, decision: str, *, intention=None, DigitalBeing, record_denied
         action = f"Ответ: {verb} черновик «{draft['theme']}», версия {draft['revision']}"
     elif action_type == "play":
         from src.cognition.local_play import (
-            guess_turn, new_game, new_guess_game, play_turn,
+            guess_turn,
+            new_game,
+            new_guess_game,
+            play_turn,
         )
 
         # Две игры. Выбор — та, где сыграно меньше партий: опыт
@@ -332,6 +374,12 @@ def act_impl(self, decision: str, *, intention=None, DigitalBeing, record_denied
             result_description=result_description,
         )
         self._last_action_outcome = outcome
+
+    # === «Эмоции-1» (k16-03): исход исполнения окрашивает состояние ===
+    # Интенсивности задаёт таблица EVENT_EMOTIONS (emotional_state.py);
+    # scale не передаём — исход либо был, либо нет. Путь исключений
+    # окрашивается в autonomous_tick (_wire_execution_exception_emotion).
+    _wire_action_outcome_emotion(self, action_type, outcome)
 
     if outcome is not None and outcome.had_effect:
         get_logger().log(
