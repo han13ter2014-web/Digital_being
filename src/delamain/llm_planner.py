@@ -118,6 +118,16 @@ class OllamaPlanner:
         # Отказ телеметрии (k16-36, фоллоу-ап 2): наблюдаем, не влияет на
         # план. Липкий, как silent_losses: успешная запись не сбрасывает.
         self.last_ledger_error: Optional[str] = None
+        # Костяк наблюдаемости (k16-40): счётчики учёта живут в ЯДРЕ,
+        # не в инфраструктуре записи леджера. records инкрементируется
+        # ПОСЛЕ факта возврата _record_usage — умершая запись не может
+        # сдвинуть records, и триплет calls/records/mismatch остаётся
+        # истинным при отказе самой записи. losses — счётчик потерь
+        # учёта (позиция 2.0, §8.6). Кода статуса здесь нет: наблюдение
+        # — свойства инстанса, статус-API — отдельный тикет.
+        self._ledger_calls = 0
+        self._ledger_records = 0
+        self._ledger_losses = 0
 
     def bind_registry(self, registry: Any) -> None:
         """Read the action schema from a live ``ActionRegistry``."""
@@ -190,6 +200,8 @@ class OllamaPlanner:
         }
 
         try:
+            # Факт вызова planner'а (k16-40): инкремент в ядре.
+            self._ledger_calls += 1
             data = self._requester(
                 f"{self.base_url}/api/chat",
                 payload,
@@ -212,8 +224,14 @@ class OllamaPlanner:
             usage = _extract_usage(data)
             if usage is not None:
                 self._record_usage(usage)
+                # records — по факту возврата записи (директива k16-40):
+                # инкремент в ядре, а не внутри записи, поэтому отказ
+                # записи не даёт записи в счётчике.
+                self._ledger_records += 1
         except Exception as exc:
             self.last_ledger_error = repr(exc)
+            # Счётчик потерь учёта (k16-40, позиция 2.0 §8.6).
+            self._ledger_losses += 1
             try:
                 print(
                     f"token_ledger: {type(exc).__name__}: {exc}",
@@ -259,6 +277,31 @@ class OllamaPlanner:
             "model": self.model,
             "last_error": self.last_error,
         }
+
+    # --- Наблюдаемость учёта (k16-40): триплет calls/records/mismatch ---
+
+    @property
+    def ledger_calls(self) -> int:
+        """Факты вызова planner'а (инкремент в ядре, монотонно)."""
+        return self._ledger_calls
+
+    @property
+    def ledger_records(self) -> int:
+        """Успешные записи usage: инкремент по факту возврата
+        _record_usage, умершая запись счётчик не сдвигает."""
+        return self._ledger_records
+
+    @property
+    def ledger_losses(self) -> int:
+        """Отказы телеметрии (запись умерла) — счётчик потерь."""
+        return self._ledger_losses
+
+    @property
+    def ledger_mismatch(self) -> bool:
+        """Тревожный инвариант триплета: вызовы были, успешных записей
+        нет. Истинен и при умершей записи: records инкрементируется
+        ядром по факту возврата, а не внутри записи."""
+        return self._ledger_calls > 0 and self._ledger_records == 0
 
     # ------------------------------------------------------------------
     # Prompt and response parsing
