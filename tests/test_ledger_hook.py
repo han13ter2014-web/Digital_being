@@ -438,3 +438,32 @@ def test_llm_disabled_tap_unreachable(monkeypatch, tmp_path: Path) -> None:
 
     assert resolutions == []
     assert not journal.exists(), f"журнал создан при выключенной врезке: {journal}"
+
+
+# === k16-39: пин отсутствия двойной записи при replan-отказе после записи ===
+
+
+def test_replan_failure_after_record_no_second_record() -> None:
+    """k16-39: отказ primary в replan ПОСЛЕ успешной записи — без повторной
+    записи. Порядок по коду (llm_planner._plan): usage пишется в леджер
+    сразу после успешного ответа транспорта и ДО парсинга плана; если
+    парсинг падает (битый JSON), PlannerError уходит в FallbackPlanner,
+    который уходит на heuristic-replan через planner.py:_call (253–257) —
+    fallback леджер не трогает, primary повторно не вызывается. Пин:
+    ровно 1 запись, исполнитель fallback, last_ledger_error не испорчен
+    отказом primary (запись была успешной, отказ — не телеметрии)."""
+    ledger = FakeLedger()
+    response = {
+        "message": {"content": NOT_JSON},
+        "prompt_eval_count": 9,
+        "eval_count": 2,
+    }
+    primary = _make_planner(response, ledger=ledger)
+    planner = FallbackPlanner(primary)
+
+    plan = planner.replan(TASK, {"failed_step": "read_file", "error": "boom"})
+
+    assert len(plan) >= 1
+    assert planner.status()["last_used"] == "fallback"
+    assert ledger.records == [{"src": "planner", "in": 9, "out": 2, "cycle": None}]
+    assert primary.last_ledger_error is None
