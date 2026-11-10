@@ -346,9 +346,8 @@ class OllamaPlanner:
             first = choices[0]
             if isinstance(first, Mapping):
                 choice_message = first.get("message")
-                if (
-                    isinstance(choice_message, Mapping)
-                    and isinstance(choice_message.get("content"), str)
+                if isinstance(choice_message, Mapping) and isinstance(
+                    choice_message.get("content"), str
                 ):
                     return str(choice_message["content"])
                 if isinstance(first.get("text"), str):
@@ -419,9 +418,7 @@ class OllamaPlanner:
                 raise PlannerError(f"plan step {index} has no action name")
             action = action.strip()
             if action not in allowed:
-                raise PlannerError(
-                    f"plan step {index} uses unknown action: {action}"
-                )
+                raise PlannerError(f"plan step {index} uses unknown action: {action}")
             args = step.get("args", {})
             if args is None:
                 args = {}
