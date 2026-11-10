@@ -34,6 +34,12 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-benchmark>=4.0.0",
     "pre-commit>=3.7.0",
+    # Пин ruff — единый канон статика с rev в .pre-commit-config.yaml
+    # (контроль — tests/test_static_pin.py, k16-38).
+    "ruff==0.5.7",
+    # PyYAML — парсинг .pre-commit-config.yaml в мета-тесте k16-38.
+    # В средах без него мета-тест скипается (видно в счётчиках гейта).
+    "PyYAML>=6",
 ]
 build = [
     "pyinstaller>=6.0",
