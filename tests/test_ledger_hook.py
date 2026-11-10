@@ -467,3 +467,60 @@ def test_replan_failure_after_record_no_second_record() -> None:
     assert planner.status()["last_used"] == "fallback"
     assert ledger.records == [{"src": "planner", "in": 9, "out": 2, "cycle": None}]
     assert primary.last_ledger_error is None
+
+
+# === k16-40: костяк наблюдаемости — триплет calls/records/mismatch ===
+
+
+def test_ledger_triplet_dead_write_and_happy_path(capsys) -> None:
+    """k16-40: триплет ядра при умершей записи и в основной ветке.
+
+    Директива k16-40: счётчики живут в ядре (OllamaPlanner), не в
+    инфраструктуре записи леджера; records инкрементируется ПОСЛЕ
+    факта возврата _record_usage, calls — при факте вызова planner'а.
+    Инвариант calls>0 и records==0 => mismatch остаётся истинным,
+    даже если сама запись умерла.
+
+    Фаза A (natural-failure, по образцу _BrokenLedger k16-36): usage
+    валиден, record() падает OSError → calls=1, records=0 (счётчик
+    ядра не сдвинулся), mismatch=True, losses=1, last_ledger_error
+    установлен, одна строка stderr.
+    Фаза B (основная ветка): рабочий леджер → calls=1, records=1,
+    mismatch=False, losses=0.
+    """
+    # Фаза A: запись умерла — триплет зафиксировал расхождение.
+    primary = _make_planner(
+        _plan_response(prompt_eval_count=100, eval_count=20),
+        ledger=_BrokenLedger(),
+    )
+    assert primary.ledger_calls == 0
+    assert primary.ledger_mismatch is False
+
+    planner = FallbackPlanner(primary)
+    plan = planner.plan("прочитай a.txt")
+
+    assert len(plan) == 1
+    assert planner.status()["last_used"] == "primary"
+    assert primary.ledger_calls == 1
+    assert primary.ledger_records == 0
+    assert primary.ledger_mismatch is True
+    assert primary.ledger_losses == 1
+    assert primary.last_ledger_error is not None
+    assert "OSError" in primary.last_ledger_error
+    err_lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert len(err_lines) == 1
+    assert err_lines[0].startswith("token_ledger: OSError")
+
+    # Фаза B: успешная запись — записи есть, mismatch отсутствует.
+    healthy = _make_planner(
+        _plan_response(prompt_eval_count=10, eval_count=4), ledger=FakeLedger()
+    )
+    assert healthy.ledger_mismatch is False
+    healthy_plan = healthy.plan("прочитай a.txt")
+
+    assert len(healthy_plan) == 1
+    assert healthy.ledger_calls == 1
+    assert healthy.ledger_records == 1
+    assert healthy.ledger_mismatch is False
+    assert healthy.ledger_losses == 0
+    assert healthy.last_ledger_error is None
