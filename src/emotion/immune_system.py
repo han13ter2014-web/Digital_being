@@ -105,6 +105,7 @@ class ImmuneSystem:
         trust_score = 0.0
 
         context_lower = context.lower()
+        signature = self._compute_signature(context)
 
         # Считаем совпадения с паттернами
         for pattern in self.TOXIC_PATTERNS:
@@ -142,8 +143,6 @@ class ImmuneSystem:
 
         # Если угроза новая — создаём антитело
         if is_threat:
-            signature = self._compute_signature(context)
-
             if signature not in self.antibodies:
                 # Новая угроза
                 new_pathogen = ImmuneThreat(

@@ -286,6 +286,16 @@ def act_impl(
                 f"осмыслила накопленное: связей {consolidated.get('links', 0)}, "
                 f"формулировок {consolidated.get('definitions', 0)}"
             )
+            # На полной энергии общая подпись мира не видит новые связи и
+            # формулировки. Подтверждаем только фактические изменения отчёта,
+            # а не сам факт прохода консолидации с нулевыми счётчиками.
+            if any(
+                consolidated.get(key, 0)
+                for key in ("links", "definitions", "refined", "confidence")
+            ):
+                confirmed_result = True
+                if not result_description:
+                    result_description = "консолидация изменила ментальную модель"
         if parts:
             action = "Ответ: " + "; ".join(parts)
     elif action_type == "checkpoint_now":
@@ -419,6 +429,16 @@ def act_impl(
                 f"осмыслила накопленное: связей {consolidated.get('links', 0)}, "
                 f"формулировок {consolidated.get('definitions', 0)}"
             )
+            # На полной энергии общая подпись мира не видит новые связи и
+            # формулировки. Подтверждаем только фактические изменения отчёта,
+            # а не сам факт прохода консолидации с нулевыми счётчиками.
+            if any(
+                consolidated.get(key, 0)
+                for key in ("links", "definitions", "refined", "confidence")
+            ):
+                confirmed_result = True
+                if not result_description:
+                    result_description = "консолидация изменила ментальную модель"
         if parts:
             action = "Ответ: " + "; ".join(parts)
     elif action_type == "synthesis":

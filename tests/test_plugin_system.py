@@ -178,11 +178,13 @@ def test_registry_register_class_lazy():
             self.instantiated = True
 
     reg = PluginRegistry()
-    reg.register_class(Lazy)
+    reg.register_class(Lazy, agent_name="NamedAgent")
     assert "lazy" not in reg._items  # ещё не инстанциирован
     inst = reg.get("lazy")
     assert inst is not None
     assert inst.instantiated is True
+    assert inst.agent_name == "NamedAgent"
+    assert reg.list_names() == ["lazy"]
 
 
 def test_registry_has_method():

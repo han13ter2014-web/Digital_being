@@ -106,3 +106,42 @@ def test_agent_uses_isolated_paths():
 def test_repo_data_has_no_artifacts_from_old_tests():
     # Следы старого теста debounce, который писал в рабочую копию.
     assert not (PROJECT_ROOT / "data" / "test_kb_debounce.json").exists()
+
+
+def test_sessionfinish_flushes_global_logger_before_removing_data(
+    tmp_path, monkeypatch
+):
+    """atexit не должен сбрасывать буфер в уже удалённый тестовый каталог."""
+    import importlib.util
+
+    from src.core import buffered_logger as bl
+
+    spec = importlib.util.spec_from_file_location(
+        "sessionfinish_test_conftest", PROJECT_ROOT / "tests" / "conftest.py"
+    )
+    assert spec is not None and spec.loader is not None
+    conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conftest)
+
+    session_root = tmp_path / "session-data"
+    log_file = session_root / "logs" / "agent_log.txt"
+    logger = bl.BufferedLogger(log_file=str(log_file), buffer_size=100)
+    logger.log("оставшаяся запись")
+    monkeypatch.setattr(bl, "_logger", logger)
+    monkeypatch.setattr(conftest, "_SESSION_DATA_DIR", str(session_root))
+
+    observed = []
+    original_rmtree = conftest.shutil.rmtree
+
+    def checked_rmtree(path, *args, **kwargs):
+        observed.append(
+            log_file.read_text(encoding="utf-8") if log_file.exists() else None
+        )
+        return original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(conftest.shutil, "rmtree", checked_rmtree)
+    conftest.pytest_sessionfinish(None, 0)
+
+    assert observed[0] is not None
+    assert "оставшаяся запись" in observed[0]
+    assert not session_root.exists()

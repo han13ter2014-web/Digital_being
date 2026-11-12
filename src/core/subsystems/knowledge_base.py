@@ -210,12 +210,18 @@ class KnowledgeSubsystem:
     def save(self) -> bool:
         """Сохраняет базу знаний в файл."""
         self.prune_if_needed()
+        temporary = self.knowledge_file + ".tmp"
         try:
             os.makedirs(os.path.dirname(self.knowledge_file) or ".", exist_ok=True)
-            with open(self.knowledge_file, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(self.knowledge_base, f, indent=2, ensure_ascii=False)
+            os.replace(temporary, self.knowledge_file)
             return True
         except Exception:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             return False
 
     # ============================================================

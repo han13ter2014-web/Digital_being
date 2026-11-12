@@ -77,18 +77,23 @@ class CheckpointSubsystem:
 
         state = self.collect_state(agent)
 
-        # Ротация
-        self._rotate(agent.name)
-
         filename = os.path.join(
             self.checkpoint_dir, f"{agent.name}_cycle_{agent.cycle_count}.json"
         )
+        temporary = filename + ".tmp"
         try:
-            with open(filename, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2, ensure_ascii=False)
+            os.replace(temporary, filename)
+            # Ротация только после успешной записи: сбой не должен удалять историю.
+            self._rotate(agent.name)
             self._last_saved_intelligence = agent.intelligence
             return filename
         except Exception:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             return None
 
     def load(self, agent, checkpoint_file: str) -> bool:

@@ -606,6 +606,7 @@ class LongTermMemory:
         if self.database is not None:
             self._save_to_sqlite()
             return
+        temporary = self.memory_file + ".tmp"
         try:
             data = {
                 "short_term": {k: v.to_dict() for k, v in self._short_term.items()},
@@ -618,9 +619,14 @@ class LongTermMemory:
                 },
             }
 
-            with open(self.memory_file, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+            os.replace(temporary, self.memory_file)
         except Exception as e:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             print(f"Ошибка сохранения памяти: {e}")
 
     def _load_legacy_json(self, path):
@@ -628,20 +634,20 @@ class LongTermMemory:
 
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
-        self._short_term = {
+        # Разбираем весь файл до изменения живой памяти: повреждённая запись
+        # не должна оставлять смесь прежнего и частично загруженного состояния.
+        short_term = {
             key: MemoryTrace.from_dict(value)
             for key, value in data.get("short_term", {}).items()
         }
-        self._long_term = {
+        long_term = {
             key: MemoryTrace.from_dict(value)
             for key, value in data.get("long_term", {}).items()
         }
-        self._episodic = [
-            MemoryTrace.from_dict(value) for value in data.get("episodic", [])
-        ]
-        known = list(self._short_term.items()) + list(self._long_term.items())
-        self._episodic_ids = {}
-        for order, trace in enumerate(self._episodic):
+        episodic = [MemoryTrace.from_dict(value) for value in data.get("episodic", [])]
+        known = list(short_term.items()) + list(long_term.items())
+        episodic_ids = {}
+        for order, trace in enumerate(episodic):
             matches = [
                 key
                 for key, candidate in known
@@ -656,10 +662,17 @@ class LongTermMemory:
                 memory_id = (
                     f"episodic_{order}_{hashlib.sha256(canonical).hexdigest()[:16]}"
                 )
-            self._episodic_ids[id(trace)] = memory_id
+            episodic_ids[id(trace)] = memory_id
         metadata = data.get("metadata", {})
-        self._consolidation_count = metadata.get("consolidation_count", 0)
-        self._decay_events_count = metadata.get("decay_events_count", 0)
+        consolidation_count = metadata.get("consolidation_count", 0)
+        decay_events_count = metadata.get("decay_events_count", 0)
+
+        self._short_term = short_term
+        self._long_term = long_term
+        self._episodic = episodic
+        self._episodic_ids = episodic_ids
+        self._consolidation_count = consolidation_count
+        self._decay_events_count = decay_events_count
 
     def _load_from_disk(self):
         """Загрузить авторитетную SQLite-память или direct legacy JSON."""

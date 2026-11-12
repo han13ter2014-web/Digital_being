@@ -66,8 +66,13 @@ _use_isolated_data_dir()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Удаляет временную папку данных после прогона."""
+    """Сбрасывает логи и только затем удаляет временную папку данных."""
     if _SESSION_DATA_DIR:
+        # atexit у BufferedLogger срабатывает после этого hook: без явного flush
+        # оставшийся чанк пишется в уже удалённый каталог и теряется.
+        from src.core.buffered_logger import flush_logs
+
+        flush_logs()
         shutil.rmtree(_SESSION_DATA_DIR, ignore_errors=True)
 
 

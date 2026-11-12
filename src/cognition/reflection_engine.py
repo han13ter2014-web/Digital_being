@@ -1,6 +1,7 @@
 """Модуль рефлексии и самоанализа агента"""
 
 import json
+import os
 from datetime import datetime
 from collections import defaultdict
 
@@ -229,6 +230,7 @@ class ReflectionEngine:
     def save_reflection_report(self, report, filename=None):
         """Сохраняет отчёт о самоанализе"""
         filename = filename or data_path("logs", "reflection_report.json")
+        temporary = filename + ".tmp"
         try:
             reports = []
             try:
@@ -240,9 +242,14 @@ class ReflectionEngine:
 
             reports.append(report)
 
-            with open(filename, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(reports, f, indent=2, ensure_ascii=False)
+            os.replace(temporary, filename)
         except Exception as e:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             print(f"❌ Ошибка при сохранении отчёта: {e}")
 
     def reflect(self):

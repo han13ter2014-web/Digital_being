@@ -300,12 +300,18 @@ def _save_knowledge_base_impl(self):
         # Пропускаем запись — debounce
         return
 
+    temporary = self.knowledge_file + ".tmp"
     try:
-        with open(self.knowledge_file, "w", encoding="utf-8") as f:
+        with open(temporary, "w", encoding="utf-8") as f:
             json.dump(self.knowledge_base, f, indent=2, ensure_ascii=False)
+        os.replace(temporary, self.knowledge_file)
         self._last_kb_save_ts = now
         self._last_kb_save_size = len(self.knowledge_base)
     except Exception as e:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
         get_logger().log(f"Ошибка при сохранении БЗ: {e}")
 
 
@@ -345,15 +351,21 @@ def load_state_impl(self, checkpoint_file):
 def save_mental_models_impl(self, filename=None, *, data_path):
     """Сохраняет ментальные модели в файл."""
     filename = filename or data_path("mind", "mental_models.json")
+    temporary = filename + ".tmp"
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(temporary, "w", encoding="utf-8") as f:
             json.dump(
                 self.mental_models.to_storage_dict(), f, indent=2, ensure_ascii=False
             )
+        os.replace(temporary, filename)
         get_logger().log(f"[{self.name}] Ментальные модели сохранены: {filename}")
     except Exception as e:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
         get_logger().log(f"[{self.name}] Ошибка сохранения: {e}")
 
 
@@ -372,20 +384,30 @@ def load_mental_models_impl(self, filename=None, *, data_path):
 
         from src.cognition.mental_models import ConceptNode
 
-        for name, node_data in data.get("concepts", {}).items():
-            self.mental_models.concepts[name] = ConceptNode.from_dict(
-                {**node_data, "name": name}
-            )
+        # Сначала разбираем и проверяем всё содержимое. Иначе повреждённое
+        # утверждение оставляет уже загруженные концепции без остального снимка.
+        concepts = {
+            name: ConceptNode.from_dict({**node_data, "name": name})
+            for name, node_data in data.get("concepts", {}).items()
+        }
 
         from src.cognition.empirical_claims import EmpiricalClaim
 
-        self.mental_models.claims = {
+        claims = {
             key: EmpiricalClaim.from_dict(raw)
             for key, raw in (data.get("claims") or {}).items()
         }
-        self.mental_models.name = data.get("name", self.mental_models.name)
-        self.mental_models.metadata.update(data.get("metadata") or {})
-        self.mental_models.association_memory = data.get("recent_associations", [])
+        metadata = dict(self.mental_models.metadata)
+        metadata.update(data.get("metadata") or {})
+        name = data.get("name", self.mental_models.name)
+        association_memory = data.get("recent_associations", [])
+
+        self.mental_models.concepts.update(concepts)
+        self.mental_models.claims = claims
+        self.mental_models.name = name
+        self.mental_models.metadata.clear()
+        self.mental_models.metadata.update(metadata)
+        self.mental_models.association_memory = association_memory
         self.mental_models._related_cache.clear()
 
         get_logger().log(

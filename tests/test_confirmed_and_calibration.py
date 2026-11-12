@@ -28,6 +28,32 @@ def test_rest_recovery_confirms():
     assert float(agent.energy) > before_energy
 
 
+def test_consolidation_without_energy_recovery_confirms_real_changes():
+    """Сон подтверждает реальные изменения модели даже на полной энергии."""
+    from config.simulation_config import LR_CONFIG
+
+    for action_type, units in (("rest", 0.5), ("deep_rest", 1.0)):
+        agent = DigitalBeing(name=f"ConfirmConsolidation_{action_type}")
+        model = agent.mental_models
+        for name in ("время", "память"):
+            model.encounter_concept(name, f"контекст_{name}", "первая встреча", 0.0)
+        model.concepts[
+            "время"
+        ].definition_hypothesis = "По опыту: 'время' связано с 'память'"
+        before = model.concepts["время"].connections.get("память", 0.0)
+        agent.energy = float(LR_CONFIG.ENERGY_MAX)
+        agent._sleep_units = float(LR_CONFIG.CONSOLIDATION_SLEEP_UNITS) - units
+
+        agent.act(action_type)
+
+        assert model.concepts["время"].connections["память"] > before
+        assert agent._last_consolidation["links"] > 0
+        outcome = agent.loop_closer.last_outcome
+        assert outcome.confirmed_result, action_type
+        assert outcome.had_effect, action_type
+        assert "консолидация" in outcome.result_description, action_type
+
+
 def test_let_go_forgotten_confirms_but_not_found_does_not():
     from src.cognition.intention_history import begin_intention
     from src.cognition.intention_waiting import remember_wait

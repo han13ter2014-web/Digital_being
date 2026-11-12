@@ -104,7 +104,13 @@ class ArchitectureProposal:
         if proposal_type not in self.PROPOSAL_TYPES:
             return {"created": False, "reason": "неизвестный тип"}
 
-        proposal_id = f"prop_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cycle}"
+        # Секунда и цикл не уникальны: standalone-запись по совпавшему ID
+        # перезаписывала прежнее предложение и решение человека по нему.
+        from uuid import uuid4
+
+        proposal_id = (
+            f"prop_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{cycle}_{uuid4().hex}"
+        )
         proposal = {
             "id": proposal_id,
             "type": proposal_type,
@@ -322,13 +328,19 @@ class ArchitectureProposal:
 
     def _enrich_file(self, proposal_id: str, extra: Dict) -> Dict:
         path = os.path.join(self.proposals_dir, f"{proposal_id}.json")
+        temporary = path + ".tmp"
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 payload = json.load(fh)
             payload.update(extra)
-            with open(path, "w", encoding="utf-8") as fh:
+            with open(temporary, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2, ensure_ascii=False)
+            os.replace(temporary, path)
         except Exception as e:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             return {"enriched": False, "reason": f"ошибка записи: {e}"}
         return {"enriched": True, "proposal_id": proposal_id}
 
@@ -366,10 +378,16 @@ class ArchitectureProposal:
         proposal["decided_at"] = datetime.now().isoformat()
         if note:
             proposal["decision_note"] = note
+        temporary = filepath + ".tmp"
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(proposal, f, indent=2, ensure_ascii=False)
+            os.replace(temporary, filepath)
         except Exception as e:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             return {"decided": False, "reason": f"ошибка записи: {e}"}
         self.registry.record(
             "architecture_proposals",

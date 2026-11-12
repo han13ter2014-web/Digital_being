@@ -241,6 +241,39 @@ def test_standalone_file_mode_is_preserved(tmp_path, monkeypatch):
     assert report["errors"] == ["режим без UUID жизни управляется файлами"]
 
 
+def test_standalone_same_second_proposals_do_not_overwrite_decision(
+    tmp_path, monkeypatch
+):
+    """Одна секунда и цикл не должны превращать два предложения в одно."""
+    from datetime import datetime as RealDateTime
+
+    class SameSecond(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return RealDateTime(2026, 11, 12, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "src.core.subsystems.architecture_proposal.datetime", SameSecond
+    )
+    api = ArchitectureProposal(registry=WillRegistry(agent_name="s"))
+
+    first = api.propose("config_change", "Первое", "Первое описание", cycle=7)
+    assert api.decide(first["proposal_id"], approved=True)["decided"] is True
+    first_path = Path(first["filepath"])
+
+    second = api.propose("method_add", "Второе", "Второе описание", cycle=7)
+
+    assert second["created"] is True
+    assert second["proposal_id"] != first["proposal_id"]
+    first_saved = json.loads(first_path.read_text(encoding="utf-8"))
+    assert first_saved["title"] == "Первое"
+    assert first_saved["status"] == "approved"
+    second_saved = json.loads(Path(second["filepath"]).read_text(encoding="utf-8"))
+    assert second_saved["title"] == "Второе"
+    assert second_saved["status"] == "pending"
+
+
 def test_managed_agent_creation_binds_sql_backend(tmp_path, monkeypatch):
     from src.core.agent import DigitalBeing
 

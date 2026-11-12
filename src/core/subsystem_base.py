@@ -200,6 +200,7 @@ class PluginRegistry:
     def __init__(self) -> None:
         self._items: Dict[str, Subsystem] = {}
         self._classes: Dict[str, Type[Subsystem]] = {}
+        self._class_agent_names: Dict[str, str] = {}
         self._lock = threading.RLock()
         # История последних тиков (для dashboard/SSE-ленты).
         self._max_history: int = 200
@@ -276,7 +277,7 @@ class PluginRegistry:
                 return False
             self._classes[name] = cls
             # Сохраняем agent_name — пригодится при инстанциировании.
-            self._classes[f"__{name}__agent__"] = cls  # type: ignore[assignment]
+            self._class_agent_names[name] = agent_name
             logger.debug(f"[registry] зарегистрирован класс: {name}")
             return True
 
@@ -288,7 +289,8 @@ class PluginRegistry:
                 return self._items[name]
             if name in self._classes:
                 cls = self._classes[name]
-                instance = cls(agent_name="unknown")
+                agent_name = self._class_agent_names.get(name, "unknown")
+                instance = cls(agent_name=agent_name)
                 self._items[name] = instance
                 return instance
             return None
@@ -302,6 +304,7 @@ class PluginRegistry:
         with self._lock:
             instance = self._items.pop(name, None)
             self._classes.pop(name, None)
+            self._class_agent_names.pop(name, None)
             if instance is not None:
                 try:
                     instance.teardown()
@@ -465,6 +468,7 @@ class PluginRegistry:
         with self._lock:
             self._items.clear()
             self._classes.clear()
+            self._class_agent_names.clear()
             self._history.clear()
 
 
