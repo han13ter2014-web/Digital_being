@@ -165,7 +165,9 @@ def test_concurrent_submit_creates_only_one_goal(
             # SQLite IntegrityError не должен снова ждать барьер.
             state = {"first": True}
 
-            def find_once(request_id, *, open_runtime, _find=original_find, _state=state):
+            def find_once(
+                request_id, *, open_runtime, _find=original_find, _state=state
+            ):
                 result = _find(request_id, open_runtime=open_runtime)
                 if result is None and _state["first"]:
                     _state["first"] = False
@@ -176,7 +178,9 @@ def test_concurrent_submit_creates_only_one_goal(
 
         request = write_request("concurrent-request")
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(sub.effector.submit, request) for sub in (first, second)]
+            futures = [
+                pool.submit(sub.effector.submit, request) for sub in (first, second)
+            ]
             results = [future.result(timeout=10) for future in futures]
 
         assert len(first.list_goals()) == 1

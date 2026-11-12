@@ -953,7 +953,7 @@ class UserPromptHandler:
     def _cmd_clear(self, agent=None) -> str:
         import os
 
-        os.system("cls" if os.name == "nt" else "clear")
+        os.system("cls" if os.name == "nt" else "clear")  # nosec B605
         return ""
 
     def _cmd_exit(self, agent=None) -> str:

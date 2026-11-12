@@ -1550,7 +1550,9 @@ class AgentRunner:
                 deferred_count = int(
                     getattr(self.agent, "_deferred_stimulus", None) is not None
                 )
-                max_attempts = max(1, queue.qsize() + deferred_count) * MAX_STIMULUS_RETRIES
+                max_attempts = (
+                    max(1, queue.qsize() + deferred_count) * MAX_STIMULUS_RETRIES
+                )
                 attempts = 0
                 while not queue.empty() and attempts < max_attempts:
                     await self._tick_once(wait_for_user=False)

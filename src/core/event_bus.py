@@ -368,11 +368,10 @@ class EventBus:
             logger.debug(f"Нет подписчиков для {event.name}")
             return
 
-        results = await asyncio.gather(
+        await asyncio.gather(
             *(self._safe_invoke(sub, event) for sub in subscribers),
             return_exceptions=False,
         )
-        # results не используются, но gather не даёт исключениям убить цикл
 
     async def _safe_invoke(self, sub: Subscriber, event: Event) -> None:
         """Вызвать подписчика, не давая исключению сломать шину."""

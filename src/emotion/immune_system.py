@@ -85,7 +85,9 @@ class ImmuneSystem:
         import hashlib
 
         # Хэшируем контекст для уникального идентификатора
-        return hashlib.md5(context.encode("utf-8")).hexdigest()[:16]
+        return hashlib.md5(context.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :16
+        ]
 
     def identify_threat(self, context: str, depth: float = 0.7) -> dict:
         """

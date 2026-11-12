@@ -82,6 +82,9 @@ def restore_cooperation(agent, staged: AgentCooperationHub) -> None:
 
 
 __all__ = [
-    "initialize_auxiliary_adapters", "tick_auxiliary_adapters",
-    "auxiliary_status", "capture_cooperation", "restore_cooperation",
+    "initialize_auxiliary_adapters",
+    "tick_auxiliary_adapters",
+    "auxiliary_status",
+    "capture_cooperation",
+    "restore_cooperation",
 ]

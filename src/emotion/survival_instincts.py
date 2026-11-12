@@ -157,7 +157,6 @@ class SurvivalInstincts:
     def check_homeostasis(self) -> Dict:
         """Проверяет состояние гомеостаза (баланса)."""
 
-        state_report = {}
         alarms_raised = []
 
         for resource_type, thresholds in self.HOMEOSTATIC_THRESHOLDS.items():
@@ -190,7 +189,6 @@ class SurvivalInstincts:
         if resource_type not in self.HOMEOSTATIC_THRESHOLDS:
             return False
 
-        target = self.HOMEOSTATIC_THRESHOLDS[resource_type]["optimal"]
         current = self.homeostasis_state[resource_type]["level"]
 
         adjustment_factor = 5.0 if adjustment_direction == "increase" else -5.0

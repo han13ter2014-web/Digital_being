@@ -142,9 +142,7 @@ class DelamainEffectorAdapter:
             # существующую цель, а не создаём второй внешний эффект.
             existing = self._find_goal(request.request_id, open_runtime=True)
             if existing is None:
-                raise EffectorError(
-                    f"could not queue effector request: {exc}"
-                ) from exc
+                raise EffectorError(f"could not queue effector request: {exc}") from exc
             if self._goal_fingerprint(existing) != self._request_fingerprint(request):
                 raise EffectorConflict(
                     f"request_id {request.request_id!r} already exists with a "

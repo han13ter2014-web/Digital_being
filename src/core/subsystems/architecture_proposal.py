@@ -263,7 +263,7 @@ class ArchitectureProposal:
         if self.database is not None:
             with closing(self.database.connect(readonly=True)) as connection:
                 rows = connection.execute(
-                    f"SELECT {self._COLUMNS} FROM architecture_proposals "
+                    f"SELECT {self._COLUMNS} FROM architecture_proposals "  # nosec B608
                     "WHERE status = 'pending' ORDER BY created_at, id"
                 ).fetchall()
             return [self._payload_from_row(row) for row in rows]
@@ -306,7 +306,7 @@ class ArchitectureProposal:
         try:
             with self.database.write() as connection:
                 row = connection.execute(
-                    f"SELECT {self._COLUMNS} FROM architecture_proposals "
+                    f"SELECT {self._COLUMNS} FROM architecture_proposals "  # nosec B608
                     "WHERE id = ?",
                     (proposal_id,),
                 ).fetchone()
@@ -389,7 +389,7 @@ class ArchitectureProposal:
         try:
             with self.database.write() as connection:
                 row = connection.execute(
-                    f"SELECT {self._COLUMNS} FROM architecture_proposals "
+                    f"SELECT {self._COLUMNS} FROM architecture_proposals "  # nosec B608
                     "WHERE id = ?",
                     (proposal_id,),
                 ).fetchone()

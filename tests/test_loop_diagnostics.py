@@ -10,7 +10,10 @@ def test_alias_diagnostic_uses_same_state_as_choice():
     for _ in range(3):
         closer.observe("explore", signature, signature)
     before = closer.to_checkpoint_dict()
-    normalize = lambda action: "explore" if action == "exploration" else action
+
+    def normalize(action):
+        return "explore" if action == "exploration" else action
+
     rows = closer.describe_candidates([{"action": "exploration"}], normalize=normalize)
     assert rows[0]["action"] == "exploration"
     assert rows[0]["normalized_action"] == "explore"

@@ -53,7 +53,6 @@ class CognitiveState:
         self.active_models = []  # Активные ментальные модели
         self.current_hypothesis = None  # Текущая гипотеза
         self.confidence_level = 0.5  # Общий уровень уверенности
-        c: float = 0.5
 
         self.processing_depth = 1  # Глубина обработки (1=поверхностно, 5=глубоко)
         self.cognitive_load = 0.0  # Когнитивная нагрузка (0-1)
@@ -291,7 +290,7 @@ class MetaCognitiveSystem:
     def perform_self_reflection(self, topic: str = None) -> dict:
         """Выполняет акт саморефлексии."""
         # Записывает акт рефлексии
-        trace = self.observe_thought(
+        self.observe_thought(
             "reflection", f"рефлексия на тему: {topic or 'собственное состояние'}"
         )
 

@@ -128,21 +128,27 @@ def test_corrupted_checkpoint_fields_are_filtered_instead_of_crashing():
     from src.core.checkpoint_validation import validate_checkpoint_state
 
     state = EmotionalState()
-    state.load_from({
-        "last_causes": {
-            "joy": [None, "битый цикл"],
-            "fear": ["12", "сохранённая причина"],
-            "anger": [float("inf"), "битый цикл"],
-        },
-        "episodes": [
-            {"emotion": "anger", "cycle": "8", "event": "boundary_violated",
-             "intensity": 1.7},
-            {"emotion": "joy", "cycle": "мусор", "intensity": 0.2},
-            {"emotion": "fear", "cycle": 2, "intensity": float("nan")},
-            {"emotion": "unknown", "cycle": 3, "intensity": 0.2},
-            "мусор",
-        ],
-    })
+    state.load_from(
+        {
+            "last_causes": {
+                "joy": [None, "битый цикл"],
+                "fear": ["12", "сохранённая причина"],
+                "anger": [float("inf"), "битый цикл"],
+            },
+            "episodes": [
+                {
+                    "emotion": "anger",
+                    "cycle": "8",
+                    "event": "boundary_violated",
+                    "intensity": 1.7,
+                },
+                {"emotion": "joy", "cycle": "мусор", "intensity": 0.2},
+                {"emotion": "fear", "cycle": 2, "intensity": float("nan")},
+                {"emotion": "unknown", "cycle": 3, "intensity": 0.2},
+                "мусор",
+            ],
+        }
+    )
     assert state.last_causes == {"fear": (12, "сохранённая причина")}
     assert len(state.episodes) == 1
     assert state.episodes[0]["emotion"] == "anger"
@@ -150,23 +156,35 @@ def test_corrupted_checkpoint_fields_are_filtered_instead_of_crashing():
     validate_checkpoint_state({"emotional_state": state.to_dict()})
 
     with pytest.raises(ValueError, match=r"episodes\[0\]\.intensity"):
-        validate_checkpoint_state({"emotional_state": {
-            "levels": {},
-            "episodes": [{"emotion": "joy", "cycle": 1,
-                          "intensity": float("inf")}],
-        }})
+        validate_checkpoint_state(
+            {
+                "emotional_state": {
+                    "levels": {},
+                    "episodes": [
+                        {"emotion": "joy", "cycle": 1, "intensity": float("inf")}
+                    ],
+                }
+            }
+        )
 
 
 def test_every_dominant_emotion_has_a_safe_art_projection(monkeypatch):
     from src.cognition import local_art
 
     used_palettes = []
-    monkeypatch.setattr(local_art, "art_available", lambda state=None, workspace=None: True)
+    monkeypatch.setattr(
+        local_art, "art_available", lambda state=None, workspace=None: True
+    )
 
     def fake_step(work, *, palette, theme, richness, workspace=None):
         used_palettes.append(palette)
-        return {"id": "test", "theme": theme, "palette": palette,
-                "revision": 1, "status": "active"}
+        return {
+            "id": "test",
+            "theme": theme,
+            "palette": palette,
+            "revision": 1,
+            "status": "active",
+        }
 
     monkeypatch.setattr(local_art, "art_step", fake_step)
     monkeypatch.setattr(local_art, "art_thumbnail", lambda work: "thumb")

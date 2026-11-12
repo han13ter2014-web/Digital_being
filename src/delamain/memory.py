@@ -499,7 +499,7 @@ class MemoryStore:
         placeholders = ",".join("?" for _ in identifiers)
         rows = self._conn.execute(
             "SELECT * FROM episodes WHERE task = 'digital_life' "
-            f"AND task_id IN ({placeholders}) ORDER BY id DESC LIMIT ?",
+            f"AND task_id IN ({placeholders}) ORDER BY id DESC LIMIT ?",  # nosec B608
             (*identifiers, limit),
         ).fetchall()
         from src.core.life_identity import validate_life_id
@@ -751,11 +751,9 @@ class MemoryStore:
             raise ValueError("goal title must not be empty")
         now = _utc_now_iso()
         cursor = self._conn.execute(
-            f"""
-            INSERT INTO {self._goals_table}
-                (created_at, updated_at, title, status, success_predicate, priority, meta_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            f"INSERT INTO {self._goals_table} "  # nosec B608
+            "(created_at, updated_at, title, status, success_predicate, priority, meta_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 now,
                 now,
@@ -772,7 +770,7 @@ class MemoryStore:
     @_atomic
     def update_goal_status(self, goal_id: int, status: str) -> bool:
         cursor = self._conn.execute(
-            f"UPDATE {self._goals_table} SET status = ?, updated_at = ? WHERE id = ?",
+            f"UPDATE {self._goals_table} SET status = ?, updated_at = ? WHERE id = ?",  # nosec B608
             (str(status), _utc_now_iso(), int(goal_id)),
         )
         self._conn.commit()
@@ -797,7 +795,8 @@ class MemoryStore:
 
         goal_id = int(goal_id)
         row = self._conn.execute(
-            f"SELECT * FROM {self._goals_table} WHERE id = ?", (goal_id,)
+            f"SELECT * FROM {self._goals_table} WHERE id = ?",  # nosec B608
+            (goal_id,),
         ).fetchone()
         if row is None:
             return False
@@ -819,12 +818,9 @@ class MemoryStore:
         )
 
         cursor = self._conn.execute(
-            f"""
-            UPDATE {self._goals_table}
-            SET updated_at = ?, status = ?, success_predicate = ?,
-                priority = ?, meta_json = ?
-            WHERE id = ?
-            """,
+            f"UPDATE {self._goals_table} "  # nosec B608
+            "SET updated_at = ?, status = ?, success_predicate = ?, "
+            "priority = ?, meta_json = ? WHERE id = ?",
             (
                 _utc_now_iso(),
                 new_status,
@@ -841,11 +837,11 @@ class MemoryStore:
     def list_goals(self, *, status: Optional[str] = None) -> List[Dict[str, Any]]:
         if status is None:
             rows = self._conn.execute(
-                f"SELECT * FROM {self._goals_table} ORDER BY priority DESC, id DESC"
+                f"SELECT * FROM {self._goals_table} ORDER BY priority DESC, id DESC"  # nosec B608
             ).fetchall()
         else:
             rows = self._conn.execute(
-                f"SELECT * FROM {self._goals_table} WHERE status = ? "
+                f"SELECT * FROM {self._goals_table} WHERE status = ? "  # nosec B608
                 "ORDER BY priority DESC, id DESC",
                 (str(status),),
             ).fetchall()
@@ -866,7 +862,8 @@ class MemoryStore:
     @_atomic
     def get_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
         row = self._conn.execute(
-            f"SELECT * FROM {self._goals_table} WHERE id = ?", (int(goal_id),)
+            f"SELECT * FROM {self._goals_table} WHERE id = ?",  # nosec B608
+            (int(goal_id),),
         ).fetchone()
         if row is None:
             return None

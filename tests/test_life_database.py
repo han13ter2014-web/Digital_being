@@ -24,9 +24,12 @@ def test_schema_reopen_and_snapshot_timestamp_roundtrip(tmp_path):
     reopened = LifeDatabase(path, life_id)
     assert reopened.checkpoints.load(snapshot)["cycle_count"] == 7
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute(
-            "SELECT saved_at FROM snapshots WHERE id = ?", (snapshot,)
-        ).fetchone()[0] == saved_at
+        assert (
+            connection.execute(
+                "SELECT saved_at FROM snapshots WHERE id = ?", (snapshot,)
+            ).fetchone()[0]
+            == saved_at
+        )
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 0
     with closing(reopened.connect()) as connection:
@@ -108,10 +111,11 @@ def test_v1_database_migrates_dialogue_schema_without_losing_state(tmp_path):
         assert connection.execute("PRAGMA user_version").fetchone()[0] == (
             LifeDatabase.SCHEMA_VERSION
         )
-        assert connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dialogue_cycles'"
-        ).fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='dialogue_cycles'"
+            ).fetchone()[0]
+            == 1
+        )
     assert reopened.checkpoints.load(snapshot) == state
-    assert LifeGuard(
-        agent_name="Test", database=reopened
-    ).load_state() == STATE_DORMANT
+    assert LifeGuard(agent_name="Test", database=reopened).load_state() == STATE_DORMANT

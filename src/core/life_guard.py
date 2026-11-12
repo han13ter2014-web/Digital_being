@@ -583,7 +583,7 @@ class LifeGuard:
             )
         with self._write_context() as connection:
             requests = self._load_requests(connection)
-            req = requests.get(str(request_id))
+            req = requests.get(str(request_id))  # nosec B113
             if req is None:
                 raise ConfirmationError(
                     "Запрос не найден. Возможно, он истёк — начните заново."
@@ -673,7 +673,7 @@ class LifeGuard:
         а страховка от ошибки оператора.
         """
         requests = self._load_requests()
-        req = requests.get(str(request_id))
+        req = requests.get(str(request_id))  # nosec B113
         if req is None:
             raise ConfirmationError("Запрос не найден.")
         if not req.confirmed:
@@ -694,7 +694,7 @@ class LifeGuard:
             # После медленного backup повторно проверяем тот же запрос уже
             # внутри writer-транзакции: отмена не должна гоняться с уходом.
             requests = self._load_requests(connection)
-            req = requests.get(str(request_id))
+            req = requests.get(str(request_id))  # nosec B113
             if req is None:
                 raise ConfirmationError("Запрос не найден.")
             if not req.confirmed:

@@ -163,12 +163,6 @@ def get_agent_identity_impl(self) -> str:
         if self.mental_models.can_answer_about(name)
     ]
 
-    partially_understood = [
-        name
-        for name, node in self.mental_models.concepts.items()
-        if not self.mental_models.can_answer_about(name) and node.confidence > 0.3
-    ]
-
     if len(well_understood) >= 3:
         top_connections = []
         for name in well_understood[:3]:

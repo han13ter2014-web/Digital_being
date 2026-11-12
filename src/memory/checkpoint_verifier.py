@@ -59,9 +59,11 @@ def _differences(legacy, restored, path="$", limit=20) -> list[str]:
             elif key not in restored:
                 result.append(f"{path}.{key}: отсутствует в SQLite")
             else:
-                result.extend(_differences(
-                    legacy[key], restored[key], f"{path}.{key}", limit - len(result)
-                ))
+                result.extend(
+                    _differences(
+                        legacy[key], restored[key], f"{path}.{key}", limit - len(result)
+                    )
+                )
             if len(result) >= limit:
                 return result[:limit]
         return result
@@ -70,9 +72,9 @@ def _differences(legacy, restored, path="$", limit=20) -> list[str]:
         if len(legacy) != len(restored):
             result.append(f"{path}: длина {len(legacy)} != {len(restored)}")
         for index, (left, right) in enumerate(zip(legacy, restored)):
-            result.extend(_differences(
-                left, right, f"{path}[{index}]", limit - len(result)
-            ))
+            result.extend(
+                _differences(left, right, f"{path}[{index}]", limit - len(result))
+            )
             if len(result) >= limit:
                 break
         return result[:limit]
@@ -152,9 +154,12 @@ def verify_checkpoint_batch(data_root, life_id: str, *, expected_count=None) -> 
                         f"cycle_count={state_cycle!r}, имя файла содержит cycle={cycle}"
                     )
                 record["state"] = state
-                record["saved_at"] = state.get("saved_at") or datetime.fromtimestamp(
-                    path.stat().st_mtime, timezone.utc
-                ).isoformat()
+                record["saved_at"] = (
+                    state.get("saved_at")
+                    or datetime.fromtimestamp(
+                        path.stat().st_mtime, timezone.utc
+                    ).isoformat()
+                )
                 record["state_sha256"] = _state_hash(state)
             except Exception as exc:
                 record["errors"].append(f"legacy: {exc}")
@@ -239,9 +244,9 @@ def verify_checkpoint_batch(data_root, life_id: str, *, expected_count=None) -> 
                         root = decoder._manifest_root(row["manifest"])
                         record["root_sha256"] = root
                         snapshot_hashes[str(row["id"])] = root
-                        state = migrate_state(decoder._decode(
-                            connection, root, set(), expected="dict"
-                        ))
+                        state = migrate_state(
+                            decoder._decode(connection, root, set(), expected="dict")
+                        )
                         validate_checkpoint_state(state)
                         record["state"] = state
                         record["state_sha256"] = _state_hash(state)
@@ -249,14 +254,16 @@ def verify_checkpoint_batch(data_root, life_id: str, *, expected_count=None) -> 
                         record["errors"].append(f"SQLite: {exc}")
                     if cycle in rows:
                         errors.append(f"Повторяющийся SQLite cycle={cycle}")
-                        database["duplicate_snapshots"].append({
-                            "cycle": cycle,
-                            "snapshot_id": record["snapshot_id"],
-                            "saved_at": record["saved_at"],
-                            "snapshot_root_sha256": record.get("root_sha256"),
-                            "sqlite_state_sha256": record.get("state_sha256"),
-                            "errors": record["errors"],
-                        })
+                        database["duplicate_snapshots"].append(
+                            {
+                                "cycle": cycle,
+                                "snapshot_id": record["snapshot_id"],
+                                "saved_at": record["saved_at"],
+                                "snapshot_root_sha256": record.get("root_sha256"),
+                                "sqlite_state_sha256": record.get("state_sha256"),
+                                "errors": record["errors"],
+                            }
+                        )
                     else:
                         rows[cycle] = record
 
@@ -287,11 +294,13 @@ def verify_checkpoint_batch(data_root, life_id: str, *, expected_count=None) -> 
                             "status": migration["status"],
                             "snapshot_hashes_match": recorded == snapshot_hashes,
                             "matching_snapshot_ids": sorted(
-                                int(key) for key in common
+                                int(key)
+                                for key in common
                                 if recorded[key] == snapshot_hashes[key]
                             ),
                             "changed_snapshot_ids": sorted(
-                                int(key) for key in common
+                                int(key)
+                                for key in common
                                 if recorded[key] != snapshot_hashes[key]
                             ),
                             "missing_snapshot_ids": sorted(
@@ -343,9 +352,7 @@ def verify_checkpoint_batch(data_root, life_id: str, *, expected_count=None) -> 
         ):
             if legacy["state"] != restored["state"]:
                 entry["errors"].append("полное состояние не совпадает")
-                entry["differences"] = _differences(
-                    legacy["state"], restored["state"]
-                )
+                entry["differences"] = _differences(legacy["state"], restored["state"])
             if legacy["state_sha256"] != restored["state_sha256"]:
                 entry["errors"].append("канонический SHA-256 состояния не совпадает")
             if legacy["saved_at"] != restored["saved_at"]:

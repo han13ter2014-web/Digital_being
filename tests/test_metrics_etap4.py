@@ -274,6 +274,19 @@ class TestWebhookManager:
             # queue_size должно быть 0 (либо sentinel)
             assert status["queue_size"] == 0 or status["queue_size"] == 1
 
+    @pytest.mark.parametrize("kind", ["telegram", "discord"])
+    def test_http_post_rejects_non_https_without_network(self, kind):
+        from src.metrics import DiscordWebhook, TelegramWebhook
+
+        webhook = (
+            TelegramWebhook(token="t", chat_id="c")
+            if kind == "telegram"
+            else DiscordWebhook(url="http://example.com/hook")
+        )
+        with patch("urllib.request.urlopen") as urlopen:
+            assert webhook._http_post("http://example.com/hook", {}) is False
+        urlopen.assert_not_called()
+
     def test_webhook_status(self):
         from src.metrics import TelegramWebhook
 

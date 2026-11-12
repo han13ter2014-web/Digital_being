@@ -90,7 +90,7 @@ class TestDeathLifeRegression:
         # но autonomous_tick не инкрементирует cycle_count (это делает evolve)
         # Поэтому вызываем save_state вручную каждые 10 итераций
         for cycle in range(100):
-            report = agent.autonomous_tick()
+            agent.autonomous_tick()
 
             assert agent.is_alive(), f"False death at cycle {cycle}"
             assert (
@@ -188,15 +188,15 @@ class TestDeathLifeRegression:
         agent = DigitalBeing("TestAgentDrift")
 
         # Создаём первый чекпоинт
-        cp1 = agent.death_risk.force_checkpoint()
-        integrity_at_cp1 = agent.death_risk.integrity.compute_overall_integrity()
+        agent.death_risk.force_checkpoint()
+        agent.death_risk.integrity.compute_overall_integrity()
 
         # Имитируем изменение состояния (увеличиваем intelligence)
         agent.intelligence = 10
         agent.cycle_count = 5
 
         # Создаём второй чекпоинт с другим состоянием
-        cp2 = agent.death_risk.force_checkpoint()
+        agent.death_risk.force_checkpoint()
 
         verification = agent.death_risk.integrity.verify_latest_checkpoint()
 

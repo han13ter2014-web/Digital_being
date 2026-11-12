@@ -44,7 +44,11 @@ def test_real_action_outcome_updates_observers_without_mutating_core():
     assert memory["action"] == "explore"
     assert memory["had_effect"] is True
     pattern = agent.thinking_patterns.patterns["analytical_thinking"]
-    assert (pattern.usage_count, pattern.success_count, pattern.failure_count) == (1, 1, 0)
+    assert (pattern.usage_count, pattern.success_count, pattern.failure_count) == (
+        1,
+        1,
+        0,
+    )
     assert agent.hormonal_system.history[-1]["event"] == "learning"
     assert agent.emergence_engine.state_history[-1]["result"] == "effect"
     assert agent.metrics.get_stats("action_outcomes")["count"] == 1
@@ -60,7 +64,11 @@ def test_failed_action_is_recorded_once_as_failure():
     assert len(agent.personality.narrative.memories) == 1
     assert agent.personality.narrative.memories[0]["had_effect"] is False
     pattern = agent.thinking_patterns.patterns["analytical_thinking"]
-    assert (pattern.usage_count, pattern.success_count, pattern.failure_count) == (1, 0, 1)
+    assert (pattern.usage_count, pattern.success_count, pattern.failure_count) == (
+        1,
+        0,
+        1,
+    )
     assert agent.hormonal_system.history[-1]["event"] == "failure"
     assert agent.metrics.get_stats("action_errors")["count"] == 1
 
@@ -99,7 +107,9 @@ def test_integrated_experience_and_cooperation_survive_checkpoint():
     reborn = DigitalBeing(name="IntegratedCheckpoint")
     apply_state_to_agent(reborn, state)
 
-    assert reborn.integrated_experience.to_checkpoint() == state["integrated_experience"]
+    assert (
+        reborn.integrated_experience.to_checkpoint() == state["integrated_experience"]
+    )
     assert reborn.cooperation_hub.to_checkpoint() == state["cooperation"]
     assert reborn.cooperation_hub.agents == {reborn.life_id: reborn}
     assert reborn.personality.narrative.memories[-1]["action"] == "create_draft"
@@ -122,7 +132,9 @@ def test_legacy_checkpoint_creates_clean_observers():
 def test_corrupted_integrated_section_leaves_agent_untouched():
     source = DigitalBeing(name="IntegratedInvalidSource")
     state = build_state_from_agent(source)
-    pattern = state["integrated_experience"]["thinking_patterns"]["patterns"]["analytical_thinking"]
+    pattern = state["integrated_experience"]["thinking_patterns"]["patterns"][
+        "analytical_thinking"
+    ]
     pattern["success_count"] = 1
     reborn = DigitalBeing(name="IntegratedInvalidTarget")
     before = _canonical_state(reborn)
@@ -150,8 +162,11 @@ def test_auxiliary_adapters_are_local_and_process_messages_autonomously():
     knowledge_before = deepcopy(second.knowledge_base)
     first.cooperation_hub.register_agent(second)
     assert first.cooperation_hub.send_message(
-        first.life_id, second.life_id, MessageType.SHARE_KNOWLEDGE,
-        '{"fact": "непроверенно"}', context="карантин",
+        first.life_id,
+        second.life_id,
+        MessageType.SHARE_KNOWLEDGE,
+        '{"fact": "непроверенно"}',
+        context="карантин",
     )
     assert tick_auxiliary_adapters(second, 1)["cooperation"]["pending_messages"] == 0
     second.cooperation_hub = first.cooperation_hub

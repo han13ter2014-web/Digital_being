@@ -63,7 +63,6 @@ class CoreSelfModule:
 
         # 2. Корректировка самоопределения в зависимости от вывода конфликта
         winning_voice = conflict_report.get("dominant_voice")
-        conflict_reason = conflict_report.get("reason", "нет конкретной причины.")
 
         if winning_voice == "Наблюдатель" and self.identity_stability_score < 0.7:
             new_statement = (

@@ -27,7 +27,9 @@ def test_external_file_is_copied_and_original_kept(tmp_path):
     source = _file(tmp_path / "outside", "painting.svg", b"<svg />")
     original = source.read_bytes()
 
-    row = database.register_artifact(source, kind="creative", metadata={"activity": "art"})
+    row = database.register_artifact(
+        source, kind="creative", metadata={"activity": "art"}
+    )
 
     assert row["kind"] == "creative"
     assert row["bytes"] == len(original)
@@ -51,9 +53,7 @@ def test_file_inside_life_dir_is_registered_in_place(tmp_path):
     row = database.register_artifact(inner, kind="export")
 
     assert row["relative_path"] == "exports/final.json"
-    copies = [
-        path for path in database.artifacts_dir.rglob("*") if path.is_file()
-    ]
+    copies = [path for path in database.artifacts_dir.rglob("*") if path.is_file()]
     assert copies == []
     assert database.verify_artifacts()["ok"] is True
 
@@ -88,8 +88,11 @@ def test_update_flag_rewrites_registered_content(tmp_path):
     revised = _file(tmp_path, "work2", b"rev2")
 
     row = database.register_artifact(
-        revised, kind="creative", relative_path="artifacts/creative/work.txt",
-        update=True, metadata={"revision": 2},
+        revised,
+        kind="creative",
+        relative_path="artifacts/creative/work.txt",
+        update=True,
+        metadata={"revision": 2},
     )
 
     assert row["sha256"] == hashlib.sha256(b"rev2").hexdigest()
@@ -100,17 +103,18 @@ def test_update_flag_rewrites_registered_content(tmp_path):
 
 def test_verify_detects_tampering_and_missing_files(tmp_path):
     database = _database(tmp_path)
-    row = database.register_artifact(
-        _file(tmp_path, "a.txt", b"aaaa"), kind="creative"
-    )
+    row = database.register_artifact(_file(tmp_path, "a.txt", b"aaaa"), kind="creative")
     stored = database.life_dir / row["relative_path"]
     stored.write_bytes(b"bbbb")
     report = database.verify_artifacts()
     assert report["ok"] is False
-    assert report["problems"] == [{
-        "id": row["id"], "relative_path": row["relative_path"],
-        "problem": "hash_mismatch",
-    }]
+    assert report["problems"] == [
+        {
+            "id": row["id"],
+            "relative_path": row["relative_path"],
+            "problem": "hash_mismatch",
+        }
+    ]
 
     stored.unlink()
     report = database.verify_artifacts()
@@ -121,16 +125,20 @@ def test_verify_detects_tampering_and_missing_files(tmp_path):
 def test_write_artifact_exports_and_refreshes_registration(tmp_path):
     database = _database(tmp_path)
     row = database.write_artifact(
-        "artifacts/architecture_proposals/prop_x.json", b'{"status": "pending"}',
-        kind="architecture_proposal", metadata={"proposal_id": "prop_x"},
+        "artifacts/architecture_proposals/prop_x.json",
+        b'{"status": "pending"}',
+        kind="architecture_proposal",
+        metadata={"proposal_id": "prop_x"},
     )
     target = database.life_dir / "artifacts" / "architecture_proposals" / "prop_x.json"
     assert target.read_bytes() == b'{"status": "pending"}'
     assert row["sha256"] == hashlib.sha256(b'{"status": "pending"}').hexdigest()
 
     updated = database.write_artifact(
-        "artifacts/architecture_proposals/prop_x.json", b'{"status": "approved"}',
-        kind="architecture_proposal", metadata={"proposal_id": "prop_x"},
+        "artifacts/architecture_proposals/prop_x.json",
+        b'{"status": "approved"}',
+        kind="architecture_proposal",
+        metadata={"proposal_id": "prop_x"},
     )
     assert updated["id"] == row["id"]
     assert updated["sha256"] == hashlib.sha256(b'{"status": "approved"}').hexdigest()
@@ -161,7 +169,8 @@ def test_v2_database_gains_new_tables_without_losing_state(tmp_path):
             LifeDatabase.SCHEMA_VERSION
         )
         tables = {
-            row[0] for row in connection.execute(
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }

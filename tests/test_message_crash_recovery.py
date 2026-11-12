@@ -82,9 +82,11 @@ async def test_processed_message_is_not_resurrected_from_stale_checkpoint(
 
         with patch.object(
             first, "autonomous_tick", return_value={"attention_selected": True}
-        ), patch.object(first, "perceive", side_effect=lambda value: value), patch.object(
-            first, "think", return_value="проверка"
-        ), patch.object(first, "act", return_value="проверка"):
+        ), patch.object(
+            first, "perceive", side_effect=lambda value: value
+        ), patch.object(first, "think", return_value="проверка"), patch.object(
+            first, "act", return_value="проверка"
+        ):
             await runner.step_once()
         assert first._pending_message_texts == []
         assert first._deferred_stimulus is None

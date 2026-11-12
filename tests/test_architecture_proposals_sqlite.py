@@ -4,23 +4,18 @@ from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 from uuid import uuid4
 
-import pytest
 
 from src.core.subsystems.architecture_proposal import ArchitectureProposal
 from src.core.subsystems.will_registry import WillRegistry
-from src.memory.life_database import LifeDatabase
 
 
 def _api(tmp_path, monkeypatch, life_id=None):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     if life_id is None:
         life_id = str(uuid4())
-    api = ArchitectureProposal(
-        registry=WillRegistry(agent_name="t"), life_id=life_id
-    )
+    api = ArchitectureProposal(registry=WillRegistry(agent_name="t"), life_id=life_id)
     return api, api.database, life_id
 
 
@@ -36,8 +31,11 @@ def test_propose_stores_sql_row_and_registered_export(tmp_path, monkeypatch):
     api, database, life_id = _api(tmp_path, monkeypatch)
 
     created = api.propose(
-        "config_change", "REST_FATIGUE_THRESHOLD", "Обоснование",
-        code_snippet="diff", cycle=7,
+        "config_change",
+        "REST_FATIGUE_THRESHOLD",
+        "Обоснование",
+        code_snippet="diff",
+        cycle=7,
         extra={"category": "energy_efficiency"},
     )
 
@@ -88,10 +86,12 @@ def test_pending_and_decision_survive_reopen(tmp_path, monkeypatch):
     assert export["decision_note"] == "хороший lever"
 
     assert final.decide(proposal_id, approved=False) == {
-        "decided": False, "reason": "уже решено: approved",
+        "decided": False,
+        "reason": "уже решено: approved",
     }
     assert final.decide("prop_missing", approved=True) == {
-        "decided": False, "reason": "не найдено",
+        "decided": False,
+        "reason": "не найдено",
     }
 
 
@@ -104,7 +104,8 @@ def test_enrich_updates_sql_and_resyncs_export(tmp_path, monkeypatch):
         {"verification": {"passed": True, "cycles": 5}, "diff": "--- a\n+++ b"},
     )
     assert enriched == {
-        "enriched": True, "proposal_id": created["proposal_id"],
+        "enriched": True,
+        "proposal_id": created["proposal_id"],
     }
     row = _rows(database)[0]
     payload = json.loads(row["payload_json"])
@@ -119,10 +120,12 @@ def test_enrich_updates_sql_and_resyncs_export(tmp_path, monkeypatch):
     assert database.verify_artifacts()["ok"] is True
 
     assert api.enrich("prop_missing", {"x": 1}) == {
-        "enriched": False, "reason": "не найдено",
+        "enriched": False,
+        "reason": "не найдено",
     }
     assert api.enrich(created["proposal_id"], {}) == {
-        "enriched": False, "reason": "нет данных",
+        "enriched": False,
+        "reason": "нет данных",
     }
 
 
@@ -156,9 +159,7 @@ def test_rebind_switches_to_authoritative_database(tmp_path, monkeypatch):
     assert api.database.life_id == life_b
     assert api.list_pending() == []
 
-    again = ArchitectureProposal(
-        registry=WillRegistry(agent_name="x"), life_id=life_a
-    )
+    again = ArchitectureProposal(registry=WillRegistry(agent_name="x"), life_id=life_a)
     assert [p["id"] for p in again.list_pending()] == [created["proposal_id"]]
 
 
@@ -167,14 +168,24 @@ def test_import_legacy_registers_without_deleting_originals(tmp_path, monkeypatc
     legacy_dir = tmp_path / "architecture_proposals"
     legacy_dir.mkdir()
     pending = {
-        "id": "prop_20261101_000000_1", "type": "config_change",
-        "title": "Старое", "description": "Описание", "code_snippet": "",
-        "status": "pending", "created_at": "2026-11-01T00:00:00", "cycle": 3,
+        "id": "prop_20261101_000000_1",
+        "type": "config_change",
+        "title": "Старое",
+        "description": "Описание",
+        "code_snippet": "",
+        "status": "pending",
+        "created_at": "2026-11-01T00:00:00",
+        "cycle": 3,
     }
     decided = {
-        "id": "prop_20261102_000000_2", "type": "method_add",
-        "title": "Решённое", "description": "", "code_snippet": "",
-        "status": "rejected", "created_at": "2026-11-02T00:00:00", "cycle": 4,
+        "id": "prop_20261102_000000_2",
+        "type": "method_add",
+        "title": "Решённое",
+        "description": "",
+        "code_snippet": "",
+        "status": "rejected",
+        "created_at": "2026-11-02T00:00:00",
+        "cycle": 4,
     }
     (legacy_dir / "prop_20261101_000000_1.json").write_text(
         json.dumps(pending, ensure_ascii=False), encoding="utf-8"
@@ -195,9 +206,7 @@ def test_import_legacy_registers_without_deleting_originals(tmp_path, monkeypatc
     assert [row["status"] for row in rows] == ["pending", "rejected"]
     registered = database.list_artifacts("architecture_proposal")
     assert len(registered) == 2
-    assert all(
-        item["metadata"]["source"] == "legacy_import" for item in registered
-    )
+    assert all(item["metadata"]["source"] == "legacy_import" for item in registered)
     for name, content in before.items():
         assert (legacy_dir / name).read_bytes() == content
 

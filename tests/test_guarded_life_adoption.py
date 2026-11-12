@@ -8,7 +8,6 @@ from pathlib import Path
 import sqlite3
 from uuid import uuid4
 
-import pytest
 
 from src.memory.checkpoint_store import SQLiteCheckpointStore
 from src.memory.life_database import LifeDatabase
@@ -24,7 +23,8 @@ def _schema(path: Path):
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         tables = {
-            row[0] for row in connection.execute(
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -46,7 +46,9 @@ def _life(tmp_path: Path):
     database = life_dir / "life.sqlite3"
     store = SQLiteCheckpointStore(database)
     state = {
-        "life_id": life_id, "name": "TestLife", "cycle_count": 7,
+        "life_id": life_id,
+        "name": "TestLife",
+        "cycle_count": 7,
         "goals": [{"id": "goal-1", "title": "Сохраниться"}],
     }
     snapshot_id = store.save(state, life_id, 7, saved_at="2026-11-11T00:00:00+00:00")
@@ -56,8 +58,10 @@ def _life(tmp_path: Path):
             "key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
         )
         for key, value in (
-            ("life_id", life_id), ("storage_kind", "life"),
-            ("storage_schema_version", 1), ("latest_snapshot_id", snapshot_id),
+            ("life_id", life_id),
+            ("storage_kind", "life"),
+            ("storage_schema_version", 1),
+            ("latest_snapshot_id", snapshot_id),
         ):
             connection.execute(
                 "INSERT INTO meta VALUES (?, ?, datetime('now'))",
@@ -74,9 +78,14 @@ def _life(tmp_path: Path):
     proposals = data / "architecture_proposals"
     proposals.mkdir()
     proposal = {
-        "id": "prop_test", "type": "config_change", "title": "Проверка",
-        "description": "Описание", "code_snippet": "", "status": "pending",
-        "created_at": "2026-11-11T00:00:00+00:00", "cycle": 7,
+        "id": "prop_test",
+        "type": "config_change",
+        "title": "Проверка",
+        "description": "Описание",
+        "code_snippet": "",
+        "status": "pending",
+        "created_at": "2026-11-11T00:00:00+00:00",
+        "cycle": 7,
         "extra": {"preserved": True},
     }
     (proposals / "prop_test.json").write_text(
@@ -89,7 +98,12 @@ def _life(tmp_path: Path):
 
 def _args(data: Path, life_id: str, output: Path):
     return [
-        "--life-id", life_id, "--data-dir", str(data), "--output", str(output),
+        "--life-id",
+        life_id,
+        "--data-dir",
+        str(data),
+        "--output",
+        str(output),
     ]
 
 
@@ -104,17 +118,30 @@ def _dry_run(tmp_path: Path, data: Path, life_id: str, backup: Path):
 
 def _execute(tmp_path: Path, data: Path, life_id: str, backup: Path, manifest, digest):
     output = tmp_path / "execution.json"
-    code = main(_args(data, life_id, output) + [
-        "--execute-live", "--pre-backup", str(backup),
-        "--manifest", str(manifest), "--manifest-sha256", digest,
-    ])
+    code = main(
+        _args(data, life_id, output)
+        + [
+            "--execute-live",
+            "--pre-backup",
+            str(backup),
+            "--manifest",
+            str(manifest),
+            "--manifest-sha256",
+            digest,
+        ]
+    )
     return code, output
 
 
 def test_dry_run_has_no_side_effects_and_manifest_is_exact(tmp_path, capsys):
     data, life_id, backup = _life(tmp_path)
-    protected = [data / "active_profile.json", data / "lives" / life_id / "life.sqlite3"]
-    protected.extend(sorted((data / "delamain" / "workspace" / "creative").rglob("*.txt")))
+    protected = [
+        data / "active_profile.json",
+        data / "lives" / life_id / "life.sqlite3",
+    ]
+    protected.extend(
+        sorted((data / "delamain" / "workspace" / "creative").rglob("*.txt"))
+    )
     protected.append(data / "architecture_proposals" / "prop_test.json")
     before = {path: _hash(path) for path in protected}
 
@@ -123,7 +150,9 @@ def test_dry_run_has_no_side_effects_and_manifest_is_exact(tmp_path, capsys):
 
     assert report["mode"] == "dry-run"
     assert report["expected_counts"] == {
-        "creative": 2, "architecture_proposal": 1, "total": 3,
+        "creative": 2,
+        "architecture_proposal": 1,
+        "total": 3,
     }
     assert len(digest) == 64
     assert {path: _hash(path) for path in protected} == before
@@ -175,9 +204,10 @@ def test_successful_v1_v3_adoption_backup_restore_and_reopen(tmp_path, capsys):
     restore_backup(post_backup, restored)
     restored_db = restored / "lives" / life_id / "life.sqlite3"
     assert _schema(restored_db)[0] == 3
-    assert restored_db.read_bytes() == (
-        post_backup / "lives" / life_id / "life.sqlite3"
-    ).read_bytes()
+    assert (
+        restored_db.read_bytes()
+        == (post_backup / "lives" / life_id / "life.sqlite3").read_bytes()
+    )
     reopened = LifeDatabase(restored_db, life_id)
     assert reopened.verify_artifacts() == {"ok": True, "checked": 3, "problems": []}
 
@@ -271,9 +301,13 @@ def test_existing_target_and_invalid_proposal_fail_dry_run_without_migration(tmp
     database = data / "lives" / life_id / "life.sqlite3"
     before = database.read_bytes()
 
-    code = main(_args(data, life_id, tmp_path / "blocked.json") + [
-        "--pre-backup", str(backup),
-    ])
+    code = main(
+        _args(data, life_id, tmp_path / "blocked.json")
+        + [
+            "--pre-backup",
+            str(backup),
+        ]
+    )
 
     assert code == 1
     assert database.read_bytes() == before
@@ -293,15 +327,21 @@ def test_nonempty_wal_blocks_dry_run(tmp_path):
         connection.commit()
         assert Path(str(database) + "-wal").stat().st_size > 0
 
-        code = main(_args(data, life_id, tmp_path / "wal.json") + [
-            "--pre-backup", str(backup),
-        ])
+        code = main(
+            _args(data, life_id, tmp_path / "wal.json")
+            + [
+                "--pre-backup",
+                str(backup),
+            ]
+        )
 
         assert code == 1
         assert _schema(database)[0] == 1
 
 
-def test_partial_creative_error_stops_without_proposal_or_retry(tmp_path, monkeypatch, capsys):
+def test_partial_creative_error_stops_without_proposal_or_retry(
+    tmp_path, monkeypatch, capsys
+):
     data, life_id, backup = _life(tmp_path)
     manifest, _report, digest = _dry_run(tmp_path, data, life_id, backup)
     from src.core import activity_workspace
@@ -334,10 +374,18 @@ def test_partial_creative_error_stops_without_proposal_or_retry(tmp_path, monkey
 
     monkeypatch.setattr(activity_workspace.shutil, "copy2", original_copy)
     retry_output = tmp_path / "retry.json"
-    retry = main(_args(data, life_id, retry_output) + [
-        "--execute-live", "--pre-backup", str(backup),
-        "--manifest", str(manifest), "--manifest-sha256", digest,
-    ])
+    retry = main(
+        _args(data, life_id, retry_output)
+        + [
+            "--execute-live",
+            "--pre-backup",
+            str(backup),
+            "--manifest",
+            str(manifest),
+            "--manifest-sha256",
+            digest,
+        ]
+    )
     capsys.readouterr()
     retry_report = json.loads(retry_output.read_text(encoding="utf-8"))
     assert retry == 1
@@ -350,7 +398,8 @@ def test_verify_artifacts_failure_is_fatal_even_with_zero_api_errors(
     data, life_id, backup = _life(tmp_path)
     manifest, _report, digest = _dry_run(tmp_path, data, life_id, backup)
     monkeypatch.setattr(
-        LifeDatabase, "verify_artifacts",
+        LifeDatabase,
+        "verify_artifacts",
         lambda self: {"ok": False, "checked": 3, "problems": [{"problem": "injected"}]},
     )
 

@@ -512,7 +512,6 @@ def test_gzip_and_plain_files_coexist():
         # Include required fields for file integrity verification
         state1 = {
             "schema_version": SCHEMA_VERSION,
-            "name": "Agent",
             "cycle_count": 10,
             "energy": 100.0,
             "x": 1,
@@ -520,7 +519,6 @@ def test_gzip_and_plain_files_coexist():
         }
         state2 = {
             "schema_version": SCHEMA_VERSION,
-            "name": "Agent",
             "cycle_count": 20,
             "energy": 100.0,
             "x": 2,

@@ -165,7 +165,6 @@ class ChatWindow:
                 "message_id": int | None,
             }
         """
-        agent_name = (event.data or {}).get("agent_name", self.agent_name)
         self._awaiting_name = True
         # Попробуем достать последнее сообщение naming из user_interaction.
         msg_text = None

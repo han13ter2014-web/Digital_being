@@ -19,7 +19,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.open_questions import (
+from src.core.open_questions import (  # noqa: E402 — путь проекта настроен выше
     OpenQuestionsManager,
     EXPLORATION_STRATEGIES,
 )
@@ -222,7 +222,7 @@ def test_record_exploration_marks_answered_on_mental_model_marker():
 def test_record_exploration_does_not_mark_for_unknown_prefix():
     mgr = _make_mgr()
     mgr.ask("q1")
-    stimulus = mgr.consume()
+    mgr.consume()
 
     # Стимул без префикса "вопрос: " — no-op
     mgr.record_exploration("обычный стимул", thought="[Ментальная модель] X")
@@ -277,9 +277,8 @@ def test_consume_marks_unresolved_when_max_explorations_reached():
     mgr.record_exploration(s2, thought="Не знаю, сложно")
 
     # Третий consume должен пометить вопрос как исчерпанный.
-    s3 = mgr.consume()
-    # s3 может быть None (если только один вопрос был и он помечен answered).
-    # Вместо проверки s3 проверим, что вопрос помечен.
+    mgr.consume()
+    # Проверяем состояние вопроса, а не возможный пустой стимул.
     assert mgr.queue[0]["answered"] is True
     assert "Не удалось найти ответ" in mgr.queue[0]["answer"]
 

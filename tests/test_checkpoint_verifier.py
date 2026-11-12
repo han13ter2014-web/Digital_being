@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -63,9 +62,7 @@ def test_exact_batch_matches_without_changing_sources(tmp_path):
     assert report["database"]["wal_bytes"] == 0
     assert report["database"]["integrity_check"] == ["ok"]
     assert [entry["matched"] for entry in report["entries"]] == [True, True]
-    assert all(
-        len(entry["snapshot_root_sha256"]) == 64 for entry in report["entries"]
-    )
+    assert all(len(entry["snapshot_root_sha256"]) == 64 for entry in report["entries"])
     assert report["deletion_authorized"] is False
     assert _hashes(data) == before
 
@@ -140,12 +137,21 @@ def test_cli_writes_manifest_outside_data_and_never_authorizes_deletion(tmp_path
     before = _hashes(data)
     output = tmp_path / "result" / "manifest.json"
 
-    assert main([
-        "--data-root", str(data),
-        "--life-id", life_id,
-        "--expected-count", "2",
-        "--output", str(output),
-    ]) == 0
+    assert (
+        main(
+            [
+                "--data-root",
+                str(data),
+                "--life-id",
+                life_id,
+                "--expected-count",
+                "2",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
 
     manifest = json.loads(output.read_text(encoding="utf-8"))
     assert manifest["ok"] is True
@@ -156,19 +162,29 @@ def test_cli_writes_manifest_outside_data_and_never_authorizes_deletion(tmp_path
     assert manifest["deletion_authorized"] is False
     assert _hashes(data) == before
     with pytest.raises(FileExistsError):
-        main([
-            "--data-root", str(data),
-            "--life-id", life_id,
-            "--output", str(output),
-        ])
+        main(
+            [
+                "--data-root",
+                str(data),
+                "--life-id",
+                life_id,
+                "--output",
+                str(output),
+            ]
+        )
 
 
 def test_cli_refuses_to_write_manifest_into_data(tmp_path):
     data, life_id, _ = _batch(tmp_path)
 
     with pytest.raises(ValueError, match="внутрь data"):
-        main([
-            "--data-root", str(data),
-            "--life-id", life_id,
-            "--output", str(data / "manifest.json"),
-        ])
+        main(
+            [
+                "--data-root",
+                str(data),
+                "--life-id",
+                life_id,
+                "--output",
+                str(data / "manifest.json"),
+            ]
+        )

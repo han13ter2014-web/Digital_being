@@ -59,7 +59,10 @@ def test_sqlite_dream_requests_events_and_state_survive_reopen(sql_guard):
     assert result["state"] == STATE_DORMANT
     assert guard.get_request(request.request_id) is None
     assert [item["event"] for item in guard.recent_events()] == [
-        "requested", "confirmed", "state_changed", "executed",
+        "requested",
+        "confirmed",
+        "state_changed",
+        "executed",
     ]
     assert not (root / "life_state.json").exists()
     assert not (root / "life_requests.json").exists()

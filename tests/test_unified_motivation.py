@@ -73,7 +73,7 @@ class TestUnifiedMotivationSystem:
         # 0.5 из 0.8 — потребность не удовлетворена на 62.5 %.
         assert need.pressure() == pytest.approx(0.625)
         assert need.urgency() == pytest.approx(0.625 * 1.2)
-        assert need.is_pressing() == True  # below threshold 0.35
+        assert need.is_pressing() is True  # below threshold 0.35
 
     def test_need_tick_drains_satisfaction(self):
         """Без удовлетворения потребность «голодает», а не насыщается.
@@ -119,7 +119,7 @@ class TestUnifiedMotivationSystem:
 
         creativity = self.system.drives["creativity"]
         assert creativity.current_level > 0.55
-        assert creativity.is_active() == True
+        assert creativity.is_active() is True
 
     def test_satisfied_needs_do_not_activate_drives(self):
         """Сытый агент не должен хотеть сильнее голодного."""

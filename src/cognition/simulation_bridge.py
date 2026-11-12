@@ -10,9 +10,15 @@ from src.cognition.intention_payload import intention_target
 from src.core.buffered_logger import get_logger
 
 
-SUPPORTED_ACTIONS = frozenset({
-    "explore", "decomposition", "synthesis", "hypothesis", "web_search",
-})
+SUPPORTED_ACTIONS = frozenset(
+    {
+        "explore",
+        "decomposition",
+        "synthesis",
+        "hypothesis",
+        "web_search",
+    }
+)
 
 
 def _mode(agent, mode=None) -> str:
@@ -87,20 +93,29 @@ def predict_candidates(agent, candidates, *, mode=None) -> tuple[list[dict], dic
             context = _context(agent, action, target)
             prediction = simulator.simulate_outcome(
                 action,
-                {"web_enabled": context["web_enabled"], "energy_band": context["energy_band"]},
+                {
+                    "web_enabled": context["web_enabled"],
+                    "energy_band": context["energy_band"],
+                },
                 context,
             ).to_dict()
             candidate["simulation"] = prediction
-            diagnostics["predicted" if prediction["status"] == "predicted" else "unavailable"] += 1
+            diagnostics[
+                "predicted" if prediction["status"] == "predicted" else "unavailable"
+            ] += 1
         except Exception as exc:
             get_logger().log(f"[INTERNAL_SIMULATION] Prediction error: {exc}")
-            candidate["simulation"] = _neutral_prediction(action, target if "target" in locals() else "", str(exc))
+            candidate["simulation"] = _neutral_prediction(
+                action, target if "target" in locals() else "", str(exc)
+            )
             diagnostics["unavailable"] += 1
             diagnostics["errors"].append(str(exc)[:500])
     return copies, diagnostics
 
 
-def learn_from_selected_action(agent, selection, intention_entry, outcome) -> dict | None:
+def learn_from_selected_action(
+    agent, selection, intention_entry, outcome
+) -> dict | None:
     """Сохраняет выполненный исход и сравнивает его с выбранным прогнозом."""
     if _mode(agent) == "off" or outcome is None:
         return None
@@ -116,7 +131,11 @@ def learn_from_selected_action(agent, selection, intention_entry, outcome) -> di
     target = str(intention_entry.get("target") or outcome.topic or "")
     context = _context(agent, action, target)
     prediction = intention_entry.get("simulation") or selection.get("simulation") or {}
-    prediction_id = prediction.get("prediction_id") if prediction.get("status") == "predicted" else None
+    prediction_id = (
+        prediction.get("prediction_id")
+        if prediction.get("status") == "predicted"
+        else None
+    )
     learned = simulator.learn_from_outcome(
         action,
         context,

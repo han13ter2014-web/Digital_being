@@ -374,18 +374,6 @@ class SensoryInterface:
     def _assess_comfort(self, context: str, relationship_quality: float = 0.5) -> float:
         """Оценивает уровень комфорта."""
 
-        comfort_indicators = [
-            "комфортно",
-            "спокойно",
-            "мирно",
-            "понятно",
-            "естественный",
-            "знакомый",
-            "приятен",
-        ]
-
-        comfort_matches = sum(1 for kw in comfort_indicators if kw in context.lower())
-
         tension_penalty = self._detect_tension(context) * 0.3
 
         return max(0.2, 0.8 - tension_penalty + relationship_quality * 0.2)

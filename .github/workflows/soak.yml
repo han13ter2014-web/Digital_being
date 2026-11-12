@@ -1,0 +1,59 @@
+name: Autonomous life multi-seed soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: Number of autonomous cycles per seed
+        required: true
+        default: "250"
+        type: string
+  schedule:
+    - cron: "17 4 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autonomous-life-soak
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: Seed ${{ matrix.seed }} — ${{ inputs.cycles || '250' }} cycles
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1, 7, 23]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime and measurement dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run isolated autonomous-life soak
+        env:
+          DIGITAL_BEING_NAME: AutonomousMeasure
+          DIGITAL_BEING_DEBUG: "0"
+        run: |
+          mkdir -p soak-reports
+          python tools/manual/autonomous_life_measure.py \
+            --cycles "${{ inputs.cycles || '250' }}" \
+            --seed "${{ matrix.seed }}" \
+            --report "soak-reports/seed-${{ matrix.seed }}.json"
+
+      - name: Upload JSON report
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-life-soak-seed-${{ matrix.seed }}
+          path: soak-reports/seed-${{ matrix.seed }}.json
+          if-no-files-found: error

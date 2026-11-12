@@ -46,8 +46,11 @@ def test_time_tick_links_intention_prediction_and_actual_outcome():
             "confidence": 0.6,
         },
     }
-    entry = {"id": "intention-1", "action": "explore",
-             "simulation": selection["simulation"]}
+    entry = {
+        "id": "intention-1",
+        "action": "explore",
+        "simulation": selection["simulation"],
+    }
     record_action_intention(agent, selection, entry)
 
     assert tick["objective_time"] == 1.0
@@ -61,7 +64,9 @@ def test_time_tick_links_intention_prediction_and_actual_outcome():
     assert agent.continuous_time.protension.predictions == []
     events = list(agent.continuous_time.retention.events)
     assert [event.event_type for event in events] == [
-        EventType.TICK, EventType.ACTION, EventType.OBSERVATION,
+        EventType.TICK,
+        EventType.ACTION,
+        EventType.OBSERVATION,
     ]
     assert events[-1].causality == ["intention-1"]
     assert events[-1].payload["had_effect"] is True
@@ -90,7 +95,8 @@ def test_meta_learning_main_contour_observes_without_mutating_parameters():
     assert first["mode"] == second["mode"] == "shadow"
     assert agent.meta_learner.cycle_counter == 2
     assert list(agent.meta_learner.fitness_history) == [
-        first["current_fitness"], second["current_fitness"],
+        first["current_fitness"],
+        second["current_fitness"],
     ]
     assert agent.meta_learner._get_current_config() == config_before
     assert agent.meta_learner.population == population_before
@@ -101,7 +107,10 @@ def test_user_message_updates_social_model_used_by_active_inference():
     agent = DigitalBeing(name="SocialObservation")
 
     observe_user_message(
-        agent, "Память сохраняет опыт", classify_user_text("Память сохраняет опыт"), 3,
+        agent,
+        "Память сохраняет опыт",
+        classify_user_text("Память сохраняет опыт"),
+        3,
     )
     observations = encode_observations(agent)
 
@@ -112,7 +121,8 @@ def test_user_message_updates_social_model_used_by_active_inference():
     # Начальная predictability=0.5 даёт evasive, а не старый постоянный unknown.
     assert observations["social_predicted_reaction"] == 1
     social_events = [
-        event for event in agent.continuous_time.retention.events
+        event
+        for event in agent.continuous_time.retention.events
         if event.event_type == EventType.SOCIAL
     ]
     assert len(social_events) == 1
@@ -162,8 +172,11 @@ def test_text_perception_enriches_real_stimulus_without_replacing_it():
 def test_metacognition_observes_outcome_and_survives_checkpoint():
     agent = DigitalBeing(name="MetaObservation")
     target = next(iter(agent.mental_models.concepts))
-    selection = {"action": "explore", "params": {"topic": target},
-                 "simulation": {"predicted_effect_probability": 0.8}}
+    selection = {
+        "action": "explore",
+        "params": {"topic": target},
+        "simulation": {"predicted_effect_probability": 0.8},
+    }
     entry = {"id": "meta-intention", "action": "explore"}
     observe_action_intention(agent, selection, entry)
     outcome = SimpleNamespace(

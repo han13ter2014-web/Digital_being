@@ -19,7 +19,9 @@ class ArtifactSandbox(Sandbox):
         self.database = database
         self.kind = str(kind)
         if not self.root.is_relative_to(database.life_dir.resolve()):
-            raise ValueError("Managed Delamain workspace must stay inside its life directory")
+            raise ValueError(
+                "Managed Delamain workspace must stay inside its life directory"
+            )
 
     def child(self, path, **kwargs):
         """Keep artifact binding for the narrow ``creative/`` action sandbox."""
@@ -34,7 +36,9 @@ class ArtifactSandbox(Sandbox):
     def _register(self, path, *, source):
         target = self.resolve(path)
         relative = target.relative_to(self.database.life_dir.resolve()).as_posix()
-        kind = "creative" if target.is_relative_to(self.root / "creative") else self.kind
+        kind = (
+            "creative" if target.is_relative_to(self.root / "creative") else self.kind
+        )
         return self.database.register_artifact(
             target,
             kind=kind,

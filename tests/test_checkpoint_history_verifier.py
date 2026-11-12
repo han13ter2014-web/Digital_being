@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from pathlib import Path
 import shutil
 from uuid import uuid4
 
@@ -47,7 +46,9 @@ def _history(tmp_path):
     create_backup(data, data / "snapshots" / "sqlite_backup")
     json_source = tmp_path / "json_source"
     shutil.copytree(data / "checkpoints", json_source / "checkpoints")
-    (json_source / "active_profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    (json_source / "active_profile.json").write_text(
+        json.dumps(profile), encoding="utf-8"
+    )
     create_backup(json_source, data / "snapshots" / "json_backup")
     return data, life_id, states
 
@@ -61,13 +62,18 @@ def test_history_matches_original_snapshots_in_verified_backup(tmp_path):
     assert report["ok"] is True, report["errors"]
     assert report["backup_count"] == 2
     assert [target["verified_in"] for target in report["targets"]] == [
-        ["sqlite_backup"], ["sqlite_backup"]
+        ["sqlite_backup"],
+        ["sqlite_backup"],
     ]
-    sqlite = next(backup for backup in report["backups"] if backup["name"] == "sqlite_backup")
+    sqlite = next(
+        backup for backup in report["backups"] if backup["name"] == "sqlite_backup"
+    )
     assert sqlite["manifest_verified"] is True
     assert sqlite["integrity_check"] == ["ok"]
     assert [entry["matched"] for entry in sqlite["snapshots"]] == [True, True]
-    json_backup = next(backup for backup in report["backups"] if backup["name"] == "json_backup")
+    json_backup = next(
+        backup for backup in report["backups"] if backup["name"] == "json_backup"
+    )
     assert json_backup["database_present"] is False
     assert report["restored_backup"] is False
     assert report["deletion_authorized"] is False
@@ -104,13 +110,23 @@ def test_history_cli_writes_evidence_without_deleting_or_restoring(tmp_path):
     before = _hashes(data)
     output = tmp_path / "evidence" / "history.json"
 
-    assert main([
-        "--data-root", str(data),
-        "--life-id", life_id,
-        "--target", "1:9472",
-        "--target", "2:9532",
-        "--output", str(output),
-    ]) == 0
+    assert (
+        main(
+            [
+                "--data-root",
+                str(data),
+                "--life-id",
+                life_id,
+                "--target",
+                "1:9472",
+                "--target",
+                "2:9532",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
 
     manifest = json.loads(output.read_text(encoding="utf-8"))
     assert manifest["ok"] is True

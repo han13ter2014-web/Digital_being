@@ -1,11 +1,11 @@
 # Coverage configuration for Digital Being.
 # Используется pytest-cov (опциональная dev-зависимость).
-# Запуск: pytest --cov=src --cov=config
-# В CI gate: COVERAGE_FAIL_UNDER=40 pytest --cov=src --cov=config
+# Запуск: pytest --cov=src --cov=config --cov-branch
+# В CI gate: COVERAGE_FAIL_UNDER=40 pytest --cov=src --cov=config --cov-branch
 
 [run]
 source = src, config
-branch = false
+branch = true
 
 # Файлы, которые не имеют смысла для покрытия (scaffolds, guides, пустые __init__).
 omit =

@@ -7,7 +7,6 @@ from uuid import uuid4
 
 from config.simulation_config import LR_CONFIG
 from src.core.agent_runner import AgentRunner
-from src.core.paths import data_path
 from src.core.watchdog import Watchdog
 from src.memory.life_database import LifeDatabase
 
@@ -75,10 +74,13 @@ def test_managed_dialogue_roundtrip_and_retention(tmp_path, monkeypatch):
     assert latest["ledger"] == {"kind": "user", "completed": True}
     assert latest["dialogue"]["pending_question"] == {"topic": "память"}
     assert latest["dialogue"]["outgoing_trace"] == ["след"]
-    assert latest["dialogue"]["messages"] == runner.agent.user_interaction.message_history
+    assert (
+        latest["dialogue"]["messages"] == runner.agent.user_interaction.message_history
+    )
     assert not (tmp_path / "logs" / "dialogue_cycles.jsonl").exists()
     assert runner.get_status()["dialogue_journal"] == {
-        "backend": "sqlite", "last_error": None,
+        "backend": "sqlite",
+        "last_error": None,
     }
 
     reopened = LifeDatabase(database.path, database.life_id)

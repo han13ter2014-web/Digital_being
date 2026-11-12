@@ -447,7 +447,6 @@ async def test_social_with_pending_keeps_open_question_note():
 async def test_definition_without_question_becomes_knowledge():
     """«X — это Y» без вопроса сущности — свидетельство, не материал."""
     agent, runner, bus = _make_runner()
-    ui = agent.user_interaction
 
     await runner._on_user_message(
         SimpleNamespace(data={"text": "Git — это система контроля версий."})

@@ -64,7 +64,8 @@ def test_mirror_mismatch_raises_but_preserves_primary_json(tmp_path, monkeypatch
         sqlite_mirror_life_id=life_id,
     )
     monkeypatch.setattr(
-        SQLiteCheckpointStore, "load",
+        SQLiteCheckpointStore,
+        "load",
         lambda self, snapshot_id: {"unexpected": snapshot_id},
     )
 

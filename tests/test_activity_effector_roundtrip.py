@@ -25,7 +25,7 @@ def test_approval_waits_then_core_step_succeeds_and_is_idempotent(tmp_path):
         request = creative_write_request(
             "draft.txt", "Маленькая композиция", request_id="creative-fixed"
         )
-        first = sub.effector.submit(request)
+        sub.effector.submit(request)
         waiting = sub.effector.step(1)
         assert waiting.status.value == "waiting_approval"
         approved = sub.approve(waiting.approval_id)
@@ -51,7 +51,7 @@ def test_rejected_creative_request_never_creates_success(tmp_path):
         request = creative_write_request(
             "draft.txt", "текст", request_id="creative-rejected"
         )
-        waiting = sub.effector.submit(request)
+        sub.effector.submit(request)
         pending = sub.effector.step(1)
         rejected = sub.reject(pending.approval_id, "не сейчас")
         assert rejected["ok"] is False

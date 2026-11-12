@@ -35,8 +35,12 @@ DELAMAIN_TABLES = {
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-        allow_nan=False, default=str,
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        default=str,
     )
 
 
@@ -75,24 +79,31 @@ def _read_snapshots(source_root, life_id):
     sources = []
     serializer = CheckpointSerializer()
     pattern = re.compile(r".+_cycle_([0-9]+)[.]json(?:[.]gz)?$")
-    paths = sorted(
-        (path for path in folder.glob("*") if pattern.fullmatch(path.name)),
-        key=lambda path: int(pattern.fullmatch(path.name).group(1)),
-    ) if folder.is_dir() else []
+    paths = (
+        sorted(
+            (path for path in folder.glob("*") if pattern.fullmatch(path.name)),
+            key=lambda path: int(pattern.fullmatch(path.name).group(1)),
+        )
+        if folder.is_dir()
+        else []
+    )
     for path in paths:
         state = serializer.load(str(path))
         if state is None:
             raise ValueError(f"Пустой исходный снимок: {path}")
         match = pattern.fullmatch(path.name)
-        records.append({
-            "state": state,
-            "cycle": int(match.group(1)),
-            "saved_at": state.get("saved_at") or datetime.fromtimestamp(
-                path.stat().st_mtime, timezone.utc
-            ).isoformat(),
-            "source": str(path),
-            "source_order": len(records),
-        })
+        records.append(
+            {
+                "state": state,
+                "cycle": int(match.group(1)),
+                "saved_at": state.get("saved_at")
+                or datetime.fromtimestamp(
+                    path.stat().st_mtime, timezone.utc
+                ).isoformat(),
+                "source": str(path),
+                "source_order": len(records),
+            }
+        )
         sources.append(path)
 
     database_path = folder / "life.sqlite3"
@@ -104,20 +115,23 @@ def _read_snapshots(source_root, life_id):
         with closing(_read_only(database_path)) as connection:
             rows = connection.execute(
                 "SELECT id, cycle, saved_at, manifest FROM snapshots "
-                "WHERE agent_name = ? ORDER BY id", (life_id,)
+                "WHERE agent_name = ? ORDER BY id",
+                (life_id,),
             ).fetchall()
             for row in rows:
                 root = decoder._manifest_root(row["manifest"])
-                state = migrate_state(decoder._decode(
-                    connection, root, set(), expected="dict"
-                ))
-                records.append({
-                    "state": state,
-                    "cycle": int(row["cycle"]),
-                    "saved_at": row["saved_at"],
-                    "source": f"{database_path}#snapshot={row['id']}",
-                    "source_order": len(records),
-                })
+                state = migrate_state(
+                    decoder._decode(connection, root, set(), expected="dict")
+                )
+                records.append(
+                    {
+                        "state": state,
+                        "cycle": int(row["cycle"]),
+                        "saved_at": row["saved_at"],
+                        "source": f"{database_path}#snapshot={row['id']}",
+                        "source_order": len(records),
+                    }
+                )
         sources.append(database_path)
 
     records.sort(key=_snapshot_sort_key)
@@ -164,7 +178,8 @@ def _read_memory(source_root, life_id, quarantine):
     for order, raw in enumerate(episodic):
         trace = MemoryTrace.from_dict(raw)
         candidates = [
-            key for key, item in traces.items()
+            key
+            for key, item in traces.items()
             if item["trace"].to_dict() == trace.to_dict()
         ]
         if len(candidates) > 1:
@@ -183,28 +198,36 @@ def _read_memory(source_root, life_id, quarantine):
     rows = []
     for trace_id, item in traces.items():
         trace = item["trace"]
-        rows.append({
-            "id": trace_id,
-            "store": item["store"],
-            "content": trace.content,
-            "importance": trace.importance,
-            "created_at": trace.created_at.isoformat(),
-            "last_accessed": trace.last_accessed.isoformat(),
-            "access_count": trace.access_count,
-            "context": trace.context,
-            "is_episodic": int(item["episode_order"] is not None),
-            "episode_order": item["episode_order"],
-            "metadata_json": "{}",
-        })
+        rows.append(
+            {
+                "id": trace_id,
+                "store": item["store"],
+                "content": trace.content,
+                "importance": trace.importance,
+                "created_at": trace.created_at.isoformat(),
+                "last_accessed": trace.last_accessed.isoformat(),
+                "access_count": trace.access_count,
+                "context": trace.context,
+                "is_episodic": int(item["episode_order"] is not None),
+                "episode_order": item["episode_order"],
+                "metadata_json": "{}",
+            }
+        )
     links = []
     for trace_id, item in traces.items():
         for related in sorted(item["trace"].associations):
             if related == trace_id:
-                quarantine.append({"store": "memory_links", "id": trace_id,
-                                   "reason": "self_link"})
+                quarantine.append(
+                    {"store": "memory_links", "id": trace_id, "reason": "self_link"}
+                )
             elif related not in traces:
-                quarantine.append({"store": "memory_links", "id": trace_id,
-                                   "reason": f"missing_target:{related}"})
+                quarantine.append(
+                    {
+                        "store": "memory_links",
+                        "id": trace_id,
+                        "reason": f"missing_target:{related}",
+                    }
+                )
             else:
                 links.append({"trace_id": trace_id, "related_trace_id": related})
     metadata = data.get("metadata", {})
@@ -230,16 +253,20 @@ def _read_delamain(source_root, life_id, intention_ids, quarantine):
     sources.append(path)
     with closing(_read_only(path)) as connection:
         existing = {
-            row[0] for row in connection.execute(
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
         for source_table, target_table in DELAMAIN_TABLES.items():
             if source_table not in existing:
                 continue
-            rows = [dict(row) for row in connection.execute(
-                f"SELECT * FROM {source_table} ORDER BY rowid"
-            )]
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"SELECT * FROM {_sql_identifier(source_table)} ORDER BY rowid"  # nosec B608
+                )
+            ]
             for row in rows:
                 metadata = _json_object(row.get("meta_json"))
                 if source_table == "self_model":
@@ -265,11 +292,13 @@ def _read_delamain(source_root, life_id, intention_ids, quarantine):
                 if legacy_episode or biography_marker:
                     result[target_table].append(row)
                 else:
-                    quarantine.append({
-                        "store": f"delamain.{source_table}",
-                        "id": _row_identity(source_table, row),
-                        "reason": "life_id_missing_or_ambiguous",
-                    })
+                    quarantine.append(
+                        {
+                            "store": f"delamain.{source_table}",
+                            "id": _row_identity(source_table, row),
+                            "reason": "life_id_missing_or_ambiguous",
+                        }
+                    )
     return result, sources, skipped_other
 
 
@@ -293,8 +322,13 @@ def _read_life_guard(source_root, agent_names, quarantine):
                 "seed_folder": data.get("seed_folder"),
             }
         else:
-            quarantine.append({"store": "life_state", "id": None,
-                               "reason": "agent_mismatch_or_invalid_state"})
+            quarantine.append(
+                {
+                    "store": "life_state",
+                    "id": None,
+                    "reason": "agent_mismatch_or_invalid_state",
+                }
+            )
     requests_path = root / "life_requests.json"
     if requests_path.is_file():
         sources.append(requests_path)
@@ -306,19 +340,26 @@ def _read_life_guard(source_root, agent_names, quarantine):
             if request.request_id != str(request_id):
                 raise ValueError("life_requests: ключ и request_id различаются")
             if request.agent_name not in agent_names:
-                quarantine.append({"store": "life_requests", "id": request_id,
-                                   "reason": "unknown_agent"})
+                quarantine.append(
+                    {
+                        "store": "life_requests",
+                        "id": request_id,
+                        "reason": "unknown_agent",
+                    }
+                )
                 continue
-            requests.append({
-                "request_id": request.request_id,
-                "kind": request.kind,
-                "agent_name": request.agent_name,
-                "reason": request.reason,
-                "created_at": request.created_at,
-                "expires_at": request.expires_at,
-                "confirmed": int(request.confirmed),
-                "confirmed_at": request.confirmed_at,
-            })
+            requests.append(
+                {
+                    "request_id": request.request_id,
+                    "kind": request.kind,
+                    "agent_name": request.agent_name,
+                    "reason": request.reason,
+                    "created_at": request.created_at,
+                    "expires_at": request.expires_at,
+                    "confirmed": int(request.confirmed),
+                    "confirmed_at": request.confirmed_at,
+                }
+            )
     events_path = root / "life_events.log"
     if events_path.is_file():
         sources.append(events_path)
@@ -331,14 +372,21 @@ def _read_life_guard(source_root, agent_names, quarantine):
             if not isinstance(data, dict):
                 raise ValueError(f"life_events:{line_number}: ожидался объект")
             if data.get("agent") not in agent_names:
-                quarantine.append({"store": "life_events", "id": line_number,
-                                   "reason": "unknown_agent"})
+                quarantine.append(
+                    {
+                        "store": "life_events",
+                        "id": line_number,
+                        "reason": "unknown_agent",
+                    }
+                )
                 continue
-            events.append({
-                "ts": str(data.get("ts") or ""),
-                "event": str(data.get("event") or ""),
-                "payload_json": _canonical(data),
-            })
+            events.append(
+                {
+                    "ts": str(data.get("ts") or ""),
+                    "event": str(data.get("event") or ""),
+                    "payload_json": _canonical(data),
+                }
+            )
     return status, requests, events, sources
 
 
@@ -350,42 +398,68 @@ def _read_metrics(source_root, life_id, agent_names):
         return rows, sources
     prefixes = tuple(f"{name}_" for name in agent_names) + (f"{life_id}_",)
     for path in sorted(root.iterdir()):
-        if path.suffix not in (".ndjson", ".jsonl") or not path.name.startswith(prefixes):
+        if path.suffix not in (".ndjson", ".jsonl") or not path.name.startswith(
+            prefixes
+        ):
             continue
         sources.append(path)
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
             if not line.strip():
                 continue
             data = json.loads(line)
-            if not isinstance(data, dict) or "channel" not in data or "value" not in data:
+            if (
+                not isinstance(data, dict)
+                or "channel" not in data
+                or "value" not in data
+            ):
                 raise ValueError(f"metrics:{path.name}:{line_number}: неверная точка")
             cycle = data.get("cycle")
-            if cycle is not None and (isinstance(cycle, bool) or not isinstance(cycle, int)):
+            if cycle is not None and (
+                isinstance(cycle, bool) or not isinstance(cycle, int)
+            ):
                 raise ValueError(f"metrics:{path.name}:{line_number}: неверный cycle")
-            rows.append({
-                "ts": str(data.get("ts") or ""),
-                "cycle": cycle,
-                "name": str(data["channel"]),
-                "value_json": _canonical(data["value"]),
-                "metadata_json": _canonical({
-                    key: value for key, value in data.items()
-                    if key not in {"ts", "cycle", "channel", "value"}
-                }),
-            })
+            rows.append(
+                {
+                    "ts": str(data.get("ts") or ""),
+                    "cycle": cycle,
+                    "name": str(data["channel"]),
+                    "value_json": _canonical(data["value"]),
+                    "metadata_json": _canonical(
+                        {
+                            key: value
+                            for key, value in data.items()
+                            if key not in {"ts", "cycle", "channel", "value"}
+                        }
+                    ),
+                }
+            )
     return rows, sources
+
+
+def _sql_identifier(value):
+    """Безопасно процитировать имя таблицы или колонки из SQLite."""
+    return '"' + str(value).replace('"', '""') + '"'
 
 
 def _insert(connection, table, row):
     columns = list(row)
     placeholders = ",".join("?" for _ in columns)
+    quoted_columns = ",".join(_sql_identifier(column) for column in columns)
     connection.execute(
-        f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+        f"INSERT INTO {_sql_identifier(table)} ({quoted_columns}) VALUES ({placeholders})",  # nosec B608
         tuple(row[column] for column in columns),
     )
 
 
 def _table_rows(connection, table):
-    return [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+    return [
+        dict(row)
+        for row in connection.execute(
+            f"SELECT * FROM {_sql_identifier(table)} ORDER BY rowid"  # nosec B608
+        )
+    ]
 
 
 def _hashes(paths, source_root):
@@ -410,8 +484,12 @@ def migrate_life_to_sqlite(source_root, life_id, destination_root):
         raise FileExistsError(f"Целевая база уже существует: {database_path}")
 
     quarantine = []
-    snapshots, sources, agent_names, intention_ids = _read_snapshots(source_root, life_id)
-    memory, memory_links, memory_meta, paths = _read_memory(source_root, life_id, quarantine)
+    snapshots, sources, agent_names, intention_ids = _read_snapshots(
+        source_root, life_id
+    )
+    memory, memory_links, memory_meta, paths = _read_memory(
+        source_root, life_id, quarantine
+    )
     sources.extend(paths)
     delamain, paths, skipped_other = _read_delamain(
         source_root, life_id, intention_ids, quarantine
@@ -436,15 +514,22 @@ def migrate_life_to_sqlite(source_root, life_id, destination_root):
         connection.execute(
             "INSERT INTO migration_runs(id, started_at, source_manifest_json, status) "
             "VALUES (?, ?, ?, 'running')",
-            (migration_id, datetime.now(timezone.utc).isoformat(), _canonical(source_manifest)),
+            (
+                migration_id,
+                datetime.now(timezone.utc).isoformat(),
+                _canonical(source_manifest),
+            ),
         )
 
     try:
         snapshot_ids = []
         for record in snapshots:
             snapshot_id = database.checkpoints.save(
-                record["state"], life_id, record["cycle"],
-                max_checkpoints=1000000, saved_at=record["saved_at"],
+                record["state"],
+                life_id,
+                record["cycle"],
+                max_checkpoints=1000000,
+                saved_at=record["saved_at"],
             )
             snapshot_ids.append(snapshot_id)
         database.set_meta("latest_snapshot_id", snapshot_ids[-1])
@@ -492,7 +577,10 @@ def migrate_life_to_sqlite(source_root, life_id, destination_root):
                     "SELECT cycle, saved_at, manifest FROM snapshots WHERE id=?",
                     (snapshot_id,),
                 ).fetchone()
-                if row["cycle"] != record["cycle"] or row["saved_at"] != record["saved_at"]:
+                if (
+                    row["cycle"] != record["cycle"]
+                    or row["saved_at"] != record["saved_at"]
+                ):
                     raise ValueError(f"Snapshot metadata mismatch: {record['source']}")
                 snapshot_hashes[str(snapshot_id)] = json.loads(row["manifest"])["root"]
                 for table, expected in delamain.items():
@@ -543,8 +631,12 @@ def migrate_life_to_sqlite(source_root, life_id, destination_root):
             connection.execute(
                 "UPDATE migration_runs SET finished_at=?, counts_json=?, hashes_json=?, "
                 "status='verified' WHERE id=?",
-                (datetime.now(timezone.utc).isoformat(), _canonical(counts),
-                 _canonical(snapshot_hashes), migration_id),
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    _canonical(counts),
+                    _canonical(snapshot_hashes),
+                    migration_id,
+                ),
             )
         return report
     except BaseException as exc:

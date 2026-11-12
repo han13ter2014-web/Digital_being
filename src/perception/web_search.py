@@ -312,7 +312,9 @@ class WebSearcher:
                     "Accept-Language": f"{lang},en;q=0.5",
                 },
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(  # nosec B310
+                req, timeout=self.timeout
+            ) as resp:
                 if resp.status != 200:
                     self._stats["errors"] += 1
                     return None, f"http_{resp.status}"
@@ -763,7 +765,9 @@ class WebSearcher:
                     "Accept-Language": f"{self.lang},en;q=0.5",
                 },
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(  # nosec B310
+                req, timeout=self.timeout
+            ) as resp:
                 if resp.status != 200:
                     self._stats["errors"] += 1
                     return self._empty(f"http_{resp.status}")

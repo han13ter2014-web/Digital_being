@@ -317,9 +317,7 @@ def create_agent(
     os.environ["DIGITAL_BEING_DATA_DIR"] = os.path.abspath(env.data_root)
     # Выбранная жизнь должна владеть managed-хранилищами с самого
     # конструктора: поздний rebind оставляет пустую БД временного UUID.
-    agent = DigitalBeing(
-        name, life_id=expected_life_id, profile_managed=True
-    )
+    agent = DigitalBeing(name, life_id=expected_life_id, profile_managed=True)
 
     # Упакованный сид загружается только в память. Живой knowledge_base.json
     # не создаётся и не читается: источник истины — следующий Core snapshot.

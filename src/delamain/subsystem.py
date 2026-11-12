@@ -1052,26 +1052,36 @@ class DelamainSubsystem(Subsystem):
         task = self._goal_command(goal) or title
         task_id = str(marker.get("task_id") or f"goal-{goal_id}")
         raw_plan = marker.get("plan")
-        plan = [dict(raw_plan[0])] if (
-            isinstance(raw_plan, (list, tuple))
-            and len(raw_plan) == 1
-            and isinstance(raw_plan[0], Mapping)
-        ) else []
+        plan = (
+            [dict(raw_plan[0])]
+            if (
+                isinstance(raw_plan, (list, tuple))
+                and len(raw_plan) == 1
+                and isinstance(raw_plan[0], Mapping)
+            )
+            else []
+        )
         recovered = False
         output: Any = None
-        error = (
-            "interrupted attempt could not be verified; manual review required"
-        )
+        error = "interrupted attempt could not be verified; manual review required"
         action = "interrupted"
         if plan:
             action = str(plan[0].get("action") or "interrupted")
             args = plan[0].get("args")
-            if action == "write_file" and isinstance(args, Mapping) and "content" in args:
+            if (
+                action == "write_file"
+                and isinstance(args, Mapping)
+                and "content" in args
+            ):
                 path = args.get("path")
                 overwrite = args.get("overwrite", True)
                 if isinstance(overwrite, str):
                     overwrite = overwrite.strip().lower() in {
-                        "1", "true", "yes", "on", "да",
+                        "1",
+                        "true",
+                        "yes",
+                        "on",
+                        "да",
                     }
                 if isinstance(path, str) and path and bool(overwrite):
                     expected = (
@@ -1093,9 +1103,7 @@ class DelamainSubsystem(Subsystem):
                                 "recovered": True,
                             }
                         else:
-                            error = (
-                                "interrupted write content differs; manual review required"
-                            )
+                            error = "interrupted write content differs; manual review required"
 
         step = ActionResult(
             action=action,

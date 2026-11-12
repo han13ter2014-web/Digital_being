@@ -40,12 +40,16 @@ Digital Being — эксперимент по наблюдаемой цифро�
 
    ```bash
    python -m compileall -q src/ config/ tests/ main.py main_tray.py
-   pre-commit run ruff --all-files
-   pre-commit run mypy --all-files
+   python -m ruff check src/ config/ tests/ main.py main_tray.py
+   python -m ruff format --check src/ config/ tests/ main.py main_tray.py
+   python -m mypy --config-file pyproject.toml --explicit-package-bases --no-site-packages --follow-imports=skip main.py main_tray.py
+   python -m bandit -r src/ config/ main.py main_tray.py -ll --skip B101,B601
    ```
 
-   Конфигурация mypy — в `pyproject.toml` (`[tool.mypy]`); ruff и
-   ruff-format запускаются через pre-commit (`.pre-commit-config.yaml`).
+   Те же проверки доступны через `pre-commit run --all-files`. Mypy пока
+   проверяет только публичные entry points `main.py` и `main_tray.py`, а не весь
+   репозиторий. Закреплённые версии и границы проверок описаны в
+   [docs/static_toolchain.md](docs/static_toolchain.md).
 
 5. Тесты:
 
@@ -55,7 +59,14 @@ Digital Being — эксперимент по наблюдаемой цифро�
    ```
 
    Точечный запуск — `python -m pytest -q tests/<файл>` или
-   `python -m pytest -k <имя>`.
+   `python -m pytest -k <имя>`. Для локального аналога coverage-gate:
+
+   ```bash
+   python -m pytest -q --cov=src --cov=config --cov-branch --cov-fail-under=40
+   ```
+
+   Полный замер при включении ветвлений дал 77,97 % совокупного покрытия.
+   Порог 40 % пока намеренно консервативный; повышение выполняется отдельно.
 
 Минимальный критерий готовности: статические проверки + точечный pytest
 по затронутым областям. Полный прогон обязателен при изменениях жизненного

@@ -280,7 +280,6 @@ class KnowledgeSubsystem:
 
             diff_new = new_words - known_words
             diff_known = known_words - new_words
-            common = new_words & known_words
 
             # Слишком разные слова → возможное противоречие
             if (

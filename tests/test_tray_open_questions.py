@@ -65,7 +65,6 @@ def test_consume_marks_question_progress():
     """_consume_open_question должен делать запись о начале размышления."""
     agent = _make_agent_with_question()
     n_questions_before = len(agent._open_questions)
-    n_explored_before = len(agent._open_questions[0]["explorations"])
 
     generate_prioritized_stimulus(agent)
 
@@ -140,7 +139,7 @@ def test_agent_runner_subscribed_to_user_command():
     try:
         agent = DigitalBeing("TestAgent")
         # Создание AgentRunner вызывает _setup_subscriptions синхронно.
-        runner = AgentRunner(agent, bus, name="TestRunner")
+        AgentRunner(agent, bus, name="TestRunner")
 
         # Проверяем, что подписка есть в шине.
         # EventBus хранит подписки в bus._subscribers (dict по event_name).

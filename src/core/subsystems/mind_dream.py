@@ -106,7 +106,7 @@ class MindDream:
 
         if self.user_interaction is not None:
             try:
-                result = self.user_interaction.ask_user(
+                self.user_interaction.ask_user(
                     question=message,
                     context="mind_dream_request",
                     cycle=getattr(agent, "cycle_count", 0) if agent else 0,

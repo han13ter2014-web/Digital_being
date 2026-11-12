@@ -60,15 +60,21 @@ def test_empty_wal_backup_preserves_source_file_set(tmp_path):
     wal = Path(str(database) + "-wal")
     assert not wal.exists() or wal.stat().st_size == 0
     before = {
-        path.relative_to(profile).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in profile.rglob("*") if path.is_file()
+        path.relative_to(profile).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in profile.rglob("*")
+        if path.is_file()
     }
 
     create_backup(profile, tmp_path / "backup")
 
     after = {
-        path.relative_to(profile).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in profile.rglob("*") if path.is_file()
+        path.relative_to(profile).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in profile.rglob("*")
+        if path.is_file()
     }
     assert after == before
 
@@ -121,7 +127,8 @@ def test_architecture_proposals_are_included_in_backup_and_restore(tmp_path):
     create_backup(profile, backup)
     manifest = verify_backup(backup)
     entry = next(
-        item for item in manifest["files"]
+        item
+        for item in manifest["files"]
         if item["path"] == "architecture_proposals/prop_test.json"
     )
     assert entry["sha256"] == hashlib.sha256(proposal.read_bytes()).hexdigest()
@@ -138,7 +145,8 @@ def _schema(path):
         connection.execute("PRAGMA query_only=ON")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         tables = {
-            row[0] for row in connection.execute(
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -162,9 +170,7 @@ def test_restore_v1_does_not_migrate_schema(tmp_path):
         connection.execute(
             "INSERT INTO meta VALUES ('life_id', ?)", (json.dumps(life_id),)
         )
-        connection.execute(
-            "INSERT INTO meta VALUES ('storage_schema_version', '1')"
-        )
+        connection.execute("INSERT INTO meta VALUES ('storage_schema_version', '1')")
         connection.execute("PRAGMA user_version=1")
     expected_schema = _schema(database)
 
@@ -176,11 +182,14 @@ def test_restore_v1_does_not_migrate_schema(tmp_path):
     restored_db = restored / "lives" / life_id / "life.sqlite3"
     assert _schema(restored_db) == expected_schema
     assert "artifacts" not in expected_schema[1]
-    assert restored_db.read_bytes() == (
-        backup / "lives" / life_id / "life.sqlite3"
-    ).read_bytes()
+    assert (
+        restored_db.read_bytes()
+        == (backup / "lives" / life_id / "life.sqlite3").read_bytes()
+    )
     assert LifeDatabase.verify_artifacts_readonly(restored_db) == {
-        "ok": True, "checked": 0, "problems": [],
+        "ok": True,
+        "checked": 0,
+        "problems": [],
     }
 
 
@@ -207,5 +216,7 @@ def test_restore_v3_verifies_artifacts_without_writing_database(tmp_path):
     assert _schema(restored_db) == _schema(backup_db)
     assert restored_db.read_bytes() == backup_db.read_bytes()
     assert LifeDatabase.verify_artifacts_readonly(restored_db) == {
-        "ok": True, "checked": 1, "problems": [],
+        "ok": True,
+        "checked": 1,
+        "problems": [],
     }

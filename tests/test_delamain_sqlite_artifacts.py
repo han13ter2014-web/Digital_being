@@ -1,7 +1,6 @@
 """Этап 5D: весь managed Delamain workspace принадлежит UUID и backup."""
 
 import hashlib
-from pathlib import Path
 from uuid import uuid4
 
 from src.delamain.subsystem import DelamainSubsystem
@@ -27,9 +26,7 @@ def _managed(tmp_path, monkeypatch):
     return subsystem, data, shared, life_id
 
 
-def test_file_actions_stay_in_life_and_survive_verified_restore(
-    tmp_path, monkeypatch
-):
+def test_file_actions_stay_in_life_and_survive_verified_restore(tmp_path, monkeypatch):
     subsystem, data, shared, life_id = _managed(tmp_path, monkeypatch)
     try:
         runtime = subsystem.runtime
@@ -55,9 +52,10 @@ def test_file_actions_stay_in_life_and_survive_verified_restore(
         rows = {row["relative_path"]: row for row in database.list_artifacts()}
         assert rows["artifacts/notes/a.txt"]["kind"] == "workspace"
         assert rows["artifacts/creative/draft.txt"]["kind"] == "creative"
-        assert rows["artifacts/notes/a.txt"]["sha256"] == hashlib.sha256(
-            (root / "notes" / "a.txt").read_bytes()
-        ).hexdigest()
+        assert (
+            rows["artifacts/notes/a.txt"]["sha256"]
+            == hashlib.sha256((root / "notes" / "a.txt").read_bytes()).hexdigest()
+        )
         assert database.verify_artifacts()["ok"] is True
     finally:
         subsystem.teardown()
@@ -66,9 +64,7 @@ def test_file_actions_stay_in_life_and_survive_verified_restore(
     restored = tmp_path / "restored"
     create_backup(data, backup)
     restore_backup(backup, restored)
-    reopened = LifeDatabase(
-        restored / "lives" / life_id / "life.sqlite3", life_id
-    )
+    reopened = LifeDatabase(restored / "lives" / life_id / "life.sqlite3", life_id)
     assert reopened.verify_artifacts() == {
         "ok": True,
         "checked": 2,
@@ -119,9 +115,9 @@ def test_standalone_workspace_keeps_legacy_root(tmp_path, monkeypatch):
             "write_creative_draft", {"path": "draft.txt", "content": "legacy"}
         )
         assert result.ok
-        assert (
-            data / "delamain" / "workspace" / "creative" / "draft.txt"
-        ).read_text(encoding="utf-8") == "legacy"
+        assert (data / "delamain" / "workspace" / "creative" / "draft.txt").read_text(
+            encoding="utf-8"
+        ) == "legacy"
         assert not (data / "lives").exists()
     finally:
         subsystem.teardown()

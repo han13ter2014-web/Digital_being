@@ -27,8 +27,13 @@ def test_six_hundred_autonomous_cycles_with_body_limits_and_restarts():
                 try:
                     apply_state_to_agent(reborn, snapshot)
                     assert reborn.energy == agent.energy
-                    assert reborn.interoception.state.atp == agent.interoception.state.atp
-                    assert reborn.interoception.state.fatigue == agent.interoception.state.fatigue
+                    assert (
+                        reborn.interoception.state.atp == agent.interoception.state.atp
+                    )
+                    assert (
+                        reborn.interoception.state.fatigue
+                        == agent.interoception.state.fatigue
+                    )
                     assert reborn.cycle_count == agent.cycle_count
                 finally:
                     _finish(agent)

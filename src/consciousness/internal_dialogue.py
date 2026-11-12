@@ -275,7 +275,6 @@ class InternalDialogueEngine:
 
         # Интуиция — это голос опыта + сердца + гармонии между голосами
         experience_opinion = self.BASE_VOICES["experience"]
-        heart_opinion = self.BASE_VOICES["heart"]
 
         intuition_score = (
             experience_opinion.strength * 0.5

@@ -21,13 +21,17 @@ def agent():
 
 def make_mapping_goal(agent):
     goal_id = agent.set_goal("Картирование: curiosity", activate=True)
-    attach_activity(agent, goal_id, {
-        "source": "drive",
-        "drive": "exploration",
-        "action_hint": "explore",
-        "type": "mapping",
-        "priority": 0.3,
-    })
+    attach_activity(
+        agent,
+        goal_id,
+        {
+            "source": "drive",
+            "drive": "exploration",
+            "action_hint": "explore",
+            "type": "mapping",
+            "priority": 0.3,
+        },
+    )
     return agent.active_goal
 
 
@@ -86,9 +90,7 @@ def test_mapping_candidate_walks_to_unmatched_related_concepts(agent):
     assert first["action"] == "explore"
     assert first["params"]["concept"] in {"исследование", "наблюдение"}
 
-    agent._goal_progress[goal["id"]]["matched_concepts"].add(
-        first["params"]["concept"]
-    )
+    agent._goal_progress[goal["id"]]["matched_concepts"].add(first["params"]["concept"])
     second = active_goal_candidate(agent)
     assert second["params"]["concept"] != first["params"]["concept"]
     assert second["params"]["concept"] in {"исследование", "наблюдение"}
@@ -103,8 +105,9 @@ def test_autonomous_tick_executes_active_goal_through_existing_arbiter(agent):
         selected = next(c for c in candidates if c.get("source") == "active_goal")
         return {**selected, "verdict": "proceed", "reasoning": "regression"}
 
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      side_effect=choose_active_goal):
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", side_effect=choose_active_goal
+    ):
         report = agent.autonomous_tick()
 
     assert report["executed_intention"]["source"] == "active_goal"
@@ -118,36 +121,60 @@ def test_ingest_deduplicates_same_work_but_preserves_another_method(agent):
     make_mapping_goal(agent)
     before = len(agent.goals)
 
-    agent._ingest_motivation_goals([
-        {"title": "Открыть новую область: curiosity", "source": "drive",
-         "action_hint": "explore", "type": "discovery"},
-        {"title": "Глубокое погружение в: curiosity", "source": "drive",
-         "action_hint": "explore", "type": "deep_learning"},
-        {"title": "Достичь мастерства в: curiosity", "source": "drive",
-         "action_hint": "synthesize_understanding", "type": "mastery"},
-    ])
+    agent._ingest_motivation_goals(
+        [
+            {
+                "title": "Открыть новую область: curiosity",
+                "source": "drive",
+                "action_hint": "explore",
+                "type": "discovery",
+            },
+            {
+                "title": "Глубокое погружение в: curiosity",
+                "source": "drive",
+                "action_hint": "explore",
+                "type": "deep_learning",
+            },
+            {
+                "title": "Достичь мастерства в: curiosity",
+                "source": "drive",
+                "action_hint": "synthesize_understanding",
+                "type": "mastery",
+            },
+        ]
+    )
 
     assert len(agent.goals) == before + 1
     assert agent.goals[-1]["title"] == "Достичь мастерства в: curiosity"
-    assert agent.goals[-1]["motivation_origin"]["action_hint"] == "synthesize_understanding"
+    assert (
+        agent.goals[-1]["motivation_origin"]["action_hint"]
+        == "synthesize_understanding"
+    )
 
 
 def test_old_duplicate_is_skipped_without_reward_and_survives_checkpoint():
     completed = {
-        "id": 1, "title": "Картирование: curiosity", "status": "active",
+        "id": 1,
+        "title": "Картирование: curiosity",
+        "status": "active",
         "difficulty": 1,
         "motivation_origin": {"action_hint": "explore", "type": "mapping"},
     }
     duplicate = {
-        "id": 2, "title": "Открыть новую область: curiosity", "status": "pending",
+        "id": 2,
+        "title": "Открыть новую область: curiosity",
+        "status": "pending",
         "difficulty": 1,
         "motivation_origin": {"action_hint": "explore", "type": "discovery"},
     }
     different = {
-        "id": 3, "title": "Достичь мастерства в: curiosity", "status": "pending",
+        "id": 3,
+        "title": "Достичь мастерства в: curiosity",
+        "status": "pending",
         "difficulty": 2,
         "motivation_origin": {
-            "action_hint": "synthesize_understanding", "type": "mastery",
+            "action_hint": "synthesize_understanding",
+            "type": "mastery",
         },
     }
     subsystem = GoalSubsystem("GoalQueue")

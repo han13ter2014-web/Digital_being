@@ -11,7 +11,12 @@ from uuid import uuid4
 
 
 DIRECTORIES = (
-    "checkpoints", "lives", "mind", "memory", "nursery", "delamain",
+    "checkpoints",
+    "lives",
+    "mind",
+    "memory",
+    "nursery",
+    "delamain",
     "architecture_proposals",
 )
 FILES = (

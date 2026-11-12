@@ -468,7 +468,6 @@ def main():
         test_plugin_registry_doesnt_accumulate_during_lifecycle,
         test_subsystem_tick_count_grows_monotonically,
         test_shared_state_thoughts_capped_at_maxlen,
-        test_shared_state_actions_capped_at_maxlen,
         test_shared_state_concurrent_push_no_corruption,
         test_plugin_registry_concurrent_register,
         test_nursery_watcher_no_leak_under_many_ticks,

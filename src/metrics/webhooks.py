@@ -32,6 +32,7 @@ import queue
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
@@ -144,6 +145,9 @@ class TelegramWebhook(Webhook):
 
     def _http_post(self, url: str, payload: Dict[str, Any]) -> bool:
         """POST JSON через urllib (без внешних зависимостей)."""
+        if urllib.parse.urlsplit(url).scheme.lower() != "https":
+            logger.warning("[telegram] отклонён не-HTTPS URL")
+            return False
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -152,7 +156,9 @@ class TelegramWebhook(Webhook):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(  # nosec B310
+                req, timeout=self.timeout
+            ) as resp:
                 body = resp.read().decode("utf-8")
                 result = json.loads(body)
                 if result.get("ok"):
@@ -218,6 +224,9 @@ class DiscordWebhook(Webhook):
         return self._http_post(self.url, payload)
 
     def _http_post(self, url: str, payload: Dict[str, Any]) -> bool:
+        if urllib.parse.urlsplit(url).scheme.lower() != "https":
+            logger.warning("[discord] отклонён не-HTTPS URL")
+            return False
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -226,7 +235,9 @@ class DiscordWebhook(Webhook):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(  # nosec B310
+                req, timeout=self.timeout
+            ) as resp:
                 # Discord возвращает 204 No Content при успехе
                 if resp.status in (200, 204):
                     return True

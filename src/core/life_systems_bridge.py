@@ -42,8 +42,7 @@ def step_meta_learning(agent) -> Optional[Dict]:
             "cycle_counter": learner.cycle_counter,
             "current_fitness": fitness,
             "best_fitness": (
-                learner.best_fitness
-                if learner.best_fitness != float("-inf") else None
+                learner.best_fitness if learner.best_fitness != float("-inf") else None
             ),
         }
     except Exception as exc:
@@ -51,8 +50,9 @@ def step_meta_learning(agent) -> Optional[Dict]:
         return {"error": str(exc)}
 
 
-def observe_user_message(agent, text: str, act, cycle: int,
-                         reaction_to_us: str = "") -> Optional[Dict]:
+def observe_user_message(
+    agent, text: str, act, cycle: int, reaction_to_us: str = ""
+) -> Optional[Dict]:
     """Записать один фактический вход пользователя в SocialCell и время."""
     observation = {
         "timestamp": int(cycle),
@@ -86,35 +86,44 @@ def record_action_intention(agent, selection: Dict, entry: Dict) -> None:
         action = str(selection.get("action") or "")
         intention_id = str(entry.get("id") or "")
         simulation = selection.get("simulation") or {}
-        engine.intend({
-            "intention_id": intention_id,
-            "action": action,
-            "expected_outcome": simulation.get("predicted_outcome"),
-            "priority": float(selection.get("strength", 0.5) or 0.5),
-        })
+        engine.intend(
+            {
+                "intention_id": intention_id,
+                "action": action,
+                "expected_outcome": simulation.get("predicted_outcome"),
+                "priority": float(selection.get("strength", 0.5) or 0.5),
+            }
+        )
         prediction_id = simulation.get("prediction_id")
         if prediction_id and simulation.get("status") == "predicted":
-            engine.predict({
+            engine.predict(
+                {
+                    "prediction_id": prediction_id,
+                    "action": simulation.get("action", action),
+                    "target": simulation.get("target", ""),
+                    "expected_effect_probability": simulation.get(
+                        "predicted_effect_probability"
+                    ),
+                    "confidence": simulation.get("confidence", 0.0),
+                    "source": "internal_simulator",
+                }
+            )
+        engine.emit_event(
+            "action",
+            {
+                "intention_id": intention_id,
+                "action": action,
                 "prediction_id": prediction_id,
-                "action": simulation.get("action", action),
-                "target": simulation.get("target", ""),
-                "expected_effect_probability": simulation.get(
-                    "predicted_effect_probability"
-                ),
-                "confidence": simulation.get("confidence", 0.0),
-                "source": "internal_simulator",
-            })
-        engine.emit_event("action", {
-            "intention_id": intention_id,
-            "action": action,
-            "prediction_id": prediction_id,
-        }, causality=[prediction_id] if prediction_id else [])
+            },
+            causality=[prediction_id] if prediction_id else [],
+        )
     except Exception as exc:
         get_logger().log(f"[CONTINUOUS_TIME] intention error: {exc}")
 
 
-def record_action_outcome(agent, entry: Dict, outcome=None,
-                          error: Optional[Exception] = None) -> None:
+def record_action_outcome(
+    agent, entry: Dict, outcome=None, error: Optional[Exception] = None
+) -> None:
     """Завершить protension только фактическим исходом этого намерения."""
     engine = getattr(agent, "continuous_time", None)
     if engine is None:
@@ -138,7 +147,8 @@ def record_action_outcome(agent, entry: Dict, outcome=None,
             payload["status"] = "observed"
             payload["had_effect"] = bool(outcome and outcome.had_effect)
             payload["reason"] = str(getattr(outcome, "reason", "") or "")
-        engine.emit_event("observation", payload,
-                          causality=[intention_id] if intention_id else [])
+        engine.emit_event(
+            "observation", payload, causality=[intention_id] if intention_id else []
+        )
     except Exception as exc:
         get_logger().log(f"[CONTINUOUS_TIME] outcome error: {exc}")

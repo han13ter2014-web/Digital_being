@@ -274,7 +274,8 @@ class LifeDatabase:
                 ).fetchone()
                 if snapshots is not None:
                     owners = {
-                        row[0] for row in connection.execute(
+                        row[0]
+                        for row in connection.execute(
                             "SELECT DISTINCT agent_name FROM snapshots"
                         )
                     }
@@ -387,11 +388,19 @@ class LifeDatabase:
         }
 
     def _upsert_artifact(
-        self, connection, *, kind, relative_path, sha256, size,
-        metadata, artifact_id=None, update=False,
+        self,
+        connection,
+        *,
+        kind,
+        relative_path,
+        sha256,
+        size,
+        metadata,
+        artifact_id=None,
+        update=False,
     ) -> dict:
         row = connection.execute(
-            f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE relative_path = ?",
+            f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE relative_path = ?",  # nosec B608
             (relative_path,),
         ).fetchone()
         payload = json.dumps(metadata or {}, ensure_ascii=False, allow_nan=False)
@@ -402,8 +411,13 @@ class LifeDatabase:
                 "(id, kind, relative_path, sha256, bytes, created_at, metadata_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    identifier, str(kind), relative_path, sha256, int(size),
-                    datetime.now(timezone.utc).isoformat(), payload,
+                    identifier,
+                    str(kind),
+                    relative_path,
+                    sha256,
+                    int(size),
+                    datetime.now(timezone.utc).isoformat(),
+                    payload,
                 ),
             )
         elif row["sha256"] == sha256 and row["bytes"] == int(size):
@@ -417,14 +431,21 @@ class LifeDatabase:
                 (str(kind), sha256, int(size), payload, relative_path),
             )
         row = connection.execute(
-            f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE relative_path = ?",
+            f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE relative_path = ?",  # nosec B608
             (relative_path,),
         ).fetchone()
         return self._artifact_dict(row)
 
     def register_artifact(
-        self, source, *, kind, relative_path=None, metadata=None,
-        artifact_id=None, update=False, connection=None,
+        self,
+        source,
+        *,
+        kind,
+        relative_path=None,
+        metadata=None,
+        artifact_id=None,
+        update=False,
+        connection=None,
     ) -> dict:
         """Зарегистрировать файл за этой жизнью: владелец, путь, SHA-256, размер.
 
@@ -461,9 +482,13 @@ class LifeDatabase:
             else:
                 shutil.copy2(resolved, target)
         kwargs = dict(
-            kind=kind, relative_path=rel.as_posix(),
-            sha256=self._digest_file(target), size=target.stat().st_size,
-            metadata=metadata, artifact_id=artifact_id, update=update,
+            kind=kind,
+            relative_path=rel.as_posix(),
+            sha256=self._digest_file(target),
+            size=target.stat().st_size,
+            metadata=metadata,
+            artifact_id=artifact_id,
+            update=update,
         )
         if connection is not None:
             return self._upsert_artifact(connection, **kwargs)
@@ -471,8 +496,14 @@ class LifeDatabase:
             return self._upsert_artifact(owned, **kwargs)
 
     def write_artifact(
-        self, relative_path, data, *, kind, metadata=None,
-        artifact_id=None, connection=None,
+        self,
+        relative_path,
+        data,
+        *,
+        kind,
+        metadata=None,
+        artifact_id=None,
+        connection=None,
     ) -> dict:
         """Атомарно записать экспорт внутрь каталога жизни и зарегистрировать.
 
@@ -500,9 +531,13 @@ class LifeDatabase:
                 except OSError:
                     pass
         kwargs = dict(
-            kind=kind, relative_path=rel.as_posix(),
-            sha256=self._digest_file(target), size=target.stat().st_size,
-            metadata=metadata, artifact_id=artifact_id, update=True,
+            kind=kind,
+            relative_path=rel.as_posix(),
+            sha256=self._digest_file(target),
+            size=target.stat().st_size,
+            metadata=metadata,
+            artifact_id=artifact_id,
+            update=True,
         )
         if connection is not None:
             return self._upsert_artifact(connection, **kwargs)
@@ -510,7 +545,7 @@ class LifeDatabase:
             return self._upsert_artifact(owned, **kwargs)
 
     def list_artifacts(self, kind=None) -> list:
-        query = f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts"
+        query = f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts"  # nosec B608
         params = ()
         if kind is not None:
             query += " WHERE kind = ?"
@@ -523,7 +558,7 @@ class LifeDatabase:
     def get_artifact(self, artifact_id):
         with closing(self.connect(readonly=True)) as connection:
             row = connection.execute(
-                f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE id = ?",
+                f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts WHERE id = ?",  # nosec B608
                 (str(artifact_id),),
             ).fetchone()
         return None if row is None else self._artifact_dict(row)
@@ -547,29 +582,35 @@ class LifeDatabase:
                 ):
                     problem = "hash_mismatch"
             if problem is not None:
-                problems.append({
-                    "id": row["id"],
-                    "relative_path": row["relative_path"],
-                    "problem": problem,
-                })
+                problems.append(
+                    {
+                        "id": row["id"],
+                        "relative_path": row["relative_path"],
+                        "problem": problem,
+                    }
+                )
         return {"ok": not problems, "checked": len(rows), "problems": problems}
 
     @classmethod
     def verify_artifacts_readonly(cls, path) -> dict:
         """Проверить реестр без создания схемы и без изменения SQLite."""
         path = Path(path)
-        with closing(sqlite3.connect(
-            path.resolve().as_uri() + "?mode=ro", uri=True
-        )) as connection:
+        with closing(
+            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only=ON")
             table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'"
             ).fetchone()
-            rows = [] if table is None else connection.execute(
-                f"SELECT {cls._ARTIFACT_COLUMNS} FROM artifacts "
-                "ORDER BY created_at, id"
-            ).fetchall()
+            rows = (
+                []
+                if table is None
+                else connection.execute(
+                    f"SELECT {cls._ARTIFACT_COLUMNS} FROM artifacts "  # nosec B608
+                    "ORDER BY created_at, id"
+                ).fetchall()
+            )
         artifacts = [cls._artifact_dict(row) for row in rows]
         return cls._verify_artifact_rows(path.parent, artifacts)
 
@@ -610,8 +651,11 @@ class LifeDatabase:
         """Снимок и указатель последнего снимка фиксируются одной транзакцией."""
         with self.write() as connection:
             snapshot_id = self.checkpoints.save(
-                state, self.life_id, cycle_count,
-                max_checkpoints=max_checkpoints, saved_at=saved_at,
+                state,
+                self.life_id,
+                cycle_count,
+                max_checkpoints=max_checkpoints,
+                saved_at=saved_at,
                 connection=connection,
             )
             self.set_meta("latest_snapshot_id", snapshot_id, connection)
@@ -620,11 +664,15 @@ class LifeDatabase:
     def verify(self) -> dict:
         with closing(self.connect(readonly=True)) as connection:
             integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]
-            foreign_keys = [tuple(row) for row in connection.execute("PRAGMA foreign_key_check")]
+            foreign_keys = [
+                tuple(row) for row in connection.execute("PRAGMA foreign_key_check")
+            ]
             journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
             version = connection.execute("PRAGMA user_version").fetchone()[0]
         return {
-            "ok": integrity == ["ok"] and not foreign_keys and version == self.SCHEMA_VERSION,
+            "ok": integrity == ["ok"]
+            and not foreign_keys
+            and version == self.SCHEMA_VERSION,
             "integrity_check": integrity,
             "foreign_key_check": foreign_keys,
             "journal_mode": journal,

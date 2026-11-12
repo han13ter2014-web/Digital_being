@@ -91,4 +91,5 @@ __all__ = [
     "ContextAwareness",
     "StyleAdapter",
     "NamingDialogue",
+    "NurseryWatcher",
 ]

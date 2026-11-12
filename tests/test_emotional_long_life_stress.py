@@ -29,7 +29,9 @@ def test_six_thousand_cycles_with_mixtures_restarts_and_final_fade():
         if cycle % 500 == 0:
             state.blend(
                 {"joy": 2.0, "fear": 1.0, "hope": 1.0},
-                cycle=cycle, cause="сложный период", scale=0.8,
+                cycle=cycle,
+                cause="сложный период",
+                scale=0.8,
             )
         if cycle % 700 == 0:
             state.handle_event("boundary_violated", cycle=cycle, cause="граница")
@@ -40,8 +42,10 @@ def test_six_thousand_cycles_with_mixtures_restarts_and_final_fade():
 
         assert len(state.episodes) <= EPISODES_MAX
         assert len(state.last_causes) <= len(EMOTIONS)
-        assert all(math.isfinite(value) and 0.0 <= value <= 1.0
-                   for value in state.levels.values())
+        assert all(
+            math.isfinite(value) and 0.0 <= value <= 1.0
+            for value in state.levels.values()
+        )
         mixture = state.mixture()
         if mixture["components"]:
             assert sum(c["weight"] for c in mixture["components"]) == pytest.approx(1.0)

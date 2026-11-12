@@ -28,11 +28,14 @@ def perceive_text(agent, text: str) -> Optional[Dict]:
         agent._last_sensory_perception = report
         engine = getattr(agent, "continuous_time", None)
         if engine is not None:
-            engine.emit_event("stimulus", {
-                "modality": "text",
-                "clarity": report["overall_clarity"],
-                "patterns": list(report["visual"]["patterns"]),
-            })
+            engine.emit_event(
+                "stimulus",
+                {
+                    "modality": "text",
+                    "clarity": report["overall_clarity"],
+                    "patterns": list(report["visual"]["patterns"]),
+                },
+            )
         return report
     except Exception as exc:
         get_logger().log(f"[SENSORY] text perception error: {exc}")
@@ -77,8 +80,9 @@ def observe_action_intention(agent, selection: Dict, entry: Dict) -> None:
         get_logger().log(f"[META_COGNITION] intention error: {exc}")
 
 
-def observe_action_outcome(agent, entry: Dict, outcome=None,
-                           error: Optional[Exception] = None) -> None:
+def observe_action_outcome(
+    agent, entry: Dict, outcome=None, error: Optional[Exception] = None
+) -> None:
     meta = getattr(agent, "meta_cognition", None)
     if meta is None:
         return
@@ -118,9 +122,7 @@ def _trim(meta) -> None:
     if len(meta.thought_traces) > limit:
         meta.thought_traces = meta.thought_traces[-keep:]
     meta.insights = meta.insights[-100:]
-    meta.knowledge_awareness.unknown_gaps = (
-        meta.knowledge_awareness.unknown_gaps[-100:]
-    )
+    meta.knowledge_awareness.unknown_gaps = meta.knowledge_awareness.unknown_gaps[-100:]
 
 
 def meta_cognition_checkpoint(agent) -> Dict:
@@ -140,16 +142,19 @@ def meta_cognition_checkpoint(agent) -> Dict:
             "understanding_level": dict(meta.knowledge_awareness.understanding_level),
             "unknown_gaps": deepcopy(meta.knowledge_awareness.unknown_gaps[-100:]),
         },
-        "thought_traces": [{
-            "thought_type": trace.thought_type,
-            "content": trace.content[:500],
-            "confidence": trace.confidence,
-            "resulting_actions": list(trace.resulting_actions),
-            "is_useful": trace.is_useful,
-            "produced_insight": trace.produced_insight,
-            "needs_revision": trace.needs_revision,
-            "timestamp": trace.timestamp.isoformat(),
-        } for trace in meta.thought_traces[-int(SIM_CONFIG.MAX_THOUGHT_TRACES):]],
+        "thought_traces": [
+            {
+                "thought_type": trace.thought_type,
+                "content": trace.content[:500],
+                "confidence": trace.confidence,
+                "resulting_actions": list(trace.resulting_actions),
+                "is_useful": trace.is_useful,
+                "produced_insight": trace.produced_insight,
+                "needs_revision": trace.needs_revision,
+                "timestamp": trace.timestamp.isoformat(),
+            }
+            for trace in meta.thought_traces[-int(SIM_CONFIG.MAX_THOUGHT_TRACES) :]
+        ],
         "insights": deepcopy(meta.insights[-100:]),
         "meta_metrics": dict(meta.meta_metrics),
     }
@@ -172,14 +177,18 @@ def validate_meta_cognition_checkpoint(state: Dict) -> None:
         if not isinstance(value, (int, float)) or not 0.0 <= value <= 1.0:
             raise ValueError(f"meta_cognition.cognitive_state.{field}: out of range")
     if not isinstance(cognitive.get("processing_depth"), int):
-        raise ValueError("meta_cognition.cognitive_state.processing_depth: expected int")
+        raise ValueError(
+            "meta_cognition.cognitive_state.processing_depth: expected int"
+        )
     if not isinstance(knowledge.get("understanding_level"), dict):
         raise ValueError("meta_cognition.knowledge_awareness: invalid understanding")
     for concept, value in knowledge["understanding_level"].items():
         if not isinstance(concept, str) or not isinstance(value, (int, float)):
             raise ValueError("meta_cognition.knowledge_awareness: invalid level")
     if not isinstance(knowledge.get("unknown_gaps"), list):
-        raise ValueError("meta_cognition.knowledge_awareness.unknown_gaps: expected list")
+        raise ValueError(
+            "meta_cognition.knowledge_awareness.unknown_gaps: expected list"
+        )
     for trace in traces:
         if not isinstance(trace, dict):
             raise ValueError("meta_cognition.thought_traces: invalid trace")
@@ -189,9 +198,13 @@ def validate_meta_cognition_checkpoint(state: Dict) -> None:
         try:
             datetime.fromisoformat(trace["timestamp"])
         except ValueError as exc:
-            raise ValueError("meta_cognition.thought_traces.timestamp: invalid") from exc
+            raise ValueError(
+                "meta_cognition.thought_traces.timestamp: invalid"
+            ) from exc
         if not isinstance(trace.get("resulting_actions"), list):
-            raise ValueError("meta_cognition.thought_traces.resulting_actions: expected list")
+            raise ValueError(
+                "meta_cognition.thought_traces.resulting_actions: expected list"
+            )
 
 
 def restore_meta_cognition(agent, state: Optional[Dict]) -> None:
@@ -204,8 +217,11 @@ def restore_meta_cognition(agent, state: Optional[Dict]) -> None:
     meta = MetaCognitiveSystem(agent.name)
     cognitive = state["cognitive_state"]
     for field in (
-        "current_focus", "confidence_level", "processing_depth",
-        "cognitive_load", "metacognitive_monitoring",
+        "current_focus",
+        "confidence_level",
+        "processing_depth",
+        "cognitive_load",
+        "metacognitive_monitoring",
     ):
         setattr(meta.cognitive_state, field, cognitive[field])
     knowledge = state["knowledge_awareness"]

@@ -37,6 +37,10 @@ dev = [
     # Пин ruff — единый канон статика с rev в .pre-commit-config.yaml
     # (контроль — tests/test_static_pin.py).
     "ruff==0.5.7",
+    # Пины совпадают с .pre-commit-config.yaml: CI и локальные хуки дают
+    # одинаковый вердикт вместо двух разных стандартов качества.
+    "mypy==1.11.2",
+    "bandit==1.7.8",
     # PyYAML — парсинг .pre-commit-config.yaml в мета-тесте.
     # В средах без него мета-тест скипается (видно в счётчиках гейта).
     "PyYAML>=6",
@@ -58,6 +62,10 @@ all = [
     "pytest-asyncio>=0.23.0",
     "pytest-benchmark>=4.0.0",
     "pre-commit>=3.7.0",
+    "ruff==0.5.7",
+    "mypy==1.11.2",
+    "bandit==1.7.8",
+    "PyYAML>=6",
     "pyinstaller>=6.0",
 ]
 

@@ -112,7 +112,7 @@ async def test_metrics_contains_help_comments(dash):
     """Каждая метрика имеет комментарий # HELP."""
     _, port = dash
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    help_lines = [l for l in body.splitlines() if l.startswith("# HELP")]
+    help_lines = [line for line in body.splitlines() if line.startswith("# HELP")]
     assert len(help_lines) >= 5, f"слишком мало # HELP: {len(help_lines)}"
 
 
@@ -121,7 +121,7 @@ async def test_metrics_contains_type_comments(dash):
     """Каждая метрика имеет комментарий # TYPE."""
     _, port = dash
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    type_lines = [l for l in body.splitlines() if l.startswith("# TYPE")]
+    type_lines = [line for line in body.splitlines() if line.startswith("# TYPE")]
     assert len(type_lines) >= 5, f"слишком мало # TYPE: {len(type_lines)}"
 
 
@@ -170,7 +170,7 @@ async def test_metrics_contains_core_gauges(dash):
             rf"^{re.escape(metric)}(\{{[^}}]*\}})?\s+-?\d+(\.\d+)?$"
         )
         assert any(
-            value_pattern.match(l) for l in body.splitlines()
+            value_pattern.match(line) for line in body.splitlines()
         ), f"метрика {metric!r} отсутствует в /metrics"
 
 

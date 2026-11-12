@@ -430,7 +430,10 @@ def _capture_inplace_state(agent):
         if isinstance(value, dict):
             kind = "dict"
             data = [
-                (_snapshot_copy(key, preserved_ids), _snapshot_copy(item, preserved_ids))
+                (
+                    _snapshot_copy(key, preserved_ids),
+                    _snapshot_copy(item, preserved_ids),
+                )
                 for key, item in value.items()
             ]
         elif isinstance(value, list):
