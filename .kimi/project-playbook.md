@@ -13,7 +13,7 @@
 - Mypy: `.venv/Scripts/python.exe -m mypy --config-file pyproject.toml --explicit-package-bases --no-site-packages --follow-imports=skip main.py main_tray.py`
 - Bandit: `.venv/Scripts/python.exe -m bandit -q -r src/ config/ main.py main_tray.py -ll --skip B101,B601`
 - Syntax: `.venv/Scripts/python.exe -m compileall -q src/ config/ tests/ main.py main_tray.py`
-- Evidence: verified locally, 2026-11-12; последний полный regression — 2384 passed, 2 skipped.
+- Evidence: verified locally, 2026-11-12; последний полный regression — 2396 passed, 2 skipped.
 
 ## Conventions
 
@@ -44,6 +44,6 @@
 
 ## Environment and recovery
 
-- Baseline Git: `57a130c` — 15 исправлений багхантинга; предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
+- Baseline Git: `1064cb1` — 16 исправлений багхантинга; исправления 17–21 проверены и включены следующим коммитом. Предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
 - Новые изменения после baseline коммитить и отправлять только по явному разрешению владельца.
 - Evidence: verified, 2026-11-12.

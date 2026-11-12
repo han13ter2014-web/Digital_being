@@ -341,6 +341,41 @@ def test_agent_runner_approval_commands(tmp_path: Path) -> None:
         sub.teardown()
 
 
+def test_registry_preflight_failure_does_not_bypass_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "workspace"
+    with DelamainRuntime(
+        root,
+        tmp_path / "memory.sqlite3",
+        approval_mode="dangerous",
+    ) as runtime:
+        original_get = runtime.registry.get
+        failed = False
+
+        def fail_once(name: str):
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("temporary registry failure")
+            return original_get(name)
+
+        monkeypatch.setattr(runtime.registry, "get", fail_once)
+        pending = runtime.run_task(
+            "write",
+            plan=[ActionRequest("write_file", {"path": "a.txt", "content": "ok"})],
+        )
+
+        assert pending.pending_approval is not None
+        assert not (root / "a.txt").exists()
+
+        approval_id = pending.pending_approval["id"]
+        runtime.memory.approve_approval(approval_id)
+        finished = runtime.run_approved(approval_id)
+        assert finished.ok is True
+        assert (root / "a.txt").read_text(encoding="utf-8") == "ok"
+
+
 def test_unknown_approval_id_is_reported(tmp_path: Path) -> None:
     sub = make_sub(tmp_path, approval_mode="dangerous")
     try:

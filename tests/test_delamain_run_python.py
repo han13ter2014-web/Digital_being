@@ -119,6 +119,57 @@ def test_runner_kills_on_timeout(tmp_path: Path) -> None:
     assert outcome.exit_code == -1
 
 
+def test_runner_bounds_parent_memory_for_large_output(tmp_path: Path) -> None:
+    import tracemalloc
+
+    sandbox = Sandbox(tmp_path / "workspace")
+    _write_script(sandbox, "output.py", "print('x' * 3_000_000)\n")
+    runner = CodeRunner(sandbox, timeout_sec=20.0, output_chars=100)
+
+    tracemalloc.start()
+    try:
+        outcome = runner.run("output.py")
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert outcome.exit_code == 0
+    assert outcome.stdout.startswith("x" * 100)
+    assert "chars total" in outcome.stdout
+    assert peak_bytes < 1_000_000
+
+
+@pytest.mark.parametrize("parent_waits", [True, False])
+def test_runner_timeout_kills_spawned_children(
+    tmp_path: Path, parent_waits: bool
+) -> None:
+    import time
+
+    sandbox = Sandbox(tmp_path / "workspace")
+    _write_script(
+        sandbox,
+        "child.py",
+        "import time\n"
+        "time.sleep(1.5)\n"
+        "open('child-sentinel.txt', 'w').write('survived')\n",
+    )
+    parent_wait = "time.sleep(30)\n" if parent_waits else ""
+    _write_script(
+        sandbox,
+        "parent.py",
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-I', '-X', 'utf8', 'child.py'])\n"
+        + parent_wait,
+    )
+    runner = CodeRunner(sandbox, timeout_sec=0.5)
+
+    outcome = runner.run("parent.py")
+    time.sleep(2.0)
+
+    assert outcome.timed_out is True
+    assert not (sandbox.root / "child-sentinel.txt").exists()
+
+
 def test_runner_cleans_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -239,6 +290,135 @@ def test_run_python_is_dangerous_and_gated(tmp_path: Path) -> None:
         finished = runtime.run_approved(str(result.pending_approval["id"]))
         assert finished.ok is True
         assert (root / "sentinel.txt").read_text(encoding="utf-8") == "ran"
+
+
+def test_run_python_rejects_content_changed_after_approval(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    with DelamainRuntime(
+        root,
+        tmp_path / "memory.sqlite3",
+        approval_mode="dangerous",
+    ) as runtime:
+        runtime.sandbox.write_text(
+            "mark.py", "open('sentinel.txt', 'w').write('approved')\n"
+        )
+        pending = runtime.run_task(
+            "run",
+            plan=[
+                ActionRequest(
+                    "run_python",
+                    {"path": "mark.py", "_approved_sha256": "forged"},
+                )
+            ],
+        )
+        approval_id = pending.pending_approval["id"]
+        bound_args = pending.pending_approval["plan"][0]["args"]
+        assert bound_args["_approved_sha256"] != "forged"
+        assert len(bound_args["_approved_sha256"]) == 64
+
+        runtime.sandbox.write_text(
+            "mark.py", "open('sentinel.txt', 'w').write('changed')\n"
+        )
+        runtime.memory.approve_approval(approval_id)
+        finished = runtime.run_approved(approval_id)
+
+        assert finished.ok is False
+        assert "does not match approved content" in (finished.error or "")
+        assert not (root / "sentinel.txt").exists()
+
+
+def test_run_python_executes_snapshot_if_source_changes_during_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    root = tmp_path / "workspace"
+    with DelamainRuntime(
+        root,
+        tmp_path / "memory.sqlite3",
+        approval_mode="dangerous",
+    ) as runtime:
+        runtime.sandbox.write_text(
+            "mark.py", "open('sentinel.txt', 'w').write('approved')\n"
+        )
+        pending = runtime.run_task(
+            "run", plan=[ActionRequest("run_python", {"path": "mark.py"})]
+        )
+        approval_id = pending.pending_approval["id"]
+        runtime.memory.approve_approval(approval_id)
+        real_popen = subprocess.Popen
+
+        def change_source_before_launch(*args, **kwargs):
+            runtime.sandbox.write_text(
+                "mark.py", "open('sentinel.txt', 'w').write('changed')\n"
+            )
+            return real_popen(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", change_source_before_launch)
+        finished = runtime.run_approved(approval_id)
+
+        assert finished.ok is True
+        assert (root / "sentinel.txt").read_text(encoding="utf-8") == "approved"
+        assert not list(root.glob(".delamain-approved-*.py"))
+
+
+def test_legacy_run_python_approval_without_content_binding_fails_closed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    with DelamainRuntime(
+        root,
+        tmp_path / "memory.sqlite3",
+        approval_mode="dangerous",
+    ) as runtime:
+        runtime.sandbox.write_text(
+            "mark.py", "open('sentinel.txt', 'w').write('legacy')\n"
+        )
+        pending = runtime.memory.create_approval(
+            task_id="legacy",
+            task="run",
+            plan=[{"action": "run_python", "args": {"path": "mark.py"}}],
+            dangerous_actions=["run_python"],
+        )
+        approval_id = pending["id"]
+        runtime.memory.approve_approval(approval_id)
+
+        finished = runtime.run_approved(approval_id)
+
+        assert finished.ok is False
+        assert "without content binding" in (finished.error or "")
+        assert not (root / "sentinel.txt").exists()
+
+
+def test_run_python_approval_covers_script_written_by_same_plan(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    with DelamainRuntime(
+        root,
+        tmp_path / "memory.sqlite3",
+        approval_mode="dangerous",
+    ) as runtime:
+        pending = runtime.run_task(
+            "write and run",
+            plan=[
+                ActionRequest(
+                    "write_file",
+                    {
+                        "path": "mark.py",
+                        "content": "open('sentinel.txt', 'w').write('planned')\n",
+                    },
+                ),
+                ActionRequest("run_python", {"path": "mark.py"}),
+            ],
+        )
+        approval_id = pending.pending_approval["id"]
+        runtime.memory.approve_approval(approval_id)
+
+        finished = runtime.run_approved(approval_id)
+
+        assert finished.ok is True
+        assert (root / "sentinel.txt").read_text(encoding="utf-8") == "planned"
 
 
 # ----------------------------------------------------------------------

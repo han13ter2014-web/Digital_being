@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .memory import MemoryStore
 from .models import ActionResult, ActionSpec, utc_now_iso
-from .runner import CodeRunner, RunnerError
+from .runner import APPROVED_SHA256_ARG, CodeRunner, RunnerError
 from .sandbox import Sandbox, SandboxError
 
 
@@ -331,10 +331,76 @@ class RunPythonAction(Action):
     def __init__(self, runner: CodeRunner) -> None:
         self.runner = runner
 
+    def bind_approval(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Bind each run to its current or earlier-planned script content."""
+
+        projected: Dict[str, Optional[bytes]] = {}
+        bound: List[Dict[str, Any]] = []
+        for raw_step in plan:
+            step = dict(raw_step)
+            args = dict(step.get("args") or {})
+            step["args"] = args
+            bound.append(step)
+            action_name = step.get("action")
+            if action_name not in {"write_file", "append_file", "run_python"}:
+                continue
+
+            relative: Optional[str] = None
+            try:
+                path = _text_arg(args, "path")
+                target = self.runner.sandbox.resolve(path)
+                relative = self.runner.sandbox.relative(target)
+                if action_name == "run_python":
+                    if relative in projected:
+                        source = projected[relative]
+                        digest = (
+                            ""
+                            if source is None
+                            else self.runner.source_sha256(path, source)
+                        )
+                    else:
+                        digest = self.runner.source_sha256(path)
+                    args[APPROVED_SHA256_ARG] = digest
+                    continue
+
+                content = args["content"]
+                if not isinstance(content, str):
+                    content = str(content)
+                data = content.encode("utf-8")
+                if action_name == "write_file":
+                    projected[relative] = data
+                    continue
+
+                if relative in projected:
+                    existing = projected[relative]
+                    if existing is None:
+                        raise RunnerError(f"cannot project appended content: {path}")
+                else:
+                    existing = target.read_bytes() if target.exists() else b""
+                projected[relative] = existing + data
+            except (
+                ActionError,
+                KeyError,
+                RunnerError,
+                SandboxError,
+                OSError,
+                TypeError,
+                ValueError,
+            ):
+                # Invalid or missing sources must fail closed at execution, not
+                # turn approval creation into an unhandled runtime exception.
+                if action_name == "run_python":
+                    args[APPROVED_SHA256_ARG] = ""
+                elif relative is not None:
+                    projected[relative] = None
+        return bound
+
     def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
         path = _text_arg(args, "path")
         try:
-            outcome = self.runner.run(path)
+            outcome = self.runner.run(
+                path, expected_sha256=args.get(APPROVED_SHA256_ARG)
+            )
         finally:
             # Approved code may create files in its workspace. Managed sandboxes
             # register both new and changed artifacts, also after a failed run.

@@ -13,7 +13,7 @@ from .context import build_failure_context
 from .memory import MemoryStore
 from .models import ActionResult, ActionRequest, TaskResult
 from .planner import HeuristicPlanner, Planner, PlannerError
-from .runner import CodeRunner
+from .runner import APPROVED_SHA256_ARG, CodeRunner
 from .sandbox import Sandbox
 
 
@@ -202,6 +202,17 @@ class DelamainRuntime:
                     f"invalid plan step: {type(exc).__name__}: {exc}",
                     self._plan_dicts(requests),
                 )
+            if request.action == "run_python":
+                # A planner cannot supply its own approval fingerprint. Stored
+                # approvals bypass this normalization and retain the bound hash.
+                request = ActionRequest(
+                    request.action,
+                    {
+                        key: value
+                        for key, value in request.args.items()
+                        if key != APPROVED_SHA256_ARG
+                    },
+                )
             requests.append(request)
         return requests, None, self._plan_dicts(requests)
 
@@ -316,6 +327,11 @@ class DelamainRuntime:
         """Store one approval and record its request episode."""
 
         planned_actions = self._plan_dicts(requests)
+        if any(step["action"] == "run_python" for step in planned_actions):
+            run_python = self.registry.get("run_python")
+            bind_approval = getattr(run_python, "bind_approval", None)
+            if callable(bind_approval):
+                planned_actions = bind_approval(planned_actions)
         approval = self.memory.create_approval(
             task_id=task_id,
             task=task,
@@ -487,6 +503,20 @@ class DelamainRuntime:
                 task=task,
                 ok=False,
                 error="stored approval plan is empty",
+            )
+        if any(
+            request.action == "run_python" and APPROVED_SHA256_ARG not in request.args
+            for request in requests
+        ):
+            return TaskResult(
+                task_id=task_id,
+                task=task,
+                ok=False,
+                error=(
+                    "stored run_python approval is unsafe without content binding; "
+                    "create a new approval"
+                ),
+                planned_actions=list(approval.get("plan") or []),
             )
 
         metadata = approval.get("metadata") or {}

@@ -22,6 +22,24 @@ def _file(tmp_path, name, content: bytes):
     return path
 
 
+def _directory_link(link, target):
+    import os
+    import subprocess
+
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            pytest.skip("Directory links are not available")
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip("Neither symlinks nor junctions are available")
+
+
 def test_external_file_is_copied_and_original_kept(tmp_path):
     database = _database(tmp_path)
     source = _file(tmp_path / "outside", "painting.svg", b"<svg />")
@@ -65,6 +83,58 @@ def test_unsafe_relative_paths_are_rejected(tmp_path):
         with pytest.raises(ValueError):
             database.register_artifact(source, kind="creative", relative_path=bad)
     assert database.list_artifacts() == []
+
+
+def test_register_artifact_rejects_linked_parent_outside_life(tmp_path):
+    database = _database(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _directory_link(database.life_dir / "linked", outside)
+    source = _file(tmp_path, "source.txt", b"managed")
+
+    with pytest.raises(ValueError, match="вне каталога жизни"):
+        database.register_artifact(
+            source, kind="export", relative_path="linked/escaped.txt"
+        )
+
+    assert not (outside / "escaped.txt").exists()
+    assert database.list_artifacts() == []
+
+
+def test_write_artifact_rejects_linked_parent_outside_life(tmp_path):
+    database = _database(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _directory_link(database.life_dir / "linked", outside)
+
+    with pytest.raises(ValueError, match="вне каталога жизни"):
+        database.write_artifact("linked/escaped.txt", b"managed", kind="export")
+
+    assert not (outside / "escaped.txt").exists()
+    assert database.list_artifacts() == []
+
+
+def test_verify_artifacts_rejects_linked_parent_outside_life(tmp_path):
+    database = _database(tmp_path)
+    row = database.write_artifact("linked/file.txt", b"managed", kind="export")
+    stored = database.life_dir / row["relative_path"]
+    stored.unlink()
+    stored.parent.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "file.txt").write_bytes(b"managed")
+    _directory_link(database.life_dir / "linked", outside)
+
+    report = database.verify_artifacts()
+
+    assert report["ok"] is False
+    assert report["problems"] == [
+        {
+            "id": row["id"],
+            "relative_path": "linked/file.txt",
+            "problem": "unsafe_path",
+        }
+    ]
 
 
 def test_same_path_conflicts_without_update_flag(tmp_path):

@@ -359,6 +359,17 @@ class LifeDatabase:
         return candidate
 
     @classmethod
+    def _artifact_target(cls, life_dir: Path, value) -> Path:
+        """Resolve an artifact path without following links outside its life."""
+
+        rel = cls.safe_relative_path(value)
+        root = life_dir.resolve()
+        target = root / rel
+        if target.is_symlink() or not target.resolve(strict=False).is_relative_to(root):
+            raise ValueError(f"Путь артефакта ведёт вне каталога жизни: {value!r}")
+        return target
+
+    @classmethod
     def _kind_slug(cls, kind: str) -> str:
         slug = cls._KIND_SLUG_RE.sub("_", str(kind).strip().lower()).strip("_")
         return slug or "misc"
@@ -467,7 +478,7 @@ class LifeDatabase:
                 rel = Path("artifacts") / self._kind_slug(kind) / source.name
         else:
             rel = self.safe_relative_path(relative_path)
-        target = life_dir / rel
+        target = self._artifact_target(life_dir, rel)
         if resolved != target:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -514,7 +525,7 @@ class LifeDatabase:
         rel = self.safe_relative_path(relative_path)
         if rel.as_posix() == self.path.name:
             raise ValueError("Путь артефакта совпадает с базой жизни")
-        target = self.life_dir / rel
+        target = self._artifact_target(self.life_dir, rel)
         payload = bytes(data)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
@@ -569,12 +580,11 @@ class LifeDatabase:
         for row in rows:
             problem = None
             try:
-                rel = cls.safe_relative_path(row["relative_path"])
+                path = cls._artifact_target(life_dir, row["relative_path"])
             except ValueError:
                 problem = "unsafe_path"
             else:
-                path = life_dir / rel
-                if path.is_symlink() or not path.is_file():
+                if not path.is_file():
                     problem = "missing"
                 elif (
                     path.stat().st_size != row["bytes"]

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .models import ActionRequest
+from .models import ActionRequest, ActionSpec
 
 
 VALID_APPROVAL_MODES = ("off", "dangerous", "all")
@@ -45,6 +45,14 @@ def normalize_approval_mode(
     if raw in VALID_APPROVAL_MODES:
         return raw, None
     return fallback, f"unknown approval mode {value!r}; using {fallback!r}"
+
+
+class _RegistryLookupFailure:
+    spec = ActionSpec(
+        name="registry_lookup_failure",
+        description="The action registry failed; approval is required fail-closed.",
+        dangerous=True,
+    )
 
 
 class ApprovalPolicy:
@@ -74,21 +82,30 @@ class ApprovalPolicy:
         try:
             return self.registry.get(str(action))
         except Exception:  # defensive: a bad registry must not bypass the gate
-            return None
+            return _RegistryLookupFailure()
 
-    def dangerous_actions(self, requests: Sequence[ActionRequest]) -> List[str]:
-        """Return unique action names marked dangerous, in plan order."""
+    def _inspect(
+        self, requests: Sequence[ActionRequest]
+    ) -> Tuple[List[ActionRequest], List[str]]:
+        """Inspect each action once, preserving failures as dangerous."""
 
-        names: List[str] = []
+        known: List[ActionRequest] = []
+        dangerous: List[str] = []
         for request in requests:
             action = self._spec_for(request.action)
             if action is None:
                 continue
+            known.append(request)
             spec = getattr(action, "spec", None)
             if spec is not None and bool(getattr(spec, "dangerous", False)):
-                if request.action not in names:
-                    names.append(request.action)
-        return names
+                if request.action not in dangerous:
+                    dangerous.append(request.action)
+        return known, dangerous
+
+    def dangerous_actions(self, requests: Sequence[ActionRequest]) -> List[str]:
+        """Return unique action names marked dangerous, in plan order."""
+
+        return self._inspect(requests)[1]
 
     def evaluate(
         self,
@@ -99,15 +116,9 @@ class ApprovalPolicy:
         if self.mode == "off" or not requests:
             return False, []
 
-        known = [
-            request
-            for request in requests
-            if self._spec_for(request.action) is not None
-        ]
+        known, dangerous = self._inspect(requests)
         if not known:
             return False, []
-
-        dangerous = self.dangerous_actions(requests)
         if self.mode == "all":
             return True, dangerous
         return bool(dangerous), dangerous
