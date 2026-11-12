@@ -262,12 +262,14 @@ class WebhookManager:
     def __init__(self, max_per_minute: int = 20, queue_maxsize: int = 100) -> None:
         self._webhooks: List[Webhook] = []
         self._max_per_minute = max_per_minute
-        self._queue: "queue.Queue[Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]]" = queue.Queue(
+        self._queue: "queue.PriorityQueue[Tuple[int, int, str, Optional[str], Optional[Dict[str, Any]]]]" = queue.PriorityQueue(
             maxsize=queue_maxsize
         )
         self._stopped = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
         self._rate_lock = threading.Lock()
+        self._sequence_lock = threading.Lock()
+        self._sequence = 0
         self._last_send_ts: List[float] = []  # для rate-limit
 
     # ----------------------------------------------------------------
@@ -310,7 +312,10 @@ class WebhookManager:
         if not self._webhooks:
             return False
         priority_value = {"high": 0, "normal": 1, "low": 2}.get(priority, 1)
-        item = (priority_value, text, title, meta)
+        with self._sequence_lock:
+            sequence = self._sequence
+            self._sequence += 1
+        item = (priority_value, sequence, text, title, meta)
 
         if blocking:
             return self._send_now(item)
@@ -323,10 +328,10 @@ class WebhookManager:
             return False
 
     def _send_now(
-        self, item: Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]
+        self, item: Tuple[int, int, str, Optional[str], Optional[Dict[str, Any]]]
     ) -> bool:
         """Отправить синхронно во все webhook-и."""
-        priority, text, title, meta = item
+        _priority, _sequence, text, title, meta = item
         if not self._check_rate_limit():
             logger.warning("[webhook] rate limit превышен")
             return False
@@ -372,7 +377,7 @@ class WebhookManager:
         self._stopped.set()
         # Кладём sentinel — worker выйдет после отправки оставшихся.
         try:
-            self._queue.put_nowait((-1, "", None, None))
+            self._queue.put_nowait((-1, -1, "", None, None))
         except queue.Full:
             pass
         if self._worker_thread:
@@ -399,7 +404,7 @@ class WebhookManager:
             except queue.Empty:
                 break
             if item[0] < 0:
-                break
+                continue
             try:
                 self._send_now(item)
             except Exception:

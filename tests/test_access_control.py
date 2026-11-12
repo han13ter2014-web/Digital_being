@@ -61,6 +61,22 @@ def test_set_access_applies_and_persists(tmp_path):
     assert load_saved(tmp_path) == {"network": False}
 
 
+def test_save_failure_restores_previous_live_state(tmp_path, monkeypatch):
+    agent = FakeAgent(searcher=FakeSearcher(True))
+
+    def fail_write(root, values):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("src.app.access_control._write_saved", fail_write)
+    result = set_access(agent, "network", False, root=tmp_path)
+
+    assert result["ok"] is False
+    assert "disk full" in result["error"]
+    assert agent.web_searcher.is_enabled is True
+    assert agent.web_searcher.calls == [False, True]
+    assert load_saved(tmp_path) == {}
+
+
 def test_saved_choice_is_applied_on_next_start(tmp_path):
     first = FakeAgent(searcher=FakeSearcher(True))
     set_access(first, "network", False, root=tmp_path)

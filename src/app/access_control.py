@@ -162,6 +162,7 @@ def apply_choice(agent: Any, key: str, enabled: bool) -> Dict[str, Any]:
 
 def set_access(agent: Any, key: str, enabled: bool, *, root) -> Dict[str, Any]:
     """Применить выбор и сохранить его только после успеха."""
+    previous_state = current_state(agent)
     result = apply_choice(agent, key, enabled)
     if not result.get("ok"):
         return result
@@ -173,10 +174,17 @@ def set_access(agent: Any, key: str, enabled: bool, *, root) -> Dict[str, Any]:
     try:
         _write_saved(root, saved)
     except OSError as exc:
+        rollback = apply_choice(agent, key, previous_state[key])
+        error = f"Не удалось сохранить выбор: {exc}"
+        if not rollback.get("ok"):
+            error += (
+                "; не удалось восстановить прежнее состояние: "
+                f"{rollback.get('error') or 'неизвестная ошибка'}"
+            )
         return {
             "ok": False,
             "label": result["label"],
-            "error": f"Не удалось сохранить выбор: {exc}",
+            "error": error,
         }
     return result
 

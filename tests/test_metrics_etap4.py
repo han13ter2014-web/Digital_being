@@ -126,6 +126,53 @@ class TestMetricsCollector:
 
         assert target.read_text(encoding="utf-8") == previous
 
+    def test_append_ndjson(self, tmp_path):
+        from src.metrics import MetricsCollector
+
+        target = tmp_path / "metrics.ndjson"
+        mc = MetricsCollector(persist_dir=str(tmp_path))
+
+        assert mc.append_ndjson(str(target), "энергия", 100.5, cycle=7) is True
+        assert mc.append_ndjson(str(target), "энергия", 99.5, cycle=8) is True
+
+        entries = [
+            json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [entry["value"] for entry in entries] == [100.5, 99.5]
+        assert [entry["cycle"] for entry in entries] == [7, 8]
+
+    def test_append_ndjson_preserves_previous_lines_on_failure(self, tmp_path):
+        from src.metrics import MetricsCollector
+
+        target = tmp_path / "metrics.ndjson"
+        previous = b'{"channel":"energy","value":90}\n'
+        target.write_bytes(previous)
+        mc = MetricsCollector(persist_dir=str(tmp_path))
+        real_open = open
+
+        class FailingWriter:
+            def __init__(self, handle):
+                self._handle = handle
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self._handle.close()
+
+            def write(self, data):
+                self._handle.write(data[:8])
+                self._handle.flush()
+                raise OSError("disk full")
+
+        def failing_open(*args, **kwargs):
+            return FailingWriter(real_open(*args, **kwargs))
+
+        with patch("builtins.open", new=failing_open):
+            assert mc.append_ndjson(str(target), "energy", 100) is False
+
+        assert target.read_bytes() == previous
+
     def test_list_channels(self):
         from src.metrics import MetricsCollector
 
@@ -342,6 +389,27 @@ class TestWebhookManager:
             status = mgr.status()
             # queue_size должно быть 0 (либо sentinel)
             assert status["queue_size"] == 0 or status["queue_size"] == 1
+
+    def test_async_queue_honors_priority_when_draining(self):
+        from src.metrics import WebhookManager, TelegramWebhook
+
+        mgr = WebhookManager(max_per_minute=100)
+        sent = []
+
+        def record_send(_self, text, **kwargs):
+            sent.append(text)
+            return True
+
+        with patch.object(TelegramWebhook, "_do_send", new=record_send):
+            mgr.add(TelegramWebhook(token="t", chat_id="c"))
+            assert mgr.send("low", priority="low") is True
+            assert mgr.send("normal", priority="normal") is True
+            assert mgr.send("high", priority="high") is True
+            mgr.stop()
+            mgr._worker_loop()
+
+        assert sent == ["high", "normal", "low"]
+        assert mgr.status()["queue_size"] == 0
 
     @pytest.mark.parametrize("kind", ["telegram", "discord"])
     def test_http_post_rejects_non_https_without_network(self, kind):

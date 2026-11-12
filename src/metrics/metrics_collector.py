@@ -273,8 +273,26 @@ class MetricsCollector:
             }
             if cycle is not None:
                 entry["cycle"] = cycle
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+            with self._lock:
+                try:
+                    original_size = os.path.getsize(path)
+                except FileNotFoundError:
+                    original_size = 0
+                try:
+                    with open(path, "ab") as f:
+                        written = f.write(line)
+                        if written != len(line):
+                            raise OSError("partial NDJSON write")
+                except Exception:
+                    try:
+                        os.truncate(path, original_size)
+                    except OSError as rollback_error:
+                        logger.warning(
+                            f"[metrics] не удалось откатить NDJSON {path}: "
+                            f"{rollback_error}"
+                        )
+                    raise
             return True
         except Exception as e:
             logger.debug(f"[metrics] ndjson append ошибка: {e}")
