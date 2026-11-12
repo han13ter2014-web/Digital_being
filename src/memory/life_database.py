@@ -359,10 +359,20 @@ class LifeDatabase:
         return candidate
 
     @classmethod
-    def _artifact_target(cls, life_dir: Path, value) -> Path:
-        """Resolve an artifact path without following links outside its life."""
+    def _artifact_target(
+        cls, life_dir: Path, value, *, database_name="life.sqlite3"
+    ) -> Path:
+        """Resolve an artifact path without escaping life or replacing SQLite."""
 
         rel = cls.safe_relative_path(value)
+        if len(rel.parts) == 1:
+            artifact_name = os.path.normcase(rel.name)
+            protected_name = os.path.normcase(database_name)
+            if any(
+                artifact_name == protected_name + suffix
+                for suffix in ("", "-wal", "-shm", "-journal")
+            ):
+                raise ValueError("Путь артефакта зарезервирован базой жизни")
         root = life_dir.resolve()
         target = root / rel
         if target.is_symlink() or not target.resolve(strict=False).is_relative_to(root):
@@ -478,7 +488,7 @@ class LifeDatabase:
                 rel = Path("artifacts") / self._kind_slug(kind) / source.name
         else:
             rel = self.safe_relative_path(relative_path)
-        target = self._artifact_target(life_dir, rel)
+        target = self._artifact_target(life_dir, rel, database_name=self.path.name)
         if resolved != target:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -523,9 +533,7 @@ class LifeDatabase:
         хеш и размер.
         """
         rel = self.safe_relative_path(relative_path)
-        if rel.as_posix() == self.path.name:
-            raise ValueError("Путь артефакта совпадает с базой жизни")
-        target = self._artifact_target(self.life_dir, rel)
+        target = self._artifact_target(self.life_dir, rel, database_name=self.path.name)
         payload = bytes(data)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
@@ -575,12 +583,16 @@ class LifeDatabase:
         return None if row is None else self._artifact_dict(row)
 
     @classmethod
-    def _verify_artifact_rows(cls, life_dir: Path, rows: list) -> dict:
+    def _verify_artifact_rows(
+        cls, life_dir: Path, rows: list, *, database_name="life.sqlite3"
+    ) -> dict:
         problems = []
         for row in rows:
             problem = None
             try:
-                path = cls._artifact_target(life_dir, row["relative_path"])
+                path = cls._artifact_target(
+                    life_dir, row["relative_path"], database_name=database_name
+                )
             except ValueError:
                 problem = "unsafe_path"
             else:
@@ -622,11 +634,15 @@ class LifeDatabase:
                 ).fetchall()
             )
         artifacts = [cls._artifact_dict(row) for row in rows]
-        return cls._verify_artifact_rows(path.parent, artifacts)
+        return cls._verify_artifact_rows(
+            path.parent, artifacts, database_name=path.name
+        )
 
     def verify_artifacts(self) -> dict:
         """Сверить реестр с файлами: существование, размер и SHA-256."""
-        return self._verify_artifact_rows(self.life_dir, self.list_artifacts())
+        return self._verify_artifact_rows(
+            self.life_dir, self.list_artifacts(), database_name=self.path.name
+        )
 
     def append_dialogue_cycle(self, record, *, max_entries: int = 5000) -> int:
         """Атомарно добавить полный след цикла и удалить старые сверх лимита."""

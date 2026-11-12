@@ -215,10 +215,70 @@ def test_write_artifact_exports_and_refreshes_registration(tmp_path):
     assert database.verify_artifacts()["ok"] is True
 
 
-def test_write_artifact_refuses_database_path(tmp_path):
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+def test_write_artifact_refuses_database_files(tmp_path, suffix):
     database = _database(tmp_path)
+    relative_path = f"{database.path.name}{suffix}"
+    protected = database.life_dir / relative_path
+    if suffix:
+        protected.write_bytes(b"sqlite-sidecar")
+    before = protected.read_bytes()
+
     with pytest.raises(ValueError, match="базой жизни"):
-        database.write_artifact("life.sqlite3", b"x", kind="export")
+        database.write_artifact(relative_path, b"replacement", kind="export")
+
+    assert protected.read_bytes() == before
+    if suffix == "-journal":
+        protected.unlink()  # Не имитировать hot journal при чтении реестра.
+    assert database.list_artifacts() == []
+
+
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+def test_register_artifact_refuses_database_files(tmp_path, suffix):
+    database = _database(tmp_path)
+    source = _file(tmp_path / "outside", "source.txt", b"replacement")
+    relative_path = f"{database.path.name}{suffix}"
+    protected = database.life_dir / relative_path
+    if suffix:
+        protected.write_bytes(b"sqlite-sidecar")
+    before = protected.read_bytes()
+
+    with pytest.raises(ValueError, match="базой жизни"):
+        database.register_artifact(
+            source, kind="export", relative_path=relative_path, update=True
+        )
+
+    assert protected.read_bytes() == before
+    assert source.read_bytes() == b"replacement"
+    if suffix == "-journal":
+        protected.unlink()  # Не имитировать hot journal при чтении реестра.
+    assert database.list_artifacts() == []
+
+
+def test_verify_artifacts_rejects_database_sidecar_paths(tmp_path):
+    database = _database(tmp_path)
+    row = database.write_artifact("exports/state.json", b"managed", kind="export")
+    relative_path = f"{database.path.name}-wal"
+    (database.life_dir / relative_path).write_bytes(b"managed")
+    with database.write() as connection:
+        connection.execute(
+            "UPDATE artifacts SET relative_path = ? WHERE id = ?",
+            (relative_path, row["id"]),
+        )
+
+    expected = {
+        "ok": False,
+        "checked": 1,
+        "problems": [
+            {
+                "id": row["id"],
+                "relative_path": relative_path,
+                "problem": "unsafe_path",
+            }
+        ],
+    }
+    assert database.verify_artifacts() == expected
+    assert database.verify_artifacts_readonly(database.path) == expected
 
 
 def test_v2_database_gains_new_tables_without_losing_state(tmp_path):
