@@ -225,9 +225,11 @@ def test_status_tracks_life_state(window):
     win._apply_status({"life_state": "dormant"})
     assert win._last_life_state == "dormant"
 
+
 # ============================================================
 # Крестик: спрятать (трей) или выйти (без трея)
 # ============================================================
+
 
 def test_close_hides_when_tray_exists():
     """С треем окно прячется: существо продолжает жить."""

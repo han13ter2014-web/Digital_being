@@ -45,7 +45,7 @@ def test_settings_data_dir_follows_env():
 def test_buffered_logger_default_is_isolated():
     from src.core.buffered_logger import BufferedLogger
 
-    logger = BufferedLogger(buffer_size=10 ** 6)
+    logger = BufferedLogger(buffer_size=10**6)
     assert _is_inside(Path(logger.log_file), Path(data_dir()))
 
 

@@ -46,6 +46,7 @@ class Event:
         timestamp: когда создано (Unix-time)
         priority: 0=низкий, 1=обычный, 2=высокий
     """
+
     name: str
     data: Any = None
     source: str = "system"
@@ -206,9 +207,7 @@ class EventBus:
         global_loop = getattr(self, "_global_loop", None)
         if global_loop is not None and not global_loop.is_closed():
             try:
-                global_loop.call_soon_threadsafe(
-                    self._enqueue_event_sync, event
-                )
+                global_loop.call_soon_threadsafe(self._enqueue_event_sync, event)
                 return True
             except RuntimeError:
                 pass
@@ -343,19 +342,23 @@ class EventBus:
         try:
             await sub(event)
         except Exception as e:
-            logger.exception(f"Ошибка в подписчике {sub.__name__} для {event.name}: {e}")
+            logger.exception(
+                f"Ошибка в подписчике {sub.__name__} для {event.name}: {e}"
+            )
 
     def _add_to_history(self, event: Event) -> None:
         """Сохранить событие в историю (с ограничением размера)."""
         self._history.append(event)
         if len(self._history) > self._history_max:
-            self._history = self._history[-self._history_max:]
+            self._history = self._history[-self._history_max :]
 
     # ============================================================
     # Наблюдение / отладка
     # ============================================================
 
-    def get_history(self, last_n: int = 20, name_filter: Optional[str] = None) -> List[Event]:
+    def get_history(
+        self, last_n: int = 20, name_filter: Optional[str] = None
+    ) -> List[Event]:
         """Получить последние N событий (опционально отфильтрованных по имени)."""
         if name_filter:
             filtered = [e for e in self._history if e.name == name_filter]
@@ -388,26 +391,26 @@ class Events:
     """Константы имён событий — чтобы избежать опечаток."""
 
     # Таймер / циклы
-    TICK = "tick"                    # Один внутренний цикл агента завершён
-    TIMER_TICK = "timer_tick"        # Таймер сработал (каждые N секунд)
+    TICK = "tick"  # Один внутренний цикл агента завершён
+    TIMER_TICK = "timer_tick"  # Таймер сработал (каждые N секунд)
 
     # Пользователь
-    USER_MESSAGE = "user_message"    # Сообщение от пользователя
+    USER_MESSAGE = "user_message"  # Сообщение от пользователя
     USER_OPENED_CHAT = "user_opened_chat"
     USER_CLOSED_CHAT = "user_closed_chat"
-    USER_COMMAND = "user_command"    # /status, /goals и т.п.
+    USER_COMMAND = "user_command"  # /status, /goals и т.п.
 
     # Агент
     AGENT_THOUGHT = "agent_thought"  # Агент подумал (мысль)
-    AGENT_ACTION = "agent_action"    # Агент совершил действие
+    AGENT_ACTION = "agent_action"  # Агент совершил действие
     AGENT_EVOLVED = "agent_evolved"  # Интеллект вырос
     AGENT_WANTS_TO_SPEAK = "agent_wants_to_speak"  # Хочет сказать (→ уведомление)
     AGENT_QUESTION = "agent_question"  # Задаёт вопрос пользователю
-    AGENT_MESSAGE = "agent_message"   # Просто сообщение (statement/reflection/etc.)
+    AGENT_MESSAGE = "agent_message"  # Просто сообщение (statement/reflection/etc.)
     AGENT_WEB_RESULT = "agent_web_result"  # Нашёл ответ в интернете (Wikipedia)
 
     # Состояние
-    ENERGY_LOW = "energy_low"        # Энергия упала
+    ENERGY_LOW = "energy_low"  # Энергия упала
     ENERGY_RECOVERED = "energy_recovered"
     GOAL_COMPLETED = "goal_completed"
     GOAL_ACTIVATED = "goal_activated"
@@ -417,16 +420,16 @@ class Events:
     RESUME_REQUESTED = "resume_requested"
     SHUTDOWN_REQUESTED = "shutdown_requested"
     SAVE_REQUESTED = "save_requested"
-    SPEED_CHANGED = "speed_changed"      # Смена скорости жизни: live/fast/max
-    STEP_REQUESTED = "step_requested"    # Один цикл по кнопке «Шаг»
+    SPEED_CHANGED = "speed_changed"  # Смена скорости жизни: live/fast/max
+    STEP_REQUESTED = "step_requested"  # Один цикл по кнопке «Шаг»
 
     # === Жизнь и уход (через подтверждение человеком) ===
     # Окно только просит. Решение принимает LifeGuard: пауза + точная
     # фраза. См. src/core/life_guard.py и src/app/life_controller.py.
-    LIFE_REQUEST = "life_request"        # Окно → ядро: «прошу сон/уход»
-    LIFE_PROMPT = "life_prompt"          # Ядро → окно: «введи фразу»
-    LIFE_CONFIRM = "life_confirm"        # Окно → ядро: «вот фраза»
-    LIFE_CANCEL = "life_cancel"          # Окно → ядро: «отменить запрос»
-    LIFE_WAKE = "life_wake"              # Окно → ядро: «разбудить»
-    LIFE_RESULT = "life_result"          # Ядро → окно: итог решения
+    LIFE_REQUEST = "life_request"  # Окно → ядро: «прошу сон/уход»
+    LIFE_PROMPT = "life_prompt"  # Ядро → окно: «введи фразу»
+    LIFE_CONFIRM = "life_confirm"  # Окно → ядро: «вот фраза»
+    LIFE_CANCEL = "life_cancel"  # Окно → ядро: «отменить запрос»
+    LIFE_WAKE = "life_wake"  # Окно → ядро: «разбудить»
+    LIFE_RESULT = "life_result"  # Ядро → окно: итог решения
     CHAT_FOCUS_REQUESTED = "chat_focus_requested"  # Фокус на поле ввода

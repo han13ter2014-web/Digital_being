@@ -5,7 +5,7 @@ calls preserve late binding; this module never imports ``src.core.agent``.
 """
 
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from config.simulation_config import LR_CONFIG
 from src.core.buffered_logger import get_logger
@@ -28,12 +28,40 @@ def list_creative_drafts_impl(self) -> List[Dict]:
     return [catalog[identifier] for identifier in sorted(catalog)]
 
 
+def export_creative_draft_impl(self, draft_id: Optional[str] = None) -> Dict:
+    """Явно передать существующий черновик в Effector; без нового цикла записи."""
+    from src.cognition.creative_catalog import catalog_for
+    from src.core.activity_workspace import workspace_for
+    from src.core.workspace_request import creative_write_request
+
+    catalog = catalog_for(self)
+    current = getattr(self, "_creative_draft", None)
+    identifier = draft_id or (current.get("id") if isinstance(current, dict) else None)
+    if not identifier or identifier not in catalog:
+        raise ValueError("Черновик отсутствует в собственном каталоге")
+    draft = catalog[identifier]
+    filename = f"{identifier}.txt"
+    content = workspace_for(self).read(filename)
+    effector = getattr(self, "delamain_effector", None)
+    if effector is None:
+        raise RuntimeError("Effector недоступен для экспорта черновика")
+    request = creative_write_request(
+        filename,
+        content,
+        reason="явный экспорт существующего творческого черновика",
+        request_id=f"creative-export-{identifier}-r{draft['revision']}",
+        target=draft.get("theme", ""),
+        core_cycle=self.cycle_count,
+    )
+    return effector.submit(request).to_dict()
+
+
 def _pick_art_theme_impl(self) -> str:
     """Тема картины — из собственной жизни, а не из чужого списка.
 
-        Активная цель, а если её нет — самая слабая известная концепция:
-        существо рисует то, что его сейчас занимает.
-        """
+    Активная цель, а если её нет — самая слабая известная концепция:
+    существо рисует то, что его сейчас занимает.
+    """
     goal = getattr(self, "active_goal", None)
     if isinstance(goal, dict):
         title = str(goal.get("title") or "").strip()
@@ -63,16 +91,23 @@ def _art_richness_impl(self) -> int:
 def _act_draw_impl(self) -> Dict:
     """Нарисовать картину: отпечаток текущего внутреннего состояния.
 
-        Палитра — доминирующая эмоция (у уже начатой работы палитра
-        хранится с рождения и не переписывается), тема — то, что
-        занимает существо, густота — запас сил. Работа на лимите
-        редакций оставляется с честной причиной, и начинается новая.
-        """
+    Палитра — доминирующая эмоция (у уже начатой работы палитра
+    хранится с рождения и не переписывается), тема — то, что
+    занимает существо, густота — запас сил. Работа на лимите
+    редакций оставляется с честной причиной, и начинается новая.
+    """
     from src.cognition.local_art import (
-        ART_LIMIT, art_available, art_step, art_thumbnail, leave_art,
+        ART_LIMIT,
+        PALETTES,
+        art_available,
+        art_step,
+        art_thumbnail,
+        leave_art,
     )
+    from src.core.activity_workspace import workspace_for
 
     work = getattr(self, "_art_work", None)
+    workspace = workspace_for(self)
     try:
         if work is not None and (
             work.get("status") == "left" or work.get("revision", 0) >= ART_LIMIT
@@ -82,11 +117,9 @@ def _act_draw_impl(self) -> Dict:
                 catalog = getattr(self, "_art_catalog", None)
                 if isinstance(catalog, dict):
                     catalog[work["id"]] = dict(work)
-                get_logger().log(
-                    f"[ART] оставила «{work['theme']}» (лимит редакций)"
-                )
+                get_logger().log(f"[ART] оставила «{work['theme']}» (лимит редакций)")
             work = None
-        if work is None and not art_available(None):
+        if work is None and not art_available(None, workspace=workspace):
             return {"text": "Ответ: рисовать негде — папка работ заполнена"}
 
         if work is not None:
@@ -99,10 +132,26 @@ def _act_draw_impl(self) -> Dict:
             dominant = emotions.dominant() if emotions is not None else None
             if dominant:
                 palette = dominant["emotion"]
+                if palette not in PALETTES:
+                    # Визуальных палитр меньше эмоций. Проекция сохраняет
+                    # валентность/возбуждение и не превращает новую эмоцию
+                    # в ошибку рисования.
+                    valence = float(dominant.get("valence", 0.0))
+                    arousal = float(dominant.get("arousal", 0.0))
+                    if valence < 0.0:
+                        palette = "fear" if arousal >= 0.55 else "sadness"
+                    elif valence >= 0.35 and arousal >= 0.4:
+                        palette = "joy"
+                    else:
+                        palette = "calm"
             theme = self._pick_art_theme()
 
         updated = art_step(
-            work, palette=palette, theme=theme, richness=self._art_richness()
+            work,
+            palette=palette,
+            theme=theme,
+            richness=self._art_richness(),
+            workspace=workspace,
         )
         self._art_work = updated
         catalog = getattr(self, "_art_catalog", None)
@@ -110,7 +159,8 @@ def _act_draw_impl(self) -> Dict:
             catalog = self._art_catalog = {}
         catalog[updated["id"]] = dict(updated)
         self._record_will(
-            "art_works", updated["theme"],
+            "art_works",
+            updated["theme"],
             f"рисунок, редакция {updated['revision']}, палитра {updated['palette']}",
         )
         thumb = art_thumbnail(updated)
@@ -137,17 +187,23 @@ def list_art_works_impl(self) -> List[Dict]:
 def _act_compose_music_impl(self) -> Dict:
     """Сочинить мелодию: отпечаток текущего состояния в звуке.
 
-        Настроение — доминирующая эмоция (у уже начатой работы оно
-        хранится с рождения и не переписывается), тема — то, что занимает
-        существо. Работа на лимите редакций оставляется с честной
-        причиной, и начинается новая.
-        """
+    Настроение — доминирующая эмоция (у уже начатой работы оно
+    хранится с рождения и не переписывается), тема — то, что занимает
+    существо. Работа на лимите редакций оставляется с честной
+    причиной, и начинается новая.
+    """
     from src.cognition.local_music import (
-        MOODS, MUSIC_LIMIT, leave_music, music_available, music_notation,
+        MOODS,
+        MUSIC_LIMIT,
+        leave_music,
+        music_available,
+        music_notation,
         music_step,
     )
+    from src.core.activity_workspace import workspace_for
 
     work = getattr(self, "_music_work", None)
+    workspace = workspace_for(self)
     try:
         if work is not None and (
             work.get("status") == "left" or work.get("revision", 0) >= MUSIC_LIMIT
@@ -157,11 +213,9 @@ def _act_compose_music_impl(self) -> Dict:
                 catalog = getattr(self, "_music_catalog", None)
                 if isinstance(catalog, dict):
                     catalog[work["id"]] = dict(work)
-                get_logger().log(
-                    f"[MUSIC] оставила «{work['theme']}» (лимит редакций)"
-                )
+                get_logger().log(f"[MUSIC] оставила «{work['theme']}» (лимит редакций)")
             work = None
-        if work is None and not music_available(None):
+        if work is None and not music_available(None, workspace=workspace):
             return {"text": "Ответ: сочинять негде — папка мелодий заполнена"}
 
         if work is not None:
@@ -180,14 +234,15 @@ def _act_compose_music_impl(self) -> Dict:
                 mood = "calm"
             theme = self._pick_art_theme()
 
-        updated = music_step(work, mood=mood, theme=theme)
+        updated = music_step(work, mood=mood, theme=theme, workspace=workspace)
         self._music_work = updated
         catalog = getattr(self, "_music_catalog", None)
         if not isinstance(catalog, dict):
             catalog = self._music_catalog = {}
         catalog[updated["id"]] = dict(updated)
         self._record_will(
-            "music_works", updated["theme"],
+            "music_works",
+            updated["theme"],
             f"мелодия, редакция {updated['revision']}, настроение {updated['mood']}",
         )
         notation = music_notation(updated)
@@ -216,7 +271,9 @@ def _reward_creative_success_impl(self):
     self._creative_wins += 1
     if self._creative_wins >= 5:  # Каждые 5 успешных креативных действий
         self.energy += LR_CONFIG.CREATIVITY_BONUS_ENERGY * 2
-        get_logger().flush_immediate(f"🎨 Креативность окупилась! +{LR_CONFIG.CREATIVITY_BONUS_ENERGY * 2} энергии")
+        get_logger().flush_immediate(
+            f"🎨 Креативность окупилась! +{LR_CONFIG.CREATIVITY_BONUS_ENERGY * 2} энергии"
+        )
         self._creative_wins = 0
 
 
@@ -226,5 +283,7 @@ def _record_creative_failure_impl(self):
     if self._creative_losses >= 3:
         # Если слишком много неудач — снижаем ε (меньше случайности)
         LR_CONFIG.EPSILON_GREEDY = max(0.05, LR_CONFIG.EPSILON_GREEDY - 0.02)
-        get_logger().log(f"Снижаю ε-greedy до {LR_CONFIG.EPSILON_GREEDY:.0%} (слишком много неудач)")
+        get_logger().log(
+            f"Снижаю ε-greedy до {LR_CONFIG.EPSILON_GREEDY:.0%} (слишком много неудач)"
+        )
         self._creative_losses = 0

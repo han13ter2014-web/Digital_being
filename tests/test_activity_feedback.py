@@ -5,7 +5,9 @@ import pytest
 from src.core.agent import DigitalBeing
 
 
-@pytest.mark.parametrize("action", ["explore", "synthesis", "know_answer", "hypothesis", "default"])
+@pytest.mark.parametrize(
+    "action", ["explore", "synthesis", "know_answer", "hypothesis", "default"]
+)
 def test_research_does_not_satisfy_play_by_alias(action):
     agent = DigitalBeing(name="FeedbackSeparation")
     system = agent.motivation_system

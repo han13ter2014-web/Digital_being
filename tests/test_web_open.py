@@ -6,6 +6,7 @@ SSRF-гард отсекает localhost и приватные адреса (и 
 не-текст и пустышки отбраковываются, действие browse_web оставляет
 впечатление (волевой акт), а не знание (knowledge_base нетронута).
 """
+
 import json
 import unittest
 from types import SimpleNamespace
@@ -41,9 +42,13 @@ _PAGE_HTML = (
 
 
 class _FakeResponse:
-    def __init__(self, body: bytes, status: int = 200,
-                 content_type: str = "text/html; charset=utf-8",
-                 final_url: str = "https://example.com/page"):
+    def __init__(
+        self,
+        body: bytes,
+        status: int = 200,
+        content_type: str = "text/html; charset=utf-8",
+        final_url: str = "https://example.com/page",
+    ):
         self._body = body
         self.status = status
         self.headers = {"Content-Type": content_type}
@@ -85,8 +90,9 @@ class SearchWebTests(unittest.TestCase):
         self.assertEqual(self.searcher._stats["found"], 0)
 
     def test_compass_empty_is_honest_miss(self):
-        with patch("urllib.request.urlopen",
-                   return_value=_FakeResponse(_ddg_payload())):
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(_ddg_payload())
+        ):
             result = self.searcher.search_web("садоводство")
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "no_search_results")
@@ -105,8 +111,10 @@ class OpenPageTests(unittest.TestCase):
         self.searcher = WebSearcher(rate_limit_sec=0)
 
     def test_page_is_read_as_clean_text(self):
-        with patch("urllib.request.urlopen",
-                   return_value=_FakeResponse(_PAGE_HTML.encode("utf-8"))):
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_FakeResponse(_PAGE_HTML.encode("utf-8")),
+        ):
             result = self.searcher.open_page("https://example.com/gardens")
         self.assertTrue(result["found"])
         self.assertEqual(result["source"], "web:page")
@@ -117,26 +125,29 @@ class OpenPageTests(unittest.TestCase):
         self.assertEqual(self.searcher._stats["pages_read"], 1)
 
     def test_localhost_and_private_are_refused_without_network(self):
-        for url in ("http://127.0.0.1/admin", "http://localhost/",
-                    "http://192.168.0.1/router", "file:///etc/passwd",
-                    "ftp://example.com/x"):
+        for url in (
+            "http://127.0.0.1/admin",
+            "http://localhost/",
+            "http://192.168.0.1/router",
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+        ):
             result = self.searcher.open_page(url)
             self.assertFalse(result["found"], url)
-            self.assertIn(result["error"],
-                          ("private_host", "bad_scheme"), url)
+            self.assertIn(result["error"], ("private_host", "bad_scheme"), url)
         self.assertEqual(self.searcher._stats["network_calls"], 0)
 
     def test_redirect_into_private_is_refused(self):
-        resp = _FakeResponse(_PAGE_HTML.encode("utf-8"),
-                             final_url="http://169.254.1.1/meta")
+        resp = _FakeResponse(
+            _PAGE_HTML.encode("utf-8"), final_url="http://169.254.1.1/meta"
+        )
         with patch("urllib.request.urlopen", return_value=resp):
             result = self.searcher.open_page("https://example.com/start")
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "private_host")
 
     def test_non_text_is_refused(self):
-        resp = _FakeResponse(b"%PDF-1.4 ...",
-                             content_type="application/pdf")
+        resp = _FakeResponse(b"%PDF-1.4 ...", content_type="application/pdf")
         with patch("urllib.request.urlopen", return_value=resp):
             result = self.searcher.open_page("https://example.com/doc.pdf")
         self.assertFalse(result["found"])
@@ -144,8 +155,9 @@ class OpenPageTests(unittest.TestCase):
 
     def test_thin_page_is_refused(self):
         thin = "<html><body><p>ок</p></body></html>"
-        with patch("urllib.request.urlopen",
-                   return_value=_FakeResponse(thin.encode("utf-8"))):
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(thin.encode("utf-8"))
+        ):
             result = self.searcher.open_page("https://example.com/thin")
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "no_extract")
@@ -169,12 +181,14 @@ class OpenPageTests(unittest.TestCase):
 
     def test_long_page_is_capped(self):
         big = "<html><body><p>" + ("слово " * 3000) + "</p></body></html>"
-        with patch("urllib.request.urlopen",
-                   return_value=_FakeResponse(big.encode("utf-8"))):
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(big.encode("utf-8"))
+        ):
             result = self.searcher.open_page("https://example.com/big")
         self.assertTrue(result["found"])
-        self.assertLessEqual(len(result["extract"]),
-                             self.searcher.WEB_PAGE_MAX_CHARS + 1)
+        self.assertLessEqual(
+            len(result["extract"]), self.searcher.WEB_PAGE_MAX_CHARS + 1
+        )
         self.assertTrue(result["extract"].endswith("…"))
 
 
@@ -199,8 +213,7 @@ class _FakeWillRegistry:
         self.records = []
 
     def record(self, will_type, topic, reason, **kwargs):
-        self.records.append({"type": will_type, "topic": topic,
-                             "reason": reason})
+        self.records.append({"type": will_type, "topic": topic, "reason": reason})
 
 
 _COMPASS = {
@@ -224,15 +237,20 @@ _PAGE = {
     "error": None,
 }
 
-_MISS = {"found": False, "title": "", "extract": "", "url": "",
-         "lang": "ru", "source": None, "error": "no_search_results"}
+_MISS = {
+    "found": False,
+    "title": "",
+    "extract": "",
+    "url": "",
+    "lang": "ru",
+    "source": None,
+    "error": "no_search_results",
+}
 
 
 def _make_web_searcher(compass=_COMPASS, page=_PAGE):
-    searcher = SimpleNamespace(is_enabled=True, compass_calls=[],
-                               page_calls=[])
-    searcher.search_web = lambda q: (searcher.compass_calls.append(q),
-                                     compass)[1]
+    searcher = SimpleNamespace(is_enabled=True, compass_calls=[], page_calls=[])
+    searcher.search_web = lambda q: (searcher.compass_calls.append(q), compass)[1]
     searcher.open_page = lambda u: (searcher.page_calls.append(u), page)[1]
     return searcher
 
@@ -261,9 +279,7 @@ class BrowseWebActionTests(unittest.TestCase):
         self.assertIn("Городские сады", result["text"])
         self.assertEqual(agent.knowledge_base, {"старая тема": "старое знание"})
         self.assertEqual(agent.will_registry.records[0]["type"], "web_browses")
-        self.assertEqual(
-            agent._web_browses["выучить садоводство"], agent.cycle_count
-        )
+        self.assertEqual(agent._web_browses["выучить садоводство"], agent.cycle_count)
         # Компас дал ссылку, страница прочитана по ней.
         self.assertEqual(searcher.page_calls, ["https://example.com/gardens"])
 

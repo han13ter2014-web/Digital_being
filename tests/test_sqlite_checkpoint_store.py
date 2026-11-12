@@ -23,10 +23,16 @@ def test_roundtrip_and_reopen(store):
             {"id": 1, "text": "Привет 🌍", "reward": 0.25, "ok": True},
             {"nested": {"tags": [None, False, 42, -0.5, ""]}},
         ],
-        "mental_models": {"concepts": {"one": {"name": "one", "score": 2}},
-                          "claims": [{"claim": "a", "confidence": 0.8}]},
-        "empty_list": [], "empty_dict": {}, "nothing": None,
-        "boolean": False, "number": 3.0, "text": "hello",
+        "mental_models": {
+            "concepts": {"one": {"name": "one", "score": 2}},
+            "claims": [{"claim": "a", "confidence": 0.8}],
+        },
+        "empty_list": [],
+        "empty_dict": {},
+        "nothing": None,
+        "boolean": False,
+        "number": 3.0,
+        "text": "hello",
     }
     assert store.latest("agent") is None
     snapshot = store.save(state, "agent", 7)
@@ -37,7 +43,9 @@ def test_roundtrip_and_reopen(store):
     assert restored.load(snapshot) == state
     assert rows(store, "PRAGMA user_version") == [(1,)]
     assert rows(store, "PRAGMA journal_mode") == [("wal",)]
-    metadata = rows(store, "SELECT agent_name, cycle, saved_at, manifest FROM snapshots")[0]
+    metadata = rows(
+        store, "SELECT agent_name, cycle, saved_at, manifest FROM snapshots"
+    )[0]
     assert metadata[:2] == ("agent", 7)
     assert "+00:00" in metadata[2]
     assert set(json.loads(metadata[3])) == {"root"}
@@ -130,8 +138,11 @@ def test_pruning_is_per_agent_and_gc_preserves_all_agents(store):
     assert store.load(other) == shared
     assert store.load(third) == {"value": 3}
     assert store.load(fourth) == {"value": 4}
-    assert rows(store, "SELECT agent_name, COUNT(*) FROM snapshots GROUP BY agent_name") == [
-        ("agent", 2), ("other", 1),
+    assert rows(
+        store, "SELECT agent_name, COUNT(*) FROM snapshots GROUP BY agent_name"
+    ) == [
+        ("agent", 2),
+        ("other", 1),
     ]
     fifth = store.save({}, "agent", 5, 1)
     assert fifth > fourth
@@ -153,9 +164,13 @@ def test_corrupt_blob_raises_value_error(store, damage):
         if damage == "missing":
             connection.execute("DELETE FROM blobs WHERE hash = ?", (root,))
         elif damage == "modified":
-            connection.execute("UPDATE blobs SET payload = '{}' WHERE hash = ?", (root,))
+            connection.execute(
+                "UPDATE blobs SET payload = '{}' WHERE hash = ?", (root,)
+            )
         else:
-            payload = "not JSON" if damage == "malformed" else '{"kind":"dict","children":[]}'
+            payload = (
+                "not JSON" if damage == "malformed" else '{"kind":"dict","children":[]}'
+            )
             digest = hashlib.sha256(payload.encode()).hexdigest()
             connection.execute("INSERT INTO blobs VALUES (?, ?)", (digest, payload))
             connection.execute(
@@ -170,7 +185,7 @@ def test_corrupt_blob_raises_value_error(store, damage):
     assert rows(store, "SELECT COUNT(*) FROM blobs") == before
 
 
-@pytest.mark.parametrize("manifest", ['not JSON', '[]', '{}', '{"root":"invalid"}'])
+@pytest.mark.parametrize("manifest", ["not JSON", "[]", "{}", '{"root":"invalid"}'])
 def test_malformed_manifest(store, manifest):
     snapshot = store.save({}, "agent", 0)
     with sqlite3.connect(store.path) as connection:
@@ -180,21 +195,37 @@ def test_malformed_manifest(store, manifest):
 
 
 def test_newer_schema_rejected_without_mutation(tmp_path):
+    future_version = max(SQLiteCheckpointStore.SUPPORTED_SCHEMA_VERSIONS) + 1
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
-        connection.execute("PRAGMA user_version=2")
-    with pytest.raises(ValueError, match="schema version: 2"):
+        connection.execute(f"PRAGMA user_version={future_version}")
+    with pytest.raises(ValueError, match=f"schema version: {future_version}"):
         SQLiteCheckpointStore(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (future_version,)
         assert connection.execute("SELECT name FROM sqlite_master").fetchall() == []
 
 
-@pytest.mark.parametrize("state,error", [
-    ([], TypeError), ({1: "not a JSON key"}, TypeError),
-    ({"bad": object()}, TypeError), ({"bad": (1, 2)}, TypeError),
-    ({"bad": float("nan")}, ValueError), ({"bad": float("inf")}, ValueError),
-])
+def test_existing_life_schema_v2_is_not_downgraded_by_snapshot_reader(tmp_path):
+    path = tmp_path / "life.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA user_version=2")
+    SQLiteCheckpointStore(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+
+
+@pytest.mark.parametrize(
+    "state,error",
+    [
+        ([], TypeError),
+        ({1: "not a JSON key"}, TypeError),
+        ({"bad": object()}, TypeError),
+        ({"bad": (1, 2)}, TypeError),
+        ({"bad": float("nan")}, ValueError),
+        ({"bad": float("inf")}, ValueError),
+    ],
+)
 def test_invalid_state_is_not_committed(store, state, error):
     with pytest.raises(error):
         store.save(state, "agent", 1)
@@ -210,8 +241,10 @@ def test_circular_state_is_not_committed(store):
     assert rows(store, "SELECT COUNT(*) FROM blobs") == [(0,)]
 
 
-@pytest.mark.parametrize("limit,error", [(0, ValueError), (-1, ValueError),
-                                         (True, TypeError), (1.5, TypeError)])
+@pytest.mark.parametrize(
+    "limit,error",
+    [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError)],
+)
 def test_invalid_retention(store, limit, error):
     with pytest.raises(error):
         store.save({}, "agent", 0, limit)

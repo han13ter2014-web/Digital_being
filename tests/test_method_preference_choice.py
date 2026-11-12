@@ -12,20 +12,30 @@ from src.core.subsystem_base import PluginRegistry
 
 
 def equal_candidates():
-    return [{"action": "play", "source": "activity", "strength": 0.8, "params": {}},
-            {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}}]
+    return [
+        {"action": "play", "source": "activity", "strength": 0.8, "params": {}},
+        {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}},
+    ]
 
 
 def test_repeated_failure_changes_real_arbitration_order_not_availability():
     from src.core.agent import DigitalBeing
 
     agent = DigitalBeing(name="PreferenceChoice")
-    verdict = {"score": 0.5, "verdict": "proceed", "confidence": 0.5, "reasoning": "equal", "voices": {}}
+    verdict = {
+        "score": 0.5,
+        "verdict": "proceed",
+        "confidence": 0.5,
+        "reasoning": "equal",
+        "voices": {},
+    }
     with patch.object(agent.decision_arbitrator, "arbitrate", return_value=verdict):
         fresh = agent.decision_arbitrator.choose_action(equal_candidates(), {})
         for _ in range(5):
             observe(agent, "play", outcome="error")
-        softened = agent.decision_arbitrator.choose_action(apply(agent, equal_candidates()), {})
+        softened = agent.decision_arbitrator.choose_action(
+            apply(agent, equal_candidates()), {}
+        )
     assert fresh["action"] in {"play", "create_draft"}
     assert softened["action"] == "create_draft"
     assert agent._is_action_available("play")

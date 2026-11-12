@@ -1,4 +1,4 @@
-"""К10: веб повторяет события Tk и не получает обходных путей в Core."""
+"""Веб повторяет события Tk и не получает обходных путей в Core."""
 
 import asyncio
 from copy import deepcopy
@@ -56,7 +56,8 @@ def _post(port: int, path: str, body: dict | None = None) -> tuple[int, dict]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
         data=json.dumps({} if body is None else body).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST",
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=3) as response:
@@ -66,7 +67,9 @@ def _post(port: int, path: str, body: dict | None = None) -> tuple[int, dict]:
 
 
 def _get(port: int, path: str) -> dict:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=3) as response:
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}{path}", timeout=3
+    ) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -85,22 +88,45 @@ def controlled_dashboard():
 @pytest.mark.parametrize(
     ("path", "body", "event_name", "payload"),
     [
-        ("/api/dialogue", {"text": "  Привет, Тэсс  "}, Events.USER_MESSAGE,
-         {"text": "Привет, Тэсс"}),
+        (
+            "/api/dialogue",
+            {"text": "  Привет, Нова  "},
+            Events.USER_MESSAGE,
+            {"text": "Привет, Нова"},
+        ),
         ("/api/control/pause", {}, Events.PAUSE_REQUESTED, {}),
         ("/api/control/resume", {}, Events.RESUME_REQUESTED, {}),
-        ("/api/control/speed", {"mode": "fast"}, Events.SPEED_CHANGED, {"mode": "fast"}),
+        (
+            "/api/control/speed",
+            {"mode": "fast"},
+            Events.SPEED_CHANGED,
+            {"mode": "fast"},
+        ),
         ("/api/control/save", {}, Events.SAVE_REQUESTED, {}),
-        ("/api/control/life/request", {"kind": "dream", "reason": "запрос из окна"},
-         Events.LIFE_REQUEST, {"kind": "dream", "reason": "запрос из окна"}),
-        ("/api/control/life/request", {"kind": "terminate", "reason": "запрос из окна"},
-         Events.LIFE_REQUEST, {"kind": "terminate", "reason": "запрос из окна"}),
+        (
+            "/api/control/life/request",
+            {"kind": "dream", "reason": "запрос из окна"},
+            Events.LIFE_REQUEST,
+            {"kind": "dream", "reason": "запрос из окна"},
+        ),
+        (
+            "/api/control/life/request",
+            {"kind": "terminate", "reason": "запрос из окна"},
+            Events.LIFE_REQUEST,
+            {"kind": "terminate", "reason": "запрос из окна"},
+        ),
         ("/api/control/life/wake", {}, Events.LIFE_WAKE, {}),
-        ("/api/access", {"key": "presence", "state": "off"}, Events.USER_COMMAND,
-         {"command": "access presence off"}),
+        (
+            "/api/access",
+            {"key": "presence", "state": "off"},
+            Events.USER_COMMAND,
+            {"command": "access presence off"},
+        ),
     ],
 )
-def test_web_publishes_exact_tk_event(controlled_dashboard, path, body, event_name, payload):
+def test_web_publishes_exact_tk_event(
+    controlled_dashboard, path, body, event_name, payload
+):
     _, port, _, bus = controlled_dashboard
     status, response = _post(port, path, body)
     assert status == 202 and response["status"] == "accepted"
@@ -144,25 +170,45 @@ def test_standalone_is_honest_and_never_accepts_mutations():
         dash.stop()
 
 
-def test_life_confirm_requires_prompt_and_preserves_guard_protocol(controlled_dashboard):
+def test_life_confirm_requires_prompt_and_preserves_guard_protocol(
+    controlled_dashboard,
+):
     _, port, state, bus = controlled_dashboard
-    status, _ = _post(port, "/api/control/life/confirm", {
-        "request_id": "missing", "phrase": "Тэсс",
-    })
+    status, _ = _post(
+        port,
+        "/api/control/life/confirm",
+        {
+            "request_id": "missing",
+            "phrase": "Нова",
+        },
+    )
     assert status == 409 and bus.published == []
 
     prompt = {
-        "request_id": "req-1", "kind": "dream", "phrase": "Тэсс",
-        "cooldown_sec": 5.0, "description": "Проверка LifeGuard",
+        "request_id": "req-1",
+        "kind": "dream",
+        "phrase": "Нова",
+        "cooldown_sec": 5.0,
+        "description": "Проверка LifeGuard",
     }
     state.push_event("life_prompt", prompt)
-    status, _ = _post(port, "/api/control/life/confirm", {
-        "request_id": "req-1", "phrase": "неверная фраза",
-    })
+    status, _ = _post(
+        port,
+        "/api/control/life/confirm",
+        {
+            "request_id": "req-1",
+            "phrase": "неверная фраза",
+        },
+    )
     assert status == 202
-    assert bus.published[-1] == (Events.LIFE_CONFIRM, {
-        "request_id": "req-1", "phrase": "неверная фраза",
-    }, "web")
+    assert bus.published[-1] == (
+        Events.LIFE_CONFIRM,
+        {
+            "request_id": "req-1",
+            "phrase": "неверная фраза",
+        },
+        "web",
+    )
 
     state.push_event("life_result", {"ok": False, "message": "Слишком рано"})
     assert state.control_snapshot(bus_connected=True)["life_prompt"] == prompt
@@ -178,7 +224,9 @@ def test_life_confirm_requires_prompt_and_preserves_guard_protocol(controlled_da
 
 def test_life_cancel_uses_existing_request_id(controlled_dashboard):
     _, port, state, bus = controlled_dashboard
-    state.push_event("life_prompt", {"request_id": "req-2", "kind": "dream", "phrase": "Тэсс"})
+    state.push_event(
+        "life_prompt", {"request_id": "req-2", "kind": "dream", "phrase": "Нова"}
+    )
     status, _ = _post(port, "/api/control/life/cancel", {"request_id": "req-2"})
     assert status == 202
     assert bus.published == [(Events.LIFE_CANCEL, {"request_id": "req-2"}, "web")]
@@ -186,11 +234,16 @@ def test_life_cancel_uses_existing_request_id(controlled_dashboard):
 
 def test_control_snapshot_contains_only_observed_results(controlled_dashboard):
     _, port, state, _ = controlled_dashboard
-    state.update_status({
-        "paused": True, "speed_mode": "fast", "life_state": "alive",
-        "last_save_ok": True, "last_save_at": 12345.0,
-        "pending_life_request": {"request_id": "req-3"},
-    })
+    state.update_status(
+        {
+            "paused": True,
+            "speed_mode": "fast",
+            "life_state": "alive",
+            "last_save_ok": True,
+            "last_save_at": 12345.0,
+            "pending_life_request": {"request_id": "req-3"},
+        }
+    )
     state.update_life({"access": {"network": {"enabled": False, "label": "Сеть"}}})
     control = _get(port, "/api/control")
     assert control["paused"] is True and control["speed_mode"] == "fast"
@@ -234,12 +287,20 @@ async def test_http_message_reaches_real_runner_and_sse_once(tmp_path, monkeypat
 
         assert agent.user_interaction.get_last_user_message_cycle() == agent.cycle_count
         events = _get(port, "/api/dialogue?limit=20")["events"]
-        sent = [event for event in events
-                if event["kind"] == "user" and event["text"] == "Привет! Я рядом."]
+        sent = [
+            event
+            for event in events
+            if event["kind"] == "user" and event["text"] == "Привет! Я рядом."
+        ]
         assert len(sent) == 1 and sent[0]["source"] == "web"
-        replay = _get(port, f"/api/dialogue?after={sent[0]['sequence']}&limit=20")["events"]
-        assert not [event for event in replay
-                    if event["kind"] == "user" and event["text"] == "Привет! Я рядом."]
+        replay = _get(port, f"/api/dialogue?after={sent[0]['sequence']}&limit=20")[
+            "events"
+        ]
+        assert not [
+            event
+            for event in replay
+            if event["kind"] == "user" and event["text"] == "Привет! Я рядом."
+        ]
     finally:
         dashboard.stop()
 

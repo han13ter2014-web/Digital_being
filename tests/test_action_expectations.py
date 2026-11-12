@@ -103,7 +103,9 @@ def test_rest_at_ceiling_does_not_refute_recovery():
     agent.energy = LR_CONFIG.ENERGY_MAX
     agent.act("deep_rest")
     assert agent.action_expectations.last_trial is None
-    assert not any(name.startswith("телесный опыт:") for name in agent.mental_models.concepts)
+    assert not any(
+        name.startswith("телесный опыт:") for name in agent.mental_models.concepts
+    )
 
 
 def test_new_attempt_cannot_complete_stale_trial():
@@ -132,6 +134,8 @@ def test_evidence_retains_next_prediction_after_storage_roundtrip():
     trial = learning.begin(model, "rest", 10, 200)
     learning.finish(model, trial, 10)
     restored = MentalModel()
-    restored.concepts[trial.claim] = ConceptNode.from_dict(model.concepts[trial.claim].to_storage_dict())
+    restored.concepts[trial.claim] = ConceptNode.from_dict(
+        model.concepts[trial.claim].to_storage_dict()
+    )
     fresh_learning = ActionExpectations()
     assert fresh_learning.begin(restored, "rest", 10, 200).expected_direction == -1

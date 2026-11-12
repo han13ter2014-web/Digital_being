@@ -35,22 +35,28 @@ def test_full_life_cycle_from_choice_to_diary_and_graph(tmp_path):
     subsystem.setup({})
     try:
         # Core действительно выбирает намерение, а не LLM и не Effector.
-        intention = begin_intention(agent, {
-            "action": "create_draft",
-            "source": "activity",
-            "params": {"topic": "память", "reason": "интерес к теме сохранился"},
-        })
+        intention = begin_intention(
+            agent,
+            {
+                "action": "create_draft",
+                "source": "activity",
+                "params": {"topic": "память", "reason": "интерес к теме сохранился"},
+            },
+        )
 
         # Подключаем изолированный Delamain к Core на время приёмки.
         agent.delamain = subsystem
         agent.delamain_effector = subsystem.effector
         from src.core.effector_driver import EffectorDriver
+
         agent.effector_driver = EffectorDriver(subsystem.effector, enabled=True)
 
         request = creative_write_request(
-            "acceptance.txt", "Небольшая запись о памяти",
+            "acceptance.txt",
+            "Небольшая запись о памяти",
             request_id="acceptance-life-cycle",
-            intention_id=intention["id"], target=intention["target"],
+            intention_id=intention["id"],
+            target=intention["target"],
             core_cycle=agent.cycle_count,
         )
 
@@ -61,7 +67,10 @@ def test_full_life_cycle_from_choice_to_diary_and_graph(tmp_path):
         waiting = subsystem.effector.step(1)
         assert waiting.status.value == "waiting_approval"
         assert waiting.approval_id
-        assert subsystem.effector.poll(request.request_id).status.value == "waiting_approval"
+        assert (
+            subsystem.effector.poll(request.request_id).status.value
+            == "waiting_approval"
+        )
 
         approved = subsystem.approve(waiting.approval_id)
         assert approved["status"] == "approved"

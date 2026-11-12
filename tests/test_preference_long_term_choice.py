@@ -13,8 +13,10 @@ from src.core.personal_continuity import capture_personal_state
 
 
 def candidates():
-    return [{"action": "play", "source": "activity", "strength": 0.8, "params": {}},
-            {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}}]
+    return [
+        {"action": "play", "source": "activity", "strength": 0.8, "params": {}},
+        {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}},
+    ]
 
 
 def test_long_term_preference_changes_arbitration_without_emotion_or_identity():
@@ -24,7 +26,13 @@ def test_long_term_preference_changes_arbitration_without_emotion_or_identity():
     personal = capture_personal_state(agent)
     for _ in range(5):
         observe(agent, "play", outcome="error", emotional_valence=0.8)
-    verdict = {"score": 0.5, "verdict": "proceed", "confidence": 0.5, "reasoning": "equal", "voices": {}}
+    verdict = {
+        "score": 0.5,
+        "verdict": "proceed",
+        "confidence": 0.5,
+        "reasoning": "equal",
+        "voices": {},
+    }
     with patch.object(agent.decision_arbitrator, "arbitrate", return_value=verdict):
         choice = agent.decision_arbitrator.choose_action(apply(agent, candidates()), {})
     assert choice["action"] == "create_draft"

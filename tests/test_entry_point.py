@@ -107,9 +107,7 @@ def test_latest_checkpoint_picks_newest(tmp_path):
     directory = tmp_path / "checkpoints"
     directory.mkdir()
     for step in (5, 120, 37):
-        (directory / f"Alpha_cycle_{step}.json").write_text(
-            "{}", encoding="utf-8"
-        )
+        (directory / f"Alpha_cycle_{step}.json").write_text("{}", encoding="utf-8")
 
     found = latest_checkpoint("Alpha", str(directory))
     assert found is not None
@@ -178,9 +176,7 @@ def _write_seed(env, name="Parent_seed_2026", concepts=3):
 
     seed_dir = os.path.join(data_path("nursery"), name)
     os.makedirs(seed_dir, exist_ok=True)
-    with open(
-        os.path.join(seed_dir, "metadata.json"), "w", encoding="utf-8"
-    ) as handle:
+    with open(os.path.join(seed_dir, "metadata.json"), "w", encoding="utf-8") as handle:
         json.dump(
             {
                 "parent_name": "Parent",
@@ -206,9 +202,7 @@ def _write_seed(env, name="Parent_seed_2026", concepts=3):
             },
             handle,
         )
-    with open(
-        os.path.join(seed_dir, "identity.json"), "w", encoding="utf-8"
-    ) as handle:
+    with open(os.path.join(seed_dir, "identity.json"), "w", encoding="utf-8") as handle:
         json.dump(
             {"values": ["Опыт", "Тишина"], "identity": {"statement": "Я есть"}},
             handle,
@@ -239,9 +233,7 @@ def test_awaken_from_seed_inherits_and_saves(env):
 
 def test_awaken_from_seed_missing_raises(env):
     with pytest.raises(FileNotFoundError):
-        awaken_from_seed(
-            _stub_agent(), "нет_такого_семени"
-        )
+        awaken_from_seed(_stub_agent(), "нет_такого_семени")
 
 
 class _StubMentalModels:

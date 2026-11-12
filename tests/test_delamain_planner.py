@@ -1,6 +1,9 @@
+from typing import Any, Dict
+
 import pytest
 
-from src.delamain.planner import HeuristicPlanner, PlannerError
+from src.delamain.models import ActionRequest
+from src.delamain.planner import FallbackPlanner, HeuristicPlanner, PlannerError
 
 
 @pytest.fixture()
@@ -56,3 +59,45 @@ def test_unknown_task_is_rejected(planner: HeuristicPlanner) -> None:
         planner.plan("сделай что-нибудь невероятное")
     with pytest.raises(PlannerError):
         planner.plan("")
+
+
+def test_fallback_planner_uses_heuristic_and_combines_errors() -> None:
+    class OfflinePlanner:
+        def plan(self, task: str):
+            raise PlannerError("primary planner is unavailable")
+
+    planner = FallbackPlanner(OfflinePlanner(), HeuristicPlanner())
+    plan = planner.plan("запиши в a.txt: ok")
+    assert plan[0].action == "write_file"
+    assert planner.status()["last_used"] == "fallback"
+    assert "unavailable" in (planner.last_error or "")
+
+    with pytest.raises(PlannerError) as exc:
+        planner.plan("неизвестная задача без шаблона")
+    assert "primary planner failed" in str(exc.value)
+    assert "fallback also failed" in str(exc.value)
+
+
+def test_fallback_planner_passes_context_to_primary_replan() -> None:
+    calls: Dict[str, Any] = {}
+
+    class RepairPlanner:
+        def plan(self, task: str):
+            raise PlannerError("plan must not be used for a repair")
+
+        def replan(self, task: str, failure_context):
+            calls["task"] = task
+            calls["context"] = dict(failure_context)
+            return [ActionRequest("read_file", {"path": "a.txt"})]
+
+    planner = FallbackPlanner(RepairPlanner(), HeuristicPlanner())
+    plan = planner.replan(
+        "repair",
+        {"stage": "action", "failed_step": 2, "action": "read_file"},
+    )
+
+    assert plan == [ActionRequest("read_file", {"path": "a.txt"})]
+    assert calls["task"] == "repair"
+    assert calls["context"]["failed_step"] == 2
+    assert planner.status()["last_context"] is True
+    assert planner.status()["last_used"] == "primary"

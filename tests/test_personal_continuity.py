@@ -62,13 +62,27 @@ def test_empty_values_are_not_replaced_with_defaults(tmp_path, monkeypatch):
     assert second.value_evolution.current_values == []
 
 
+def test_will_registry_identity_and_risk_cooldown_survive_rename_restore():
+    from src.core.agent import DigitalBeing
+
+    first = DigitalBeing(name="OriginalName")
+    first.will_registry._last_risk_cycle = 120
+    state = build_state_from_agent(first)
+    second = DigitalBeing(name="TemporaryName")
+    apply_state_to_agent(second, state)
+    assert capture_personal_state(second) == capture_personal_state(first)
+    assert second.will_registry._last_risk_cycle == 120
+
+
 def test_invalid_personal_state_does_not_partially_change_agent():
     from src.core.agent import DigitalBeing
 
     agent = DigitalBeing(name="InvalidPersonal")
     state = build_state_from_agent(agent)
     before = deepcopy(capture_personal_state(agent))
-    state["personal_state"]["attachments"] = {"user": {"name": "user", "kind": "user", "trust": float("nan")}}
+    state["personal_state"]["attachments"] = {
+        "user": {"name": "user", "kind": "user", "trust": float("nan")}
+    }
     with pytest.raises(ValueError, match="personal_state"):
         apply_state_to_agent(agent, state)
     assert capture_personal_state(agent) == before

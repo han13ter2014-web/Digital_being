@@ -23,14 +23,22 @@ def propose_experiment(model, *, energy, energy_max, fatigue, cycle, last_cycle=
         if conclusion["confidence"] >= 0.7:
             continue
         if claim.metric == "energy":
-            if claim.relation != "increase" or not claim.conditions.get("energy_below_ceiling"):
+            if claim.relation != "increase" or not claim.conditions.get(
+                "energy_below_ceiling"
+            ):
                 continue
             if not 0 <= energy < energy_max - tolerance:
                 continue
         elif claim.metric == "fatigue":
-            if claim.relation != "decrease" or not claim.conditions.get("fatigue_above_zero"):
+            if claim.relation != "decrease" or not claim.conditions.get(
+                "fatigue_above_zero"
+            ):
                 continue
-            if fatigue is None or not math.isfinite(fatigue) or not tolerance < fatigue <= 1:
+            if (
+                fatigue is None
+                or not math.isfinite(fatigue)
+                or not tolerance < fatigue <= 1
+            ):
                 continue
         else:
             continue
@@ -39,7 +47,14 @@ def propose_experiment(model, *, energy, energy_max, fatigue, cycle, last_cycle=
     if not possible:
         return None
     uncertainty, claim_id, claim = max(possible, key=lambda item: (item[0], item[1]))
-    return {"source": "self_experiment", "action": claim.subject,
-            "strength": min(0.55, 0.6 * uncertainty),
-            "params": {"claim_id": claim_id, "reason": "Проверить собственное неуверенное представление",
-                       "uncertainty": uncertainty, "metric": claim.metric}}
+    return {
+        "source": "self_experiment",
+        "action": claim.subject,
+        "strength": min(0.55, 0.6 * uncertainty),
+        "params": {
+            "claim_id": claim_id,
+            "reason": "Проверить собственное неуверенное представление",
+            "uncertainty": uncertainty,
+            "metric": claim.metric,
+        },
+    }

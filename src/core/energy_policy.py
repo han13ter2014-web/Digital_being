@@ -35,20 +35,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EnergyThresholds:
     """Пороги, определяющие поведение."""
+
     # Энергия → минимальный интервал тика
-    FULL_ENERGY_INTERVAL = 5.0       # ≥80% энергии — быстрые циклы
-    NORMAL_INTERVAL = 10.0           # ≥50%
-    SLOW_INTERVAL = 30.0             # ≥20%
-    TIRED_INTERVAL = 60.0            # ≥10%
-    EXHAUSTED_INTERVAL = 300.0       # <10% — почти спит
+    FULL_ENERGY_INTERVAL = 5.0  # ≥80% энергии — быстрые циклы
+    NORMAL_INTERVAL = 10.0  # ≥50%
+    SLOW_INTERVAL = 30.0  # ≥20%
+    TIRED_INTERVAL = 60.0  # ≥10%
+    EXHAUSTED_INTERVAL = 300.0  # <10% — почти спит
 
     # Восстановление энергии в секунду простоя
     # (когда тик медленный — агент «отдыхает» и восстанавливается)
-    REGEN_PER_SEC_FULL_ENERGY = 0.5     # быстро при 80%+
-    REGEN_PER_SEC_NORMAL = 0.3          # при 50-80%
-    REGEN_PER_SEC_SLOW = 0.1            # при 20-50%
-    REGEN_PER_SEC_TIRED = 0.02          # при 10-20% — еле-еле
-    REGEN_PER_SEC_EXHAUSTED = 0.005     # <10% — почти не восстанавливается
+    REGEN_PER_SEC_FULL_ENERGY = 0.5  # быстро при 80%+
+    REGEN_PER_SEC_NORMAL = 0.3  # при 50-80%
+    REGEN_PER_SEC_SLOW = 0.1  # при 20-50%
+    REGEN_PER_SEC_TIRED = 0.02  # при 10-20% — еле-еле
+    REGEN_PER_SEC_EXHAUSTED = 0.005  # <10% — почти не восстанавливается
 
     # Когда публиковать ENERGY_LOW
     LOW_THRESHOLD = 20.0
@@ -71,9 +72,9 @@ class EnergyPolicy:
         self._get_energy = get_energy
         self._max_energy = float(max_energy)
         # Флаги уведомлений (чтобы не спамить)
-        self._low_warned = False           # True после первого LOW-уведомления
-        self._critical_warned = False      # True после первого CRITICAL-уведомления
-        self._recovered_notified = False   # True после RECOVERED-уведомления
+        self._low_warned = False  # True после первого LOW-уведомления
+        self._critical_warned = False  # True после первого CRITICAL-уведомления
+        self._recovered_notified = False  # True после RECOVERED-уведомления
         # Защита от ложного «я восстановился» при старте:
         # уведомляем о recovered только если до этого были LOW/CRITICAL.
         self._has_been_low_before = False
@@ -109,10 +110,10 @@ class EnergyPolicy:
         """Сколько секунд ждать до следующего тика в зависимости от энергии."""
         level = self.energy_level()
         return {
-            "full":      EnergyThresholds.FULL_ENERGY_INTERVAL,
-            "normal":    EnergyThresholds.NORMAL_INTERVAL,
-            "slow":      EnergyThresholds.SLOW_INTERVAL,
-            "tired":     EnergyThresholds.TIRED_INTERVAL,
+            "full": EnergyThresholds.FULL_ENERGY_INTERVAL,
+            "normal": EnergyThresholds.NORMAL_INTERVAL,
+            "slow": EnergyThresholds.SLOW_INTERVAL,
+            "tired": EnergyThresholds.TIRED_INTERVAL,
             "exhausted": EnergyThresholds.EXHAUSTED_INTERVAL,
         }[level]
 
@@ -177,7 +178,10 @@ class EnergyPolicy:
 
     def should_publish_low(self) -> bool:
         """True, если только что пересёкли порог LOW (для публикации события)."""
-        if self.energy_percent < EnergyThresholds.LOW_THRESHOLD and not self._low_warned:
+        if (
+            self.energy_percent < EnergyThresholds.LOW_THRESHOLD
+            and not self._low_warned
+        ):
             self._low_warned = True
             self._has_been_low_before = True
             return True
@@ -185,7 +189,10 @@ class EnergyPolicy:
 
     def should_publish_critical(self) -> bool:
         """True, если только что пересёкли порог CRITICAL."""
-        if self.energy_percent < EnergyThresholds.CRITICAL_THRESHOLD and not self._critical_warned:
+        if (
+            self.energy_percent < EnergyThresholds.CRITICAL_THRESHOLD
+            and not self._critical_warned
+        ):
             self._critical_warned = True
             self._has_been_low_before = True
             return True
@@ -233,6 +240,7 @@ class EnergyPolicy:
 # ============================================================
 # Backward compatibility: legacy-функция для main.py
 # ============================================================
+
 
 def is_agent_alive_legacy(energy: float, max_cycles: int, cycle_count: int) -> bool:
     """Старая проверка жизнеспособности. Оставлена для CLI-режима.

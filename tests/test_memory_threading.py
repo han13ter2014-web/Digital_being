@@ -1,4 +1,4 @@
-"""Тикет V-3: эпизоды жизни терялись из-за привязки SQLite к потоку.
+"""Тикет многопоточной записи: эпизоды жизни терялись из-за привязки SQLite к потоку.
 
 До фикса ``record_life_episode``, вызванный из потока эффекторов, падал с
 «SQLite objects created in a thread can only be used in that same thread» —
@@ -48,9 +48,7 @@ def test_record_life_episode_from_foreign_threads(tmp_path):
     episodes = store.recent_life_episodes(life_id="life-test", limit=200)
     # Не «нет исключений», а «нет потерь»: ровно M×N записей, и каждый
     # intention_id на месте — ни одного пропуска.
-    expected = {
-        f"intention-{i}-{j}" for i in range(4) for j in range(per_thread)
-    }
+    expected = {f"intention-{i}-{j}" for i in range(4) for j in range(per_thread)}
     recorded = {episode["task_id"] for episode in episodes}
     assert len(episodes) == 4 * per_thread
     assert recorded == expected
@@ -60,7 +58,7 @@ def test_record_life_episode_from_foreign_threads(tmp_path):
 def test_same_fact_concurrent_upsert(tmp_path):
     """Check-then-act на ОДНОМ факте: потоки не рвутся на UNIQUE.
 
-    Реальная гонка тикета V-3: несколько потоков одновременно запоминают
+    Реальная гонка тикета многопоточной записи: несколько потоков одновременно запоминают
     один и тот же факт. Каждый проходит путь «SELECT → нет → INSERT»;
     без общего замка второй INSERT бьётся о UNIQUE constraint, и запись
     теряется. Все потоки обязаны выжить, факт обязан остаться ровно один.
@@ -71,7 +69,7 @@ def test_same_fact_concurrent_upsert(tmp_path):
     def writer() -> None:
         try:
             for _ in range(50):
-                store.remember_fact("дом", "Тэсс живёт в компьютере")
+                store.remember_fact("дом", "Нова живёт в компьютере")
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
@@ -79,8 +77,9 @@ def test_same_fact_concurrent_upsert(tmp_path):
 
     assert errors == []
     matching = [
-        fact for fact in store.recent_facts(limit=200)
-        if fact["key"] == "дом" and fact["value"] == "Тэсс живёт в компьютере"
+        fact
+        for fact in store.recent_facts(limit=200)
+        if fact["key"] == "дом" and fact["value"] == "Нова живёт в компьютере"
     ]
     assert len(matching) == 1
     store.close()
@@ -114,12 +113,14 @@ def test_recall_while_remembering_same_topic(tmp_path):
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
 
-    _spawn([
-        threading.Thread(target=writer),
-        threading.Thread(target=writer),
-        threading.Thread(target=reader),
-        threading.Thread(target=reader),
-    ])
+    _spawn(
+        [
+            threading.Thread(target=writer),
+            threading.Thread(target=writer),
+            threading.Thread(target=reader),
+            threading.Thread(target=reader),
+        ]
+    )
 
     assert errors == []
     facts = store.recall_facts("обучение", limit=50)

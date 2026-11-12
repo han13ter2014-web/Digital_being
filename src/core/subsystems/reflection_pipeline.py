@@ -15,6 +15,7 @@ class ReflectionPipeline:
 
     def __init__(self, agent_name: str = "agent"):
         from src.cognition.reflection_engine import ReflectionEngine
+
         self.engine = ReflectionEngine()
         self.agent_name = agent_name
 

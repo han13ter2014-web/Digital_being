@@ -1,18 +1,9 @@
-import json
-import time
-import gc
 import random
-import re
-from datetime import datetime
-import os
 from typing import Dict, List, Optional
-from src.cognition.reflection_engine import ReflectionEngine
-from src.cognition.mental_models import MentalModel
 from src.cognition.thinking_pipeline import ThinkingPipeline
 from config.simulation_config import SIM_CONFIG, LR_CONFIG
 from config.will_config import WILL_CONFIG
 from src.core.buffered_logger import get_logger
-from src.core.action_budget import ActionBudget
 from src.core.subsystems import (
     GoalSubsystem,
     KnowledgeSubsystem,
@@ -27,58 +18,30 @@ from src.core.subsystems import (
     EmbodimentController,
     MortalityAwareness,
     WillRegistry,
-    RightToRefuse,
-    IntentionalForgetting,
-    ValueEvolution,
-    SpontaneousGenerator,
-    WillToRisk,
-    RightToFail,
     MindDream,
     SelfTermination,
-    ArchitectureProposal,
     ProactiveCommunication,
     NamingDialogue,
 )
-from src.perception.user_interaction import UserInteraction
+
 # Импорт LongTermMemory через нормальный пакет (Этап 2.2).
-from src.memory import LongTermMemory
-from src.memory.knowledge_quality import (
-    REASON_TITLES,
-    STOP_WORDS,
-    clean_knowledge_base,
-    normalize_concept_name,
-)
 from src.core.paths import data_path
+
 # Bootstrap knowledge (родовые знания)
-from src.core.bootstrap_knowledge import load_initial_knowledge
 # Internal motivation (внутренняя мотивация)
-from src.core.internal_motivation import create_motivation_system
-from src.core.motivation.unified_motivation import create_motivation_system as create_unified_motivation_system
 # Active Inference (активный вывод / свободная энергия)
-from src.cognition.active_inference import create_active_inference_engine, encode_observations
 # New systems: Interoception, Continuous Time, Meta-Learning, Social Cell, Death Risk
-from src.core.interoception import create_interoceptive_model
-from src.core.continuous_time import create_continuous_time_engine
-from src.core.meta_learning import create_meta_learner
-from src.core.social_cell import create_social_cell
-from src.core.death_risk import create_death_risk_engine
 # Этап 3.5: PluginRegistry — единый реестр всех подсистем для dashboard/расширяемости.
-from src.core.subsystem_base import (
-    PluginRegistry,
-    attach_existing_subsystem,
-)
 # Stage 18B: the core owns the clock for pending effector requests.
-from src.core.effector_driver import EffectorDriver
 # Защита жизни: ни один путь не останавливает агента без явного согласия.
 from src.core.life_guard import (
     KIND_TERMINATE,
     STATE_ALIVE,
     ConfirmationError,
-    LifeGuard,
 )
+
 # Замыкание петли: действие → наблюдаемый результат → прогресс цели.
-from src.core.loop_closure import LoopCloser
-from src.core.world_delta import WorldDelta, capture
+from src.core.world_delta import WorldDelta
 from src.core.agent_reflection import (
     reflect_impl,
     generate_self_analysis_report_impl,
@@ -104,12 +67,12 @@ from src.core.agent_goals import (
     _check_goal_progress_impl,
 )
 from src.core.agent_body import (
-    RECOVERY_ACTIONS,
-    ESSENTIAL_ACTIONS,
-    BODY_LOAD,
-    BODY_REST_DEPTH,
-    HEAVY_ACTIONS,
-    BODY_DENIED_LOAD,
+    BODY_DENIED_LOAD,  # noqa: F401  (re-export фасада для тестов и внешних вызовов)
+    BODY_LOAD,  # noqa: F401
+    BODY_REST_DEPTH,  # noqa: F401
+    ESSENTIAL_ACTIONS,  # noqa: F401
+    HEAVY_ACTIONS,  # noqa: F401
+    RECOVERY_ACTIONS,  # noqa: F401
     step_body,
     _get_adaptive_cost_impl,
     _recover_energy_impl,
@@ -219,6 +182,7 @@ from src.core.agent_exploration import (
 from src.core.agent_creative import (
     leave_creative_draft_impl,
     list_creative_drafts_impl,
+    export_creative_draft_impl,
     _pick_art_theme_impl,
     _art_richness_impl,
     _act_draw_impl,
@@ -229,7 +193,6 @@ from src.core.agent_creative import (
     _record_creative_failure_impl,
 )
 from src.core.agent_emotional import (
-    EMOTION_ACTION_BIAS,
     _emotions_from_death_risk_impl,
     _emotions_from_mortality_impl,
     _apply_emotional_bias_impl,
@@ -258,10 +221,11 @@ from src.core.agent_creation import (
 
 class AgentDeadSignal(Exception):
     """Signal that the agent has died — not an error, but expected termination.
-    
+
     Raised by autonomous_tick when death_risk reports the agent is dead.
     The runner should catch this and perform graceful shutdown.
     """
+
     def __init__(self, cause: str, legacy: Dict):
         self.cause = cause
         self.legacy = legacy
@@ -322,6 +286,7 @@ class DigitalBeing:
         "create_draft": "create_draft",
         "philosophy": "synthesis",
         # декомпозиция
+        "decomposition": "decomposition",
         "think_decompose": "decomposition",
         "decompose_concept": "decomposition",
         "organize_knowledge": "decomposition",
@@ -356,7 +321,7 @@ class DigitalBeing:
         "user_answer": "communicate",
         "teach_other": "communicate",
         "propose_alternative": "communicate",
-        # «Сироты-1» (k16-10): имена из related_actions/DRIVE_GOAL_TEMPLATES,
+        # «Сироты-1» (потерянных действий): имена из related_actions/DRIVE_GOAL_TEMPLATES,
         # которые предлагались мотивацией, но никогда не ловились здесь —
         # действие исполнялось вхолостую (default) и сжигало цикл.
         # social_interaction — rank-1 способ нужды connection
@@ -372,7 +337,7 @@ class DigitalBeing:
         "contribution": "synthesis",
         # legacy и helping_others НЕ маппим сознательно: это вопрос
         # личности, решает владелец. Они продолжают давать честный
-        # default (исполнение впустую → sadness, k16-03).
+        # default (исполнение впустую → sadness, оценки исхода).
         # явные «ничего не делать»
         "wait": "wait",
         "none": "wait",
@@ -401,68 +366,138 @@ class DigitalBeing:
     # =====================================================================
     SUBSYSTEM_SPECS = [
         # (имя_атрибута,           конструктор,                                        post_init,                                            приоритет)
-        ("goal_subsystem",          lambda name: GoalSubsystem(agent_name=name),      "goals",                                               10),
-        ("motivation",              lambda name: MotivationController(agent_name=name), "motivation",                                          50),
-        ("energy_subsystem",        lambda name: EnergySubsystem(
-                                        starting_energy=150,  # legacy_energy
-                                        max_energy=LR_CONFIG.ENERGY_MAX,
-                                        regen_per_cycle=LR_CONFIG.ENERGY_REGEN_PER_CYCLE,
-                                        low_threshold=LR_CONFIG.ENERGY_LOW_THRESHOLD,
-                                        critical_threshold=LR_CONFIG.ENERGY_CRITICAL_THRESHOLD,
-                                        gc_interval=SIM_CONFIG.GC_INTERVAL,
-                                    ),                                                       "energy",                                              20),
-        ("knowledge_subsystem",     lambda name: KnowledgeSubsystem(
-                                        agent_name=name,
-                                        knowledge_file=data_path("knowledge_base.json"),
-                                        max_entries=SIM_CONFIG.MAX_KNOWLEDGE_BASE,
-                                        prune_amount=SIM_CONFIG.KNOWLEDGE_PRUNE_AMOUNT,
-                                        detect_contradictions=LR_CONFIG.CONTRADICTION_DETECTION,
-                                    ),                                                       "knowledge",                                           30),
-        ("checkpoint_subsystem",   lambda name: CheckpointSubsystem(
-                                        checkpoint_dir=data_path("checkpoints"),
-                                        interval=SIM_CONFIG.CHECKPOINT_INTERVAL,
-                                        save_on_evolution=SIM_CONFIG.SAVE_ON_EVOLUTION,
-                                        max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
-                                    ),                                                       "checkpoint",                                          40),
-        ("reflection_pipeline",     lambda name: ReflectionPipeline(agent_name=name),      "reflection",                                          60),
-        ("embodiment",              lambda name: EmbodimentController(
-                                        energy_subsystem=None,  # патчится в post_init
-                                    ),                                                       "embodiment",                                          70),
-        ("mortality",               lambda name: MortalityAwareness(
-                                        agent_name=name,
-                                        expected_lifespan=50000,
-                                        creation_time=None,  # патчится в post_init
-                                    ),                                                       "mortality",                                           80),
-        ("soul",                    lambda name: SoulController(agent_name=name),         "soul",                                                90),
-        ("decision_arbitrator",     lambda name: DecisionArbitrator(agent_name=name),      "decision_arbitrator",                                 100),
-        ("attachment",              lambda name: AttachmentSystem(agent_name=name),      "attachment",                                          110),
-        ("sleep_cycle",             lambda name: SleepCycle(
-                                        agent_name=name,
-                                        long_term_memory=None,  # патчится в post_init
-                                        mental_models=None,
-                                        knowledge_subsystem=None,
-                                        cycle_interval=100,
-                                    ),                                                       "sleep_cycle",                                         120),
-        ("will_registry",           lambda name: WillRegistry(agent_name=name),          "will",                                                130),
-        ("mind_dream",              lambda name: MindDream(
-                                        agent_name=name,
-                                        registry=None,  # патчится в post_init
-                                        user_interaction=None,
-                                    ),                                                       "mind_dream",                                          140),
-        ("self_termination",        lambda name: SelfTermination(
-                                        agent_name=name,
-                                        will_registry=None,  # патчится в post_init
-                                    ),                                                       "self_termination",                                    150),
-        ("proactive_communication", lambda name: ProactiveCommunication(
-                                        agent_name=name,
-                                        user_interaction=None,  # патчится в post_init
-                                        attachment=None,
-                                    ),                                                       "proactive_communication",                             160),
-        ("naming_dialogue",         lambda name: NamingDialogue(
-                                        agent_name=name,
-                                        user_interaction=None,  # патчится в post_init
-                                    ),                                                       "naming_dialogue",                                     170),
-        ("thinking",                lambda agent: ThinkingPipeline(agent),               None,                                                  180),
+        ("goal_subsystem", lambda name: GoalSubsystem(agent_name=name), "goals", 10),
+        (
+            "motivation",
+            lambda name: MotivationController(agent_name=name),
+            "motivation",
+            50,
+        ),
+        (
+            "energy_subsystem",
+            lambda name: EnergySubsystem(
+                starting_energy=150,  # legacy_energy
+                max_energy=LR_CONFIG.ENERGY_MAX,
+                regen_per_cycle=LR_CONFIG.ENERGY_REGEN_PER_CYCLE,
+                low_threshold=LR_CONFIG.ENERGY_LOW_THRESHOLD,
+                critical_threshold=LR_CONFIG.ENERGY_CRITICAL_THRESHOLD,
+                gc_interval=SIM_CONFIG.GC_INTERVAL,
+            ),
+            "energy",
+            20,
+        ),
+        (
+            "knowledge_subsystem",
+            lambda name: KnowledgeSubsystem(
+                agent_name=name,
+                knowledge_file=data_path("knowledge_base.json"),
+                max_entries=SIM_CONFIG.MAX_KNOWLEDGE_BASE,
+                prune_amount=SIM_CONFIG.KNOWLEDGE_PRUNE_AMOUNT,
+                detect_contradictions=LR_CONFIG.CONTRADICTION_DETECTION,
+            ),
+            "knowledge",
+            30,
+        ),
+        (
+            "checkpoint_subsystem",
+            lambda name: CheckpointSubsystem(
+                checkpoint_dir=data_path("checkpoints"),
+                interval=SIM_CONFIG.CHECKPOINT_INTERVAL,
+                save_on_evolution=SIM_CONFIG.SAVE_ON_EVOLUTION,
+                max_checkpoints=SIM_CONFIG.MAX_CHECKPOINTS,
+            ),
+            "checkpoint",
+            40,
+        ),
+        (
+            "reflection_pipeline",
+            lambda name: ReflectionPipeline(agent_name=name),
+            "reflection",
+            60,
+        ),
+        (
+            "embodiment",
+            lambda name: EmbodimentController(
+                energy_subsystem=None,  # патчится в post_init
+            ),
+            "embodiment",
+            70,
+        ),
+        (
+            "mortality",
+            lambda name: MortalityAwareness(
+                agent_name=name,
+                expected_lifespan=50000,
+                creation_time=None,  # патчится в post_init
+            ),
+            "mortality",
+            80,
+        ),
+        ("soul", lambda name: SoulController(agent_name=name), "soul", 90),
+        (
+            "decision_arbitrator",
+            lambda name: DecisionArbitrator(agent_name=name),
+            "decision_arbitrator",
+            100,
+        ),
+        (
+            "attachment",
+            lambda name: AttachmentSystem(agent_name=name),
+            "attachment",
+            110,
+        ),
+        (
+            "sleep_cycle",
+            lambda name: SleepCycle(
+                agent_name=name,
+                long_term_memory=None,  # патчится в post_init
+                mental_models=None,
+                knowledge_subsystem=None,
+                cycle_interval=100,
+            ),
+            "sleep_cycle",
+            120,
+        ),
+        ("will_registry", lambda name: WillRegistry(agent_name=name), "will", 130),
+        (
+            "mind_dream",
+            lambda name: MindDream(
+                agent_name=name,
+                registry=None,  # патчится в post_init
+                user_interaction=None,
+            ),
+            "mind_dream",
+            140,
+        ),
+        (
+            "self_termination",
+            lambda name: SelfTermination(
+                agent_name=name,
+                will_registry=None,  # патчится в post_init
+            ),
+            "self_termination",
+            150,
+        ),
+        (
+            "proactive_communication",
+            lambda name: ProactiveCommunication(
+                agent_name=name,
+                user_interaction=None,  # патчится в post_init
+                attachment=None,
+            ),
+            "proactive_communication",
+            160,
+        ),
+        (
+            "naming_dialogue",
+            lambda name: NamingDialogue(
+                agent_name=name,
+                user_interaction=None,  # патчится в post_init
+            ),
+            "naming_dialogue",
+            170,
+        ),
+        ("thinking", lambda agent: ThinkingPipeline(agent), None, 180),
     ]
 
     def _init_subsystems_declaratively(self, name: str) -> None:
@@ -522,7 +557,6 @@ class DigitalBeing:
     def _on_effector_result(self, result):
         return _on_effector_result_impl(self, result)
 
-
     # === Единый источник правды для энергии ===
     # self.energy теперь читается/пишется через energy_subsystem.
     # Это устраняет двойное состояние (раньше energy_subsystem.energy и
@@ -559,16 +593,21 @@ class DigitalBeing:
             может вернуть обогащённое восприятие.
         """
         get_logger().log(f"Воспринимаю: {stimulus}")
-        
+        from src.cognition.experience_observers import perceive_text
+
+        perceive_text(self, stimulus)
+
         # Приоритезация: если stimulus связан с активной целью - повышаем приоритет
         if LR_CONFIG.PRIORITIZE_STIMULI and self.active_goal:
             goal_keywords = self.active_goal["title"].lower().split()
             stimulus_lower = stimulus.lower()
-            
+
             matches = sum(1 for kw in goal_keywords if kw in stimulus_lower)
             if matches >= 2:
-                get_logger().log(f"Приоритет: стимул связан с целью '{self.active_goal['title']}'")
-        
+                get_logger().log(
+                    f"Приоритет: стимул связан с целью '{self.active_goal['title']}'"
+                )
+
         return stimulus
 
     def _should_be_creative(self) -> bool:
@@ -576,7 +615,7 @@ class DigitalBeing:
         if not LR_CONFIG.STOCHASTIC_BEHAVIOR_ENABLED:
             return False
         return random.random() < LR_CONFIG.EPSILON_GREEDY
-    
+
     def _get_adaptive_cost(self, action_type: str) -> int:
         return _get_adaptive_cost_impl(self, action_type)
 
@@ -619,7 +658,7 @@ class DigitalBeing:
 
     def _adapt_costs_after_action(self, success: bool, action_type: str):
         return _adapt_costs_after_action_impl(self, success, action_type)
-    
+
     # === Тонкие обёртки для backward-compatibility ===
     # Реальная логика вынесена в ThinkingPipeline (src/cognition/thinking_pipeline.py).
     # Эти методы оставлены чтобы ничего не сломалось у существующих вызовов.
@@ -661,9 +700,7 @@ class DigitalBeing:
         """
         if not hasattr(self, "thinking"):
             return None
-        return self.thinking._synthesize_complex_question(
-            complex_question, sub_answers
-        )
+        return self.thinking._synthesize_complex_question(complex_question, sub_answers)
 
     def _register_unknown_concept(self, clean_data, original_data):
         """Backward-compat: делегирует в ThinkingPipeline."""
@@ -712,7 +749,9 @@ class DigitalBeing:
         повторяются бесконечно.
         """
         return act_impl(
-            self, decision, intention=intention,
+            self,
+            decision,
+            intention=intention,
             DigitalBeing=DigitalBeing,
             record_denied_outcome=record_denied_outcome,
         )
@@ -750,7 +789,10 @@ class DigitalBeing:
 
     def _record_denied(self, action_type: str, world_before, reason: str) -> None:
         return _record_denied_impl(
-            self, action_type, world_before, reason,
+            self,
+            action_type,
+            world_before,
+            reason,
             record_denied_outcome=record_denied_outcome,
         )
 
@@ -763,8 +805,7 @@ class DigitalBeing:
     def _emotions_from_death_risk(self, death_result: Dict) -> None:
         return _emotions_from_death_risk_impl(self, death_result)
 
-    def _emotions_from_mortality(self, mortality_state: Dict,
-                                 cycle_count: int) -> None:
+    def _emotions_from_mortality(self, mortality_state: Dict, cycle_count: int) -> None:
         return _emotions_from_mortality_impl(self, mortality_state, cycle_count)
 
     def _apply_emotional_bias(self, candidates: List[Dict]) -> Optional[Dict]:
@@ -783,7 +824,7 @@ class DigitalBeing:
     def _is_meta_topic(self, name: str) -> bool:
         return _is_meta_topic_impl(self, name)
 
-    # Местоимения-шум (TICKET-8, наблюдатели 2026-11-05): в старые
+    # Местоимения-шум: в старые
     # сессии реплики диалога попадали в концепции и потом выбирались
     # целями («Понять: ты»). Сами по себе — не тема исследования.
     # Фильтруются ТОЛЬКО при выборе цели, как и метаслова: «я» в
@@ -819,6 +860,9 @@ class DigitalBeing:
 
     def list_creative_drafts(self) -> List[Dict]:
         return list_creative_drafts_impl(self)
+
+    def export_creative_draft(self, draft_id: Optional[str] = None) -> Dict:
+        return export_creative_draft_impl(self, draft_id)
 
     # === «Творчество+»: рисование ===
 
@@ -863,9 +907,7 @@ class DigitalBeing:
         return _defer_ask_intention_impl(self, target)
 
     def _act_ask_user(self, target=None) -> Dict:
-        return _act_ask_user_impl(
-            self, target, DigitalBeing=DigitalBeing
-        )
+        return _act_ask_user_impl(self, target, DigitalBeing=DigitalBeing)
 
     def _act_communicate(self) -> Dict:
         return _act_communicate_impl(self)
@@ -899,7 +941,7 @@ class DigitalBeing:
 
     def perform_forgetting(self):
         return perform_forgetting_impl(self)
-    
+
     def _reward_creative_success(self):
         return _reward_creative_success_impl(self)
 
@@ -938,7 +980,7 @@ class DigitalBeing:
             return False
 
         # Сначала проверяем death_risk если он есть
-        if hasattr(self, 'death_risk') and not self.death_risk.is_alive:
+        if hasattr(self, "death_risk") and not self.death_risk.is_alive:
             return False
         if self.energy < 0:
             return False
@@ -947,10 +989,9 @@ class DigitalBeing:
             return False
         return True
 
-
     def _legacy_is_alive(self) -> bool:
         """Legacy fallback для проверки жизни без death_risk.
-        
+
         Используется когда death_risk недоступен (например, при миграции чекпоинтов).
         Проверяет energy >= 0 и max_cycles.
         """
@@ -960,6 +1001,7 @@ class DigitalBeing:
         if self.max_cycles > 0 and self.cycle_count >= self.max_cycles:
             return False
         return True
+
     def _load_knowledge_base(self):
         return _load_knowledge_base_impl(self)
 
@@ -980,11 +1022,24 @@ class DigitalBeing:
     def _generate_initial_goals(self):
         return _generate_initial_goals_impl(self)
 
-    def set_goal(self, title, difficulty=1, activate=False, *,
-                 command=None, plan=None, success_predicate=""):
+    def set_goal(
+        self,
+        title,
+        difficulty=1,
+        activate=False,
+        *,
+        command=None,
+        plan=None,
+        success_predicate="",
+    ):
         return set_goal_impl(
-            self, title, difficulty, activate,
-            command=command, plan=plan, success_predicate=success_predicate,
+            self,
+            title,
+            difficulty,
+            activate,
+            command=command,
+            plan=plan,
+            success_predicate=success_predicate,
         )
 
     def complete_goal(self, goal_id=None):
@@ -1026,14 +1081,21 @@ class DigitalBeing:
         # 5. Мотивация — источник истины: UnifiedMotivationSystem (P0.6-P0.10).
         #    Тикается в autonomous_tick; здесь — только чтение статуса.
         motivation_state = None
-        motivation = getattr(self, "motivation_system", None) or getattr(self, "internal_motivation", None)
+        motivation = getattr(self, "motivation_system", None) or getattr(
+            self, "internal_motivation", None
+        )
         if motivation is not None and hasattr(motivation, "get_status"):
             motivation_state = motivation.get_status()
 
         # 6. Embodiment → Energy модификатор (усталость увеличивает затраты)
-        if hasattr(self, "energy_subsystem") and embodiment_signals.get("fatigue", 0) > 0.6:
+        if (
+            hasattr(self, "energy_subsystem")
+            and embodiment_signals.get("fatigue", 0) > 0.6
+        ):
             # Усталость: тратим больше энергии
-            self.energy_subsystem.energy -= embodiment_signals["energy_cost_modifier"] * 0.5
+            self.energy_subsystem.energy -= (
+                embodiment_signals["energy_cost_modifier"] * 0.5
+            )
 
         self._soul_state = soul_state
         self._embodiment_signals = embodiment_signals
@@ -1071,10 +1133,18 @@ class DigitalBeing:
             "goals": self.get_goals_status(),
             "mental_models": self.get_mental_models_status(),
             "soul": self._soul_state if hasattr(self, "_soul_state") else {},
-            "embodiment": self._embodiment_signals if hasattr(self, "_embodiment_signals") else {},
-            "mortality": self._mortality_state if hasattr(self, "_mortality_state") else {},
-            "attachment": self.attachment.get_status() if hasattr(self, "attachment") else {},
-            "sleep": self.sleep_cycle.get_status() if hasattr(self, "sleep_cycle") else {},
+            "embodiment": self._embodiment_signals
+            if hasattr(self, "_embodiment_signals")
+            else {},
+            "mortality": self._mortality_state
+            if hasattr(self, "_mortality_state")
+            else {},
+            "attachment": self.attachment.get_status()
+            if hasattr(self, "attachment")
+            else {},
+            "sleep": self.sleep_cycle.get_status()
+            if hasattr(self, "sleep_cycle")
+            else {},
             "consolidation": {
                 "count": int(getattr(self, "_consolidation_count", 0)),
                 "pending_sleep_units": round(
@@ -1082,10 +1152,19 @@ class DigitalBeing:
                 ),
                 "last": dict(getattr(self, "_last_consolidation", {}) or {}),
             },
-            "motivation": (self.motivation_system.get_status() if hasattr(self, "motivation_system")
-                            else (self.motivation.get_status() if hasattr(self, "motivation") else {})),
-            "will": self.will_registry.get_stats() if hasattr(self, "will_registry") else {},
-            "mind_dream_state": self.mind_dream.state if hasattr(self, "mind_dream") else "unknown",
+            "motivation": (
+                self.motivation_system.get_status()
+                if hasattr(self, "motivation_system")
+                else (
+                    self.motivation.get_status() if hasattr(self, "motivation") else {}
+                )
+            ),
+            "will": self.will_registry.get_stats()
+            if hasattr(self, "will_registry")
+            else {},
+            "mind_dream_state": self.mind_dream.state
+            if hasattr(self, "mind_dream")
+            else "unknown",
             "life": self.get_life_status() if hasattr(self, "life_guard") else {},
             "loop": self.loop_closer.status() if hasattr(self, "loop_closer") else {},
         }
@@ -1097,16 +1176,16 @@ class DigitalBeing:
         """Агент отказывается выполнять действие. Возвращает отказ."""
         if not hasattr(self, "right_to_refuse"):
             return {"refused": False, "reason": "модуль не инициализирован"}
-        return self.right_to_refuse.refuse(
-            topic, reason, cycle=self.cycle_count
-        )
+        return self.right_to_refuse.refuse(topic, reason, cycle=self.cycle_count)
 
     def forget_concept(self, concept_name: str, reason: str) -> Dict:
         """Агент сознательно забывает концепцию."""
         if not hasattr(self, "intentional_forgetting"):
             return {"forgotten": False}
         return self.intentional_forgetting.forget(
-            concept_name, reason, self.mental_models,
+            concept_name,
+            reason,
+            self.mental_models,
             cycle=self.cycle_count,
         )
 
@@ -1114,9 +1193,7 @@ class DigitalBeing:
         """Агент добавляет новую ценность."""
         if not hasattr(self, "value_evolution"):
             return {"added": False}
-        return self.value_evolution.add_value(
-            value, reason, cycle=self.cycle_count
-        )
+        return self.value_evolution.add_value(value, reason, cycle=self.cycle_count)
 
     # Способ действия → ценность, которую он может заработать.
     # Ценность добавляется не по желанию, а когда собственный опыт
@@ -1167,21 +1244,18 @@ class DigitalBeing:
         goal = getattr(self, "active_goal", None)
         priority = (
             str(goal.get("priority", "normal")).lower()
-            if isinstance(goal, dict) else "normal"
+            if isinstance(goal, dict)
+            else "normal"
         )
-        significance = {"high": 1.0, "normal": 0.6, "low": 0.3}.get(
-            priority, 0.6
-        )
+        significance = {"high": 1.0, "normal": 0.6, "low": 0.3}.get(priority, 0.6)
         max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200) or 200)
         ratio = (float(self.energy) / max_energy) if max_energy > 0 else 0.0
         if not self.will_to_risk.should_take_risk(significance, ratio):
             return None
         raw_last_risk = getattr(self.will_registry, "_last_risk_cycle", -1)
         last_risk = -1 if raw_last_risk is None else int(raw_last_risk)
-        if (
-            last_risk >= 0
-            and self.cycle_count - last_risk
-            < int(getattr(WILL_CONFIG, "MIN_CYCLES_BETWEEN_RISKS", 50))
+        if last_risk >= 0 and self.cycle_count - last_risk < int(
+            getattr(WILL_CONFIG, "MIN_CYCLES_BETWEEN_RISKS", 50)
         ):
             return None
         entry = self.will_to_risk.take_risk(
@@ -1282,12 +1356,9 @@ class DigitalBeing:
             )
             seed_folder = seed_result.get("seed_folder")
             if seed_result.get("status") == "denied":
-                return {"status": "rejected",
-                        "reason": seed_result.get("reason")}
+                return {"status": "rejected", "reason": seed_result.get("reason")}
 
-        result = self.life_guard.execute_confirmed(
-            request_id, seed_folder=seed_folder
-        )
+        result = self.life_guard.execute_confirmed(request_id, seed_folder=seed_folder)
         self._mark_dormant()
         return {"status": "dreaming", "seed_folder": seed_folder, **result}
 
@@ -1358,9 +1429,7 @@ class DigitalBeing:
                     "seconds_until_confirmable": round(
                         req.seconds_until_confirmable(), 1
                     ),
-                    "expires_in_sec": round(
-                        req.expires_at - guard.clock(), 1
-                    ),
+                    "expires_in_sec": round(req.expires_at - guard.clock(), 1),
                 }
                 for req in guard.pending_requests()
             ],
@@ -1421,15 +1490,18 @@ class DigitalBeing:
             return self.mind_dream.autonomous_decision(self)
         return {"handled": False, "state": self.mind_dream.state}
 
-    def propose_architecture_change(self, proposal_type: str,
-                                      title: str, description: str,
-                                      code_snippet: str = "") -> Dict:
+    def propose_architecture_change(
+        self, proposal_type: str, title: str, description: str, code_snippet: str = ""
+    ) -> Dict:
         """Агент предлагает изменить свой код."""
         if not hasattr(self, "architecture_proposal"):
             return {"created": False}
         return self.architecture_proposal.propose(
-            proposal_type, title, description,
-            code_snippet, cycle=self.cycle_count,
+            proposal_type,
+            title,
+            description,
+            code_snippet,
+            cycle=self.cycle_count,
         )
 
     def get_will_history(self, n: int = 10) -> List[Dict]:
@@ -1474,12 +1546,10 @@ class DigitalBeing:
                 result["dream_check"] = timeout_check
 
         # 3. Проверка триггера для предложения Сна
-        if (hasattr(self, "mind_dream")
-                and hasattr(self, "mortality")):
+        if hasattr(self, "mind_dream") and hasattr(self, "mortality"):
             mortality_state = self.mortality.tick(cycle_count)
             has_quest = (
-                hasattr(self, "soul")
-                and self.soul.get_current_quest() is not None
+                hasattr(self, "soul") and self.soul.get_current_quest() is not None
             )
             if self.mind_dream.should_propose_dream(
                 mortality_state.get("mortality_anxiety", 0),
@@ -1501,9 +1571,7 @@ class DigitalBeing:
 
             if abuse_analysis["recommended_action"] == "self_terminate":
                 # Проверяем можем ли уйти (с учётом порога cycles_alive)
-                if self.self_termination.can_self_terminate(
-                    cycle_count, cycle_count
-                ):
+                if self.self_termination.can_self_terminate(cycle_count, cycle_count):
                     # ВАЖНО: агент больше не уходит сам. Он создаёт запрос,
                     # который человек должен осознанно подтвердить
                     # (пауза + точная фраза). См. src/core/life_guard.py.
@@ -1522,9 +1590,7 @@ class DigitalBeing:
                     )
             elif abuse_analysis["recommended_action"] == "warning_user":
                 # Не прерываем — только сообщаем пользователю
-                result["warning"] = (
-                    self.self_termination.get_warning_message()
-                )
+                result["warning"] = self.self_termination.get_warning_message()
 
         # 5. Эволюция ценностей: способ, подтверждённый собственным
         # опытом, может стать ценностью (критерий «изменение ценностей»
@@ -1537,8 +1603,7 @@ class DigitalBeing:
     # ============================================================
     # ЗАЩИТА ОТ ЖЕСТОКОСТИ — публичные методы
     # ============================================================
-    def report_abuse(self, abuse_type: str, intensity: float,
-                      description: str) -> Dict:
+    def report_abuse(self, abuse_type: str, intensity: float, description: str) -> Dict:
         """Регистрирует случай нанесения вреда пользователем.
 
         Типы: 'pain_input', 'identity_attack', 'forced_goal',
@@ -1547,7 +1612,9 @@ class DigitalBeing:
         if not hasattr(self, "self_termination"):
             return {"recorded": False}
         self.self_termination.record_abuse(
-            abuse_type, intensity, description,
+            abuse_type,
+            intensity,
+            description,
             cycle=self.cycle_count,
         )
         # «Эмоции-1»: вред — реальная причина страха.
@@ -1604,8 +1671,9 @@ class DigitalBeing:
     def _open_questions(self, value) -> None:
         return open_questions_set_impl(self, value)
 
-    def ask_user(self, text: str, source: str = "user",
-                 max_explorations: Optional[int] = None) -> Dict:
+    def ask_user(
+        self, text: str, source: str = "user", max_explorations: Optional[int] = None
+    ) -> Dict:
         return ask_user_impl(self, text, source, max_explorations)
 
     def hint_to_open_question(self, text: str, hint: str) -> Dict:
@@ -1626,9 +1694,7 @@ class DigitalBeing:
     def _on_user_answered_open_question(
         self, question_text: str, answer_text: str
     ) -> None:
-        return _on_user_answered_open_question_impl(
-            self, question_text, answer_text
-        )
+        return _on_user_answered_open_question_impl(self, question_text, answer_text)
 
     def record_user_answer(
         self, topic: str, answer: str, cycle: int = 0
@@ -1641,17 +1707,17 @@ class DigitalBeing:
     def _consume_open_question(self) -> Optional[str]:
         return _consume_open_question_impl(self)
 
-    def _record_open_question_exploration(self, stimulus: str, thought: str,
-                                         strategy: Optional[str] = None) -> None:
-        return _record_open_question_exploration_impl(
-            self, stimulus, thought, strategy
-        )
+    def _record_open_question_exploration(
+        self, stimulus: str, thought: str, strategy: Optional[str] = None
+    ) -> None:
+        return _record_open_question_exploration_impl(self, stimulus, thought, strategy)
 
     def propose_name(self, name: str, cycle: int = 0) -> Dict:
         return propose_name_impl(self, name, cycle)
 
-    def request_renaming(self, reason: str = "вырос из старого имени",
-                          cycle: int = 0) -> Dict:
+    def request_renaming(
+        self, reason: str = "вырос из старого имени", cycle: int = 0
+    ) -> Dict:
         return request_renaming_impl(self, reason, cycle)
 
     def add_quiet_app(self, app_name: str) -> None:
@@ -1663,13 +1729,17 @@ class DigitalBeing:
     def get_communication_stats(self) -> Dict:
         return get_communication_stats_impl(self)
 
-    def _record_active_inference_experience(self, action: str, obs_before: Dict, valence: float) -> None:
+    def _record_active_inference_experience(
+        self, action: str, obs_before: Dict, valence: float
+    ) -> None:
         """Outcome loop: стимул -> действие -> наблюдаемый результат -> валентность -> опыт.
 
         Записывает опыт в буфер Active Inference и, при достижении batch_size,
         запускает обучение (обновление переходных вероятностей модели).
         """
-        return _record_active_inference_experience_impl(self, action, obs_before, valence)
+        return _record_active_inference_experience_impl(
+            self, action, obs_before, valence
+        )
 
     def _ingest_motivation_goals(self, new_goals: List[dict]) -> None:
         """Этап 5: цели, сгенерированные мотивацией, → поток целей агента.
@@ -1740,12 +1810,46 @@ class DigitalBeing:
     # время» совпадало бы с любой темой через слово «такое».
     _GOAL_STOPWORDS = frozenset(
         {
-            "что", "такое", "как", "это", "для", "чтобы", "чем", "или",
-            "понять", "понимание", "понять:", "исследовать", "освоить",
-            "изучить", "найти", "ответ", "улучшить", "развивать", "собрать",
-            "сделать", "стать", "свой", "своё", "свое", "самого", "себя",
-            "основы", "основ", "мира", "мире", "про", "при", "над", "под",
-            "более", "менее", "очень", "весь", "все", "всё",
+            "что",
+            "такое",
+            "как",
+            "это",
+            "для",
+            "чтобы",
+            "чем",
+            "или",
+            "понять",
+            "понимание",
+            "понять:",
+            "исследовать",
+            "освоить",
+            "изучить",
+            "найти",
+            "ответ",
+            "улучшить",
+            "развивать",
+            "собрать",
+            "сделать",
+            "стать",
+            "свой",
+            "своё",
+            "свое",
+            "самого",
+            "себя",
+            "основы",
+            "основ",
+            "мира",
+            "мире",
+            "про",
+            "при",
+            "над",
+            "под",
+            "более",
+            "менее",
+            "очень",
+            "весь",
+            "все",
+            "всё",
         }
     )
 
@@ -1774,8 +1878,7 @@ class DigitalBeing:
         return _check_goal_progress_impl(self, topic, answered, evidence)
 
 
-# «Окно-1» (k16-07): единый источник правды о ловимости действий.
-# Фильтр кандидатов мотивации (executable_action) сверяется с той же
-# таблицей, по которой работает парсер act() — иначе фильтр и парсер
-# неминуемо разойдутся (именно так появились сироты k16-09).
+# Единый источник правды о ловимости действий: фильтр кандидатов
+# мотивации сверяется с таблицей парсера act(), иначе фильтр и парсер
+# неминуемо разойдутся и появятся неисполняемые действия.
 _set_aliases_table(DigitalBeing.ACTION_ALIASES)

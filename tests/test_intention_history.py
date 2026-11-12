@@ -9,10 +9,15 @@ from src.cognition.intention_history import begin_intention, LIMIT
 
 def test_real_execution_records_target_reason_and_observed_outcome():
     agent = DigitalBeing(name="IntentionMemory")
-    selected = {"action": "explore", "source": "motivation", "verdict": "proceed",
-                "params": {"topic": "память", "reason": "интерес"}}
-    with patch.object(agent.decision_arbitrator, "choose_action", return_value=selected), \
-         patch.object(agent, "think", return_value="Не знаю"):
+    selected = {
+        "action": "explore",
+        "source": "motivation",
+        "verdict": "proceed",
+        "params": {"topic": "память", "reason": "интерес"},
+    }
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=selected
+    ), patch.object(agent, "think", return_value="Не знаю"):
         report = agent.autonomous_tick()
     entry = agent._intention_history[-1]
     assert entry["id"] == report["intention_id"]
@@ -38,8 +43,11 @@ def test_unfinished_attempt_restores_as_interrupted_without_outcome():
 def test_no_stale_outcome_when_handler_is_unobserved():
     agent = DigitalBeing(name="UnobservedIntention")
     agent.act("rest")
-    with patch.object(agent.decision_arbitrator, "choose_action", return_value={"action": "communicate", "source": "test"}), \
-         patch.object(agent, "act", return_value="text"):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        return_value={"action": "communicate", "source": "test"},
+    ), patch.object(agent, "act", return_value="text"):
         agent.autonomous_tick()
     assert agent._intention_history[-1]["status"] == "unobserved"
     assert agent._intention_history[-1]["outcome"] is None

@@ -59,8 +59,9 @@ def test_watchdog_detects_slow_cycle():
     wd.on_cycle_end()
 
     alerts = wd.get_alerts()
-    assert any(a.get("kind") == "slow_cycle" for a in alerts), \
-        f"Ожидался slow_cycle алерт, получено: {alerts}"
+    assert any(
+        a.get("kind") == "slow_cycle" for a in alerts
+    ), f"Ожидался slow_cycle алерт, получено: {alerts}"
     print(f"  ✅ Медленный цикл обнаружен ({len(alerts)} алертов)")
 
 
@@ -115,20 +116,25 @@ def test_mental_models_apply_limit_forgets_weak():
     # Создаём 50 концепций.
     # Устанавливаем confidence напрямую после создания, обходя пересчёт в add_experience.
     for i in range(50):
-        mm.encounter_concept(f"c_{i}", f"ctx_{i}", "x", 0.0)  # valence=0 → confidence не растёт
+        mm.encounter_concept(
+            f"c_{i}", f"ctx_{i}", "x", 0.0
+        )  # valence=0 → confidence не растёт
         if i < 30:
             mm.concepts[f"c_{i}"].confidence = 0.9
         else:
             mm.concepts[f"c_{i}"].confidence = 0.05  # ниже MIN_CONFIDENCE_FOR_RETENTION
 
     from config import simulation_config
+
     original = simulation_config.LR_CONFIG.MAX_CONCEPTS
     try:
         # 50 концепций. max=20, значит over=30, target_forget=30.
         simulation_config.LR_CONFIG.MAX_CONCEPTS = 20
         forgotten = mm.apply_concept_limit()
         assert forgotten == 30, f"должно быть забыто 30 (over), забыто {forgotten}"
-        assert len(mm.concepts) == 20, f"должно остаться 20, осталось {len(mm.concepts)}"
+        assert (
+            len(mm.concepts) == 20
+        ), f"должно остаться 20, осталось {len(mm.concepts)}"
         # Главный инвариант: среди оставшихся НЕТ тех 20, которым мы выставили 0.05.
         weak_names = {f"c_{i}" for i in range(30, 50)}  # те, кому ставили 0.05
         remaining = set(mm.concepts.keys())
@@ -164,6 +170,7 @@ def test_long_term_memory_apply_episodic_limit():
 
     ltm = _FakeLTM()
     from src.memory.long_term_memory import LongTermMemory as _LTM
+
     ltm._apply_episodic_limit = _LTM._apply_episodic_limit.__get__(ltm, _FakeLTM)
 
     # Добавляем эпизоды вручную
@@ -184,8 +191,12 @@ def test_long_term_memory_apply_episodic_limit():
         assert len(ltm._episodic) == 30
         # Проверяем, что остались важные
         remaining_importance = [t.importance for t in ltm._episodic]
-        assert all(i > 0.5 for i in remaining_importance), "оставшиеся должны быть важными"
-        print(f"  ✅ LTM эпизоды: забыто {forgotten} слабых, осталось {len(ltm._episodic)} важных")
+        assert all(
+            i > 0.5 for i in remaining_importance
+        ), "оставшиеся должны быть важными"
+        print(
+            f"  ✅ LTM эпизоды: забыто {forgotten} слабых, осталось {len(ltm._episodic)} важных"
+        )
     finally:
         simulation_config.LR_CONFIG.MAX_EPISODIC_MEMORIES = original
 
@@ -258,7 +269,10 @@ def main():
         ("Watchdog ловит медленный цикл", test_watchdog_detects_slow_cycle),
         ("Health dashboard работает", test_health_dashboard_runs),
         ("Кеш mental_models помогает", test_mental_models_cache_helps),
-        ("Лимит mental_models забывает слабые", test_mental_models_apply_limit_forgets_weak),
+        (
+            "Лимит mental_models забывает слабые",
+            test_mental_models_apply_limit_forgets_weak,
+        ),
         ("Лимит эпизодов LTM", test_long_term_memory_apply_episodic_limit),
         ("Debounce save_kb", test_save_knowledge_base_debounces),
         ("100 циклов mental_models < 30с", test_smoke_100_cycles_in_seconds),

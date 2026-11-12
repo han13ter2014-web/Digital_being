@@ -9,20 +9,21 @@ one-way while public method names and patch points remain on the facade.
 def reflect_impl(self):
     """Анализирует собственную производительность.
 
-        Шаг 7: агент теперь «осознаёт своё тело» — включает RSS и состояние
-        систем в рефлексию. Это этично: не цензура, а самосознание.
-        """
+    Шаг 7: агент теперь «осознаёт своё тело» — включает RSS и состояние
+    систем в рефлексию. Это этично: не цензура, а самосознание.
+    """
     from src.core.watchdog import get_watchdog
+
     agent_state = {
-        'cycle_count': self.cycle_count,
-        'intelligence': self.intelligence,
-        'energy': self.energy,
-        'success_streak': self.success_streak,
-        'completed_goals': self.completed_goals,
-        'knowledge_base': self.knowledge_base,
+        "cycle_count": self.cycle_count,
+        "intelligence": self.intelligence,
+        "energy": self.energy,
+        "success_streak": self.success_streak,
+        "completed_goals": self.completed_goals,
+        "knowledge_base": self.knowledge_base,
         # Шаг 7: метрики «тела»
-        'rss_mb': get_watchdog().get_rss_mb(),
-        'concepts_count': len(self.mental_models.concepts),
+        "rss_mb": get_watchdog().get_rss_mb(),
+        "concepts_count": len(self.mental_models.concepts),
     }
 
     self.reflection_engine.record_cycle(agent_state)
@@ -34,12 +35,12 @@ def reflect_impl(self):
 def generate_self_analysis_report_impl(self):
     """Генерирует полный отчёт самоанализа"""
     agent_state = {
-        'cycle_count': self.cycle_count,
-        'intelligence': self.intelligence,
-        'energy': self.energy,
-        'success_streak': self.success_streak,
-        'completed_goals': self.completed_goals,
-        'knowledge_base': self.knowledge_base
+        "cycle_count": self.cycle_count,
+        "intelligence": self.intelligence,
+        "energy": self.energy,
+        "success_streak": self.success_streak,
+        "completed_goals": self.completed_goals,
+        "knowledge_base": self.knowledge_base,
     }
 
     report = self.reflection_engine.generate_report(agent_state)
@@ -48,15 +49,15 @@ def generate_self_analysis_report_impl(self):
     print(f"\n[{self.name}] ОТЧЕТ САМОАНАЛИЗА")
     print(f"{'-'*50}")
 
-    if report['insights']:
+    if report["insights"]:
         print("Выводы:")
-        for insight in report['insights']:
+        for insight in report["insights"]:
             print(f"  {insight}")
 
-    if report['strategy_recommendations']:
+    if report["strategy_recommendations"]:
         print("\nРекомендации стратегии:")
-        for rec in report['strategy_recommendations']:
-            priority_icon = "Красный" if rec['priority'] == 'high' else "Желтый"
+        for rec in report["strategy_recommendations"]:
+            priority_icon = "Красный" if rec["priority"] == "high" else "Желтый"
             print(f"  {priority_icon} {rec['recommendation']}")
 
     print(f"{'-'*50}\n")
@@ -67,13 +68,15 @@ def generate_self_analysis_report_impl(self):
 def get_performance_metrics_impl(self):
     """Возвращает текущие метрики производительности"""
     metrics = self.reflection_engine.effectiveness_metrics.copy()
-    metrics.update({
-        'current_intelligence': self.intelligence,
-        'current_energy': self.energy,
-        'cycle_count': self.cycle_count,
-        'completed_goals': self.completed_goals,
-        'knowledge_size': len(self.knowledge_base)
-    })
+    metrics.update(
+        {
+            "current_intelligence": self.intelligence,
+            "current_energy": self.energy,
+            "cycle_count": self.cycle_count,
+            "completed_goals": self.completed_goals,
+            "knowledge_size": len(self.knowledge_base),
+        }
+    )
     return metrics
 
 
@@ -84,9 +87,15 @@ def get_mental_models_status_impl(self) -> dict:
     """Возвращает статус системы ментальных моделей."""
     return {
         "total_concepts": len(self.mental_models.concepts),
-        "concepts_with_high_confidence": sum(1 for n in self.mental_models.concepts.values() if n.confidence > 0.7),
-        "concepts_with_definition": sum(1 for n in self.mental_models.concepts.values() if len(n.definition_hypothesis) > 10),
-        "total_associations": self.mental_models.metadata["total_associations"]
+        "concepts_with_high_confidence": sum(
+            1 for n in self.mental_models.concepts.values() if n.confidence > 0.7
+        ),
+        "concepts_with_definition": sum(
+            1
+            for n in self.mental_models.concepts.values()
+            if len(n.definition_hypothesis) > 10
+        ),
+        "total_associations": self.mental_models.metadata["total_associations"],
     }
 
 
@@ -123,30 +132,40 @@ def display_all_concepts_impl(self):
     print(f"{'-'*50}")
 
     sorted_concepts = sorted(
-        self.mental_models.concepts.items(),
-        key=lambda x: x[1].confidence,
-        reverse=True
+        self.mental_models.concepts.items(), key=lambda x: x[1].confidence, reverse=True
     )
 
     for name, node in sorted_concepts:
-        icon = "LIGHTBULB" if node.confidence > 0.7 else "MAGNIFYING_GLASS" if node.confidence > 0.4 else "QUESTION"
+        icon = (
+            "LIGHTBULB"
+            if node.confidence > 0.7
+            else "MAGNIFYING_GLASS"
+            if node.confidence > 0.4
+            else "QUESTION"
+        )
         status = "CHECK" if self.mental_models.can_answer_about(name) else "CLOCK"
 
         print(f"\n  {status} {icon} {name}")
         if node.definition_hypothesis:
-            short = node.definition_hypothesis[:70] + "..." if len(node.definition_hypothesis) > 70 else node.definition_hypothesis
+            short = (
+                node.definition_hypothesis[:70] + "..."
+                if len(node.definition_hypothesis) > 70
+                else node.definition_hypothesis
+            )
             print(f"     Гипотеза: '{short}'")
 
 
 def get_agent_identity_impl(self) -> str:
     """Формирует описание 'кто я' на основе ментальных моделей."""
     well_understood = [
-        name for name, node in self.mental_models.concepts.items()
+        name
+        for name, node in self.mental_models.concepts.items()
         if self.mental_models.can_answer_about(name)
     ]
 
     partially_understood = [
-        name for name, node in self.mental_models.concepts.items()
+        name
+        for name, node in self.mental_models.concepts.items()
         if not self.mental_models.can_answer_about(name) and node.confidence > 0.3
     ]
 

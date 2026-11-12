@@ -13,7 +13,10 @@ async def test_backup_has_no_yield_between_save_and_copy(monkeypatch):
     events = []
     runner = AgentRunner.__new__(AgentRunner)
     runner._save_state_safe = lambda: events.append("save") or True
-    monkeypatch.setattr("src.memory.profile_backup.create_backup", lambda source, destination: events.append("copy") or destination)
+    monkeypatch.setattr(
+        "src.memory.profile_backup.create_backup",
+        lambda source, destination: events.append("copy") or destination,
+    )
     asyncio.get_running_loop().call_soon(events.append, "tick")
     assert runner.backup_now("new_backup") == "new_backup"
     assert events == ["save", "copy"]

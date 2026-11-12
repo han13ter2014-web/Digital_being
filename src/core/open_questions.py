@@ -22,6 +22,7 @@ DigitalBeing всё ещё предоставляет высокоуровнев
     >>> mgr.consume()  # вернёт стимул для thinking
     'вопрос: что такое любовь? [стратегия=mental_model_lookup, попытка 1/5]'
 """
+
 from __future__ import annotations
 
 import re
@@ -31,12 +32,12 @@ from typing import Callable, Dict, List, Optional
 # Шесть стратегий размышления. Приоритет по порядку: сначала
 # ищем в ментальных моделях, потом в knowledge_base, и т.д.
 EXPLORATION_STRATEGIES: List[str] = [
-    "mental_model_lookup",   # ищем в ментальных моделях
-    "knowledge_base_search", # в knowledge_base
-    "hypothesis_generation", # генерируем гипотезу
-    "decomposition",         # разбиваем на части
-    "analogy_search",        # ищем аналогии в известном
-    "cross_reference",       # ищем перекрёстные ссылки
+    "mental_model_lookup",  # ищем в ментальных моделях
+    "knowledge_base_search",  # в knowledge_base
+    "hypothesis_generation",  # генерируем гипотезу
+    "decomposition",  # разбиваем на части
+    "analogy_search",  # ищем аналогии в известном
+    "cross_reference",  # ищем перекрёстные ссылки
 ]
 
 # Эвристика «найден ответ» — определяется в ThinkingPipeline, но
@@ -44,8 +45,13 @@ EXPLORATION_STRATEGIES: List[str] = [
 _ANSWER_PREFILTER = ("Не знаю", "Новый концепт")
 _ANSWER_REQUIRED_MARKER = "[Ментальная модель]"
 _UNKNOWN_ANSWERS = {
-    "не знаю", "не уверен", "не уверена", "не могу сказать",
-    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+    "не знаю",
+    "не уверен",
+    "не уверена",
+    "не могу сказать",
+    "без понятия",
+    "затрудняюсь ответить",
+    "не знаю ответа",
 }
 
 
@@ -77,13 +83,7 @@ def _topic_from_question(question_text: str) -> Optional[str]:
         match = pattern.search(text)
         if not match:
             continue
-        topic = (
-            match.group("topic")
-            .strip()
-            .strip("«»\"'")
-            .rstrip(".!?…")
-            .strip()
-        )
+        topic = match.group("topic").strip().strip("«»\"'").rstrip(".!?…").strip()
         if topic:
             return topic
     return None
@@ -126,8 +126,9 @@ class OpenQuestionsManager:
 
     # === API (тонкий фасад, ранее был в DigitalBeing) ===
 
-    def ask(self, text: str, source: str = "user",
-            max_explorations: Optional[int] = None) -> Dict:
+    def ask(
+        self, text: str, source: str = "user", max_explorations: Optional[int] = None
+    ) -> Dict:
         """Поставить открытый вопрос в очередь.
 
         Args:
@@ -292,14 +293,17 @@ class OpenQuestionsManager:
         if not stimulus.startswith(text_marker):
             return
         # "вопрос: <text> [стратегия=..., попытка N/M]"
-        rest = stimulus[len(text_marker):]
+        rest = stimulus[len(text_marker) :]
         if " [стратегия=" in rest:
             q_text = rest.split(" [стратегия=")[0].strip()
         else:
             q_text = rest.strip()
 
         for q in self.queue:
-            if q["text"].strip().lower() == q_text.strip().lower() and not q["answered"]:
+            if (
+                q["text"].strip().lower() == q_text.strip().lower()
+                and not q["answered"]
+            ):
                 q["last_explored_at"] = self._cycle()
                 used_strategy = strategy
                 if "[" in stimulus and "стратегия=" in stimulus:
@@ -310,11 +314,13 @@ class OpenQuestionsManager:
                     except Exception:
                         pass
 
-                q["explorations"].append({
-                    "cycle": self._cycle(),
-                    "thought": thought[:200],
-                    "strategy": used_strategy or "unknown",
-                })
+                q["explorations"].append(
+                    {
+                        "cycle": self._cycle(),
+                        "thought": thought[:200],
+                        "strategy": used_strategy or "unknown",
+                    }
+                )
 
                 # Эвристика «найден ответ».
                 if (
@@ -342,17 +348,21 @@ class OpenQuestionsManager:
         if not saved:
             return 0
         for q_data in saved:
-            self.queue.append({
-                "text": q_data.get("text", ""),
-                "source": q_data.get("source", "user"),
-                "started_at": q_data.get("started_at", 0),
-                "last_explored_at": q_data.get("last_explored_at", 0),
-                "explorations": q_data.get("explorations", []),
-                "max_explorations": q_data.get("max_explorations", self.default_max_explorations),
-                "hint": q_data.get("hint"),
-                "answered": q_data.get("answered", False),
-                "answer": q_data.get("answer"),
-            })
+            self.queue.append(
+                {
+                    "text": q_data.get("text", ""),
+                    "source": q_data.get("source", "user"),
+                    "started_at": q_data.get("started_at", 0),
+                    "last_explored_at": q_data.get("last_explored_at", 0),
+                    "explorations": q_data.get("explorations", []),
+                    "max_explorations": q_data.get(
+                        "max_explorations", self.default_max_explorations
+                    ),
+                    "hint": q_data.get("hint"),
+                    "answered": q_data.get("answered", False),
+                    "answer": q_data.get("answer"),
+                }
+            )
         return len(self.queue)
 
     # === Внутреннее ===
@@ -369,7 +379,8 @@ class OpenQuestionsManager:
             "last_explored_at": cycle,
             "explorations": [],
             "max_explorations": (
-                max_explorations if max_explorations is not None
+                max_explorations
+                if max_explorations is not None
                 else self.default_max_explorations
             ),
             "hint": None,

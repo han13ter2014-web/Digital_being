@@ -26,7 +26,9 @@ def test_legacy_profile_keeps_memory_after_binding_uuid(tmp_path, monkeypatch):
     born = DigitalBeing("Old")
     state = build_state_from_agent(born)
     state.pop("life_id", None)
-    CheckpointSerializer(checkpoint_dir=str(checkpoints), backend="json").save(state, "Old", 0)
+    CheckpointSerializer(checkpoint_dir=str(checkpoints), backend="json").save(
+        state, "Old", 0
+    )
 
     restored, report = create_agent(env, "Old")
     assert report["source"] == "checkpoint"
@@ -48,20 +50,39 @@ def test_legacy_profile_keeps_memory_after_binding_uuid(tmp_path, monkeypatch):
 
 
 def test_corrupt_uuid_memory_stops_restore_without_overwrite(tmp_path, monkeypatch):
-    """Повреждённая память не должна молча стать пустой."""
+    """Повреждённая SQLite-память не должна молча стать пустой."""
+    from contextlib import closing
+    import sqlite3
     import pytest
     from src.app.bootstrap import RecoveryRequiredError
+    from src.core.paths import data_path
 
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     env = setup_environment(chdir=False, console=False)
     first, _ = create_agent(env, "Alpha", new=True)
     assert first.save_state(force=True)
-    path = Path(first.long_term_memory.memory_file)
-    path.write_text("{повреждено", encoding="utf-8")
-    before = path.read_bytes()
+    path = Path(data_path("lives", first.life_id, "life.sqlite3"))
+    with closing(sqlite3.connect(path)) as connection:
+        with connection:
+            connection.execute(
+                "INSERT INTO memory_traces(id, store, content, importance, "
+                "created_at, last_accessed, access_count, context, is_episodic, "
+                "episode_order, metadata_json) VALUES "
+                "('broken', 'short_term', 'broken', 0.5, 'повреждено', "
+                "'повреждено', 0, '', 0, NULL, '{}')"
+            )
+        before = connection.execute(
+            "SELECT * FROM memory_traces WHERE id = 'broken'"
+        ).fetchone()
     with pytest.raises(RecoveryRequiredError):
         create_agent(env, "Alpha", expected_life_id=first.life_id)
-    assert path.read_bytes() == before
+    with closing(sqlite3.connect(path)) as connection:
+        assert (
+            connection.execute(
+                "SELECT * FROM memory_traces WHERE id = 'broken'"
+            ).fetchone()
+            == before
+        )
 
 
 def test_nested_non_uuid_directory_is_not_used_as_identity(tmp_path, monkeypatch):

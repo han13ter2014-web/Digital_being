@@ -35,7 +35,9 @@ def test_source_resources_do_not_depend_on_launcher_path(monkeypatch):
     assert not frozen
 
 
-def test_relative_profile_is_resolved_once_before_later_cwd_change(tmp_path, monkeypatch):
+def test_relative_profile_is_resolved_once_before_later_cwd_change(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", "profile")
     env = setup_environment(chdir=False, console=False)

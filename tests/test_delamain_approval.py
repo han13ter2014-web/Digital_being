@@ -303,6 +303,7 @@ def test_agent_runner_approval_commands(tmp_path: Path) -> None:
     sub = make_sub(tmp_path, approval_mode="dangerous")
     runner = AgentRunner(FakeAgent(sub), EventBus(), watchdog=object())
     try:
+
         async def scenario() -> None:
             pending_text = await runner.handle_command(
                 "/delamain run write cmd.txt: hi"
@@ -315,9 +316,7 @@ def test_agent_runner_approval_commands(tmp_path: Path) -> None:
             assert approval_id in listed
             assert "write_file" in listed
 
-            approved = await runner.handle_command(
-                f"/delamain approve {approval_id}"
-            )
+            approved = await runner.handle_command(f"/delamain approve {approval_id}")
             assert "✅" in approved
             assert (tmp_path / "workspace" / "cmd.txt").read_text(
                 encoding="utf-8"

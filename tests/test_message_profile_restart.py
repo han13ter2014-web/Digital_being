@@ -45,10 +45,11 @@ async def test_burst_survives_real_profile_restart(tmp_path, monkeypatch, backen
             received.append(text)
             return text
 
-        with patch.object(second, "autonomous_tick", return_value={"attention_selected": True}), \
-             patch.object(second, "perceive", side_effect=perceive), \
-             patch.object(second, "think", return_value="проверка"), \
-             patch.object(second, "act", return_value="проверка"):
+        with patch.object(
+            second, "autonomous_tick", return_value={"attention_selected": True}
+        ), patch.object(second, "perceive", side_effect=perceive), patch.object(
+            second, "think", return_value="проверка"
+        ), patch.object(second, "act", return_value="проверка"):
             for _ in range(41):
                 await restored.step_once()
         assert received == ["текущий вопрос", *messages]

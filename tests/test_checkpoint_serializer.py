@@ -9,6 +9,7 @@ test_checkpoint_serializer.py — тесты для src.core.checkpoint_serializ
 - ``build_state_from_agent`` / ``apply_state_to_agent`` — round-trip.
 - Обработка отсутствующих/повреждённых файлов.
 """
+
 import json
 import os
 import tempfile
@@ -34,6 +35,7 @@ _SENTINEL = object()
 
 class FakeNamingDialogue:
     """Простая замена NamingDialogue для тестов."""
+
     def __init__(self, phase: str = "none", history: list | None = None):
         self.phase = phase
         self._name_history = list(history) if history else []
@@ -75,9 +77,13 @@ class FakeAgent:
         self.knowledge_base = (
             knowledge_base if knowledge_base is not None else {"python": "язык"}
         )
-        self.goals = goals if goals is not None else [
-            {"id": 1, "title": "Test goal", "status": "active"},
-        ]
+        self.goals = (
+            goals
+            if goals is not None
+            else [
+                {"id": 1, "title": "Test goal", "status": "active"},
+            ]
+        )
         # sentinel: различаем «не передано» (default → первая цель) и «передано None»
         self.active_goal = (
             active_goal if active_goal is not _SENTINEL else self.goals[0]
@@ -327,12 +333,15 @@ def test_load_returns_state():
         ser = CheckpointSerializer(checkpoint_dir=tmp, max_checkpoints=20)
         path = os.path.join(tmp, "Test_cycle_5.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "schema_version": 1,
-                "name": "Test",
-                "cycle_count": 5,
-                "energy": 50,
-            }, f)
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "name": "Test",
+                    "cycle_count": 5,
+                    "energy": 50,
+                },
+                f,
+            )
         state = ser.load(path)
         assert state is not None
         assert state["name"] == "Test"
@@ -495,6 +504,7 @@ def test_gzip_reduces_size_on_repetitive_data():
 def test_gzip_and_plain_files_coexist():
     """Старые .json и новые .json.gz файлы могут сосуществовать и читаются."""
     from src.core.checkpoint_migrations import SCHEMA_VERSION
+
     with tempfile.TemporaryDirectory() as tmp:
         ser_plain = CheckpointSerializer(checkpoint_dir=tmp, compress=False)
         ser_gzip = CheckpointSerializer(checkpoint_dir=tmp, compress=True)
@@ -506,7 +516,7 @@ def test_gzip_and_plain_files_coexist():
             "cycle_count": 10,
             "energy": 100.0,
             "x": 1,
-            "name": "Plain"
+            "name": "Plain",
         }
         state2 = {
             "schema_version": SCHEMA_VERSION,
@@ -514,7 +524,7 @@ def test_gzip_and_plain_files_coexist():
             "cycle_count": 20,
             "energy": 100.0,
             "x": 2,
-            "name": "Gzip"
+            "name": "Gzip",
         }
 
         path_plain = ser_plain.save(state1, "Agent", 10)
@@ -549,7 +559,9 @@ def test_gzip_load_corrupted_raises_error():
         # Создаём битый gzip-файл
         path = os.path.join(tmp, "Test_cycle_1.json.gz")
         with open(path, "wb") as f:
-            f.write(b"\x1f\x8b not really gzip data")  # магические байты есть, но дальше мусор
+            f.write(
+                b"\x1f\x8b not really gzip data"
+            )  # магические байты есть, но дальше мусор
         with pytest.raises(CheckpointCorruptedError):
             ser.load(path)
 
@@ -557,8 +569,12 @@ def test_gzip_load_corrupted_raises_error():
 def test_gzip_compress_level_clamped():
     """compress_level ограничивается в диапазоне 1-9."""
     with tempfile.TemporaryDirectory() as tmp:
-        ser_low = CheckpointSerializer(checkpoint_dir=tmp, compress=True, compress_level=0)
-        ser_high = CheckpointSerializer(checkpoint_dir=tmp, compress=True, compress_level=99)
+        ser_low = CheckpointSerializer(
+            checkpoint_dir=tmp, compress=True, compress_level=0
+        )
+        ser_high = CheckpointSerializer(
+            checkpoint_dir=tmp, compress=True, compress_level=99
+        )
         assert ser_low.compress_level == 1
         assert ser_high.compress_level == 9
 
@@ -566,6 +582,7 @@ def test_gzip_compress_level_clamped():
 def test_extract_cycle_number_supports_gz():
     """_extract_cycle_number корректно работает с .json.gz."""
     from src.core.checkpoint_serializer import _extract_cycle_number
+
     assert _extract_cycle_number("Alpha_cycle_42.json", "Alpha_cycle_") == "42"
     assert _extract_cycle_number("Alpha_cycle_42.json.gz", "Alpha_cycle_") == "42"
     assert _extract_cycle_number("Beta_cycle_100.json.gz", "Beta_cycle_") == "100"

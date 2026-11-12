@@ -181,9 +181,7 @@ def test_predicted_trajectory_matches_step():
     for _ in range(model.predicted_fatigue_horizon - 1):
         actual.step(dt=1.0, cognitive_load=0.8)
 
-    assert actual.state.fatigue == pytest.approx(
-        predicted_fatigue[-1], abs=0.05
-    )
+    assert actual.state.fatigue == pytest.approx(predicted_fatigue[-1], abs=0.05)
 
 
 def test_prediction_says_work_tires_and_rest_recovers():

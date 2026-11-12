@@ -39,9 +39,7 @@ def agent():
 
 def test_decomposition_queues_sub_questions(agent):
     """Под-вопросы не теряются: они попадают в очередь открытых вопросов."""
-    before = len(
-        [q for q in agent.get_open_questions() if not q.get("answered")]
-    )
+    before = len([q for q in agent.get_open_questions() if not q.get("answered")])
 
     agent.act("think_decompose")
 
@@ -216,13 +214,19 @@ def test_stuck_fallback_rests_when_nothing_proven(agent):
     """Нет доказанных действий — отдых честнее, чем имитация работы."""
     agent.energy = 200.0
     agent.loop_closer.observe(
-        "explore", WorldSignature(), WorldSignature(),
+        "explore",
+        WorldSignature(),
+        WorldSignature(),
     )
     agent.loop_closer.observe(
-        "explore", WorldSignature(), WorldSignature(),
+        "explore",
+        WorldSignature(),
+        WorldSignature(),
     )
     agent.loop_closer.observe(
-        "explore", WorldSignature(), WorldSignature(),
+        "explore",
+        WorldSignature(),
+        WorldSignature(),
     )
 
     assert agent._stuck_fallback() == "deep_rest"

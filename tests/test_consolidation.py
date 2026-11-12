@@ -33,9 +33,9 @@ def _model_with_link() -> MentalModel:
         model.encounter_concept(name, f"контекст_{name}", "первая встреча", 0.0)
     # Определение «времени» упоминает «память» — это и есть наблюдённая
     # связь, которую сон должен закрепить.
-    model.concepts["время"].definition_hypothesis = (
-        "По опыту: 'время' связано с 'память'"
-    )
+    model.concepts[
+        "время"
+    ].definition_hypothesis = "По опыту: 'время' связано с 'память'"
     return model
 
 
@@ -109,10 +109,22 @@ def test_consolidation_link_is_bounded():
 
 def test_consolidation_forms_definition_from_experience():
     model = MentalModel()
-    model.encounter_concept("энтропия", "гипотеза_цикл_1", "мера беспорядка", 0.5,
-                            evidence_kind="hypothesis", source="self:hypothesis")
-    model.encounter_concept("энтропия", "гипотеза_цикл_2", "растёт в замкнутой системе", 0.5,
-                            evidence_kind="hypothesis", source="self:hypothesis")
+    model.encounter_concept(
+        "энтропия",
+        "гипотеза_цикл_1",
+        "мера беспорядка",
+        0.5,
+        evidence_kind="hypothesis",
+        source="self:hypothesis",
+    )
+    model.encounter_concept(
+        "энтропия",
+        "гипотеза_цикл_2",
+        "растёт в замкнутой системе",
+        0.5,
+        evidence_kind="hypothesis",
+        source="self:hypothesis",
+    )
     node = model.concepts["энтропия"]
     # Опыт есть, а формулировки ещё нет — ровно то, что делает сон.
     node.definition_hypothesis = ""
@@ -146,8 +158,13 @@ def test_consolidation_refines_definition_from_links():
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["энтропия"]
     model.encounter_concept(
-        "энтропия", "ctx2", "мера беспорядка", 0.5,
-        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+        "энтропия",
+        "ctx2",
+        "мера беспорядка",
+        0.5,
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="ctx2",
     )
     node.definition_hypothesis = "По опыту (2 встреч): 'энтропия' — мера беспорядка"
     node.connections["порядок"] = 0.6
@@ -173,8 +190,13 @@ def test_refinement_excludes_reflexive_concepts():
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["следствие"]
     model.encounter_concept(
-        "следствие", "ctx2", "результат причины", 0.5,
-        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+        "следствие",
+        "ctx2",
+        "результат причины",
+        0.5,
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="ctx2",
     )
     node.definition_hypothesis = "По опыту (2 встреч): 'следствие' — результат причины"
     node.connections["причина"] = 0.6
@@ -198,8 +220,13 @@ def test_refinement_lists_links_after_colon():
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["время"]
     model.encounter_concept(
-        "время", "ctx2", "идёт вперёд", 0.5,
-        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+        "время",
+        "ctx2",
+        "идёт вперёд",
+        0.5,
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="ctx2",
     )
     node.definition_hypothesis = "По опыту (2 встреч): 'время' — идёт вперёд"
     node.connections["память"] = 0.6
@@ -214,10 +241,22 @@ def test_refinement_lists_links_after_colon():
 def test_synthesized_definition_lists_outcomes_after_colon():
     """Формулировка из сырых результатов тоже перечисляет после двоеточия."""
     model = MentalModel()
-    model.encounter_concept("память", "встреча", "запомнила шаг", 0.5,
-                            evidence_kind="hypothesis", source="self:hypothesis")
-    model.encounter_concept("память", "встреча", "воспроизвела шаг", 0.5,
-                            evidence_kind="hypothesis", source="self:hypothesis")
+    model.encounter_concept(
+        "память",
+        "встреча",
+        "запомнила шаг",
+        0.5,
+        evidence_kind="hypothesis",
+        source="self:hypothesis",
+    )
+    model.encounter_concept(
+        "память",
+        "встреча",
+        "воспроизвела шаг",
+        0.5,
+        evidence_kind="hypothesis",
+        source="self:hypothesis",
+    )
     node = model.concepts["память"]
     node.definition_hypothesis = ""
 
@@ -236,8 +275,13 @@ def test_refinement_needs_evidence():
         model.encounter_concept(name, f"ctx_{name}", "встреча", 0.0)
     node = model.concepts["энтропия"]
     model.encounter_concept(
-        "энтропия", "ctx2", "мера беспорядка", 0.5,
-        evidence_strength=0.5, evidence_kind="observation", source="ctx2",
+        "энтропия",
+        "ctx2",
+        "мера беспорядка",
+        0.5,
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="ctx2",
     )
     original = "По опыту (2 встреч): 'энтропия' — мера беспорядка"
     node.definition_hypothesis = original
@@ -260,8 +304,13 @@ def test_consolidation_recomputes_consistent_confidence_without_bonus():
     for cycle in range(3):
         context = f"наблюдение_цикл_{cycle}"
         model.encounter_concept(
-            "градиент", context, "направление роста", 0.6,
-            evidence_strength=0.6, evidence_kind="observation", source=context,
+            "градиент",
+            context,
+            "направление роста",
+            0.6,
+            evidence_strength=0.6,
+            evidence_kind="observation",
+            source=context,
         )
     node = model.concepts["градиент"]
     expected = node.confidence
@@ -279,9 +328,14 @@ def test_inconsistent_experience_is_not_stabilized():
     for cycle, valence in enumerate((0.8, 0.8, -0.8)):
         context = f"наблюдение_цикл_{cycle}"
         model.encounter_concept(
-            "риск", context, "плохо" if valence > 0 else "хорошо", valence,
-            evidence_strength=abs(valence), evidence_kind="observation",
-            source=context, evidence_direction=-1 if valence < 0 else 1,
+            "риск",
+            context,
+            "плохо" if valence > 0 else "хорошо",
+            valence,
+            evidence_strength=abs(valence),
+            evidence_kind="observation",
+            source=context,
+            evidence_direction=-1 if valence < 0 else 1,
         )
     node = model.concepts["риск"]
     expected = node.confidence
@@ -345,9 +399,9 @@ def test_sleep_turns_observation_into_link():
     model.encounter_concept("время", "ctx3", "длительность", 0.0)
     model.encounter_concept("память", "ctx", "хранение следов", 0.0)
     model.encounter_concept("память", "ctx2", "связана с время", 0.0)
-    model.concepts["память"].definition_hypothesis = (
-        "По опыту: 'память' связана с время"
-    )
+    model.concepts[
+        "память"
+    ].definition_hypothesis = "По опыту: 'память' связана с время"
     before = model.concepts["память"].connections["время"]
     assert before < 0.3
 

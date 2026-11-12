@@ -165,9 +165,7 @@ def test_direct_execute_dream_is_denied(agent):
 def test_dialogue_consent_does_not_execute_dream(agent):
     """Согласие «да» в диалоге — только первый шаг."""
     agent.mind_dream._dream_state = "pending"
-    agent.mind_dream._dream_request_started = __import__(
-        "datetime"
-    ).datetime.now()
+    agent.mind_dream._dream_request_started = __import__("datetime").datetime.now()
 
     result = agent.mind_dream.process_user_response("да", agent)
 
@@ -200,9 +198,7 @@ def test_termination_requires_confirmation(agent):
     assert req["reversible"] is False
     assert agent.is_alive() is True
 
-    agent.life_guard.clock.advance(
-        get_policy("terminate").cooldown_sec + 1
-    )
+    agent.life_guard.clock.advance(get_policy("terminate").cooldown_sec + 1)
     result = agent.confirm_termination(req["request_id"], "GuardTest")
 
     # Без «НАВСЕГДА» фраза не совпадает.
@@ -212,12 +208,8 @@ def test_termination_requires_confirmation(agent):
 
 def test_termination_with_full_phrase(agent):
     req = agent.request_termination("тест")
-    agent.life_guard.clock.advance(
-        get_policy("terminate").cooldown_sec + 1
-    )
-    result = agent.confirm_termination(
-        req["request_id"], "GuardTest НАВСЕГДА"
-    )
+    agent.life_guard.clock.advance(get_policy("terminate").cooldown_sec + 1)
+    result = agent.confirm_termination(req["request_id"], "GuardTest НАВСЕГДА")
 
     assert result["status"] == "terminated"
     assert agent.is_alive() is False
@@ -236,9 +228,7 @@ def test_life_status_is_exposed_for_ui(agent):
     assert "dream" in status["policies"]
     assert "terminate" in status["policies"]
     # Политики видны человеку до нажатия кнопки.
-    assert status["policies"]["terminate"]["expected_phrase"] == (
-        "GuardTest НАВСЕГДА"
-    )
+    assert status["policies"]["terminate"]["expected_phrase"] == ("GuardTest НАВСЕГДА")
     assert status["policies"]["terminate"]["reversible"] is False
 
 

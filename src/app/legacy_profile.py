@@ -10,6 +10,22 @@ def discover_legacy_name(root, default):
     """Выбрать единственную старую жизнь; неоднозначность требует человека."""
     from src.app.bootstrap import RecoveryRequiredError
 
+    lives_directory = Path(root) / "lives"
+    if lives_directory.is_dir():
+        from src.core.life_identity import validate_life_id
+
+        for path in lives_directory.iterdir():
+            if not path.is_dir():
+                continue
+            try:
+                validate_life_id(path.name)
+            except ValueError:
+                continue
+            raise RecoveryRequiredError(
+                "Найден UUID-профиль без указателя активной жизни; "
+                "нужно восстановить active_profile.json из резервной копии"
+            )
+
     directory = Path(root) / "checkpoints"
     names = set()
     if not directory.exists():
@@ -34,11 +50,17 @@ def discover_legacy_name(root, default):
                 names.add(match.group(1))
         database = directory / "life.sqlite3"
         if database.exists():
-            with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            with closing(
+                sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+            ) as connection:
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
-                if version != 1:
+                from src.memory.life_database import LifeDatabase
+
+                if version not in (1, LifeDatabase.SCHEMA_VERSION):
                     raise ValueError("неподдерживаемый формат истории")
-                for (name,) in connection.execute("SELECT DISTINCT agent_name FROM snapshots"):
+                for (name,) in connection.execute(
+                    "SELECT DISTINCT agent_name FROM snapshots"
+                ):
                     if not isinstance(name, str) or not name.strip():
                         raise ValueError("некорректное имя сохранённой жизни")
                     names.add(name)

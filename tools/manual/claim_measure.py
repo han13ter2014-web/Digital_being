@@ -32,17 +32,35 @@ def main():
             with patch.object(first, "_recover_energy", return_value=0.0):
                 first.act("rest")
             initial = dict(first.action_expectations.last_trial)
-            stored = {key: claim.to_dict() for key, claim in first.mental_models.claims.items()}
+            stored = {
+                key: claim.to_dict()
+                for key, claim in first.mental_models.claims.items()
+            }
             first.save_state(force=True)
             second, startup = create_agent(env, "ClaimsMeasure")
-            restored = {key: claim.to_dict() for key, claim in second.mental_models.claims.items()}
+            restored = {
+                key: claim.to_dict()
+                for key, claim in second.mental_models.claims.items()
+            }
             second.act("rest")
-            result = {"startup": startup["source"], "energy_delta": initial["delta"],
-                      "fatigue_before": fatigue_before, "fatigue_after": initial["fatigue_after"],
-                      "conclusions": initial["claims"], "restored_identically": stored == restored,
-                      "next_energy_expectation": second.action_expectations.last_trial["expected_direction"],
-                      "next_fatigue_expectation": second.action_expectations.last_trial["fatigue_expected_direction"]}
-            args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            result = {
+                "startup": startup["source"],
+                "energy_delta": initial["delta"],
+                "fatigue_before": fatigue_before,
+                "fatigue_after": initial["fatigue_after"],
+                "conclusions": initial["claims"],
+                "restored_identically": stored == restored,
+                "next_energy_expectation": second.action_expectations.last_trial[
+                    "expected_direction"
+                ],
+                "next_fatigue_expectation": second.action_expectations.last_trial[
+                    "fatigue_expected_direction"
+                ],
+            }
+            args.report.write_text(
+                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             print(json.dumps(result, ensure_ascii=True, indent=2))
         logging.shutdown()
 

@@ -129,9 +129,7 @@ def test_confirm_too_early_is_refused(env):
     run(controller._on_request(Event({"kind": "dream"})))
     request_id = published(bus, Events.LIFE_PROMPT)[-1]["request_id"]
 
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "CtrlTest"})
-    ))
+    run(controller._on_confirm(Event({"request_id": request_id, "phrase": "CtrlTest"})))
 
     assert agent.is_alive() is True
     result = published(bus, Events.LIFE_RESULT)[-1]
@@ -145,9 +143,7 @@ def test_confirm_wrong_phrase_is_refused(env):
     request_id = published(bus, Events.LIFE_PROMPT)[-1]["request_id"]
     agent.life_guard.clock.advance(get_policy("dream").cooldown_sec + 1)
 
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "да"})
-    ))
+    run(controller._on_confirm(Event({"request_id": request_id, "phrase": "да"})))
 
     assert agent.is_alive() is True
     assert published(bus, Events.LIFE_RESULT)[-1]["ok"] is False
@@ -159,9 +155,7 @@ def test_confirm_correct_phrase_sleeps_agent(env):
     request_id = published(bus, Events.LIFE_PROMPT)[-1]["request_id"]
     agent.life_guard.clock.advance(get_policy("dream").cooldown_sec + 1)
 
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "CtrlTest"})
-    ))
+    run(controller._on_confirm(Event({"request_id": request_id, "phrase": "CtrlTest"})))
 
     assert agent.is_alive() is False
     result = published(bus, Events.LIFE_RESULT)[-1]
@@ -171,9 +165,11 @@ def test_confirm_correct_phrase_sleeps_agent(env):
 
 def test_confirm_unknown_request_is_refused(env):
     agent, bus, controller = env
-    run(controller._on_confirm(
-        Event({"request_id": "нет-такого", "phrase": "CtrlTest"})
-    ))
+    run(
+        controller._on_confirm(
+            Event({"request_id": "нет-такого", "phrase": "CtrlTest"})
+        )
+    )
     assert agent.is_alive() is True
 
 
@@ -210,9 +206,7 @@ def test_wake_after_dream(env):
     run(controller._on_request(Event({"kind": "dream"})))
     request_id = published(bus, Events.LIFE_PROMPT)[-1]["request_id"]
     agent.life_guard.clock.advance(get_policy("dream").cooldown_sec + 1)
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "CtrlTest"})
-    ))
+    run(controller._on_confirm(Event({"request_id": request_id, "phrase": "CtrlTest"})))
     assert agent.is_alive() is False
 
     run(controller._on_wake(Event({})))
@@ -233,12 +227,12 @@ def test_termination_requires_full_phrase(env):
     agent.life_guard.clock.advance(get_policy("terminate").cooldown_sec + 1)
 
     # Без «НАВСЕГДА» — отказ.
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "CtrlTest"})
-    ))
+    run(controller._on_confirm(Event({"request_id": request_id, "phrase": "CtrlTest"})))
     assert agent.is_alive() is True
 
-    run(controller._on_confirm(
-        Event({"request_id": request_id, "phrase": "CtrlTest НАВСЕГДА"})
-    ))
+    run(
+        controller._on_confirm(
+            Event({"request_id": request_id, "phrase": "CtrlTest НАВСЕГДА"})
+        )
+    )
     assert agent.is_alive() is False

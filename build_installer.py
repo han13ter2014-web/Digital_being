@@ -80,7 +80,9 @@ def check_exe_exists() -> None:
     """Проверяет, что dist/DigitalBeing.exe уже собран."""
     if not os.path.isfile(DIST_EXE):
         print(f"❌ Не найден {DIST_EXE}")
-        print("   Сначала соберите .exe через `python build.py` или передайте --rebuild.")
+        print(
+            "   Сначала соберите .exe через `python build.py` или передайте --rebuild."
+        )
         sys.exit(1)
 
 
@@ -121,8 +123,8 @@ def build() -> None:
         sys.exit(1)
     size_mb = os.path.getsize(setup_exe) / (1024 * 1024)
     print(f"\n✅ Готово! {setup_exe} ({size_mb:.1f} MB)")
-    print(f"   Раздавайте этот файл — пользователи получат визард установки.")
-    print(f"   Двойной клик на setup.exe → мастер установки → ярлык на рабочем столе.")
+    print("   Раздавайте этот файл — пользователи получат визард установки.")
+    print("   Двойной клик на setup.exe → мастер установки → ярлык на рабочем столе.")
 
 
 def main() -> None:

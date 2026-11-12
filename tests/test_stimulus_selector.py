@@ -119,19 +119,18 @@ def test_goal_priority_always_picks_high_with_prob_1():
     high_only = "python функции"  # содержит оба keyword-а + Python
     pool = [
         high_only,
-        "python импорт",     # Python-стимул → high через _apply_python_priority
-        "не_связано_1",      # 0 совпадений, не Python → low
+        "python импорт",  # Python-стимул → high через _apply_python_priority
+        "не_связано_1",  # 0 совпадений, не Python → low
         "не_связано_2",
     ]
     for _ in range(50):
         result = select_stimulus(agent, goal_priority_prob=1.0, stimuli_pool=pool)
         # Должен быть из high_priority, не low
-        assert result in {high_only, "python импорт"}, (
-            f"Неожиданный выбор из low_priority: {result}"
-        )
-        assert result not in {"не_связано_1", "не_связано_2"}, (
-            f"Выпало в low: {result}"
-        )
+        assert result in {
+            high_only,
+            "python импорт",
+        }, f"Неожиданный выбор из low_priority: {result}"
+        assert result not in {"не_связано_1", "не_связано_2"}, f"Выпало в low: {result}"
 
 
 def test_no_priority_when_prob_zero():
@@ -145,12 +144,15 @@ def test_no_priority_when_prob_zero():
     )
     pool = [
         "python функции",  # 2 совпадения → high_priority
-        "не_связано_1",   # 0 совпадений → low_priority
+        "не_связано_1",  # 0 совпадений → low_priority
         "не_связано_2",
     ]
     for _ in range(50):
         result = select_stimulus(agent, goal_priority_prob=0.0, stimuli_pool=pool)
-        assert result in {"не_связано_1", "не_связано_2"}, f"Неожиданный выбор: {result}"
+        assert result in {
+            "не_связано_1",
+            "не_связано_2",
+        }, f"Неожиданный выбор: {result}"
 
 
 def test_short_goal_keywords_ignored():
@@ -175,6 +177,7 @@ def test_no_active_goal_uses_random_pool():
 def test_prioritize_disabled_uses_random():
     """Если PRIORITIZE_STIMULI=False в конфиге — случайный стимул."""
     from config.simulation_config import LR_CONFIG
+
     original = LR_CONFIG.PRIORITIZE_STIMULI
     try:
         LR_CONFIG.PRIORITIZE_STIMULI = False
@@ -236,6 +239,7 @@ def test_stimuli_pool_none_uses_config():
     """Если stimuli_pool=None — берётся LR_CONFIG.STIMULI_POOL."""
     agent = FakeAgent(active_goal=None)
     from config.simulation_config import LR_CONFIG
+
     # По умолчанию LR_CONFIG.STIMULI_POOL непустой
     result = select_stimulus(agent)  # stimuli_pool=None → из конфига
     assert result in LR_CONFIG.STIMULI_POOL
@@ -248,6 +252,7 @@ def test_high_priority_count_check():
     через ``_apply_python_priority`` (Этап 5) — раньше они шли в low.
     """
     from src.core.stimulus_selector import _split_by_goal
+
     pool = ["python функции", "python импорт", "просто шум"]
     high, low = _split_by_goal(pool, "изучить python функции")
     # "python функции" — 2 keyword-а, "python импорт" — 1 keyword + Python-priority
@@ -262,9 +267,11 @@ def test_high_priority_count_check():
 def test_python_priority_disabled_with_low_multiplier():
     """При multiplier < threshold — Python-стимулы не поднимаются."""
     from src.core.stimulus_selector import _split_by_goal
+
     pool = ["python импорт", "не_связано"]
     high, low = _split_by_goal(
-        pool, "изучить что-то другое",
+        pool,
+        "изучить что-то другое",
         python_multiplier=0.5,  # ниже дефолтного threshold=0.6
         tech_threshold=0.6,
     )
@@ -276,9 +283,11 @@ def test_python_priority_disabled_with_low_multiplier():
 def test_python_priority_enabled_by_default():
     """При multiplier (3.0) >= threshold (0.6) — Python-стимулы поднимаются."""
     from src.core.stimulus_selector import _split_by_goal
+
     pool = ["python импорт", "python def", "не_связано"]
     high, low = _split_by_goal(
-        pool, "изучить что-то",  # цель не содержит python
+        pool,
+        "изучить что-то",  # цель не содержит python
     )
     # Все Python-стимулы поднялись в high
     assert set(high) == {"python импорт", "python def"}
@@ -288,9 +297,11 @@ def test_python_priority_enabled_by_default():
 def test_python_priority_can_be_disabled_via_param():
     """apply_python_priority=False — отключает приоритезацию."""
     from src.core.stimulus_selector import _split_by_goal
+
     pool = ["python импорт", "не_связано"]
     high, low = _split_by_goal(
-        pool, "изучить что-то",
+        pool,
+        "изучить что-то",
         apply_python_priority=False,
     )
     # Python-стимул НЕ поднялся (отключено)
@@ -301,6 +312,7 @@ def test_python_priority_can_be_disabled_via_param():
 def test_is_python_tech_stimulus():
     """Распознавание Python/технических стимулов."""
     from src.core.stimulus_selector import _is_python_tech_stimulus
+
     # Питоновые
     assert _is_python_tech_stimulus("команда import")
     assert _is_python_tech_stimulus("функция def")
@@ -315,5 +327,6 @@ def test_is_python_tech_stimulus():
 def test_try_consume_open_question_returns_none_for_empty():
     """_try_consume_open_question возвращает None при пустой очереди."""
     from src.core.stimulus_selector import _try_consume_open_question
+
     agent = FakeAgent(open_questions=[])
     assert _try_consume_open_question(agent) is None

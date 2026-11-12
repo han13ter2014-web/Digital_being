@@ -36,9 +36,11 @@ def temp_nursery():
 # 1. Базовая функциональность
 # ============================================================
 
+
 def test_nursery_watcher_initializes():
     """Watcher создаётся без падения."""
     from src.core.subsystems.nursery_watcher import NurseryWatcher
+
     w = NurseryWatcher(agent_name="TestAgent")
     assert w.agent_name == "TestAgent"
     assert w.name == "nursery_watcher"
@@ -50,6 +52,7 @@ def test_nursery_watcher_initializes():
 def test_nursery_watcher_setup_with_missing_dir():
     """setup() не падает, если директории нет."""
     from src.core.subsystems.nursery_watcher import NurseryWatcher
+
     w = NurseryWatcher(agent_name="TestAgent", nursery_dir="/nonexistent/path")
     # Не должно падать.
     w.setup({"agent_name": "TestAgent"})
@@ -58,6 +61,7 @@ def test_nursery_watcher_setup_with_missing_dir():
 def test_nursery_watcher_finds_existing_seeds(temp_nursery):
     """При setup() фиксирует уже существующие seed-ы как известные."""
     from src.core.subsystems.nursery_watcher import NurseryWatcher
+
     # Создаём два seed-а заранее
     seed1 = os.path.join(temp_nursery, "TestSubject_seed_2026-01-01T00-00-00")
     seed2 = os.path.join(temp_nursery, "OtherAgent_seed_2026-01-02T00-00-00")
@@ -83,8 +87,13 @@ def test_nursery_watcher_detects_new_seed(temp_nursery):
     # Создаём новый seed ПОСЛЕ setup
     new_seed = os.path.join(temp_nursery, "NewSeed_seed_2026-02-01")
     os.makedirs(new_seed)
-    for f in ("metadata.json", "identity.json", "mental_models.json",
-              "personality_signature.json", "README.md"):
+    for f in (
+        "metadata.json",
+        "identity.json",
+        "mental_models.json",
+        "personality_signature.json",
+        "README.md",
+    ):
         with open(os.path.join(new_seed, f), "w") as fp:
             fp.write("{}")
 
@@ -180,6 +189,7 @@ def test_nursery_watcher_seed_history_limited(temp_nursery):
 # 2. list_seeds() и get_seed()
 # ============================================================
 
+
 def test_nursery_watcher_list_seeds(temp_nursery):
     """list_seeds() возвращает все seed-ы с метаданными."""
     from src.core.subsystems.nursery_watcher import NurseryWatcher
@@ -188,8 +198,13 @@ def test_nursery_watcher_list_seeds(temp_nursery):
     for i in range(2):
         s = os.path.join(temp_nursery, f"Listed_seed_{i}")
         os.makedirs(s)
-        for fname in ("metadata.json", "identity.json", "mental_models.json",
-                      "personality_signature.json", "README.md"):
+        for fname in (
+            "metadata.json",
+            "identity.json",
+            "mental_models.json",
+            "personality_signature.json",
+            "README.md",
+        ):
             with open(os.path.join(s, fname), "w") as f:
                 if fname.endswith(".json"):
                     json.dump({"agent_name": f"agent_{i}"}, f)
@@ -229,6 +244,7 @@ def test_nursery_watcher_get_seed_by_name(temp_nursery):
 def test_nursery_watcher_get_seed_missing_returns_none(temp_nursery):
     """get_seed() несуществующего — возвращает None."""
     from src.core.subsystems.nursery_watcher import NurseryWatcher
+
     w = NurseryWatcher(agent_name="T", nursery_dir=temp_nursery)
     assert w.get_seed("nonexistent_seed") is None
 
@@ -236,6 +252,7 @@ def test_nursery_watcher_get_seed_missing_returns_none(temp_nursery):
 # ============================================================
 # 3. status() и attach_agent()
 # ============================================================
+
 
 def test_nursery_watcher_status_includes_metadata(temp_nursery):
     """status() содержит снимок для dashboard."""
@@ -285,6 +302,7 @@ def test_nursery_watcher_attach_agent_idempotent():
 # ============================================================
 # 4. Интеграция с PluginRegistry
 # ============================================================
+
 
 def test_nursery_watcher_registers_in_registry():
     """Watcher автоматически регистрируется в PluginRegistry через DigitalBeing."""

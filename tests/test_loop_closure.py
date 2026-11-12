@@ -12,11 +12,9 @@ import pytest
 
 from src.core.loop_closure import (
     DEFAULT_PRODUCTIVE_ACTIONS,
-    ActionOutcome,
     LoopCloser,
 )
 from src.core.world_delta import (
-    WorldDelta,
     WorldSignature,
     between,
     capture,
@@ -124,7 +122,7 @@ def test_effect_resets_streak():
 
 
 def test_confirmed_result_resets_streak_without_faking_world_delta():
-    """К4: восстановление ресурса — результат, но не прирост знаний."""
+    """Восстановление ресурса — результат, но не прирост знаний."""
     closer = LoopCloser(max_no_effect=3)
     empty = WorldSignature()
     closer.observe("deep_rest", empty, empty)

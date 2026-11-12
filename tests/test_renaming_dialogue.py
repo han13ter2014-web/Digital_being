@@ -1,7 +1,6 @@
 """Осознанное переименование: переспрос при принятом имени, отказ сохраняет имя.
 
-Покрывает ступень 3.1 (PATCH_WORK_STATUS: «Согласие на альтернативное имя
-... требуют отдельной проверки»):
+Покрывает согласие на альтернативное имя и отдельную проверку решения:
 - classify_confirmation: короткие «да/нет» vs обычная речь;
 - offer_rename / confirm_rename / cancel_rename (решение за Core, 30% отказ);
 - чинёный accept_alternative + decline_alternative;
@@ -27,7 +26,7 @@ def _interaction():
     return ui
 
 
-def _dialogue(agent_name="Тэсс"):
+def _dialogue(agent_name="Нова"):
     return NamingDialogue(agent_name=agent_name, user_interaction=_interaction())
 
 
@@ -36,7 +35,9 @@ class _NamingAgent(SimpleNamespace):
 
     def propose_name(self, name, cycle=0):
         return self.naming_dialogue.process_name_proposal(
-            name, agent=self, cycle=cycle,
+            name,
+            agent=self,
+            cycle=cycle,
         )
 
 
@@ -52,20 +53,24 @@ def _runner(agent):
 # classify_confirmation
 # ============================================================
 
-@pytest.mark.parametrize("text,expected", [
-    ("да", "affirmative"),
-    ("Хорошо.", "affirmative"),
-    ("Давай!", "affirmative"),
-    ("Ок", "affirmative"),
-    ("Пусть будет так", "affirmative"),
-    ("нет", "negative"),
-    ("Не надо", "negative"),
-    ("Оставь как есть", "negative"),
-    ("не знаю", "unknown"),
-    ("Зовут Кот", "unknown"),
-    ("Да, я тебя слышу и стараюсь понять.", "unknown"),
-    ("", "unknown"),
-])
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("да", "affirmative"),
+        ("Хорошо.", "affirmative"),
+        ("Давай!", "affirmative"),
+        ("Ок", "affirmative"),
+        ("Пусть будет так", "affirmative"),
+        ("нет", "negative"),
+        ("Не надо", "negative"),
+        ("Оставь как есть", "negative"),
+        ("не знаю", "unknown"),
+        ("Зовут Кот", "unknown"),
+        ("Да, я тебя слышу и стараюсь понять.", "unknown"),
+        ("", "unknown"),
+    ],
+)
 def test_classify_confirmation(text, expected):
     assert classify_confirmation(text) == expected
 
@@ -74,7 +79,8 @@ def test_classify_confirmation(text, expected):
 # Осознанное переименование (NamingDialogue)
 # ============================================================
 
-def _completed_dialogue(agent_name="Тэсс"):
+
+def _completed_dialogue(agent_name="Нова"):
     nd = _dialogue(agent_name)
     nd.phase = NamingDialogue.PHASE_COMPLETED
     return nd
@@ -82,7 +88,7 @@ def _completed_dialogue(agent_name="Тэсс"):
 
 def test_offer_rename_asks_confirmation_and_keeps_name():
     nd = _completed_dialogue()
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.offer_rename("Омелла", agent=agent, cycle=5)
 
@@ -91,29 +97,31 @@ def test_offer_rename_asks_confirmation_and_keeps_name():
     assert result["awaiting_user_decision"] is True
     assert nd.phase == NamingDialogue.PHASE_RENAMING_PENDING
     assert nd._rename_candidate == "Омелла"
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     nd.user_interaction.send_message.assert_called_once()
-    assert nd.user_interaction.send_message.call_args.kwargs["context"] == \
-        "rename_confirmation"
+    assert (
+        nd.user_interaction.send_message.call_args.kwargs["context"]
+        == "rename_confirmation"
+    )
 
 
 def test_completed_phase_proposal_routes_to_confirmation():
     """«/name X» и естественная речь в фазе completed не меняют имя молча."""
     nd = _completed_dialogue()
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.process_name_proposal("Омелла", agent=agent, cycle=6)
 
     assert result["status"] == "rename_confirmation"
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_RENAMING_PENDING
 
 
 def test_offer_rename_same_name_rejected():
     nd = _completed_dialogue()
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
-    result = nd.offer_rename("Тэсс", agent=agent, cycle=1)
+    result = nd.offer_rename("Нова", agent=agent, cycle=1)
 
     assert result["status"] == "rejected"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
@@ -124,7 +132,7 @@ def test_confirm_rename_accepts_and_changes_name(monkeypatch):
     nd = _completed_dialogue()
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.confirm_rename(agent=agent, cycle=7)
 
@@ -135,7 +143,7 @@ def test_confirm_rename_accepts_and_changes_name(monkeypatch):
     assert nd.user_interaction.agent_name == "Омелла"
     entry = nd._name_history[-1]
     assert entry["source"] == "rename"
-    assert entry["old_name"] == "Тэсс"
+    assert entry["old_name"] == "Нова"
 
 
 def test_confirm_rename_refusal_keeps_name(monkeypatch):
@@ -144,13 +152,13 @@ def test_confirm_rename_refusal_keeps_name(monkeypatch):
     nd = _completed_dialogue()
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.confirm_rename(agent=agent, cycle=7)
 
     assert result["status"] == "rename_declined"
-    assert result["kept_name"] == "Тэсс"
-    assert agent.name == "Тэсс"
+    assert result["kept_name"] == "Нова"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
     assert nd._rename_candidate == ""
 
@@ -159,13 +167,13 @@ def test_cancel_rename_keeps_name():
     nd = _completed_dialogue()
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.cancel_rename(agent=agent, cycle=8)
 
     assert result["status"] == "rename_cancelled"
-    assert result["kept_name"] == "Тэсс"
-    assert agent.name == "Тэсс"
+    assert result["kept_name"] == "Нова"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
 
 
@@ -174,7 +182,7 @@ def test_confirm_rename_without_pending_is_safe():
     nd = _completed_dialogue()
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = ""
-    agent = SimpleNamespace(name="Тэсс", attachment=None)
+    agent = SimpleNamespace(name="Нова", attachment=None)
 
     result = nd.confirm_rename(agent=agent, cycle=1)
 
@@ -185,6 +193,7 @@ def test_confirm_rename_without_pending_is_safe():
 # ============================================================
 # Альтернативное имя: починенный accept + новый decline
 # ============================================================
+
 
 def test_accept_alternative_applies_agent_alternative():
     nd = _completed_dialogue()
@@ -244,11 +253,15 @@ def test_propose_alternative_stores_alternative(monkeypatch):
 # Гейт AgentRunner по фазам
 # ============================================================
 
+
 @pytest.mark.asyncio
 async def test_gate_completed_name_proposal_asks_confirmation():
     nd = _completed_dialogue()
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=7, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=7,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
@@ -256,7 +269,7 @@ async def test_gate_completed_name_proposal_asks_confirmation():
         SimpleNamespace(data={"text": "Пусть тебя зовут Омелла"})
     )
 
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_RENAMING_PENDING
     runner.bus.publish.assert_awaited_once()
     assert runner.bus.publish.call_args.args[0] == "agent_thought"
@@ -271,7 +284,10 @@ async def test_gate_completed_confirm_yes_renames(monkeypatch):
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=8, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=8,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
@@ -290,16 +306,19 @@ async def test_gate_completed_confirm_no_keeps_name():
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=8, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=8,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
     await runner._on_user_message(SimpleNamespace(data={"text": "нет"}))
 
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
     runner.bus.publish.assert_awaited_once()
-    assert "Тэсс" in runner.bus.publish.call_args.args[1]["text"]
+    assert "Нова" in runner.bus.publish.call_args.args[1]["text"]
 
 
 @pytest.mark.asyncio
@@ -309,7 +328,10 @@ async def test_gate_considering_yes_accepts_alternative():
     nd._proposed_name = "Малютка"
     nd._alternative_name = "Alpha Jr."
     agent = _NamingAgent(
-        name="Alpha", cycle_count=9, attachment=None, naming_dialogue=nd,
+        name="Alpha",
+        cycle_count=9,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
@@ -325,7 +347,10 @@ async def test_gate_completed_confirmation_words_are_normal_speech():
     """«да/нет/хорошо/не знаю» без активного диалога не перехватываются."""
     nd = _completed_dialogue()
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=3, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=3,
+        attachment=None,
+        naming_dialogue=nd,
     )
 
     assert await agent_naming_gate(agent, "хорошо") is False
@@ -338,7 +363,10 @@ async def test_gate_completed_renames_only_on_real_proposal():
     """Осмысленное имя в фазе completed перехватывается, обычная речь — нет."""
     nd = _completed_dialogue()
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=3, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=3,
+        attachment=None,
+        naming_dialogue=nd,
     )
 
     assert await agent_naming_gate(agent, "Пусть тебя зовут Омелла") is True
@@ -355,20 +383,18 @@ async def test_gate_completed_request_is_not_a_name_proposal():
     """
     nd = _completed_dialogue()
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=7, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=7,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Спой песню!"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Спой песню!"}))
 
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
-    texts = [
-        call.args[1].get("text", "")
-        for call in runner.bus.publish.call_args_list
-    ]
+    texts = [call.args[1].get("text", "") for call in runner.bus.publish.call_args_list]
     assert any("не умею" in t for t in texts)
     assert not any("переименовать" in t for t in texts)
 
@@ -380,21 +406,19 @@ async def test_gate_renaming_pending_request_cancels_and_refuses():
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
     agent = _NamingAgent(
-        name="Тэсс", cycle_count=8, attachment=None, naming_dialogue=nd,
+        name="Нова",
+        cycle_count=8,
+        attachment=None,
+        naming_dialogue=nd,
     )
     runner = _runner(agent)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Нарисуй кота"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Нарисуй кота"}))
 
-    assert agent.name == "Тэсс"
+    assert agent.name == "Нова"
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
     assert not nd._rename_candidate
-    texts = [
-        call.args[1].get("text", "")
-        for call in runner.bus.publish.call_args_list
-    ]
+    texts = [call.args[1].get("text", "") for call in runner.bus.publish.call_args_list]
     assert any("не умею" in t for t in texts)
     assert not any("переименовать" in t for t in texts)
 

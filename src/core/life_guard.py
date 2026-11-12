@@ -30,9 +30,10 @@
 
 Состояние жизни
 ---------------
-Состояние (``alive`` / ``dormant`` / ``terminated``) хранится в файле
-``data/life_state.json``, а не в подменённом методе ``agent.is_alive``.
-Так оно переживает перезапуск и его можно показать человеку.
+Состояние (``alive`` / ``dormant`` / ``terminated``) managed-жизни хранится
+в ``life.sqlite3``; standalone использует ``data/life_state.json``. Оно не
+зависит от подменённого метода ``agent.is_alive``, переживает перезапуск и
+может быть показано человеку.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ import json
 import os
 import shutil
 import time
+from contextlib import closing, nullcontext
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -52,7 +54,7 @@ from src.core.paths import data_path
 # ============================================================
 
 STATE_ALIVE = "alive"
-STATE_DORMANT = "dormant"        # ушёл в сон, семя оставлено
+STATE_DORMANT = "dormant"  # ушёл в сон, семя оставлено
 STATE_TERMINATED = "terminated"  # ушёл без семени
 
 VALID_STATES = (STATE_ALIVE, STATE_DORMANT, STATE_TERMINATED)
@@ -244,6 +246,40 @@ class LifeGuard:
     # Источник текущего отображаемого имени. Имя — только подпись жизни,
     # поэтому подтверждение должно следовать за ним, а не за именем при рождении.
     name_provider: Any = field(default=None, repr=False)
+    life_id: Optional[str] = None
+    database: Any = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.database is not None:
+            target = self.life_id or self.database.life_id
+            from src.core.life_identity import validate_life_id
+
+            self.life_id = validate_life_id(target)
+            if self.database.life_id != self.life_id:
+                raise ValueError("LifeGuard и база принадлежат разным жизням")
+        elif self.life_id is not None:
+            from src.core.life_identity import validate_life_id
+            from src.memory.life_database import LifeDatabase
+
+            self.life_id = validate_life_id(self.life_id)
+            self.database = LifeDatabase(
+                data_path("lives", self.life_id, "life.sqlite3"), self.life_id
+            )
+
+    def rebind(self, life_id: str) -> None:
+        """Переключить managed-объект на авторитетную базу другого UUID."""
+        from src.core.life_identity import validate_life_id
+        from src.memory.life_database import LifeDatabase
+
+        target = validate_life_id(life_id)
+        if self.life_id == target and self.database is not None:
+            return
+        self.life_id = target
+        self.database = LifeDatabase(data_path("lives", target, "life.sqlite3"), target)
+
+    def _write_context(self):
+        """Общая транзакция SQL; для standalone сохраняется файловый путь."""
+        return self.database.write() if self.database is not None else nullcontext(None)
 
     def current_name(self) -> str:
         """Текущее имя жизни; при смене имени фраза не должна устаревать."""
@@ -260,12 +296,23 @@ class LifeGuard:
     # Состояние жизни
     # ------------------------------------------------------------------
 
-    def load_state(self) -> str:
-        """Читает сохранённое состояние жизни. Битый файл → ``alive``.
+    def load_state(self, connection=None) -> str:
+        """Читает состояние из SQL либо из legacy-файла.
 
-        Сознательно склоняемся к «жив»: лучше оживить агента, чем
-        случайно похоронить его из-за повреждённого JSON.
+        Отсутствующая SQL-строка и битый legacy JSON означают ``alive``:
+        лучше оживить агента, чем случайно похоронить его из-за повреждения.
         """
+        if self.database is not None:
+            if connection is None:
+                with closing(self.database.connect(readonly=True)) as owned:
+                    return self.load_state(owned)
+            row = connection.execute(
+                "SELECT state FROM life_status WHERE id = 1"
+            ).fetchone()
+            if row is None:
+                return STATE_ALIVE
+            state = str(row[0])
+            return state if state in VALID_STATES else STATE_ALIVE
         try:
             with open(self.state_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -276,6 +323,21 @@ class LifeGuard:
 
     def state_details(self) -> Dict[str, Any]:
         """Полная запись состояния для показа человеку."""
+        if self.database is not None:
+            with closing(self.database.connect(readonly=True)) as connection:
+                row = connection.execute(
+                    "SELECT state, display_name, reason, changed_at, seed_folder "
+                    "FROM life_status WHERE id = 1"
+                ).fetchone()
+            if row is None:
+                return {"state": STATE_ALIVE}
+            return {
+                "state": row["state"],
+                "agent_name": row["display_name"],
+                "reason": row["reason"],
+                "changed_at": row["changed_at"],
+                "seed_folder": row["seed_folder"],
+            }
         try:
             with open(self.state_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -291,15 +353,16 @@ class LifeGuard:
         *,
         reason: str = "",
         seed_folder: Optional[str] = None,
+        connection=None,
     ) -> Dict[str, Any]:
-        """Записывает состояние жизни на диск.
-
-        Это единственный способ изменить состояние — прямое присваивание
-        ``agent.is_alive`` больше не используется, потому что оно не
-        переживает перезапуск.
-        """
+        """Атомарно изменяет состояние и добавляет событие в том же backend."""
         if state not in VALID_STATES:
             raise ValueError(f"недопустимое состояние: {state!r}")
+        if self.database is not None and connection is None:
+            with self.database.write() as owned:
+                return self.set_state(
+                    state, reason=reason, seed_folder=seed_folder, connection=owned
+                )
         payload: Dict[str, Any] = {
             "state": state,
             "agent_name": self.current_name(),
@@ -307,13 +370,38 @@ class LifeGuard:
             "changed_at": datetime.now().isoformat(timespec="seconds"),
             "seed_folder": seed_folder,
         }
+        if self.database is not None:
+            connection.execute(
+                "INSERT INTO life_status"
+                "(id, state, display_name, reason, changed_at, seed_folder) "
+                "VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                "state=excluded.state, display_name=excluded.display_name, "
+                "reason=excluded.reason, changed_at=excluded.changed_at, "
+                "seed_folder=excluded.seed_folder",
+                (
+                    state,
+                    payload["agent_name"],
+                    reason,
+                    payload["changed_at"],
+                    seed_folder,
+                ),
+            )
+            self._log_event(
+                "state_changed",
+                state=state,
+                reason=reason,
+                seed_folder=seed_folder,
+                connection=connection,
+            )
+            return payload
         os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
         tmp = f"{self.state_path}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, self.state_path)
-        self._log_event("state_changed", state=state, reason=reason,
-                        seed_folder=seed_folder)
+        self._log_event(
+            "state_changed", state=state, reason=reason, seed_folder=seed_folder
+        )
         return payload
 
     def is_alive(self) -> bool:
@@ -324,7 +412,18 @@ class LifeGuard:
     # Запросы и подтверждения
     # ------------------------------------------------------------------
 
-    def _load_requests(self) -> Dict[str, LifeRequest]:
+    def _load_requests(self, connection=None) -> Dict[str, LifeRequest]:
+        if self.database is not None:
+            if connection is None:
+                with closing(self.database.connect(readonly=True)) as owned:
+                    return self._load_requests(owned)
+            rows = connection.execute(
+                "SELECT request_id, kind, agent_name, reason, created_at, "
+                "expires_at, confirmed, confirmed_at FROM life_requests"
+            ).fetchall()
+            return {
+                str(row["request_id"]): LifeRequest.from_dict(dict(row)) for row in rows
+            }
         try:
             with open(self.requests_path, "r", encoding="utf-8") as fh:
                 raw = json.load(fh)
@@ -342,7 +441,32 @@ class LifeGuard:
                 continue
         return result
 
-    def _save_requests(self, requests: Dict[str, LifeRequest]) -> None:
+    def _save_requests(self, requests: Dict[str, LifeRequest], connection=None) -> None:
+        if self.database is not None:
+            if connection is None:
+                with self.database.write() as owned:
+                    self._save_requests(requests, owned)
+                return
+            connection.execute("DELETE FROM life_requests")
+            connection.executemany(
+                "INSERT INTO life_requests(request_id, kind, agent_name, reason, "
+                "created_at, expires_at, confirmed, confirmed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        req.request_id,
+                        req.kind,
+                        req.agent_name,
+                        req.reason,
+                        req.created_at,
+                        req.expires_at,
+                        int(req.confirmed),
+                        req.confirmed_at,
+                    )
+                    for req in requests.values()
+                ],
+            )
+            return
         os.makedirs(os.path.dirname(self.requests_path) or ".", exist_ok=True)
         payload = {key: req.to_dict() for key, req in requests.items()}
         tmp = f"{self.requests_path}.tmp"
@@ -396,45 +520,51 @@ class LifeGuard:
             raise ConfirmationError(
                 "Предохранитель выключен: уход запрещён в этом режиме."
             )
-        current = self.load_state()
-        if current == STATE_TERMINATED:
-            raise ConfirmationError("Агент уже прекратил существование.")
-        if current == STATE_DORMANT and kind == KIND_TERMINATE:
-            raise ConfirmationError(
-                "Агент уже в глубоком сне. Необратимый уход из сна "
-                "запрещён: сначала прорастите семя."
+        with self._write_context() as connection:
+            current = self.load_state(connection)
+            if current == STATE_TERMINATED:
+                raise ConfirmationError("Агент уже прекратил существование.")
+            if current == STATE_DORMANT and kind == KIND_TERMINATE:
+                raise ConfirmationError(
+                    "Агент уже в глубоком сне. Необратимый уход из сна "
+                    "запрещён: сначала прорастите семя."
+                )
+
+            now = self.clock()
+            name = agent_name or self.current_name()
+
+            requests = self._load_requests(connection)
+            # Чистим истёкшие, чтобы хранилище не росло.
+            requests = {
+                key: value
+                for key, value in requests.items()
+                if not value.is_expired(now)
+            }
+            # Два запроса в одну миллисекунду не должны перезаписывать друг
+            # друга: иначе второй «теряется» и подтверждается чужой.
+            request_id = f"{kind}-{int(now * 1000)}"
+            suffix = 1
+            while request_id in requests:
+                request_id = f"{kind}-{int(now * 1000)}-{suffix}"
+                suffix += 1
+            req = LifeRequest(
+                request_id=request_id,
+                kind=kind,
+                agent_name=name,
+                reason=reason,
+                created_at=now,
+                expires_at=now + policy.ttl_sec,
             )
-
-        now = self.clock()
-        name = agent_name or self.current_name()
-
-        requests = self._load_requests()
-        # Чистим истёкшие, чтобы файл не рос.
-        requests = {
-            key: value
-            for key, value in requests.items()
-            if not value.is_expired(now)
-        }
-        # Два запроса в одну миллисекунду не должны перезаписывать друг
-        # друга: иначе второй «теряется» и подтверждается чужой.
-        request_id = f"{kind}-{int(now * 1000)}"
-        suffix = 1
-        while request_id in requests:
-            request_id = f"{kind}-{int(now * 1000)}-{suffix}"
-            suffix += 1
-        req = LifeRequest(
-            request_id=request_id,
-            kind=kind,
-            agent_name=name,
-            reason=reason,
-            created_at=now,
-            expires_at=now + policy.ttl_sec,
-        )
-        requests[request_id] = req
-        self._save_requests(requests)
-        self._log_event("requested", kind=kind, reason=reason,
-                        request_id=request_id)
-        return req
+            requests[request_id] = req
+            self._save_requests(requests, connection)
+            self._log_event(
+                "requested",
+                kind=kind,
+                reason=reason,
+                request_id=request_id,
+                connection=connection,
+            )
+            return req
 
     def confirm(
         self,
@@ -451,66 +581,79 @@ class LifeGuard:
             raise ConfirmationError(
                 "Предохранитель выключен: уход запрещён в этом режиме."
             )
-        requests = self._load_requests()
-        req = requests.get(str(request_id))
-        if req is None:
-            raise ConfirmationError(
-                "Запрос не найден. Возможно, он истёк — начните заново."
-            )
-        if req.confirmed:
-            raise ConfirmationError("Этот запрос уже был подтверждён.")
+        with self._write_context() as connection:
+            requests = self._load_requests(connection)
+            req = requests.get(str(request_id))
+            if req is None:
+                raise ConfirmationError(
+                    "Запрос не найден. Возможно, он истёк — начните заново."
+                )
+            if req.confirmed:
+                raise ConfirmationError("Этот запрос уже был подтверждён.")
 
-        now = self.clock()
-        if req.is_expired(now):
-            raise ConfirmationError(
-                "Время на подтверждение истекло. Запрос отменён — "
-                "начните заново, чтобы осознанно пройти весь путь."
-            )
+            now = self.clock()
+            if req.is_expired(now):
+                raise ConfirmationError(
+                    "Время на подтверждение истекло. Запрос отменён — "
+                    "начните заново, чтобы осознанно пройти весь путь."
+                )
 
-        policy = get_policy(req.kind)
-        waiting = req.seconds_until_confirmable(now)
-        if waiting > 0:
-            raise ConfirmationError(
-                f"Слишком рано. Подождите ещё {waiting:.0f} с, "
-                f"чтобы прочитать последствия."
-            )
+            policy = get_policy(req.kind)
+            waiting = req.seconds_until_confirmable(now)
+            if waiting > 0:
+                raise ConfirmationError(
+                    f"Слишком рано. Подождите ещё {waiting:.0f} с, "
+                    f"чтобы прочитать последствия."
+                )
 
-        expected = policy.expected_phrase(req.agent_name)
-        entered = normalize_phrase(phrase)
-        # После смены имени запрос, созданный раньше, и новый диалог должны
-        # приниматься оба: жизнь одна, меняется только её подпись.
-        accepted = {normalize_phrase(expected),
-                    normalize_phrase(policy.expected_phrase(self.current_name()))}
-        if entered not in accepted:
-            raise ConfirmationError(
-                f"Фраза не совпала. Нужно ввести точно: «{expected}»"
-            )
+            expected = policy.expected_phrase(req.agent_name)
+            entered = normalize_phrase(phrase)
+            # После смены имени запрос, созданный раньше, и новый диалог должны
+            # приниматься оба: жизнь одна, меняется только её подпись.
+            accepted = {
+                normalize_phrase(expected),
+                normalize_phrase(policy.expected_phrase(self.current_name())),
+            }
+            if entered not in accepted:
+                raise ConfirmationError(
+                    f"Фраза не совпала. Нужно ввести точно: «{expected}»"
+                )
 
-        req.confirmed = True
-        req.confirmed_at = now
-        requests[req.request_id] = req
-        self._save_requests(requests)
-        self._log_event("confirmed", kind=req.kind,
-                        request_id=req.request_id)
-        return req
+            req.confirmed = True
+            req.confirmed_at = now
+            requests[req.request_id] = req
+            self._save_requests(requests, connection)
+            self._log_event(
+                "confirmed",
+                kind=req.kind,
+                request_id=req.request_id,
+                connection=connection,
+            )
+            return req
 
     def cancel(self, request_id: str) -> bool:
         """Отменяет запрос. Работает всегда, ничего не требует."""
-        requests = self._load_requests()
-        if str(request_id) not in requests:
-            return False
-        del requests[str(request_id)]
-        self._save_requests(requests)
-        self._log_event("cancelled", request_id=str(request_id))
-        return True
+        with self._write_context() as connection:
+            requests = self._load_requests(connection)
+            if str(request_id) not in requests:
+                return False
+            del requests[str(request_id)]
+            self._save_requests(requests, connection)
+            self._log_event(
+                "cancelled", request_id=str(request_id), connection=connection
+            )
+            return True
 
-    def cancel_all(self) -> int:
+    def cancel_all(self, connection=None) -> int:
         """Отменяет все запросы. Вызывается при возобновлении жизни."""
-        requests = self._load_requests()
+        if self.database is not None and connection is None:
+            with self.database.write() as owned:
+                return self.cancel_all(owned)
+        requests = self._load_requests(connection)
         count = len(requests)
         if count:
-            self._save_requests({})
-            self._log_event("cancelled_all", count=count)
+            self._save_requests({}, connection)
+            self._log_event("cancelled_all", count=count, connection=connection)
         return count
 
     # ------------------------------------------------------------------
@@ -541,39 +684,64 @@ class LifeGuard:
         snapshot = None
         if req.kind == KIND_TERMINATE:
             snapshot = self.create_snapshot(tag="before_terminate")
+            if self.database is not None and snapshot is None:
+                raise ConfirmationError(
+                    "Не удалось создать обязательный резервный снимок; "
+                    "необратимый уход отменён."
+                )
 
-        state = STATE_DORMANT if req.kind == KIND_DREAM else STATE_TERMINATED
-        details = self.set_state(
-            state, reason=req.reason, seed_folder=seed_folder
-        )
-        del requests[req.request_id]
-        self._save_requests(requests)
-        self._log_event("executed", kind=req.kind,
-                        request_id=req.request_id, snapshot=snapshot)
-        return {
-            "kind": req.kind,
-            "state": state,
-            "details": details,
-            "snapshot": snapshot,
-            "reversible": get_policy(req.kind).reversible,
-        }
+        with self._write_context() as connection:
+            # После медленного backup повторно проверяем тот же запрос уже
+            # внутри writer-транзакции: отмена не должна гоняться с уходом.
+            requests = self._load_requests(connection)
+            req = requests.get(str(request_id))
+            if req is None:
+                raise ConfirmationError("Запрос не найден.")
+            if not req.confirmed:
+                raise ConfirmationError(
+                    "Запрос не подтверждён. Сначала вызовите confirm()."
+                )
+            state = STATE_DORMANT if req.kind == KIND_DREAM else STATE_TERMINATED
+            details = self.set_state(
+                state,
+                reason=req.reason,
+                seed_folder=seed_folder,
+                connection=connection,
+            )
+            del requests[req.request_id]
+            self._save_requests(requests, connection)
+            self._log_event(
+                "executed",
+                kind=req.kind,
+                request_id=req.request_id,
+                snapshot=snapshot,
+                connection=connection,
+            )
+            return {
+                "kind": req.kind,
+                "state": state,
+                "details": details,
+                "snapshot": snapshot,
+                "reversible": get_policy(req.kind).reversible,
+            }
 
     def wake(self, reason: str = "возвращение к жизни") -> Dict[str, Any]:
         """Возвращает агента из ``dormant`` в ``alive``.
 
         Из ``terminated`` возврата нет: для этого есть ``restore_snapshot``.
         """
-        current = self.load_state()
-        if current == STATE_TERMINATED:
-            raise ConfirmationError(
-                "Агент прекратил существование. Вернуть его можно только "
-                "из снимка: restore_snapshot()."
-            )
-        if current == STATE_ALIVE:
-            return {"changed": False, "state": STATE_ALIVE}
-        self.cancel_all()
-        details = self.set_state(STATE_ALIVE, reason=reason)
-        return {"changed": True, "state": STATE_ALIVE, "details": details}
+        with self._write_context() as connection:
+            current = self.load_state(connection)
+            if current == STATE_TERMINATED:
+                raise ConfirmationError(
+                    "Агент прекратил существование. Вернуть его можно только "
+                    "из снимка: restore_snapshot()."
+                )
+            if current == STATE_ALIVE:
+                return {"changed": False, "state": STATE_ALIVE}
+            self.cancel_all(connection)
+            details = self.set_state(STATE_ALIVE, reason=reason, connection=connection)
+            return {"changed": True, "state": STATE_ALIVE, "details": details}
 
     # ------------------------------------------------------------------
     # Снимки (страховка оператора)
@@ -590,9 +758,7 @@ class LifeGuard:
         safe_tag = "".join(
             ch if ch.isalnum() or ch in "-_" else "_" for ch in str(tag)
         )[:40]
-        target = os.path.join(
-            self.snapshot_root, f"{stamp}_{safe_tag}"
-        )
+        target = os.path.join(self.snapshot_root, f"{stamp}_{safe_tag}")
         os.makedirs(target, exist_ok=True)
 
         import sqlite3
@@ -624,7 +790,7 @@ class LifeGuard:
     def _prune_snapshots(self) -> None:
         snapshots = self.list_snapshots()
         excess = len(snapshots) - max(1, int(self.max_snapshots))
-        for path in snapshots[:max(0, excess)]:
+        for path in snapshots[: max(0, excess)]:
             try:
                 shutil.rmtree(path)
             except OSError:
@@ -634,14 +800,28 @@ class LifeGuard:
     # Журнал
     # ------------------------------------------------------------------
 
-    def _log_event(self, event: str, **fields: Any) -> None:
-        """Пишет строку в журнал решений. Ошибки записи не критичны."""
+    def _log_event(self, event: str, *, connection=None, **fields: Any) -> None:
+        """Добавляет событие в SQL либо в legacy JSONL."""
         record = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "event": event,
             "agent": self.current_name(),
         }
         record.update(fields)
+        if self.database is not None:
+            if connection is None:
+                with self.database.write() as owned:
+                    self._log_event(event, connection=owned, **fields)
+                return
+            connection.execute(
+                "INSERT INTO life_events(ts, event, payload_json) VALUES (?, ?, ?)",
+                (
+                    record["ts"],
+                    event,
+                    json.dumps(record, ensure_ascii=False, allow_nan=False),
+                ),
+            )
+            return
         try:
             os.makedirs(os.path.dirname(self.events_path) or ".", exist_ok=True)
             with open(self.events_path, "a", encoding="utf-8") as fh:
@@ -651,13 +831,20 @@ class LifeGuard:
 
     def recent_events(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Последние записи журнала (для окна и диагностики)."""
+        if self.database is not None:
+            with closing(self.database.connect(readonly=True)) as connection:
+                rows = connection.execute(
+                    "SELECT payload_json FROM life_events ORDER BY id DESC LIMIT ?",
+                    (max(1, int(limit)),),
+                ).fetchall()
+            return [json.loads(row[0]) for row in reversed(rows)]
         try:
             with open(self.events_path, "r", encoding="utf-8") as fh:
                 lines = fh.readlines()
         except OSError:
             return []
         result: List[Dict[str, Any]] = []
-        for line in lines[-max(1, limit):]:
+        for line in lines[-max(1, limit) :]:
             try:
                 result.append(json.loads(line))
             except ValueError:

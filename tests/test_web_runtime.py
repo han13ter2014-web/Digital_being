@@ -1,4 +1,4 @@
-"""К9: Runtime делит одни DTO между Tk и вебом и деградирует без вреда Tk."""
+"""Runtime делит одни DTO между Tk и вебом и деградирует без вреда Tk."""
 
 import asyncio
 from types import SimpleNamespace
@@ -18,14 +18,29 @@ class _Recorder:
         self.diary = []
         self.events = []
 
-    def push_status(self, value): self.status.append(value)
-    def push_life_status(self, value): self.life.append(value)
-    def push_graph(self, value): self.graph.append(value)
-    def publish_status(self, value): self.status.append(value)
-    def publish_life(self, value): self.life.append(value)
-    def publish_graph(self, value): self.graph.append(value)
-    def publish_diary(self, value): self.diary.append(value)
-    def publish_event(self, *args, **kwargs): self.events.append((args, kwargs))
+    def push_status(self, value):
+        self.status.append(value)
+
+    def push_life_status(self, value):
+        self.life.append(value)
+
+    def push_graph(self, value):
+        self.graph.append(value)
+
+    def publish_status(self, value):
+        self.status.append(value)
+
+    def publish_life(self, value):
+        self.life.append(value)
+
+    def publish_graph(self, value):
+        self.graph.append(value)
+
+    def publish_diary(self, value):
+        self.diary.append(value)
+
+    def publish_event(self, *args, **kwargs):
+        self.events.append((args, kwargs))
 
 
 @pytest.mark.asyncio
@@ -39,7 +54,9 @@ async def test_tk_and_web_receive_same_dto_objects(monkeypatch):
     monkeypatch.setattr("src.ui.life_snapshot.build_diary_snapshot", lambda *a: diary)
     monkeypatch.setattr("src.ui.graph_view.build_life_graph", lambda *a: graph)
     window, dashboard = _Recorder(), _Recorder()
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), window, dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), window, dashboard
+    )
 
     task = asyncio.create_task(runtime._status_loop())
     await asyncio.sleep(0.05)
@@ -59,7 +76,9 @@ async def test_existing_bus_events_are_forwarded_readonly():
     runtime = Runtime(SimpleNamespace(), bus, SimpleNamespace(), dashboard=dashboard)
     runtime._subscribe_dashboard()
     await bus.start()
-    await bus.publish(Events.AGENT_MESSAGE, {"id": "m1", "content": "привет"}, source="agent")
+    await bus.publish(
+        Events.AGENT_MESSAGE, {"id": "m1", "content": "привет"}, source="agent"
+    )
     await bus.dispatch_once()
     assert len(dashboard.events) == 1
     args, _ = dashboard.events[0]
@@ -70,7 +89,9 @@ async def test_existing_bus_events_are_forwarded_readonly():
 def test_bind_failure_does_not_escape_to_tk():
     dashboard = Mock()
     dashboard.start.side_effect = OSError("порт занят")
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime._start_dashboard()
     assert "порт занят" in runtime.dashboard_error
     assert runtime.error is None
@@ -82,7 +103,9 @@ def test_successful_dashboard_start_opens_local_web(monkeypatch):
     monkeypatch.setattr(
         "webbrowser.open", lambda url, new=0: opened.append((url, new)) or True
     )
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime.open_browser = True
 
     runtime._start_dashboard()
@@ -97,7 +120,9 @@ def test_failed_dashboard_start_never_opens_browser(monkeypatch):
     dashboard.start.side_effect = OSError("порт занят")
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda *a, **k: opened.append(a))
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime.open_browser = True
 
     runtime._start_dashboard()
@@ -110,7 +135,9 @@ def test_no_web_open_flag_disables_only_browser_opening(monkeypatch):
     dashboard = Mock(host="127.0.0.1", port=8765)
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda *a, **k: opened.append(a))
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime.open_browser = not parse_args(["--no-web-open"]).no_web_open
 
     runtime._start_dashboard()
@@ -123,7 +150,9 @@ def test_no_web_open_flag_disables_only_browser_opening(monkeypatch):
 def test_browser_failure_does_not_escape_to_life(monkeypatch):
     dashboard = Mock(host="127.0.0.1", port=8765)
     monkeypatch.setattr("webbrowser.open", Mock(side_effect=OSError("нет браузера")))
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime.open_browser = True
 
     runtime._start_dashboard()
@@ -134,7 +163,9 @@ def test_browser_failure_does_not_escape_to_life(monkeypatch):
 
 def test_dashboard_stop_is_idempotent_after_failed_start():
     dashboard = Mock()
-    runtime = Runtime(SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard)
+    runtime = Runtime(
+        SimpleNamespace(), EventBus(), SimpleNamespace(), dashboard=dashboard
+    )
     runtime._stop_dashboard()
     runtime._stop_dashboard()
     assert dashboard.stop.call_count == 2

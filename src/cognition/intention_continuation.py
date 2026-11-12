@@ -10,7 +10,9 @@ def continuation_candidate(agent):
     waits = getattr(agent, "_waiting_intentions", {})
     history = list(getattr(agent, "_intention_history", []))
     known_ids = {entry["id"] for entry in history}
-    history = [entry for entry in waits.values() if entry["id"] not in known_ids] + history
+    history = [
+        entry for entry in waits.values() if entry["id"] not in known_ids
+    ] + history
     # Более поздняя попытка той же темы определяет её состояние; другие
     # занятия, включая отдых, не стирают отложенную тему.
     from src.cognition.intention_evidence import finish_evidence_goal
@@ -28,7 +30,7 @@ def continuation_candidate(agent):
         if key in seen:
             continue
         seen.add(key)
-        # «Нетерпеливый вопрос» (TICKET-2): тема в backoff после
+        # Тема в backoff после
         # отложения — не предлагать продолжение, пока пауза не вышла.
         deferred = getattr(agent, "_deferred_intentions", None) or {}
         if agent.cycle_count < deferred.get(key, (0, 0))[0]:
@@ -45,27 +47,45 @@ def continuation_candidate(agent):
 
             context = information_context(agent)
             waiting = waits.get(waiting_key(action, target))
-            if waiting and (waiting["evidence_goal"]["status"] == "satisfied"
-                            or waiting["evidence_goal"].get("information_context") == context):
+            if waiting and (
+                waiting["evidence_goal"]["status"] == "satisfied"
+                or waiting["evidence_goal"].get("information_context") == context
+            ):
                 continue
-            if any(previous.get("continuation_of")
-                   and agent._normalize_action(previous.get("action")) == action
-                   and previous.get("target") == target
-                   and (previous.get("evidence_goal") or {}).get("status") == "pending"
-                   and (previous.get("evidence_goal") or {}).get("information_context") == context
-                   for previous in history):
+            if any(
+                previous.get("continuation_of")
+                and agent._normalize_action(previous.get("action")) == action
+                and previous.get("target") == target
+                and (previous.get("evidence_goal") or {}).get("status") == "pending"
+                and (previous.get("evidence_goal") or {}).get("information_context")
+                == context
+                for previous in history
+            ):
                 continue
         elif entry.get("status") == "performed" and outcome.get("had_effect"):
             continue
-        if entry.get("status") not in {"performed", "interrupted", "denied", "unobserved", "error"}:
+        if entry.get("status") not in {
+            "performed",
+            "interrupted",
+            "denied",
+            "unobserved",
+            "error",
+        }:
             continue
         if entry.get("cycle", 0) >= agent.cycle_count:
             continue
         if agent.loop_closer.is_stuck(action):
             continue
-        candidate = {"source": "intention_continuation", "action": action, "strength": 0.4,
-                     "params": {"topic": target, "reason": entry.get("reason", ""),
-                                "continuation_of": entry["id"]}}
+        candidate = {
+            "source": "intention_continuation",
+            "action": action,
+            "strength": 0.4,
+            "params": {
+                "topic": target,
+                "reason": entry.get("reason", ""),
+                "continuation_of": entry["id"],
+            },
+        }
         if agent._is_candidate_available(candidate):
             return candidate
     return None

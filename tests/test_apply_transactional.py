@@ -43,13 +43,10 @@ def _assert_untouched(agent, before):
     assert agent.goals == before["goals"]
     assert agent.knowledge_base == before["knowledge_base"]
     assert set(agent.mental_models.concepts.keys()) == before["concepts"]
-    assert (
-        {
-            key: dict(value)
-            for key, value in getattr(agent, "_method_preferences", {}).items()
-        }
-        == before["method_preferences"]
-    )
+    assert {
+        key: dict(value)
+        for key, value in getattr(agent, "_method_preferences", {}).items()
+    } == before["method_preferences"]
 
 
 def _make_agent_and_state():

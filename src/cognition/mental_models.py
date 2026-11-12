@@ -21,6 +21,7 @@ def _lr_config():
     """Ленивый импорт LR_CONFIG чтобы избежать циклов."""
     try:
         from config.simulation_config import LR_CONFIG
+
         return LR_CONFIG
     except Exception:
         return None
@@ -95,10 +96,9 @@ CONFIDENCE_RANGE = 0.8
 CONFIDENCE_MAX = 0.9
 
 
-
 class ConceptNode:
     """Узел ментальной модели - представляет одну концепцию."""
-    
+
     def __init__(self, name: str):
         self.name = name
         self.definition_hypothesis = ""  # Собственная гипотеза о значении
@@ -109,11 +109,17 @@ class ConceptNode:
         self.contexts_encountered = set()  # Контексты где встречалась
         self.created_at = datetime.now()
         self.last_updated = datetime.now()
-    
+
     def add_experience(
-        self, context: str, outcome: str, emotional_valence: float = 0.0,
-        *, evidence_strength: float = 0.0, evidence_kind: str = "exposure",
-        source: str = "", evidence_direction: int = 1,
+        self,
+        context: str,
+        outcome: str,
+        emotional_valence: float = 0.0,
+        *,
+        evidence_strength: float = 0.0,
+        evidence_kind: str = "exposure",
+        source: str = "",
+        evidence_direction: int = 1,
     ):
         """Записать переживание; эмоция не является подтверждением знания."""
         import math
@@ -121,11 +127,20 @@ class ConceptNode:
         strength = float(evidence_strength)
         if not math.isfinite(strength) or not 0.0 <= strength <= 1.0:
             raise ValueError("evidence_strength должен быть в диапазоне 0..1")
-        if evidence_kind not in {"exposure", "hypothesis", "observation", "testimony", "innate", "legacy"}:
+        if evidence_kind not in {
+            "exposure",
+            "hypothesis",
+            "observation",
+            "testimony",
+            "innate",
+            "legacy",
+        }:
             raise ValueError("Неизвестный вид опыта")
         if evidence_direction not in (-1, 1):
             raise ValueError("evidence_direction должен быть -1 или 1")
-        if strength and (not source or evidence_kind in {"exposure", "hypothesis", "legacy"}):
+        if strength and (
+            not source or evidence_kind in {"exposure", "hypothesis", "legacy"}
+        ):
             raise ValueError("Свидетельству нужны происхождение и наблюдение/сообщение")
         experience = {
             "context": context,
@@ -135,7 +150,7 @@ class ConceptNode:
             "evidence_kind": evidence_kind,
             "source": source,
             "evidence_direction": evidence_direction,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
         self.experiences.append(experience)
         self.contexts_encountered.add(context)
@@ -160,7 +175,11 @@ class ConceptNode:
         # Повторное чтение того же источника — не независимое подтверждение.
         sources = {}
         for experience in self.experiences:
-            if experience.get("evidence_kind") not in {"observation", "testimony", "innate"}:
+            if experience.get("evidence_kind") not in {
+                "observation",
+                "testimony",
+                "innate",
+            }:
                 continue
             source = experience.get("source")
             if not isinstance(source, str) or not source.strip():
@@ -170,12 +189,18 @@ class ConceptNode:
                 direction = experience.get("evidence_direction", 1)
             except (TypeError, ValueError):
                 continue
-            if not math.isfinite(strength) or not EVIDENCE_MIN <= strength <= 1.0 or direction not in (-1, 1):
+            if (
+                not math.isfinite(strength)
+                or not EVIDENCE_MIN <= strength <= 1.0
+                or direction not in (-1, 1)
+            ):
                 continue
             key = (source, direction)
             sources[key] = max(sources.get(key, 0.0), strength)
         total = sum(sources.values())
-        signed = sum(strength * direction for (_, direction), strength in sources.items())
+        signed = sum(
+            strength * direction for (_, direction), strength in sources.items()
+        )
         agreement = (abs(signed) / total) if total > 0 else 0.0
         return total, agreement
 
@@ -195,7 +220,9 @@ class ConceptNode:
             if EVIDENCE_MIN <= strength <= 1.0 and direction in (-1, 1):
                 key = (source, direction)
                 sources[key] = max(sources.get(key, 0.0), strength)
-        signed = sum(strength * direction for (_, direction), strength in sources.items())
+        signed = sum(
+            strength * direction for (_, direction), strength in sources.items()
+        )
         return 1 if signed > 0 else -1 if signed < 0 else 0
 
     def recompute_confidence(self) -> float:
@@ -215,16 +242,18 @@ class ConceptNode:
 
     def to_storage_dict(self) -> dict:
         data = self.to_dict()
-        data.update({
-            "experiences": [dict(exp) for exp in self.experiences],
-            "connections": dict(self.connections),
-            "contexts": sorted(self.contexts_encountered),
-            "usage_examples": list(self.usage_examples),
-            "schema_version": 2,
-            "source": getattr(self, "source", ""),
-            "tags": list(getattr(self, "tags", [])),
-            "legacy_confidence": getattr(self, "legacy_confidence", None),
-        })
+        data.update(
+            {
+                "experiences": [dict(exp) for exp in self.experiences],
+                "connections": dict(self.connections),
+                "contexts": sorted(self.contexts_encountered),
+                "usage_examples": list(self.usage_examples),
+                "schema_version": 2,
+                "source": getattr(self, "source", ""),
+                "tags": list(getattr(self, "tags", [])),
+                "legacy_confidence": getattr(self, "legacy_confidence", None),
+            }
+        )
         return data
 
     @classmethod
@@ -240,7 +269,9 @@ class ConceptNode:
             exp.setdefault("source", "")
             exp.setdefault("evidence_direction", 1)
         node.contexts_encountered = set(data.get("contexts", []))
-        node.contexts_encountered.update(exp.get("context", "") for exp in node.experiences)
+        node.contexts_encountered.update(
+            exp.get("context", "") for exp in node.experiences
+        )
         node.usage_examples = list(data.get("usage_examples", []))
         node.source = data.get("source", "")
         node.tags = list(data.get("tags", []))
@@ -256,13 +287,17 @@ class ConceptNode:
 
     def connect_to(self, other_concept: str, weight: float = 0.5):
         """Создает связь с другой концепцией."""
-        self.connections[other_concept] = max(self.connections.get(other_concept, 0.0), weight)
-    
+        self.connections[other_concept] = max(
+            self.connections.get(other_concept, 0.0), weight
+        )
+
     def strengthen_connection(self, other_concept: str, delta: float = 0.1):
         """Усиливает существующую связь."""
         if other_concept in self.connections:
-            self.connections[other_concept] = min(1.0, self.connections[other_concept] + delta)
-    
+            self.connections[other_concept] = min(
+                1.0, self.connections[other_concept] + delta
+            )
+
     def get_related_concepts(self, min_weight: float = 0.3) -> list[dict]:
         """Возвращает связанные концепции с весом выше порога."""
         return [
@@ -270,7 +305,7 @@ class ConceptNode:
             for c, w in self.connections.items()
             if w >= min_weight
         ]
-    
+
     def to_dict(self) -> dict:
         """Серилизует узел в словарь."""
         return {
@@ -282,7 +317,7 @@ class ConceptNode:
             "contexts": list(self.contexts_encountered)[:10],  # Топ-10 контекстов
             "usage_examples": self.usage_examples[:5],
             "created_at": self.created_at.isoformat(),
-            "last_updated": self.last_updated.isoformat()
+            "last_updated": self.last_updated.isoformat(),
         }
 
 
@@ -372,7 +407,9 @@ class MentalModel:
 
         batch = max(1, int(scan_batch))
         cursor = int(getattr(self, "_consolidation_cursor", 0)) % total
-        window = [names[(cursor + offset) % total] for offset in range(min(batch, total))]
+        window = [
+            names[(cursor + offset) % total] for offset in range(min(batch, total))
+        ]
         self._consolidation_cursor = (cursor + len(window)) % total
 
         links = 0
@@ -440,7 +477,8 @@ class MentalModel:
         не смысл, и в формулировке они выглядят как «связано с я, ты».
         """
         if len(node.experiences) < 2 or not any(
-            exp.get("evidence_kind") in {"hypothesis", "observation", "testimony", "innate"}
+            exp.get("evidence_kind")
+            in {"hypothesis", "observation", "testimony", "innate"}
             for exp in node.experiences
         ):
             return 0
@@ -449,7 +487,8 @@ class MentalModel:
             for other, weight in sorted(
                 node.connections.items(), key=lambda item: item[1], reverse=True
             )
-            if weight >= min_weight and other in self.concepts
+            if weight >= min_weight
+            and other in self.concepts
             and str(other).strip().lower() not in _REFLEXIVE_CONCEPTS
         ][:3]
         if len(strong) < 2:
@@ -559,15 +598,24 @@ class MentalModel:
             del self.concepts[name]
             forgotten += 1
 
-        self.metadata["forgotten_count"] = self.metadata.get("forgotten_count", 0) + forgotten
+        self.metadata["forgotten_count"] = (
+            self.metadata.get("forgotten_count", 0) + forgotten
+        )
         # Инвалидируем кеш (связи могли измениться)
         self._related_cache.clear()
         return forgotten
 
     def encounter_concept(
-        self, concept_name: str, context: str, outcome: str, valence: float = 0.0,
-        *, evidence_strength: float = 0.0, evidence_kind: str = "exposure",
-        source: str = "", evidence_direction: int = 1,
+        self,
+        concept_name: str,
+        context: str,
+        outcome: str,
+        valence: float = 0.0,
+        *,
+        evidence_strength: float = 0.0,
+        evidence_kind: str = "exposure",
+        source: str = "",
+        evidence_direction: int = 1,
     ) -> ConceptNode:
         """Агент встречает концепцию в определенном контексте."""
 
@@ -575,8 +623,12 @@ class MentalModel:
             # Новая концепция - создаем узел
             node = ConceptNode(concept_name)
             node.add_experience(
-                context, outcome, valence, evidence_strength=evidence_strength,
-                evidence_kind=evidence_kind, source=source,
+                context,
+                outcome,
+                valence,
+                evidence_strength=evidence_strength,
+                evidence_kind=evidence_kind,
+                source=source,
                 evidence_direction=evidence_direction,
             )
             self.concepts[concept_name] = node
@@ -591,8 +643,12 @@ class MentalModel:
             # Уже известная концепция - обновляем опыт
             node = self.concepts[concept_name]
             node.add_experience(
-                context, outcome, valence, evidence_strength=evidence_strength,
-                evidence_kind=evidence_kind, source=source,
+                context,
+                outcome,
+                valence,
+                evidence_strength=evidence_strength,
+                evidence_kind=evidence_kind,
+                source=source,
                 evidence_direction=evidence_direction,
             )
 
@@ -603,7 +659,7 @@ class MentalModel:
             self._synthesize_definition(concept_name)
 
             return node
-    
+
     def _find_initial_associations(self, new_node: ConceptNode):
         """Находит потенциальные связи для новой концепции.
 
@@ -621,13 +677,15 @@ class MentalModel:
             if existing_name == new_node.name:
                 continue
 
-            common_contexts = new_node.contexts_encountered & existing_node.contexts_encountered
+            common_contexts = (
+                new_node.contexts_encountered & existing_node.contexts_encountered
+            )
             if common_contexts:
                 weight = min(0.7, len(common_contexts) * 0.25)
                 new_node.connect_to(existing_name, weight)
                 existing_node.connect_to(new_node.name, weight)
                 self._record_association(new_node.name, existing_name, weight)
-    
+
     def _update_associations(self, updated_node: ConceptNode):
         """Обновляет ассоциации на основе нового опыта.
 
@@ -665,23 +723,28 @@ class MentalModel:
             updated_node.connect_to(other_name, weight)
             other_node.connect_to(updated_node.name, weight)
             self._record_association(
-                updated_node.name, other_name,
+                updated_node.name,
+                other_name,
                 updated_node.connections.get(other_name, weight),
             )
-    
+
     def _synthesize_definition(self, concept_name: str):
         """Синтезирует гипотезу определения на основе опыта."""
         node = self.concepts[concept_name]
-        
+
         material = [
-            exp for exp in node.experiences
-            if exp.get("evidence_kind") in {"hypothesis", "observation", "testimony", "innate"}
+            exp
+            for exp in node.experiences
+            if exp.get("evidence_kind")
+            in {"hypothesis", "observation", "testimony", "innate"}
         ]
         if not material:
             return
 
         # Содержательное свидетельство важнее собственной догадки.
-        supported = [exp for exp in material if exp.get("evidence_strength", 0.0) >= EVIDENCE_MIN]
+        supported = [
+            exp for exp in material if exp.get("evidence_strength", 0.0) >= EVIDENCE_MIN
+        ]
         if supported:
             material = supported
         context_patterns = defaultdict(list)
@@ -690,16 +753,20 @@ class MentalModel:
             keywords = [w for w in exp["context"].split() if len(w) > 3]
             for kw in keywords:
                 context_patterns[kw].append(exp)
-        
+
         # Находит наиболее часто встречающиеся паттерны
-        most_common = max(context_patterns.items(), key=lambda x: len(x[1])) if context_patterns else (None, [])
+        most_common = (
+            max(context_patterns.items(), key=lambda x: len(x[1]))
+            if context_patterns
+            else (None, [])
+        )
 
         if most_common[0] and len(most_common[1]) >= 2:
             # Формирует гипотезу определения
             common_outcomes = [e["outcome"] for e in most_common[1]]
             outcome_counter = Counter(common_outcomes)
             most_frequent = outcome_counter.most_common(3)
-            
+
             if len(most_frequent) > 0:
                 hypothesis_parts = [p[0] for p in most_frequent if p[1] >= 1]
                 if hypothesis_parts:
@@ -721,25 +788,29 @@ class MentalModel:
                     f"По опыту ({len(node.experiences)} встреч): "
                     f"'{concept_name}' — {' -> '.join(unique[:3])}"
                 )
-        
+
         # Обновляет уверенность. Формула одна на всю систему: см.
         # ConceptNode.recompute_confidence. Раньше здесь считалась своя
         # (0.3 + (1-дисперсия)*0.5 + встречи*0.05), и она перетирала
         # значение из add_experience — два источника истины давали
         # несовместимые числа.
         node.recompute_confidence()
-    
+
     def _record_association(self, concept1: str, concept2: str, weight: float):
         """Записывает ассоциацию в память."""
-        self.association_memory.append({
-            "concept1": concept1,
-            "concept2": concept2,
-            "weight": weight,
-            "timestamp": datetime.now().isoformat()
-        })
+        self.association_memory.append(
+            {
+                "concept1": concept1,
+                "concept2": concept2,
+                "weight": weight,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         self.metadata["total_associations"] += 1
-    
-    def find_concepts_by_context(self, context: str, min_confidence: float = 0.1) -> list[ConceptNode]:
+
+    def find_concepts_by_context(
+        self, context: str, min_confidence: float = 0.1
+    ) -> list[ConceptNode]:
         """Находит концепции связанные с данным контекстом."""
         relevant = []
         for name, node in self.concepts.items():
@@ -749,8 +820,10 @@ class MentalModel:
                 if node.confidence >= min_confidence:
                     relevant.append(node)
         return sorted(relevant, key=lambda n: n.confidence, reverse=True)
-    
-    def find_related_concepts(self, concept_name: str, max_distance: int = 2) -> list[ConceptNode]:
+
+    def find_related_concepts(
+        self, concept_name: str, max_distance: int = 2
+    ) -> list[ConceptNode]:
         """Находит связанные концепции через граф (BFS) с кешированием (Шаг 4)."""
         if concept_name not in self.concepts:
             return []
@@ -796,12 +869,12 @@ class MentalModel:
                 pass
         self._related_cache[cache_key] = (self._cycle_counter, result)
         return result
-    
+
     def get_concept_understanding(self, concept_name: str) -> dict:
         """Возвращает полное понимание концепции агентом."""
         if concept_name not in self.concepts:
             return {"unknown": True, "concept": concept_name}
-        
+
         node = self.concepts[concept_name]
         return {
             "concept": concept_name,
@@ -811,31 +884,36 @@ class MentalModel:
             "evidence_direction": node.evidence_direction(),
             "connections": node.get_related_concepts(),
             "experiences": node.experiences[-5:],  # Последние 5 опытов
-            "can_define": node.confidence > 0.5 and len(node.definition_hypothesis) > 10
+            "can_define": node.confidence > 0.5
+            and len(node.definition_hypothesis) > 10,
         }
-    
+
     def can_answer_about(self, concept_name: str) -> bool:
         """Проверяет может ли агент дать осмысленный ответ о концепции."""
         if concept_name not in self.concepts:
             return False
-        
+
         node = self.concepts[concept_name]
-        return (node.confidence > 0.4 and 
-                len(node.experiences) >= 2 and 
-                len(node.definition_hypothesis) > 10)
-    
+        return (
+            node.confidence > 0.4
+            and len(node.experiences) >= 2
+            and len(node.definition_hypothesis) > 10
+        )
+
     def to_dict(self) -> dict:
         """Серилизует всю систему ментальных моделей."""
         return {
             "name": self.name,
             "metadata": self.metadata,
             "concepts": {name: node.to_dict() for name, node in self.concepts.items()},
-            "recent_associations": self.association_memory[-10:]
+            "recent_associations": self.association_memory[-10:],
         }
-    
+
     def to_storage_dict(self) -> dict:
         data = self.to_dict()
-        data["concepts"] = {name: node.to_storage_dict() for name, node in self.concepts.items()}
+        data["concepts"] = {
+            name: node.to_storage_dict() for name, node in self.concepts.items()
+        }
         data["claims"] = {key: claim.to_dict() for key, claim in self.claims.items()}
         return data
 
@@ -845,7 +923,7 @@ class MentalModel:
             if concept_name not in self.concepts:
                 print(f"  Концепция '{concept_name}' не найдена в модели")
                 return
-            
+
             node = self.concepts[concept_name]
             self._print_node(node, indent)
         else:
@@ -856,21 +934,28 @@ class MentalModel:
                     print(f"  Концепций: {len(self.concepts)}")
                     print(f"{'─' * 40}")
                 self._print_node(node, indent)
-    
+
     def _print_node(self, node: ConceptNode, indent: int):
         """Визуально отображает один узел с связями."""
         prefix = "  " * indent
-        icon = "💡" if node.confidence > 0.7 else "🔍" if node.confidence > 0.4 else "❓"
-        
+        icon = (
+            "💡" if node.confidence > 0.7 else "🔍" if node.confidence > 0.4 else "❓"
+        )
+
         print(f"{prefix}{icon} {node.name}")
         if node.definition_hypothesis:
             print(f"{prefix}   📝 '{node.definition_hypothesis[:60]}...'")
-        print(f"{prefix}   Уверенность: {node.confidence:.1%} | Опыт: {len(node.experiences)} встреч")
-        
+        print(
+            f"{prefix}   Уверенность: {node.confidence:.1%} | Опыт: {len(node.experiences)} встреч"
+        )
+
         if node.connections:
-            top_connections = sorted(node.connections.items(), key=lambda x: x[1], reverse=True)[:3]
+            top_connections = sorted(
+                node.connections.items(), key=lambda x: x[1], reverse=True
+            )[:3]
             for conn_name, weight in top_connections:
                 print(f"{prefix}   ↔ {conn_name} ({weight:.1%})")
+
 
 # ============================================================
 # Public API

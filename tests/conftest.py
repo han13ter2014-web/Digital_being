@@ -6,6 +6,7 @@ conftest.py — общая конфигурация для pytest.
 2. Настройку coverage по умолчанию (если установлен pytest-cov).
 3. Фикстуры для headless-запуска (без блокирующих input/print).
 """
+
 import sys
 import os
 import shutil
@@ -20,6 +21,14 @@ if str(PROJECT_ROOT) not in sys.path:
 # Окружение: подавляем блокирующие GUI-вызовы в тестах
 os.environ.setdefault("DIGITAL_BEING_TEST_MODE", "1")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("VOICE_CONSOLE_QUIET", "1")
+# Тесты никогда не используют реальные внешние endpoint-ы владельца.
+for _webhook_env in (
+    "DIGITAL_BEING_TELEGRAM_TOKEN",
+    "DIGITAL_BEING_TELEGRAM_CHAT_ID",
+    "DIGITAL_BEING_DISCORD_WEBHOOK_URL",
+):
+    os.environ.pop(_webhook_env, None)
 
 # === Изоляция данных (этап 3) ===
 # Все изменяемые данные (KB, логи, чекпоинты, память, метрики) идут через
@@ -40,8 +49,15 @@ def _use_isolated_data_dir():
     _SESSION_DATA_DIR = path
     os.environ[_DATA_ENV] = path
     for sub in (
-        "checkpoints", "logs", "mind", "memory", "nursery", "evolution",
-        "cooperation", "architecture_proposals", "metrics",
+        "checkpoints",
+        "logs",
+        "mind",
+        "memory",
+        "nursery",
+        "evolution",
+        "cooperation",
+        "architecture_proposals",
+        "metrics",
     ):
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
@@ -86,8 +102,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Предупреждает, если тесты всё-таки изменили data/ рабочей копии."""
     after = _repo_data_manifest()
     changed = sorted(
-        key for key, value in after.items()
-        if _REPO_DATA_BEFORE.get(key) != value
+        key for key, value in after.items() if _REPO_DATA_BEFORE.get(key) != value
     )
     removed = sorted(set(_REPO_DATA_BEFORE) - set(after))
     if changed or removed:

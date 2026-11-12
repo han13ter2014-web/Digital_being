@@ -11,6 +11,7 @@ def _lr_config():
     """Ленивый импорт LR_CONFIG (избегаем циклов)."""
     try:
         from config.simulation_config import LR_CONFIG
+
         return LR_CONFIG
     except Exception:
         return None
@@ -19,6 +20,7 @@ def _lr_config():
 @dataclass
 class MemoryTrace:
     """Отдельный след памяти с decay-функцией."""
+
     content: str
     importance: float  # 0.0-1.0
     created_at: datetime
@@ -40,7 +42,7 @@ class MemoryTrace:
         cycles = time_passed / (24 * 3600)  # Циклы по суткам
 
         # Экспоненциальный decay с модификацией по importance
-        base_decay = decay_rate ** cycles
+        base_decay = decay_rate**cycles
 
         # Важные воспоминания забываются медленнее
         importance_factor = 1.0 - (self.importance * 0.5)
@@ -58,34 +60,39 @@ class MemoryTrace:
     def to_dict(self) -> dict:
         """Сериализует в dict."""
         return {
-            'content': self.content,
-            'importance': self.importance,
-            'created_at': self.created_at.isoformat(),
-            'last_accessed': self.last_accessed.isoformat(),
-            'access_count': self.access_count,
-            'context': self.context,
-            'associations': list(self.associations)
+            "content": self.content,
+            "importance": self.importance,
+            "created_at": self.created_at.isoformat(),
+            "last_accessed": self.last_accessed.isoformat(),
+            "access_count": self.access_count,
+            "context": self.context,
+            "associations": list(self.associations),
         }
 
     @staticmethod
-    def from_dict(data: dict) -> 'MemoryTrace':
+    def from_dict(data: dict) -> "MemoryTrace":
         """Десериализует из dict."""
         return MemoryTrace(
-            content=data['content'],
-            importance=data['importance'],
-            created_at=datetime.fromisoformat(data['created_at']),
-            last_accessed=datetime.fromisoformat(data['last_accessed']),
-            access_count=data.get('access_count', 0),
-            context=data.get('context', ''),
-            associations=set(data.get('associations', []))
+            content=data["content"],
+            importance=data["importance"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            last_accessed=datetime.fromisoformat(data["last_accessed"]),
+            access_count=data.get("access_count", 0),
+            context=data.get("context", ""),
+            associations=set(data.get("associations", [])),
         )
 
 
 class LongTermMemory:
     """Система долгосрочной памяти с экспоненциальным decay."""
 
-    def __init__(self, agent_name: str, decay_rate: float = 0.95,
-                 consolidation_threshold: float = 0.7, life_id: str = None):
+    def __init__(
+        self,
+        agent_name: str,
+        decay_rate: float = 0.95,
+        consolidation_threshold: float = 0.7,
+        life_id: str = None,
+    ):
         """
         Args:
             agent_name: Имя агента для сохранения памяти
@@ -98,21 +105,33 @@ class LongTermMemory:
 
         # Структура памяти
         self._short_term: Dict[str, MemoryTrace] = {}  # Активная память
-        self._long_term: Dict[str, MemoryTrace] = {}   # Консолидированная память
-        self._episodic: List[MemoryTrace] = []         # Эпизодическая память (события в порядке)
+        self._long_term: Dict[str, MemoryTrace] = {}  # Консолидированная память
+        self._episodic: List[
+            MemoryTrace
+        ] = []  # Эпизодическая память (события в порядке)
 
         # Метаданные
-        self._access_patterns: Dict[str, int] = {}     # Частотность доступа
+        self._access_patterns: Dict[str, int] = {}  # Частотность доступа
         self._similarity_cache: Dict[str, List[str]] = {}  # Кэш похожих воспоминаний
         self._consolidation_count = 0
         self._decay_events_count = 0
+        self._episodic_ids = {}
+        self.database = None
 
         if life_id is not None:
             from src.core.life_identity import validate_life_id
+            from src.memory.life_database import LifeDatabase
 
-            validate_life_id(life_id)
+            life_id = validate_life_id(life_id)
+            self.database = LifeDatabase(
+                data_path("lives", life_id, "life.sqlite3"), life_id
+            )
         self.life_id = life_id
-        self.memory_file = data_path("memory", f"{life_id or agent_name}_long_term.json")
+        # Путь сохранён для диагностики и legacy-миграции, но UUID-память
+        # больше не читает и не перезаписывает этот JSON.
+        self.memory_file = data_path(
+            "memory", f"{life_id or agent_name}_long_term.json"
+        )
         os.makedirs(data_path("memory"), exist_ok=True)
 
         self._load_from_disk()
@@ -128,16 +147,20 @@ class LongTermMemory:
         target = validate_life_id(life_id)
         if self.life_id == target:
             return
-        # Состояние в памяти могло прийти из файла другой (например, только что
-        # созданной при старте) жизни: авторитетен только файл целевого UUID.
+        # Состояние в памяти могло прийти из другой жизни: авторитетна
+        # только база целевого UUID.
         self._short_term = {}
         self._long_term = {}
         self._episodic = []
+        self._episodic_ids = {}
         self._access_patterns = {}
         self._similarity_cache = {}
         self._consolidation_count = 0
         self._decay_events_count = 0
+        from src.memory.life_database import LifeDatabase
+
         self.life_id = target
+        self.database = LifeDatabase(data_path("lives", target, "life.sqlite3"), target)
         self.memory_file = data_path("memory", f"{target}_long_term.json")
         self._load_from_disk()
 
@@ -146,9 +169,24 @@ class LongTermMemory:
         from pathlib import Path
         import shutil
 
-        if not self.life_id or Path(self.memory_file).exists():
+        if not self.life_id:
             return
-        if Path(legacy_name).name != legacy_name or "/" in legacy_name or "\\" in legacy_name:
+        if self.database is not None:
+            from contextlib import closing
+
+            with closing(self.database.connect(readonly=True)) as connection:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM memory_traces"
+                ).fetchone()[0]
+            if count:
+                return
+        elif Path(self.memory_file).exists():
+            return
+        if (
+            Path(legacy_name).name != legacy_name
+            or "/" in legacy_name
+            or "\\" in legacy_name
+        ):
             raise ValueError("Некорректное имя старого файла памяти")
         source = Path(data_path("memory", f"{legacy_name}_long_term.json"))
         if not source.exists():
@@ -167,10 +205,19 @@ class LongTermMemory:
         finally:
             if temporary.exists():
                 temporary.unlink()
-        self._load_from_disk()
+        if self.database is not None:
+            self._load_legacy_json(self.memory_file)
+            self._save_to_sqlite()
+        else:
+            self._load_from_disk()
 
-    def store(self, content: str, importance: float = 0.5, context: str = "",
-              memory_type: str = "episodic") -> str:
+    def store(
+        self,
+        content: str,
+        importance: float = 0.5,
+        context: str = "",
+        memory_type: str = "episodic",
+    ) -> str:
         """Сохраняет новое воспоминание.
 
         Args:
@@ -190,7 +237,7 @@ class LongTermMemory:
             created_at=datetime.now(),
             last_accessed=datetime.now(),
             context=context,
-            associations=set()
+            associations=set(),
         )
 
         # Добавляем в краткосрочную память
@@ -199,6 +246,7 @@ class LongTermMemory:
         # Добавляем в эпизодическую память
         if memory_type == "episodic":
             self._episodic.append(trace)
+            self._episodic_ids[id(trace)] = memory_id
             # === Лимит эпизодов (Шаг 2) ===
             self._apply_episodic_limit()
 
@@ -231,10 +279,15 @@ class LongTermMemory:
         forgotten_traces = sorted_eps[:over]
         forgotten_ids = set(id(t) for t in forgotten_traces)
         self._episodic = [t for t in self._episodic if id(t) not in forgotten_ids]
+        episodic_ids = getattr(self, "_episodic_ids", None)
+        if episodic_ids is not None:
+            for object_id in forgotten_ids:
+                episodic_ids.pop(object_id, None)
         return len(forgotten_traces)
 
-    def recall(self, query: str, threshold: float = 0.1,
-               max_results: int = 5) -> List[Dict]:
+    def recall(
+        self, query: str, threshold: float = 0.1, max_results: int = 5
+    ) -> List[Dict]:
         """Вспоминает воспоминания релевантные запросу.
 
         Args:
@@ -257,21 +310,25 @@ class LongTermMemory:
 
             # Вычисляем релевантность
             memory_words = set(trace.content.lower().split())
-            relevance = len(query_words & memory_words) / max(len(query_words | memory_words), 1)
+            relevance = len(query_words & memory_words) / max(
+                len(query_words | memory_words), 1
+            )
 
             if relevance > 0.1:
                 trace.last_accessed = datetime.now()
                 trace.access_count += 1
 
-                results.append({
-                    'content': trace.content,
-                    'importance': trace.importance,
-                    'strength': strength,
-                    'relevance': relevance,
-                    'age_days': (datetime.now() - trace.created_at).days,
-                    'access_count': trace.access_count,
-                    'context': trace.context
-                })
+                results.append(
+                    {
+                        "content": trace.content,
+                        "importance": trace.importance,
+                        "strength": strength,
+                        "relevance": relevance,
+                        "age_days": (datetime.now() - trace.created_at).days,
+                        "access_count": trace.access_count,
+                        "context": trace.context,
+                    }
+                )
 
         # Добавляем из краткосрочной памяти если есть место
         if len(results) < max_results:
@@ -282,27 +339,31 @@ class LongTermMemory:
                     continue
 
                 memory_words = set(trace.content.lower().split())
-                relevance = len(query_words & memory_words) / max(len(query_words | memory_words), 1)
+                relevance = len(query_words & memory_words) / max(
+                    len(query_words | memory_words), 1
+                )
 
-                if relevance > 0.1 and memory_id not in [r.get('id') for r in results]:
+                if relevance > 0.1 and memory_id not in [r.get("id") for r in results]:
                     trace.last_accessed = datetime.now()
                     trace.access_count += 1
 
-                    results.append({
-                        'content': trace.content,
-                        'importance': trace.importance,
-                        'strength': strength,
-                        'relevance': relevance,
-                        'age_days': (datetime.now() - trace.created_at).days,
-                        'access_count': trace.access_count,
-                        'context': trace.context
-                    })
+                    results.append(
+                        {
+                            "content": trace.content,
+                            "importance": trace.importance,
+                            "strength": strength,
+                            "relevance": relevance,
+                            "age_days": (datetime.now() - trace.created_at).days,
+                            "access_count": trace.access_count,
+                            "context": trace.context,
+                        }
+                    )
 
                 if len(results) >= max_results:
                     break
 
         # Сортируем по релевантности и силе
-        results.sort(key=lambda x: (x['relevance'], x['strength']), reverse=True)
+        results.sort(key=lambda x: (x["relevance"], x["strength"]), reverse=True)
         return results[:max_results]
 
     def trigger_decay(self):
@@ -319,7 +380,10 @@ class LongTermMemory:
 
             if strength < 0.05:  # Слишком слабая
                 to_remove_short.append(memory_id)
-            elif strength > self.consolidation_threshold and memory_id not in self._long_term:
+            elif (
+                strength > self.consolidation_threshold
+                and memory_id not in self._long_term
+            ):
                 # Консолидируем в долгосрочную память
                 to_promote.append((memory_id, trace))
 
@@ -340,15 +404,17 @@ class LongTermMemory:
 
         for memory_id, trace in self._long_term.items():
             strength = trace.decay_strength(datetime.now(), self.decay_rate)
-            all_memories.append({
-                'content': trace.content,
-                'importance': trace.importance,
-                'strength': strength,
-                'age_days': (datetime.now() - trace.created_at).days,
-                'context': trace.context
-            })
+            all_memories.append(
+                {
+                    "content": trace.content,
+                    "importance": trace.importance,
+                    "strength": strength,
+                    "age_days": (datetime.now() - trace.created_at).days,
+                    "context": trace.context,
+                }
+            )
 
-        all_memories.sort(key=lambda x: (x['importance'], x['strength']), reverse=True)
+        all_memories.sort(key=lambda x: (x["importance"], x["strength"]), reverse=True)
         return all_memories[:count]
 
     def get_recent_episodes(self, days: int = 7, count: int = 10) -> List[Dict]:
@@ -357,11 +423,11 @@ class LongTermMemory:
 
         recent = [
             {
-                'content': trace.content,
-                'created_at': trace.created_at.isoformat(),
-                'importance': trace.importance,
-                'age_days': (datetime.now() - trace.created_at).days,
-                'context': trace.context
+                "content": trace.content,
+                "created_at": trace.created_at.isoformat(),
+                "importance": trace.importance,
+                "age_days": (datetime.now() - trace.created_at).days,
+                "context": trace.context,
             }
             for trace in reversed(self._episodic)
             if trace.created_at > cutoff
@@ -377,20 +443,22 @@ class LongTermMemory:
 
         avg_importance = 0
         if total_long > 0:
-            avg_importance = sum(t.importance for t in self._long_term.values()) / total_long
+            avg_importance = (
+                sum(t.importance for t in self._long_term.values()) / total_long
+            )
 
         total_memory_size = total_short + total_long
 
         return {
-            'short_term_count': total_short,
-            'long_term_count': total_long,
-            'episodic_count': total_episodic,
-            'total_memories': total_memory_size,
-            'avg_importance': avg_importance,
-            'consolidation_count': self._consolidation_count,
-            'decay_events': self._decay_events_count,
-            'decay_rate': self.decay_rate,
-            'consolidation_threshold': self.consolidation_threshold
+            "short_term_count": total_short,
+            "long_term_count": total_long,
+            "episodic_count": total_episodic,
+            "total_memories": total_memory_size,
+            "avg_importance": avg_importance,
+            "consolidation_count": self._consolidation_count,
+            "decay_events": self._decay_events_count,
+            "decay_rate": self.decay_rate,
+            "consolidation_threshold": self.consolidation_threshold,
         }
 
     def _link_similar_memories(self, memory_id: str, max_links: int = 3):
@@ -402,12 +470,16 @@ class LongTermMemory:
         trace_words = set(trace.content.lower().split())
 
         candidates = []
-        for other_id, other_trace in list(self._short_term.items()) + list(self._long_term.items()):
+        for other_id, other_trace in list(self._short_term.items()) + list(
+            self._long_term.items()
+        ):
             if other_id == memory_id:
                 continue
 
             other_words = set(other_trace.content.lower().split())
-            similarity = len(trace_words & other_words) / max(len(trace_words | other_words), 1)
+            similarity = len(trace_words & other_words) / max(
+                len(trace_words | other_words), 1
+            )
 
             if similarity > 0.2:
                 candidates.append((other_id, similarity))
@@ -432,44 +504,178 @@ class LongTermMemory:
         content_hash = hash(content) % 10000
         return f"mem_{timestamp}_{content_hash}"
 
+    def _save_to_sqlite(self):
+        """Атомарно заменить представление памяти в базе этой жизни."""
+        entries = {}
+        for store, values in (
+            ("short_term", self._short_term),
+            ("long_term", self._long_term),
+        ):
+            for memory_id, trace in values.items():
+                entries[memory_id] = {"trace": trace, "store": store}
+        episode_orders = {}
+        for order, trace in enumerate(self._episodic):
+            memory_id = self._episodic_ids.get(id(trace))
+            if memory_id is None:
+                memory_id = self._generate_id(trace.content)
+                self._episodic_ids[id(trace)] = memory_id
+            episode_orders[id(trace)] = order
+            if memory_id not in entries:
+                entries[memory_id] = {"trace": trace, "store": "episodic"}
+
+        with self.database.write() as connection:
+            connection.execute("DELETE FROM memory_links")
+            connection.execute("DELETE FROM memory_traces")
+            for memory_id, item in entries.items():
+                trace = item["trace"]
+                connection.execute(
+                    "INSERT INTO memory_traces(id, store, content, importance, "
+                    "created_at, last_accessed, access_count, context, is_episodic, "
+                    "episode_order, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')",
+                    (
+                        memory_id,
+                        item["store"],
+                        trace.content,
+                        trace.importance,
+                        trace.created_at.isoformat(),
+                        trace.last_accessed.isoformat(),
+                        trace.access_count,
+                        trace.context,
+                        int(id(trace) in episode_orders),
+                        episode_orders.get(id(trace)),
+                    ),
+                )
+            for memory_id, item in entries.items():
+                for related_id in sorted(item["trace"].associations):
+                    if related_id != memory_id and related_id in entries:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO memory_links(trace_id, related_trace_id) "
+                            "VALUES (?, ?)",
+                            (memory_id, related_id),
+                        )
+            for key, value in (
+                ("consolidation_count", self._consolidation_count),
+                ("decay_events_count", self._decay_events_count),
+                ("saved_at", datetime.now().isoformat()),
+            ):
+                self.database.set_meta(f"long_term_memory.{key}", value, connection)
+
+    def _load_from_sqlite(self):
+        from contextlib import closing
+
+        with closing(self.database.connect(readonly=True)) as connection:
+            rows = connection.execute(
+                "SELECT * FROM memory_traces ORDER BY rowid"
+            ).fetchall()
+            links = connection.execute(
+                "SELECT trace_id, related_trace_id FROM memory_links ORDER BY rowid"
+            ).fetchall()
+        traces = {}
+        episodic = []
+        for row in rows:
+            trace = MemoryTrace(
+                content=row["content"],
+                importance=row["importance"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                last_accessed=datetime.fromisoformat(row["last_accessed"]),
+                access_count=row["access_count"],
+                context=row["context"],
+                associations=set(),
+            )
+            traces[row["id"]] = trace
+            if row["store"] == "short_term":
+                self._short_term[row["id"]] = trace
+            elif row["store"] == "long_term":
+                self._long_term[row["id"]] = trace
+            if row["episode_order"] is not None:
+                episodic.append((row["episode_order"], row["id"], trace))
+        self._episodic = [trace for _, _, trace in sorted(episodic)]
+        self._episodic_ids = {id(trace): memory_id for _, memory_id, trace in episodic}
+        for row in links:
+            if row["trace_id"] in traces and row["related_trace_id"] in traces:
+                traces[row["trace_id"]].associations.add(row["related_trace_id"])
+        self._consolidation_count = int(
+            self.database.get_meta("long_term_memory.consolidation_count", 0)
+        )
+        self._decay_events_count = int(
+            self.database.get_meta("long_term_memory.decay_events_count", 0)
+        )
+
     def _save_to_disk(self):
-        """Сохраняет память на диск."""
+        """Сохранить SQLite-память либо старый JSON для direct legacy-агента."""
+        if self.database is not None:
+            self._save_to_sqlite()
+            return
         try:
             data = {
-                'short_term': {k: v.to_dict() for k, v in self._short_term.items()},
-                'long_term': {k: v.to_dict() for k, v in self._long_term.items()},
-                'episodic': [t.to_dict() for t in self._episodic],
-                'metadata': {
-                    'consolidation_count': self._consolidation_count,
-                    'decay_events_count': self._decay_events_count,
-                    'saved_at': datetime.now().isoformat()
-                }
+                "short_term": {k: v.to_dict() for k, v in self._short_term.items()},
+                "long_term": {k: v.to_dict() for k, v in self._long_term.items()},
+                "episodic": [t.to_dict() for t in self._episodic],
+                "metadata": {
+                    "consolidation_count": self._consolidation_count,
+                    "decay_events_count": self._decay_events_count,
+                    "saved_at": datetime.now().isoformat(),
+                },
             }
 
-            with open(self.memory_file, 'w', encoding='utf-8') as f:
+            with open(self.memory_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         except Exception as e:
             print(f"Ошибка сохранения памяти: {e}")
 
+    def _load_legacy_json(self, path):
+        import hashlib
+
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        self._short_term = {
+            key: MemoryTrace.from_dict(value)
+            for key, value in data.get("short_term", {}).items()
+        }
+        self._long_term = {
+            key: MemoryTrace.from_dict(value)
+            for key, value in data.get("long_term", {}).items()
+        }
+        self._episodic = [
+            MemoryTrace.from_dict(value) for value in data.get("episodic", [])
+        ]
+        known = list(self._short_term.items()) + list(self._long_term.items())
+        self._episodic_ids = {}
+        for order, trace in enumerate(self._episodic):
+            matches = [
+                key
+                for key, candidate in known
+                if candidate.to_dict() == trace.to_dict()
+            ]
+            if matches:
+                memory_id = matches[0]
+            else:
+                canonical = json.dumps(
+                    trace.to_dict(), ensure_ascii=False, sort_keys=True, default=str
+                ).encode("utf-8")
+                memory_id = (
+                    f"episodic_{order}_{hashlib.sha256(canonical).hexdigest()[:16]}"
+                )
+            self._episodic_ids[id(trace)] = memory_id
+        metadata = data.get("metadata", {})
+        self._consolidation_count = metadata.get("consolidation_count", 0)
+        self._decay_events_count = metadata.get("decay_events_count", 0)
+
     def _load_from_disk(self):
-        """Загружает память с диска."""
+        """Загрузить авторитетную SQLite-память или direct legacy JSON."""
+        if self.database is not None:
+            try:
+                self._load_from_sqlite()
+            except Exception as exc:
+                raise ValueError(
+                    "Не удалось прочитать UUID-память; база не изменена"
+                ) from exc
+            return
         if not os.path.exists(self.memory_file):
             return
-
         try:
-            with open(self.memory_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            self._short_term = {k: MemoryTrace.from_dict(v) for k, v in data.get('short_term', {}).items()}
-            self._long_term = {k: MemoryTrace.from_dict(v) for k, v in data.get('long_term', {}).items()}
-            self._episodic = [MemoryTrace.from_dict(t) for t in data.get('episodic', [])]
-
-            metadata = data.get('metadata', {})
-            self._consolidation_count = metadata.get('consolidation_count', 0)
-            self._decay_events_count = metadata.get('decay_events_count', 0)
+            self._load_legacy_json(self.memory_file)
         except Exception as e:
-            if self.life_id is not None:
-                raise ValueError("Не удалось прочитать UUID-память; файл не изменён") from e
             print(f"Ошибка загрузки памяти: {e}")
 
     def save(self):
@@ -481,7 +687,10 @@ class LongTermMemory:
         to_remove = []
 
         for memory_id, trace in self._short_term.items():
-            if trace.decay_strength(datetime.now(), self.decay_rate) < strength_threshold:
+            if (
+                trace.decay_strength(datetime.now(), self.decay_rate)
+                < strength_threshold
+            ):
                 to_remove.append(memory_id)
 
         for memory_id in to_remove:

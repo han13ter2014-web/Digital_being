@@ -56,14 +56,21 @@ def main() -> None:
     for depth, group in sorted(groups.items()):
         items = list(group.values())
         avg = lambda key: mean(item[key] for item in items)
-        share = mean(item["answerable"] / item["own"] if item["own"] else 0.0 for item in items)
-        print(f"{depth:.2f} {len(items)} {avg('own'):.1f} "
-              f"{avg('answerable'):.1f} {share:.1%} {avg('deep'):.1f} "
-              f"{avg('encounters'):.2f} {avg('confidence'):.3f}")
-        print("  " + ", ".join(
-            f"seed {seed:g}: {row['answerable']:g}/{row['own']:g}"
-            for seed, row in sorted(group.items())
-        ))
+        share = mean(
+            item["answerable"] / item["own"] if item["own"] else 0.0 for item in items
+        )
+        print(
+            f"{depth:.2f} {len(items)} {avg('own'):.1f} "
+            f"{avg('answerable'):.1f} {share:.1%} {avg('deep'):.1f} "
+            f"{avg('encounters'):.2f} {avg('confidence'):.3f}"
+        )
+        print(
+            "  "
+            + ", ".join(
+                f"seed {seed:g}: {row['answerable']:g}/{row['own']:g}"
+                for seed, row in sorted(group.items())
+            )
+        )
 
 
 if __name__ == "__main__":

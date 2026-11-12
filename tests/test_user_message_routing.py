@@ -48,18 +48,14 @@ def _make_runner():
 
 def _thoughts(bus):
     return [
-        dict(data or {})
-        for name, data in bus.published
-        if name == Events.AGENT_THOUGHT
+        dict(data or {}) for name, data in bus.published if name == Events.AGENT_THOUGHT
     ]
 
 
 def _replies(bus):
     """Реплики канала диалога (AGENT_MESSAGE от UserInteraction.send_reply)."""
     return [
-        dict(data or {})
-        for name, data in bus.published
-        if name == Events.AGENT_MESSAGE
+        dict(data or {}) for name, data in bus.published if name == Events.AGENT_MESSAGE
     ]
 
 
@@ -106,9 +102,7 @@ async def test_social_presence_with_pending_keeps_question_open():
     ui = agent.user_interaction
     ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Привет! Я рядом."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Привет! Я рядом."}))
 
     assert ui.get_pending_question() is not None
     assert agent._user_explained_topics == {}
@@ -122,9 +116,7 @@ async def test_repeat_protest_without_pending_is_just_social():
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Ты повторяешь."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Ты повторяешь."}))
 
     assert ui.question_history == []
     assert agent._user_explained_topics == {}
@@ -137,9 +129,7 @@ async def test_social_presence_without_pending_gets_neutral_reply():
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Привет! Я рядом."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Привет! Я рядом."}))
 
     assert ui.get_last_user_message_cycle() == agent.cycle_count
     assert ui.question_history == []
@@ -189,7 +179,7 @@ async def test_plain_answer_still_closes_pending_question():
 
 @pytest.mark.asyncio
 async def test_question_with_pending_does_not_close_question():
-    """TICKET-5/6 (наблюдатели 2026-11-05): вопрос человека — не ответ.
+    """Регрессия диалоговой очереди: вопрос человека — не ответ.
 
     Живая сессия: «Что тебе сейчас важно?» при открытом вопросе про
     «обучение» записывалось как «Записал про "обучение"», и вопрос
@@ -214,7 +204,7 @@ async def test_question_with_pending_does_not_close_question():
 
 @pytest.mark.asyncio
 async def test_about_self_question_with_pending_gets_honest_reply():
-    """TICKET-4/6: вопрос о сущности при висящем вопросе — честный
+    """Вопрос о сущности при висящем вопросе — честный
     ответ о себе; висящий вопрос не перебивает разговор."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
@@ -232,7 +222,7 @@ async def test_about_self_question_with_pending_gets_honest_reply():
 
 @pytest.mark.asyncio
 async def test_unknown_text_asks_clarification_not_learning_material():
-    """K13: непонятая реплика сразу вызывает протокол уточнения 1–4.
+    """Непонятая реплика сразу вызывает протокол уточнения 1–4.
 
     Автообучения и постановки фразы в стимулы по-прежнему нет: сначала
     человек выбирает категорию, и лишь его ответ разрешает дальнейший путь.
@@ -241,7 +231,9 @@ async def test_unknown_text_asks_clarification_not_learning_material():
     ui = agent.user_interaction
 
     await runner._on_user_message(
-        SimpleNamespace(data={"text": "Квантовая запутанность и коллапс волновой функции."})
+        SimpleNamespace(
+            data={"text": "Квантовая запутанность и коллапс волновой функции."}
+        )
     )
 
     assert agent._user_explained_topics == {}
@@ -268,7 +260,9 @@ async def test_unknown_text_is_remembered_as_dialogue_turn():
     ui = agent.user_interaction
 
     await runner._on_user_message(
-        SimpleNamespace(data={"text": "Квантовая запутанность и коллапс волновой функции."})
+        SimpleNamespace(
+            data={"text": "Квантовая запутанность и коллапс волновой функции."}
+        )
     )
 
     history = ui.get_history(5)
@@ -289,9 +283,7 @@ async def test_user_contact_is_felt_as_joy():
     """
     agent, runner, bus = _make_runner()
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "привет"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "привет"}))
 
     state = agent.emotional_state
     assert state.levels["joy"] > 0.0
@@ -320,9 +312,7 @@ async def test_ask_about_self_gets_honest_reply_not_learning_material():
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Чем занимаешься?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Чем занимаешься?"}))
 
     assert ui.get_last_user_message_cycle() == agent.cycle_count
     assert ui.question_history == []
@@ -338,14 +328,10 @@ async def test_ask_about_self_gets_honest_reply_not_learning_material():
 async def test_ask_about_self_reports_occupation_and_memory():
     agent, runner, bus = _make_runner()
     agent._exploration_history = ["квантовая запутанность"]
-    agent.user_model.observe(
-        "могу отлучаться надолго — не переживай", cycle=1
-    )
+    agent.user_model.observe("могу отлучаться надолго — не переживай", cycle=1)
     agent.user_model.observe("я работаю по ночам", cycle=2)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Чем ты занята?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Чем ты занята?"}))
 
     texts = _reply_texts(bus)
     reply = next(t for t in texts if "Меня зовут" in t)
@@ -356,54 +342,46 @@ async def test_ask_about_self_reports_occupation_and_memory():
 
 @pytest.mark.asyncio
 async def test_identity_recognition_confirms_actual_name():
-    """Т3: «Ты Афродита?» при совпадении имени — «Да», не unknown."""
+    """Узнавание имени: «Ты Нова?» при совпадении имени — «Да», не unknown."""
     agent, runner, bus = _make_runner()
-    agent.name = "Афродита"
+    agent.name = "Нова"
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Ты Афродита?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Ты Нова?"}))
 
     texts = _reply_texts(bus)
-    assert any("Да, меня зовут Афродита" in t for t in texts)
+    assert any("Да, меня зовут Нова" in t for t in texts)
 
 
 @pytest.mark.asyncio
 async def test_identity_recognition_denies_wrong_name():
-    """Т3: «Ты Афродита?» при другом имени — честное «Нет» и имя."""
+    """Узнавание имени: «Ты Нова?» при другом имени — честное «Нет» и имя."""
     agent, runner, bus = _make_runner()
-    agent.name = "Тэсс"
+    agent.name = "Ола"
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Ты Афродита?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Ты Нова?"}))
 
     texts = _reply_texts(bus)
-    reply = next(t for t in texts if "Нет, я не Афродита" in t)
-    assert "меня зовут Тэсс" in reply
+    reply = next(t for t in texts if "Нет, я не Нова" in t)
+    assert "меня зовут Ола" in reply
 
 
 @pytest.mark.asyncio
 async def test_identity_questions_follow_rename():
-    """Т3: после переименования «кто ты?» и «ты X?» — новое имя."""
+    """Узнавание имени: после переименования «кто ты?» и «ты X?» — новое имя."""
     agent, runner, bus = _make_runner()
     agent.name = "Омелла"
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Кто ты?"})
-    )
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Ты Тэсс?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Кто ты?"}))
+    await runner._on_user_message(SimpleNamespace(data={"text": "Ты Ола?"}))
 
     texts = _reply_texts(bus)
     assert any("Меня зовут Омелла" in t for t in texts)
-    assert any("Нет, я не Тэсс" in t and "Омелла" in t for t in texts)
+    assert any("Нет, я не Ола" in t and "Омелла" in t for t in texts)
 
 
 @pytest.mark.asyncio
 async def test_non_identity_text_keeps_unknown_path():
-    """Т3: не-идентификационный текст — прежний путь (уточнение)."""
+    """Узнавание имени: не-идентификационный текст — прежний путь (уточнение)."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
@@ -419,12 +397,10 @@ async def test_non_identity_text_keeps_unknown_path():
 
 @pytest.mark.asyncio
 async def test_social_greeting_gets_greeting_reply():
-    """Т4: чистое приветствие — каркас приветствия, не нейтральный."""
+    """Социальный отклик: чистое приветствие — каркас приветствия, не нейтральный."""
     agent, runner, bus = _make_runner()
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Привет!"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Привет!"}))
 
     texts = _reply_texts(bus)
     assert any("Привет. Рада тебя слышать." in t for t in texts)
@@ -433,12 +409,10 @@ async def test_social_greeting_gets_greeting_reply():
 
 @pytest.mark.asyncio
 async def test_social_state_question_gets_state_reply():
-    """Т4: «Как дела?» — каркас состояния без выдуманных деталей."""
+    """Социальный отклик: «Как дела?» — каркас состояния без выдуманных деталей."""
     agent, runner, bus = _make_runner()
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Как дела?"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Как дела?"}))
 
     texts = _reply_texts(bus)
     assert any("всё ровно" in t for t in texts)
@@ -447,12 +421,10 @@ async def test_social_state_question_gets_state_reply():
 
 @pytest.mark.asyncio
 async def test_social_warmth_keeps_neutral_reply():
-    """Т4: прочее социальное (тепло) — прежний нейтральный каркас."""
+    """Социальный отклик: прочее социальное (тепло) — прежний нейтральный каркас."""
     agent, runner, bus = _make_runner()
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Скучаю по тебе."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Скучаю по тебе."}))
 
     texts = _reply_texts(bus)
     assert any("Я слышу тебя. Спасибо, что ты рядом." in t for t in texts)
@@ -460,14 +432,12 @@ async def test_social_warmth_keeps_neutral_reply():
 
 @pytest.mark.asyncio
 async def test_social_with_pending_keeps_open_question_note():
-    """Т4: социальная реплика при висящем вопросе — прежняя заметка."""
+    """Социальный отклик: социальная реплика при висящем вопросе — прежняя заметка."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
     ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Привет!"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Привет!"}))
 
     texts = _reply_texts(bus)
     assert any("остаётся открытым" in t for t in texts)
@@ -549,7 +519,9 @@ async def test_definition_with_unrelated_pending_diverts_to_definition_door():
     )
 
     await runner._on_user_message(
-        SimpleNamespace(data={"text": "Погода — это состояние атмосферы в данное время."})
+        SimpleNamespace(
+            data={"text": "Погода — это состояние атмосферы в данное время."}
+        )
     )
 
     assert "Погода" in agent._user_explained_topics
@@ -599,7 +571,7 @@ async def test_social_door_respects_naming_phase_priority(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_request_gets_honest_refusal_not_learning_material():
-    """Ф4: «Нарисуй кота» — честное «не умею», не концепт и не выдумка."""
+    """Границы просьб: «Нарисуй кота» — честное «не умею», не концепт и не выдумка."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
@@ -618,14 +590,12 @@ async def test_request_gets_honest_refusal_not_learning_material():
 
 @pytest.mark.asyncio
 async def test_request_with_pending_keeps_question_open():
-    """Ф4: просьба о невозможном не закрывает вопрос сущности."""
+    """Границы просьб: просьба о невозможном не закрывает вопрос сущности."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
     ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Спой песню!"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Спой песню!"}))
 
     assert ui.get_pending_question() is not None
     assert agent._user_explained_topics == {}
@@ -635,14 +605,12 @@ async def test_request_with_pending_keeps_question_open():
 
 @pytest.mark.asyncio
 async def test_noise_input_gets_honest_reply_not_learning_material():
-    """Ф4: «🙂🙂🙂» — честный ответ «нет букв», не материал для изучения."""
+    """Границы просьб: «🙂🙂🙂» — честный ответ «нет букв», не материал для изучения."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
     ui.ask_user(QUESTION, context=CONTEXT, cycle=1)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "🙂🙂🙂"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "🙂🙂🙂"}))
 
     # вопрос сущности остаётся открытым — эмодзи не ответ
     assert ui.get_pending_question() is not None

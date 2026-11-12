@@ -9,8 +9,10 @@ from src.core.subsystems.decision_arbitrator import DecisionArbitrator
 
 
 def proposal(model, **kwargs):
-    return propose_experiment(model, **({"energy": 80, "energy_max": 200,
-                              "fatigue": 0.2, "cycle": 25} | kwargs))
+    return propose_experiment(
+        model,
+        **({"energy": 80, "energy_max": 200, "fatigue": 0.2, "cycle": 25} | kwargs),
+    )
 
 
 def test_only_existing_uncertain_claim_is_proposed_without_side_effects():
@@ -48,13 +50,22 @@ def test_real_arbiter_can_choose_or_decline_experiment():
     get_body_claim(model, "rest", "energy")
     candidate = proposal(model)
     arbiter = DecisionArbitrator()
-    verdict = {"score": 0.5, "verdict": "proceed", "confidence": 0.5,
-               "reasoning": "равные условия", "voices": {}}
+    verdict = {
+        "score": 0.5,
+        "verdict": "proceed",
+        "confidence": 0.5,
+        "reasoning": "равные условия",
+        "voices": {},
+    }
     with patch.object(arbiter, "arbitrate", return_value=verdict):
         weak = {"source": "other_desire", "action": "communicate", "strength": 0.1}
         strong = {**weak, "strength": 1.0}
-        assert arbiter.choose_action([weak, candidate], {})["source"] == "self_experiment"
-        assert arbiter.choose_action([strong, candidate], {})["source"] == "other_desire"
+        assert (
+            arbiter.choose_action([weak, candidate], {})["source"] == "self_experiment"
+        )
+        assert (
+            arbiter.choose_action([strong, candidate], {})["source"] == "other_desire"
+        )
 
 
 def test_autonomous_tick_offers_and_executes_selected_check():
@@ -66,15 +77,23 @@ def test_autonomous_tick_offers_and_executes_selected_check():
     agent.cycle_count = 25
 
     def choose(candidates, context):
-        candidate = next(item for item in candidates if item["source"] == "self_experiment")
+        candidate = next(
+            item for item in candidates if item["source"] == "self_experiment"
+        )
         return {**candidate, "verdict": "proceed", "reasoning": "controlled selection"}
 
     with patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose):
         result = agent.autonomous_tick()
     assert result["experiment_result"]["claim_id"] == claim.claim_id
-    assert result["experiment_result"]["observation"]["claims"]["energy"]["status"] == "supported"
+    assert (
+        result["experiment_result"]["observation"]["claims"]["energy"]["status"]
+        == "supported"
+    )
     assert agent._last_experiment_cycle == 25
-    assert proposal(agent.mental_models, cycle=26, last_cycle=agent._last_experiment_cycle) is None
+    assert (
+        proposal(agent.mental_models, cycle=26, last_cycle=agent._last_experiment_cycle)
+        is None
+    )
 
 
 def test_observation_changes_proposed_claim():

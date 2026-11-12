@@ -160,8 +160,14 @@ def activity_rows(snapshot: Dict[str, Any]) -> List[Row]:
             rows.append(("Партия", str(game.get("round", 1))))
             rows.append(("Результат", _GAME_RESULTS.get(game.get("result"), "идёт")))
     elif action == "create_draft":
-        drafts = ((snapshot.get("activities") or {}).get("creative") or {}).get("drafts") or []
-        active = [d for d in drafts if isinstance(d, dict) and d.get("status", "active") == "active"]
+        drafts = ((snapshot.get("activities") or {}).get("creative") or {}).get(
+            "drafts"
+        ) or []
+        active = [
+            d
+            for d in drafts
+            if isinstance(d, dict) and d.get("status", "active") == "active"
+        ]
         if active:
             draft = active[-1]
             rows.append(("Черновик", str(draft.get("theme") or "—")))
@@ -199,12 +205,14 @@ def choice_rows(snapshot: Dict[str, Any]) -> List[Row]:
 
     pref = (snapshot.get("preferences") or {}).get(action)
     if isinstance(pref, dict):
-        rows.append((
-            "Опыт способа",
-            f"попыток {pref.get('attempts', 0)}, "
-            f"с эффектом {pref.get('effects', 0)}, "
-            f"сбоев {pref.get('failures', 0)}",
-        ))
+        rows.append(
+            (
+                "Опыт способа",
+                f"попыток {pref.get('attempts', 0)}, "
+                f"с эффектом {pref.get('effects', 0)}, "
+                f"сбоев {pref.get('failures', 0)}",
+            )
+        )
 
     loop = (snapshot.get("now") or {}).get("loop") or {}
     last_action = loop.get("last_action")
@@ -250,12 +258,20 @@ def access_rows(snapshot: Dict[str, Any]) -> List[Row]:
     for key in ("network", "delamain", "effector", "presence"):
         item = access.get(key)
         if isinstance(item, dict):
-            rows.append((str(item.get("label") or key),
-                         "включено" if item.get("enabled") else "выключено"))
+            rows.append(
+                (
+                    str(item.get("label") or key),
+                    "включено" if item.get("enabled") else "выключено",
+                )
+            )
     workspace = access.get("workspace")
     if isinstance(workspace, dict):
-        rows.append((str(workspace.get("label") or "Рабочая область"),
-                     str(workspace.get("path") or "—")))
+        rows.append(
+            (
+                str(workspace.get("label") or "Рабочая область"),
+                str(workspace.get("path") or "—"),
+            )
+        )
     return rows
 
 
@@ -265,8 +281,9 @@ def effector_rows(snapshot: Dict[str, Any]) -> List[Row]:
     if not effector.get("available"):
         return [("Состояние", "Effector не подключён")]
     counts = effector.get("counts") or {}
-    rows = [(label, str(int(counts.get(key, 0) or 0)))
-            for key, label in _EFFECTOR_LABELS]
+    rows = [
+        (label, str(int(counts.get(key, 0) or 0))) for key, label in _EFFECTOR_LABELS
+    ]
     return rows
 
 
@@ -277,7 +294,9 @@ def pending_effector_note(snapshot: Dict[str, Any]) -> Optional[str]:
     иначе пользователь решит, что всё уже сделано.
     """
     counts = (snapshot.get("effector") or {}).get("counts") or {}
-    pending = int(counts.get("queued", 0) or 0) + int(counts.get("waiting_approval", 0) or 0)
+    pending = int(counts.get("queued", 0) or 0) + int(
+        counts.get("waiting_approval", 0) or 0
+    )
     if pending <= 0:
         return None
     return f"Не завершено: {pending} (в очереди или ждёт подтверждения)"

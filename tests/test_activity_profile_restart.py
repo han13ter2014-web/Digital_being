@@ -14,7 +14,9 @@ from src.core.subsystem_base import PluginRegistry
 
 @pytest.mark.parametrize("backend", ["json", "sqlite"])
 @pytest.mark.parametrize("action", ["play", "create_draft"])
-def test_activity_completes_after_profile_restart(tmp_path, monkeypatch, backend, action):
+def test_activity_completes_after_profile_restart(
+    tmp_path, monkeypatch, backend, action
+):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "profile"))
     monkeypatch.setattr(SIM_CONFIG, "CHECKPOINT_BACKEND", backend)
     monkeypatch.setattr(LR_CONFIG, "WEB_SEARCH_ENABLED", False)
@@ -23,11 +25,17 @@ def test_activity_completes_after_profile_restart(tmp_path, monkeypatch, backend
         env = setup_environment(chdir=False, console=False)
         first, _ = create_agent(env, "ActivityLife", new=True)
         identifier = first.set_goal("Своё занятие", activate=True)
-        attach_activity(first, identifier, {"source": "self", "need": "play", "action_hint": action})
+        attach_activity(
+            first, identifier, {"source": "self", "need": "play", "action_hint": action}
+        )
         if action == "play":
             # Настоящий первый ход, но партия пока не закончена.
             candidate = activity_candidate(first)
-            with patch.object(first.decision_arbitrator, "choose_action", return_value={**candidate, "verdict": "proceed"}):
+            with patch.object(
+                first.decision_arbitrator,
+                "choose_action",
+                return_value={**candidate, "verdict": "proceed"},
+            ):
                 first.autonomous_tick()
             assert first.active_goal["activity"]["steps"] == 1
         original = deepcopy(next(g for g in first.goals if g["id"] == identifier))
@@ -44,7 +52,11 @@ def test_activity_completes_after_profile_restart(tmp_path, monkeypatch, backend
             candidate = activity_candidate(second)
             if candidate is None:
                 break
-            with patch.object(second.decision_arbitrator, "choose_action", return_value={**candidate, "verdict": "proceed"}):
+            with patch.object(
+                second.decision_arbitrator,
+                "choose_action",
+                return_value={**candidate, "verdict": "proceed"},
+            ):
                 second.autonomous_tick()
             second.cycle_count += 1
             if goal["status"] == "completed":
@@ -56,7 +68,10 @@ def test_activity_completes_after_profile_restart(tmp_path, monkeypatch, backend
         second.save_state(force=True)
         PluginRegistry.reset_global()
         third, _ = create_agent(env, "ActivityLife")
-        assert next(g for g in third.goals if g["id"] == identifier)["status"] == "completed"
+        assert (
+            next(g for g in third.goals if g["id"] == identifier)["status"]
+            == "completed"
+        )
         assert third.completed_goals == count + 1
     finally:
         PluginRegistry.reset_global()

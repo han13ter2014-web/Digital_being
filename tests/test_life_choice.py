@@ -13,8 +13,9 @@ def _write_life(root, name, cycle, payload=None):
     checkpoints = root / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
     path = checkpoints / f"{name}_cycle_{cycle}.json"
-    path.write_text(json.dumps(payload or {"name": name, "cycle_count": cycle}),
-                    encoding="utf-8")
+    path.write_text(
+        json.dumps(payload or {"name": name, "cycle_count": cycle}), encoding="utf-8"
+    )
     return path
 
 
@@ -37,10 +38,15 @@ def test_describe_life_is_human_readable(tmp_path):
 
 def test_resolve_with_single_life_needs_no_question(tmp_path):
     _write_life(tmp_path, "Одна", 5)
-    assert resolve_startup_name(
-        data_root=str(tmp_path), default_name="Alpha", interactive=True,
-        ask=lambda lives: pytest.fail("не должен спрашивать"),
-    ) == "Одна"
+    assert (
+        resolve_startup_name(
+            data_root=str(tmp_path),
+            default_name="Alpha",
+            interactive=True,
+            ask=lambda lives: pytest.fail("не должен спрашивать"),
+        )
+        == "Одна"
+    )
 
 
 def test_resolve_asks_when_several_lives(tmp_path):
@@ -74,7 +80,9 @@ def test_resolve_rejects_unknown_choice(tmp_path):
     _write_life(tmp_path, "Малютка", 494)
     with pytest.raises(RecoveryRequiredError):
         resolve_startup_name(
-            data_root=str(tmp_path), default_name="Alpha", interactive=True,
+            data_root=str(tmp_path),
+            default_name="Alpha",
+            interactive=True,
             ask=lambda lives: "Чужая",
         )
 
@@ -85,16 +93,24 @@ def test_corrupt_pointer_is_not_hidden_by_chooser(tmp_path):
     (tmp_path / "active_profile.json").write_text("{битый", encoding="utf-8")
     with pytest.raises(RecoveryRequiredError):
         resolve_startup_name(
-            data_root=str(tmp_path), default_name="Alpha", interactive=True,
+            data_root=str(tmp_path),
+            default_name="Alpha",
+            interactive=True,
             ask=lambda lives: pytest.fail("повреждённый указатель нельзя обходить"),
         )
 
 
 def test_explicit_name_skips_pointer(tmp_path):
     _write_life(tmp_path, "Alpha", 28)
-    assert resolve_startup_name(
-        name="Alpha", data_root=str(tmp_path), default_name="X", interactive=True,
-    ) == "Alpha"
+    assert (
+        resolve_startup_name(
+            name="Alpha",
+            data_root=str(tmp_path),
+            default_name="X",
+            interactive=True,
+        )
+        == "Alpha"
+    )
 
 
 def test_build_runtime_writes_pointer_immediately(tmp_path, monkeypatch):
@@ -111,4 +127,3 @@ def test_build_runtime_writes_pointer_immediately(tmp_path, monkeypatch):
     payload = json.loads((tmp_path / "active_profile.json").read_text(encoding="utf-8"))
     assert payload["name"] == "Alpha"
     assert payload["life_id"] == runtime.agent.life_id
-

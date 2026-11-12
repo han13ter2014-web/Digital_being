@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 ACCESS_FILE = "access_settings.json"
 
@@ -50,8 +50,7 @@ def load_saved(root) -> Dict[str, bool]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(
-            "Не удалось прочитать сохранённые разрешения; "
-            "переключатели не применены"
+            "Не удалось прочитать сохранённые разрешения; " "переключатели не применены"
         ) from exc
     if not isinstance(payload, dict):
         raise ValueError("Файл разрешений повреждён; переключатели не применены")
@@ -101,21 +100,30 @@ def apply_choice(agent: Any, key: str, enabled: bool) -> Dict[str, Any]:
     if key == "network":
         searcher = getattr(agent, "web_searcher", None)
         if searcher is None:
-            return {"ok": False, "label": label,
-                    "error": "Интернет-поиск не подключён в этой сборке"}
+            return {
+                "ok": False,
+                "label": label,
+                "error": "Интернет-поиск не подключён в этой сборке",
+            }
         searcher.toggle(value)
         return {"ok": True, "error": None, "label": label}
 
     if key == "delamain":
         subsystem = getattr(agent, "delamain", None)
         if subsystem is None:
-            return {"ok": False, "label": label,
-                    "error": "Планирование задач не подключено в этой сборке"}
+            return {
+                "ok": False,
+                "label": label,
+                "error": "Планирование задач не подключено в этой сборке",
+            }
         if value:
             result = subsystem.enable()
             if not result.get("enabled"):
-                return {"ok": False, "label": label,
-                        "error": str(result.get("error") or "не удалось включить")}
+                return {
+                    "ok": False,
+                    "label": label,
+                    "error": str(result.get("error") or "не удалось включить"),
+                }
         else:
             subsystem.disable()
         return {"ok": True, "error": None, "label": label}
@@ -134,21 +142,25 @@ def apply_choice(agent: Any, key: str, enabled: bool) -> Dict[str, Any]:
 
     effector = getattr(agent, "delamain_effector", None)
     if effector is None:
-        return {"ok": False, "label": label,
-                "error": "Выполнение действий не подключено в этой сборке"}
+        return {
+            "ok": False,
+            "label": label,
+            "error": "Выполнение действий не подключено в этой сборке",
+        }
     subsystem = getattr(agent, "delamain", None)
     if value and subsystem is not None and not getattr(subsystem, "enabled", False):
         # Действия исполняет тот же слой, что и планирование. Включать его
         # в одиночку значило бы показать разрешение, которое не работает.
-        return {"ok": False, "label": label,
-                "error": "сначала включите «Планирование задач»"}
+        return {
+            "ok": False,
+            "label": label,
+            "error": "сначала включите «Планирование задач»",
+        }
     effector.enabled = value
     return {"ok": True, "error": None, "label": label}
 
 
-def set_access(
-    agent: Any, key: str, enabled: bool, *, root
-) -> Dict[str, Any]:
+def set_access(agent: Any, key: str, enabled: bool, *, root) -> Dict[str, Any]:
     """Применить выбор и сохранить его только после успеха."""
     result = apply_choice(agent, key, enabled)
     if not result.get("ok"):
@@ -161,8 +173,11 @@ def set_access(
     try:
         _write_saved(root, saved)
     except OSError as exc:
-        return {"ok": False, "label": result["label"],
-                "error": f"Не удалось сохранить выбор: {exc}"}
+        return {
+            "ok": False,
+            "label": result["label"],
+            "error": f"Не удалось сохранить выбор: {exc}",
+        }
     return result
 
 

@@ -11,11 +11,9 @@ Enable it in one of three ways:
 * set ``DELAMAIN_LOCAL_ENABLED = True`` in ``config/simulation_config.py``;
 * run ``/delamain on`` in the tray chat.
 
-The runtime works without a model. A goal is either a simple command that the
-deterministic planner understands, an explicit list of action requests stored
-in the goal metadata, or (optionally) a plan from a local Ollama model with a
-heuristic fallback. The LLM is disabled by default by
-``DELAMAIN_LLM_ENABLED``. Dangerous plans can wait for explicit approval;
+The runtime is model-free. A goal is either a simple command that the
+deterministic planner understands or an explicit list of action requests stored
+in the goal metadata. Dangerous plans can wait for explicit approval;
 the gate is configured by ``DELAMAIN_APPROVAL_MODE`` (``dangerous`` by
 default since ``run_python`` joined the action set: the entity proposes code
 and changes, the human decides).
@@ -45,13 +43,13 @@ from typing import Any, Dict, List, Mapping, Optional
 from src.core.subsystem_base import Subsystem
 
 from .approval import VALID_APPROVAL_MODES, normalize_approval_mode
+from .artifact_sandbox import ArtifactSandbox
 from .context import build_failure_context
 from .effector import DelamainEffectorAdapter
 from .goal_authoring import GoalAuthoring
 from .goal_bridge import GoalBridge, derive_bridge_status
-from .llm_planner import OllamaPlanner
 from .models import ActionRequest, TaskResult, utc_now_iso
-from .planner import FallbackPlanner, HeuristicPlanner, Planner
+from .planner import Planner
 from .runner import CodeRunner
 from .runtime import DelamainRuntime
 from .sandbox import Sandbox
@@ -136,19 +134,19 @@ class DelamainSubsystem(Subsystem):
         run_timeout: Optional[float] = None,
         run_output_chars: Optional[int] = None,
         run_max_code_bytes: Optional[int] = None,
-        llm_enabled: Optional[bool] = None,
-        llm_base_url: Optional[str] = None,
-        llm_model: Optional[str] = None,
-        llm_timeout: Optional[float] = None,
-        llm_max_steps: Optional[int] = None,
-        llm_temperature: Optional[float] = None,
         approval_mode: Optional[str] = None,
         bridge_enabled: Optional[bool] = None,
         goal_proposal_enabled: Optional[bool] = None,
         effector_enabled: Optional[bool] = None,
         core_driven: Optional[bool] = None,
+        life_id: Optional[str] = None,
     ) -> None:
         super().__init__(agent_name=agent_name)
+        if life_id is not None:
+            from src.core.life_identity import validate_life_id
+
+            life_id = validate_life_id(life_id)
+        self.life_id = life_id
 
         default_workspace, default_db = _default_paths()
         workspace_value = (
@@ -157,12 +155,20 @@ class DelamainSubsystem(Subsystem):
             or _cfg("DELAMAIN_WORKSPACE", "")
             or default_workspace
         )
-        db_value = (
-            db_path
-            or os.environ.get("DELAMAIN_DB")
-            or _cfg("DELAMAIN_DB", "")
-            or default_db
-        )
+        if self.life_id is not None:
+            from src.core.paths import data_path
+
+            # UUID-память и workspace не подчиняются общим DELAMAIN_* путям:
+            # иначе две жизни могли бы записаться в один внешний источник.
+            workspace_value = data_path("lives", self.life_id, "artifacts")
+            db_value = data_path("lives", self.life_id, "life.sqlite3")
+        else:
+            db_value = (
+                db_path
+                or os.environ.get("DELAMAIN_DB")
+                or _cfg("DELAMAIN_DB", "")
+                or default_db
+            )
         self.workspace = Path(workspace_value).expanduser()
         self.db_path = Path(db_value).expanduser()
 
@@ -227,9 +233,7 @@ class DelamainSubsystem(Subsystem):
         if replan_on_failure is None:
             replan_env = os.environ.get("DELAMAIN_REPLAN_ON_FAILURE")
             if replan_env is None:
-                replan_on_failure = bool(
-                    _cfg("DELAMAIN_REPLAN_ON_FAILURE", False)
-                )
+                replan_on_failure = bool(_cfg("DELAMAIN_REPLAN_ON_FAILURE", False))
             else:
                 replan_on_failure = _parse_bool(replan_env)
         # Replanning is opt-in: the default retries the same explicit/skill
@@ -239,9 +243,7 @@ class DelamainSubsystem(Subsystem):
         if replan_with_context is None:
             context_env = os.environ.get("DELAMAIN_REPLAN_WITH_CONTEXT")
             if context_env is None:
-                replan_with_context = bool(
-                    _cfg("DELAMAIN_REPLAN_WITH_CONTEXT", False)
-                )
+                replan_with_context = bool(_cfg("DELAMAIN_REPLAN_WITH_CONTEXT", False))
             else:
                 replan_with_context = _parse_bool(context_env)
         # Passing the failed step's result to the planner changes the prompt
@@ -251,9 +253,7 @@ class DelamainSubsystem(Subsystem):
         if step_repair_enabled is None:
             repair_env = os.environ.get("DELAMAIN_STEP_REPAIR_ENABLED")
             if repair_env is None:
-                step_repair_enabled = bool(
-                    _cfg("DELAMAIN_STEP_REPAIR_ENABLED", False)
-                )
+                step_repair_enabled = bool(_cfg("DELAMAIN_STEP_REPAIR_ENABLED", False))
             else:
                 step_repair_enabled = _parse_bool(repair_env)
         # Stage 16 is opt-in: without this flag a failed step behaves exactly
@@ -277,45 +277,6 @@ class DelamainSubsystem(Subsystem):
         if repair_steps_value is None:
             repair_steps_value = _cfg("DELAMAIN_MAX_REPAIR_STEPS", 5)
         self.max_repair_steps = max(1, int(repair_steps_value))
-
-        if llm_enabled is None:
-            llm_env = os.environ.get("DELAMAIN_LLM_ENABLED")
-            if llm_env is None:
-                llm_enabled = bool(_cfg("DELAMAIN_LLM_ENABLED", False))
-            else:
-                llm_enabled = _parse_bool(llm_env)
-        self.llm_enabled = bool(llm_enabled)
-        self.llm_base_url = str(
-            llm_base_url
-            or os.environ.get("DELAMAIN_LLM_BASE_URL")
-            or _cfg("DELAMAIN_LLM_BASE_URL", "http://127.0.0.1:11434")
-        ).strip()
-        self.llm_model = str(
-            llm_model
-            or os.environ.get("DELAMAIN_LLM_MODEL")
-            or _cfg("DELAMAIN_LLM_MODEL", "qwen2.5:7b-instruct")
-        ).strip()
-        timeout_value = (
-            llm_timeout
-            if llm_timeout is not None
-            else os.environ.get("DELAMAIN_LLM_TIMEOUT")
-            or _cfg("DELAMAIN_LLM_TIMEOUT", 20.0)
-        )
-        self.llm_timeout = max(1.0, float(timeout_value))
-        steps_value = (
-            llm_max_steps
-            if llm_max_steps is not None
-            else os.environ.get("DELAMAIN_LLM_MAX_STEPS")
-            or _cfg("DELAMAIN_LLM_MAX_STEPS", 12)
-        )
-        self.llm_max_steps = max(1, int(steps_value))
-        temperature_value = (
-            llm_temperature
-            if llm_temperature is not None
-            else os.environ.get("DELAMAIN_LLM_TEMPERATURE")
-            or _cfg("DELAMAIN_LLM_TEMPERATURE", 0.0)
-        )
-        self.llm_temperature = max(0.0, min(2.0, float(temperature_value)))
 
         raw_approval_mode = (
             approval_mode
@@ -353,9 +314,7 @@ class DelamainSubsystem(Subsystem):
         if core_driven is None:
             driver_env = os.environ.get("DELAMAIN_EFFECTOR_CORE_DRIVEN")
             if driver_env is None:
-                core_driven = bool(
-                    _cfg("DELAMAIN_EFFECTOR_CORE_DRIVEN", False)
-                )
+                core_driven = bool(_cfg("DELAMAIN_EFFECTOR_CORE_DRIVEN", False))
             else:
                 core_driven = _parse_bool(driver_env)
         # Stage 18B: core_driven selects who owns the clock. The effector flag
@@ -416,6 +375,23 @@ class DelamainSubsystem(Subsystem):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def bind_life(self, life_id: str) -> None:
+        """Переключить ещё не открытый runtime на базу указанной жизни."""
+        from src.core.life_identity import validate_life_id
+        from src.core.paths import data_path
+
+        target = validate_life_id(life_id)
+        if self.life_id == target:
+            return
+        if self.runtime is not None:
+            raise RuntimeError(
+                "Нельзя сменить жизнь Delamain с открытым runtime; "
+                "сначала требуется teardown"
+            )
+        self.life_id = target
+        self.workspace = Path(data_path("lives", target, "artifacts"))
+        self.db_path = Path(data_path("lives", target, "life.sqlite3"))
+
     def setup(self, context: Dict[str, Any]) -> None:
         super().setup(context)
         self._agent = (context or {}).get("agent")
@@ -464,34 +440,27 @@ class DelamainSubsystem(Subsystem):
     # ------------------------------------------------------------------
 
     def _build_planner(self) -> Optional[Planner]:
-        """Build the optional planner stack without touching the network."""
+        """Use the runtime's deterministic planner; no network is involved."""
 
         self._planner_error = None
-        if not self.llm_enabled:
-            self._planner_mode = "heuristic"
-            return None
-        try:
-            primary = OllamaPlanner(
-                base_url=self.llm_base_url,
-                model=self.llm_model,
-                timeout=self.llm_timeout,
-                max_steps=self.llm_max_steps,
-                temperature=self.llm_temperature,
-            )
-            self._planner_mode = f"ollama:{self.llm_model}+fallback"
-            return FallbackPlanner(primary, HeuristicPlanner())
-        except Exception as exc:
-            # A bad model name or URL must not prevent the agent from
-            # starting. The deterministic planner remains available.
-            self._planner_error = f"{type(exc).__name__}: {exc}"
-            self._planner_mode = "heuristic (LLM setup failed)"
-            return None
+        self._planner_mode = "heuristic"
+        return None
 
     def _ensure_runtime(self) -> DelamainRuntime:
         if self.runtime is None:
             self.workspace.mkdir(parents=True, exist_ok=True)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            sandbox = Sandbox(self.workspace, max_file_bytes=self.max_file_bytes)
+            if self.life_id is None:
+                sandbox = Sandbox(self.workspace, max_file_bytes=self.max_file_bytes)
+            else:
+                from src.memory.life_database import LifeDatabase
+
+                database = LifeDatabase(self.db_path, self.life_id)
+                sandbox = ArtifactSandbox(
+                    self.workspace,
+                    max_file_bytes=self.max_file_bytes,
+                    database=database,
+                )
             code_runner = CodeRunner(
                 sandbox,
                 timeout_sec=self.run_timeout,
@@ -508,6 +477,7 @@ class DelamainSubsystem(Subsystem):
                 max_step_repairs=self.max_step_repairs,
                 max_repair_steps=self.max_repair_steps,
                 code_runner=code_runner,
+                life_id=self.life_id,
             )
         return self.runtime
 
@@ -590,7 +560,10 @@ class DelamainSubsystem(Subsystem):
         if goal is None:
             return None
         metadata = goal.get("metadata") or {}
-        if isinstance(metadata, Mapping) and metadata.get("bridge_source") == "goal_subsystem":
+        if (
+            isinstance(metadata, Mapping)
+            and metadata.get("bridge_source") == "goal_subsystem"
+        ):
             goal["bridge_status"] = derive_bridge_status(goal, runtime.memory)
             goal["cognitive_goal_id"] = metadata.get("cognitive_goal_id")
             goal["cognitive_goal_title"] = metadata.get("cognitive_goal_title")
@@ -705,9 +678,7 @@ class DelamainSubsystem(Subsystem):
         goal_metadata = goal.get("metadata") if goal is not None else {}
         if not isinstance(goal_metadata, Mapping):
             goal_metadata = {}
-        previous_attempts = (
-            self._attempts(goal_metadata) if goal is not None else 0
-        )
+        previous_attempts = self._attempts(goal_metadata) if goal is not None else 0
         goal_title = (
             str(goal.get("title"))
             if goal is not None and goal.get("title")
@@ -739,8 +710,11 @@ class DelamainSubsystem(Subsystem):
         if self.core_driven:
             self._sync_bridge()
             return {
-                "ok": True, "status": "approved", "approval_id": approval_id,
-                "goal_id": goal_id, "trigger": "approval",
+                "ok": True,
+                "status": "approved",
+                "approval_id": approval_id,
+                "goal_id": goal_id,
+                "trigger": "approval",
                 "detail": {"execution": "deferred_to_core_effector"},
             }
 
@@ -800,9 +774,7 @@ class DelamainSubsystem(Subsystem):
 
         goal_id = updated.get("goal_id")
         goal = runtime.memory.get_goal(int(goal_id)) if goal_id is not None else None
-        prior_steps, effective_steps, step_repairs = self._approval_progress(
-            updated
-        )
+        prior_steps, effective_steps, step_repairs = self._approval_progress(updated)
         attempts: Optional[int] = None
         if goal is not None:
             metadata = goal.get("metadata") or {}
@@ -1014,9 +986,7 @@ class DelamainSubsystem(Subsystem):
             return None
 
         result = TaskResult(
-            task_id=(
-                f"goal-{goal_id}" if goal_id is not None else "delamain-manual"
-            ),
+            task_id=(f"goal-{goal_id}" if goal_id is not None else "delamain-manual"),
             task=task,
             ok=False,
             error=f"budget denied: {decision_dict.get('reason')}",
@@ -1081,20 +1051,16 @@ class DelamainSubsystem(Subsystem):
                         task_id=str(approval.get("task_id") or f"goal-{goal_id}"),
                         task=task,
                         ok=False,
-                        error="approval required: " + ", ".join(
+                        error="approval required: "
+                        + ", ".join(
                             approval.get("dangerous_actions") or ["all actions"]
                         ),
                         planned_actions=list(approval.get("plan") or []),
                         effective_actions=list(
-                            approval_metadata.get("prior_effective_actions")
-                            or []
+                            approval_metadata.get("prior_effective_actions") or []
                         ),
-                        steps_before=_safe_int(
-                            approval_metadata.get("prior_steps")
-                        ),
-                        repair_count=_safe_int(
-                            approval_metadata.get("repair_count")
-                        ),
+                        steps_before=_safe_int(approval_metadata.get("prior_steps")),
+                        repair_count=_safe_int(approval_metadata.get("repair_count")),
                         pending_approval=approval,
                     )
                     summary = self._summarize(
@@ -1441,9 +1407,7 @@ class DelamainSubsystem(Subsystem):
         if not isinstance(metadata, Mapping):
             metadata = {}
         effective = metadata.get("prior_effective_actions")
-        effective_steps = (
-            len(effective) if isinstance(effective, (list, tuple)) else 0
-        )
+        effective_steps = len(effective) if isinstance(effective, (list, tuple)) else 0
         return (
             _safe_int(metadata.get("prior_steps")),
             effective_steps,
@@ -1478,7 +1442,7 @@ class DelamainSubsystem(Subsystem):
             return 0.0
         exponent = min(1024, max(0, int(attempt_number) - 1))
         try:
-            delay = self.retry_backoff_sec * (2 ** exponent)
+            delay = self.retry_backoff_sec * (2**exponent)
         except OverflowError:  # pragma: no cover - absurdly large config
             delay = float("inf")
         if self.retry_backoff_max_sec > 0:
@@ -1672,9 +1636,7 @@ class DelamainSubsystem(Subsystem):
                 else None
             ),
             "failure_action": (
-                failure_context.get("action")
-                if failure_context is not None
-                else None
+                failure_context.get("action") if failure_context is not None else None
             ),
             "reused_skill": bool(reused_skill),
             "approval_id": result.approval_id
@@ -1750,12 +1712,7 @@ class DelamainSubsystem(Subsystem):
 
     def _planner_info(self) -> Dict[str, Any]:
         info: Dict[str, Any] = {
-            "enabled": self.llm_enabled,
             "mode": self._planner_mode,
-            "base_url": self.llm_base_url,
-            "model": self.llm_model,
-            "timeout": self.llm_timeout,
-            "max_steps": self.llm_max_steps,
             "error": self._planner_error,
             "last_used": None,
             "last_error": None,

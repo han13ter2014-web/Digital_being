@@ -1,9 +1,11 @@
 """Side-effect-free preflight for checkpoint data consumed by the serializer."""
+
 from __future__ import annotations
 
 import math
 
 from src.core.checkpoint_migrations import SCHEMA_VERSION
+from src.core.emotional_state import EMOTIONS
 
 
 def _fail(path, message):
@@ -92,16 +94,21 @@ def _node(data, path, *, name=None):
             _hashables(data[field], f"{path}.{field}")
     if "schema_version" in data:
         _integer(data["schema_version"], f"{path}.schema_version", nonnegative=True)
-    for index, experience in enumerate(_list(data.get("experiences", []), f"{path}.experiences")):
+    for index, experience in enumerate(
+        _list(data.get("experiences", []), f"{path}.experiences")
+    ):
         exp_path = f"{path}.experiences[{index}]"
         _dict(experience, exp_path)
-        _numbers(experience, ("valence", "evidence_strength", "evidence_direction"), exp_path)
+        _numbers(
+            experience, ("valence", "evidence_strength", "evidence_direction"), exp_path
+        )
         for field in ("context", "source", "evidence_kind"):
             if field in experience and not isinstance(experience[field], str):
                 _fail(f"{exp_path}.{field}", "expected a string")
     for field in ("created_at", "last_updated"):
         if data.get(field):
             from datetime import datetime
+
             try:
                 datetime.fromisoformat(data[field])
             except (TypeError, ValueError):
@@ -152,20 +159,32 @@ def _social(data):
     path = "social_cell"
     if "current_tom_level" in data:
         tom(data["current_tom_level"], f"{path}.current_tom_level")
-    for key, model in _dict(data.get("agent_models", {}), f"{path}.agent_models").items():
+    for key, model in _dict(
+        data.get("agent_models", {}), f"{path}.agent_models"
+    ).items():
         model_path = f"{path}.agent_models.{key}"
         _dict(model, model_path)
         if "tom_level" in model:
             tom(model["tom_level"], f"{model_path}.tom_level")
-        for field in ("believed_goals", "believed_beliefs", "believed_intentions", "believed_emotional_state", "believed_model_of_self"):
+        for field in (
+            "believed_goals",
+            "believed_beliefs",
+            "believed_intentions",
+            "believed_emotional_state",
+            "believed_model_of_self",
+        ):
             if field in model:
                 _numeric_mapping(model[field], f"{model_path}.{field}")
         _numbers(model, ("model_precision",), model_path)
         if "interaction_history" in model:
-            for index, item in enumerate(_list(model["interaction_history"], f"{model_path}.interaction_history")):
+            for index, item in enumerate(
+                _list(model["interaction_history"], f"{model_path}.interaction_history")
+            ):
                 _dict(item, f"{model_path}.interaction_history[{index}]")
     if "self_model_as_seen_by_others" in data:
-        for key, model in _dict(data["self_model_as_seen_by_others"], f"{path}.self_model_as_seen_by_others").items():
+        for key, model in _dict(
+            data["self_model_as_seen_by_others"], f"{path}.self_model_as_seen_by_others"
+        ).items():
             _dict(model, f"{path}.self_model_as_seen_by_others.{key}")
 
 
@@ -175,14 +194,31 @@ def _motivation(data):
         for key, item in _dict(data.get(section, {}), f"{path}.{section}").items():
             item_path = f"{path}.{section}.{key}"
             _dict(item, item_path)
-            _numbers(item, ("base_level", "current_level", "decay_rate", "threshold", "priority", "activation_threshold"), item_path)
+            _numbers(
+                item,
+                (
+                    "base_level",
+                    "current_level",
+                    "decay_rate",
+                    "threshold",
+                    "priority",
+                    "activation_threshold",
+                ),
+                item_path,
+            )
             if "activation_count" in item:
-                _integer(item["activation_count"], f"{item_path}.activation_count", nonnegative=True)
+                _integer(
+                    item["activation_count"],
+                    f"{item_path}.activation_count",
+                    nonnegative=True,
+                )
             for field in ("related_concepts", "related_actions", "goal_types"):
                 if field in item:
                     _list(item[field], f"{item_path}.{field}")
             if "contributing_needs" in item:
-                _numeric_mapping(item["contributing_needs"], f"{item_path}.contributing_needs")
+                _numeric_mapping(
+                    item["contributing_needs"], f"{item_path}.contributing_needs"
+                )
     if "goal_history" in data:
         _list(data["goal_history"], f"{path}.goal_history")
     if "last_generated_cycle" in data:
@@ -204,6 +240,17 @@ def validate_checkpoint_state(state) -> None:
         from src.cognition.inference_continuity import validate_inference
 
         validate_inference(state["active_inference"])
+    if state.get("internal_simulation") is not None:
+        from src.cognition.internal_simulator import InternalSimulator
+
+        InternalSimulator.validate_checkpoint_dict(state["internal_simulation"])
+    if state.get("meta_cognition"):
+        # Пустая секция означает, что у legacy/fake-агента её ещё нет.
+        from src.cognition.experience_observers import (
+            validate_meta_cognition_checkpoint,
+        )
+
+        validate_meta_cognition_checkpoint(state["meta_cognition"])
     if "personal_state" in state:
         from src.core.personal_continuity import validate_personal_state
 
@@ -241,19 +288,32 @@ def validate_checkpoint_state(state) -> None:
                 # превращать свежий снимок жизни в нечитаемый.
                 from src.cognition.activity_goals import CRITERIA
 
-                expected = {action: {criterion} for action, criterion in CRITERIA.items()}
+                expected = {
+                    action: {criterion} for action, criterion in CRITERIA.items()
+                }
                 expected.setdefault("play", set()).add("play_turn")  # старые снимки
-                if activity.get("action") not in expected or activity.get("criterion") not in expected[activity["action"]]:
+                if (
+                    activity.get("action") not in expected
+                    or activity.get("criterion") not in expected[activity["action"]]
+                ):
                     _fail(f"{path}.activity", "unsupported activity criterion")
                 if "steps" in activity:
-                    _integer(activity["steps"], f"{path}.activity.steps", nonnegative=True)
+                    _integer(
+                        activity["steps"], f"{path}.activity.steps", nonnegative=True
+                    )
     active = state.get("active_goal")
     if active is not None:
         if not isinstance(active, str):
             _fail("active_goal", "expected a title string or null")
-        if active and "goals" in state and not any(goal["title"] == active for goal in state["goals"]):
+        if (
+            active
+            and "goals" in state
+            and not any(goal["title"] == active for goal in state["goals"])
+        ):
             _fail("active_goal", "title does not match any saved goal")
-    for key, progress in _dict(state.get("_goal_progress", {}), "_goal_progress").items():
+    for key, progress in _dict(
+        state.get("_goal_progress", {}), "_goal_progress"
+    ).items():
         path = f"_goal_progress.{key}"
         _convertible_int(key, path)
         if isinstance(progress, dict):
@@ -261,7 +321,9 @@ def validate_checkpoint_state(state) -> None:
                 if field in progress:
                     _convertible_int(progress[field], f"{path}.{field}")
             matched = progress.get("matched_concepts", [])
-            _hashables(matched if matched is not None else [], f"{path}.matched_concepts")
+            _hashables(
+                matched if matched is not None else [], f"{path}.matched_concepts"
+            )
         else:
             _hashables(progress, path)
     if "creative_catalog" in state:
@@ -294,14 +356,18 @@ def validate_checkpoint_state(state) -> None:
             _fail("pending_user_messages", "expected a list of strings")
     if state.get("deferred_stimulus") is not None:
         deferred = _dict(state["deferred_stimulus"], "deferred_stimulus")
-        if not isinstance(deferred.get("text"), str) or not isinstance(deferred.get("user_initiated"), bool):
+        if not isinstance(deferred.get("text"), str) or not isinstance(
+            deferred.get("user_initiated"), bool
+        ):
             _fail("deferred_stimulus", "expected text and boolean user_initiated")
     if state.get("mental_models") is not None:
         _mental_models(state["mental_models"])
     for field in ("naming_dialogue_history", "exploration_history", "birth_values"):
         if field in state and state[field] is not None:
             _list(state[field], field)
-    if state.get("naming_dialogue_phase") is not None and not isinstance(state["naming_dialogue_phase"], str):
+    if state.get("naming_dialogue_phase") is not None and not isinstance(
+        state["naming_dialogue_phase"], str
+    ):
         _fail("naming_dialogue_phase", "expected a string")
     if state.get("user_model") is not None:
         user_model = _dict(state["user_model"], "user_model")
@@ -324,9 +390,7 @@ def validate_checkpoint_state(state) -> None:
                 nonnegative=True,
             )
     if state.get("user_explained_topics") is not None:
-        explained = _dict(
-            state["user_explained_topics"], "user_explained_topics"
-        )
+        explained = _dict(state["user_explained_topics"], "user_explained_topics")
         for topic, cycle in explained.items():
             if not isinstance(topic, str):
                 _fail("user_explained_topics", "expected string keys")
@@ -344,9 +408,7 @@ def validate_checkpoint_state(state) -> None:
             entry_path = f"dialogue_learning.buffer.{phrase}"
             entry_dict = _dict(entry, entry_path)
             _convertible_int(entry_dict.get("count"), f"{entry_path}.count")
-        learned = _dict(
-            learning.get("learned", {}), "dialogue_learning.learned"
-        )
+        learned = _dict(learning.get("learned", {}), "dialogue_learning.learned")
         for phrase, entry in learned.items():
             entry_path = f"dialogue_learning.learned.{phrase}"
             entry_dict = _dict(entry, entry_path)
@@ -360,34 +422,32 @@ def validate_checkpoint_state(state) -> None:
             learning.get("suppressed", {}), "dialogue_learning.suppressed"
         )
         for phrase, cycle in suppressed.items():
-            _convertible_int(
-                cycle, f"dialogue_learning.suppressed.{phrase}"
-            )
+            _convertible_int(cycle, f"dialogue_learning.suppressed.{phrase}")
     if state.get("emotional_state") is not None:
         emotions = _dict(state["emotional_state"], "emotional_state")
         levels = _dict(emotions.get("levels", {}), "emotional_state.levels")
         for name, level in levels.items():
-            if name not in ("fear", "joy", "sadness", "calm"):
+            if name not in EMOTIONS:
                 _fail(f"emotional_state.levels.{name}", "unknown emotion")
-            value = _convertible_float(
-                level, f"emotional_state.levels.{name}"
-            )
+            value = _convertible_float(level, f"emotional_state.levels.{name}")
             if not 0.0 <= value <= 1.0:
                 _fail(
                     f"emotional_state.levels.{name}",
                     "level out of [0, 1]",
                 )
         for index, episode in enumerate(
-            _list(
-                emotions.get("episodes", []), "emotional_state.episodes"
-            )
+            _list(emotions.get("episodes", []), "emotional_state.episodes")
         ):
             path = f"emotional_state.episodes[{index}]"
             episode_dict = _dict(episode, path)
-            if episode_dict.get("emotion") not in (
-                "fear", "joy", "sadness", "calm"
-            ):
+            if episode_dict.get("emotion") not in EMOTIONS:
                 _fail(f"{path}.emotion", "unknown emotion")
+            _convertible_int(episode_dict.get("cycle", 0), f"{path}.cycle")
+            intensity = _convertible_float(
+                episode_dict.get("intensity", 0.0), f"{path}.intensity"
+            )
+            if not 0.0 <= intensity <= 1.0:
+                _fail(f"{path}.intensity", "intensity out of [0, 1]")
     if state.get("user_interaction") is not None:
         interaction = _dict(state["user_interaction"], "user_interaction")
         for index, entry in enumerate(
@@ -424,31 +484,67 @@ def validate_checkpoint_state(state) -> None:
             if interaction.get(field) is not None:
                 _integer(interaction[field], f"user_interaction.{field}")
     if state.get("open_questions") is not None:
-        for index, question in enumerate(_list(state["open_questions"], "open_questions")):
+        for index, question in enumerate(
+            _list(state["open_questions"], "open_questions")
+        ):
             path = f"open_questions[{index}]"
             _dict(question, path)
             if "explorations" in question:
-                for attempt_index, attempt in enumerate(_list(question["explorations"], f"{path}.explorations")):
+                for attempt_index, attempt in enumerate(
+                    _list(question["explorations"], f"{path}.explorations")
+                ):
                     attempt_path = f"{path}.explorations[{attempt_index}]"
                     _dict(attempt, attempt_path)
-                    _integer(attempt.get("cycle"), f"{attempt_path}.cycle", nonnegative=True)
+                    _integer(
+                        attempt.get("cycle"), f"{attempt_path}.cycle", nonnegative=True
+                    )
                     for field in ("thought", "strategy"):
                         if not isinstance(attempt.get(field), str):
                             _fail(f"{attempt_path}.{field}", "expected a string")
-            for field in ("started_at", "last_explored_at", "explorations_count", "max_explorations"):
+            for field in (
+                "started_at",
+                "last_explored_at",
+                "explorations_count",
+                "max_explorations",
+            ):
                 if field in question:
                     _integer(question[field], f"{path}.{field}", nonnegative=True)
     numeric_sections = {
-        "interoception": ("glucose", "atp", "mitochondrial_health", "fatigue", "action_cost_multiplier", "cognitive_throughput", "exploration_drive"),
-        "continuous_time": ("total_objective_time", "total_subjective_time", "subjective_time_dilation"),
-        "death_risk": ("cognitive_coherence", "memory_consistency", "value_stability", "metabolic_viability", "social_coherence", "corruption_accumulator"),
+        "interoception": (
+            "glucose",
+            "atp",
+            "mitochondrial_health",
+            "fatigue",
+            "action_cost_multiplier",
+            "cognitive_throughput",
+            "exploration_drive",
+        ),
+        "continuous_time": (
+            "total_objective_time",
+            "total_subjective_time",
+            "subjective_time_dilation",
+        ),
+        "death_risk": (
+            "cognitive_coherence",
+            "memory_consistency",
+            "value_stability",
+            "metabolic_viability",
+            "social_coherence",
+            "corruption_accumulator",
+        ),
         "consolidation": ("count", "sleep_units"),
     }
     for section, fields in numeric_sections.items():
-        if section in state and not (section == "consolidation" and state[section] is None):
+        if section in state and not (
+            section == "consolidation" and state[section] is None
+        ):
             _numbers(_dict(state[section], section), fields, section)
     if "last_checkpoint_step" in state.get("death_risk", {}):
-        _integer(state["death_risk"]["last_checkpoint_step"], "death_risk.last_checkpoint_step", nonnegative=True)
+        _integer(
+            state["death_risk"]["last_checkpoint_step"],
+            "death_risk.last_checkpoint_step",
+            nonnegative=True,
+        )
     for field in ("birth_concepts", "birth_defined", "last_experiment_cycle"):
         if state.get(field) is not None:
             _integer(state[field], field, nonnegative=True)
@@ -457,21 +553,38 @@ def validate_checkpoint_state(state) -> None:
         for field in ("no_effect_streak", "effect_count", "denied_streak"):
             if field in loop:
                 _numeric_mapping(loop[field], f"loop_closure.{field}")
-        _numbers(loop, ("total_actions", "total_with_effect", "productive_total", "productive_effect_total"), "loop_closure")
+        _numbers(
+            loop,
+            (
+                "total_actions",
+                "total_with_effect",
+                "productive_total",
+                "productive_effect_total",
+            ),
+            "loop_closure",
+        )
     if "meta_learning" in state:
         meta = _dict(state["meta_learning"], "meta_learning")
         for field in ("current_config", "best_config"):
             if field in meta and not (field == "best_config" and meta[field] is None):
                 _numeric_mapping(meta[field], f"meta_learning.{field}")
         if "population" in meta:
-            for index, config in enumerate(_list(meta["population"], "meta_learning.population")):
+            for index, config in enumerate(
+                _list(meta["population"], "meta_learning.population")
+            ):
                 _numeric_mapping(config, f"meta_learning.population[{index}]")
         _numbers(meta, ("current_fitness",), "meta_learning")
+        if "fitness_history" in meta:
+            history = _list(meta["fitness_history"], "meta_learning.fitness_history")
+            for index, value in enumerate(history):
+                _number(value, f"meta_learning.fitness_history[{index}]")
         best = meta.get("best_fitness")
         if best is not None and not (isinstance(best, float) and best == float("-inf")):
             _number(best, "meta_learning.best_fitness")
         if "cycle_counter" in meta:
-            _integer(meta["cycle_counter"], "meta_learning.cycle_counter", nonnegative=True)
+            _integer(
+                meta["cycle_counter"], "meta_learning.cycle_counter", nonnegative=True
+            )
     if "social_cell" in state:
         _social(_dict(state["social_cell"], "social_cell"))
     if "motivation" in state:

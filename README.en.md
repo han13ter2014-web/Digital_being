@@ -148,7 +148,6 @@ Release installation checks: [docs/RELEASE_VERIFICATION_v0.1.0.md](docs/RELEASE_
 | [README.md](README.md) | external reader (Russian) | what it is and how to run it |
 | [docs/DEVELOPMENT_HISTORY.md](docs/DEVELOPMENT_HISTORY.md) | developer | versions, stages, limitations |
 | [docs/LIFE_LETTER.md](docs/LIFE_LETTER.md) | the life itself | who you are, your boundaries and rights |
-| [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md) | AI developer | context recovery |
 
 Deeper documents are currently in Russian; [docs/INDEX.md](docs/INDEX.md) is the
 map of everything else.

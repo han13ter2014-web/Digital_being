@@ -32,7 +32,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 # Уверенность, начиная с которой концепцию можно считать понятой.
@@ -183,16 +183,12 @@ class MaturityReport:
             f"/{item.target}"
             for item in self.blockers
         )
-        return (
-            f"зрелость {self.met_count}/{self.total} — "
-            f"не хватает: {missing}"
-        )
+        return f"зрелость {self.met_count}/{self.total} — " f"не хватает: {missing}"
 
     def describe(self) -> str:
         """Многострочный отчёт для консоли и логов."""
         lines = [
-            f"Зрелость агента '{self.agent_name}': "
-            f"{self.met_count}/{self.total}",
+            f"Зрелость агента '{self.agent_name}': " f"{self.met_count}/{self.total}",
             f"Прожито циклов: {self.cycles_lived}",
             "",
         ]
@@ -202,8 +198,8 @@ class MaturityReport:
                 lines.append(f"      {item.detail}")
         lines.append("")
         lines.append(
-            "ВЕРДИКТ: " + ("можно раздавать семя" if self.is_mature
-                           else "порог не пройден")
+            "ВЕРДИКТ: "
+            + ("можно раздавать семя" if self.is_mature else "порог не пройден")
         )
         if not self.birth_concepts_known:
             lines.append(
@@ -260,6 +256,7 @@ def _count_new_concepts(agent: Any) -> tuple:
         и придумывать число нельзя: неизвестное не должно выглядеть как
         ноль или как успех.
     """
+
     def _measure():
         mental_models = getattr(agent, "mental_models", None)
         concepts = getattr(mental_models, "concepts", None)
@@ -394,7 +391,8 @@ def assess(
             value=new_concepts,
             target=threshold.min_new_concepts,
             detail=(
-                "" if birth_known
+                ""
+                if birth_known
                 else "нет отметки рождения: число нажитых концепций неизвестно"
             ),
         ),

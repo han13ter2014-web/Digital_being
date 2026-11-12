@@ -92,6 +92,38 @@ def test_sqlite_runner_does_not_export_mind(tmp_path, monkeypatch):
 
     assert runner._save_state_safe() is True
     assert calls == [("checkpoint", True)]
-    assert json.loads((tmp_path / "active_profile.json").read_text(encoding="utf-8")) == {
-        "name": "integration"
-    }
+    assert json.loads(
+        (tmp_path / "active_profile.json").read_text(encoding="utf-8")
+    ) == {"name": "integration"}
+
+
+def test_profile_sqlite_primary_uses_lives_and_restores_without_json(
+    tmp_path, monkeypatch
+):
+    from src.app.active_profile import active_name, remember_active_name
+    from src.app.bootstrap import create_agent
+    from src.app.paths import setup_environment
+    from src.memory.life_database import LifeDatabase
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "sqlite")
+    env = setup_environment(chdir=False, console=False)
+    first, _ = create_agent(env, "SQLiteOnly", new=True)
+    first.cycle_count = 19
+    saved = first.save_state(force=True)
+    remember_active_name(tmp_path, first.name, first.life_id)
+    database_path = tmp_path / "lives" / first.life_id / "life.sqlite3"
+
+    assert saved == f"{database_path}#snapshot=1"
+    assert database_path.is_file()
+    assert not list((tmp_path / "checkpoints").rglob("*.json"))
+    assert active_name(tmp_path, "Missing") == "SQLiteOnly"
+    snapshot_id = LifeDatabase(database_path, first.life_id).get_meta(
+        "latest_snapshot_id"
+    )
+    assert saved.endswith(f"#snapshot={snapshot_id}")
+
+    second, report = create_agent(env, "SQLiteOnly", expected_life_id=first.life_id)
+    assert report["source"] == "checkpoint"
+    assert second.life_id == first.life_id
+    assert second.cycle_count == 19

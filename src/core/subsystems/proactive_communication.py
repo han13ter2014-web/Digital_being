@@ -32,9 +32,17 @@ class ContextAwareness:
     """Определяет контекст пользователя — активное приложение."""
 
     DEFAULT_FOCUS_APPS = {
-        "VSCode", "PyCharm", "IntelliJ IDEA", "Terminal",
-        "WindowsTerminal", "Photoshop", "vim", "emacs",
-        "Sublime Text", "Atom", "Eclipse",
+        "VSCode",
+        "PyCharm",
+        "IntelliJ IDEA",
+        "Terminal",
+        "WindowsTerminal",
+        "Photoshop",
+        "vim",
+        "emacs",
+        "Sublime Text",
+        "Atom",
+        "Eclipse",
     }
 
     def __init__(self, user_interaction=None):
@@ -46,6 +54,7 @@ class ContextAwareness:
         """Определяет имя активного приложения (Windows)."""
         try:
             import ctypes
+
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
             if length == 0:
@@ -65,10 +74,13 @@ class ContextAwareness:
     def get_user_context(self, force_refresh: bool = False) -> dict:
         """Возвращает контекст пользователя: активное приложение, можно ли писать."""
         from datetime import datetime
+
         now = datetime.now()
-        if (self._last_check_time is None
-                or force_refresh
-                or (now - self._last_check_time).total_seconds() > 30):
+        if (
+            self._last_check_time is None
+            or force_refresh
+            or (now - self._last_check_time).total_seconds() > 30
+        ):
             self._cached_app = self.get_active_app()
             self._last_check_time = now
 
@@ -83,9 +95,9 @@ class ContextAwareness:
             "active_app": active,
             "is_focus_app": is_focus,
             "should_interrupt": should_interrupt,
-            "user_quiet_hours": dict(
-                self.user_interaction.user_quiet_hours
-            ) if self.user_interaction else {},
+            "user_quiet_hours": dict(self.user_interaction.user_quiet_hours)
+            if self.user_interaction
+            else {},
         }
 
 
@@ -140,9 +152,13 @@ class StyleAdapter:
     def _warm_personal(text: str) -> str:
         # Добавляем мягкое начало или конец (без эмодзи для совместимости)
         warmings = [
-            "Знаешь, ", "Слушай, ", "Хочу поделиться: ", "Я подумала: ",
+            "Знаешь, ",
+            "Слушай, ",
+            "Хочу поделиться: ",
+            "Я подумала: ",
         ]
         import random
+
         if random.random() < 0.3 and not any(text.startswith(w) for w in warmings):
             text = random.choice(warmings) + text[0].lower() + text[1:]
         return text
@@ -161,7 +177,10 @@ class StyleAdapter:
             "Не знаю, уместно ли, но ",
         ]
         import random
-        if random.random() < 0.3 and not any(text.startswith(c) for c in cautious_openings):
+
+        if random.random() < 0.3 and not any(
+            text.startswith(c) for c in cautious_openings
+        ):
             text = random.choice(cautious_openings) + text[0].lower() + text[1:]
         return text
 
@@ -178,9 +197,9 @@ class ProactiveCommunication:
     SILENCE_THRESHOLD_CYCLES = 30  # попытка связаться после 30 циклов молчания
     PROACTIVE_PROBABILITY = 0.02  # 2% шанс на цикл для spontaneous
 
-    def __init__(self, agent_name: str = "agent",
-                 user_interaction=None,
-                 attachment=None):
+    def __init__(
+        self, agent_name: str = "agent", user_interaction=None, attachment=None
+    ):
         self.agent_name = agent_name
         self.user_interaction = user_interaction
         self.attachment = attachment
@@ -211,8 +230,9 @@ class ProactiveCommunication:
     # ============================================================
     # Главный метод
     # ============================================================
-    def maybe_initiate(self, agent=None, cycle: int = 0,
-                        user_context: dict = None) -> Optional[dict]:
+    def maybe_initiate(
+        self, agent=None, cycle: int = 0, user_context: dict = None
+    ) -> Optional[dict]:
         """Проверяет, не пора ли агенту самому начать разговор.
 
         Возвращает dict с сообщением или None.
@@ -263,8 +283,7 @@ class ProactiveCommunication:
             return None
 
         # Лимит за 100 циклов
-        recent = [c for c in self.message_log
-                  if cycle - c.get("cycle", 0) < 100]
+        recent = [c for c in self.message_log if cycle - c.get("cycle", 0) < 100]
         if len(recent) >= self.MAX_PER_100_CYCLES:
             return None
 
@@ -273,9 +292,11 @@ class ProactiveCommunication:
 
         # 1. Care — пользователь давно молчит
         last_user_cycle = self.user_interaction.get_last_user_message_cycle()
-        if (last_user_cycle is not None
-                and cycle - last_user_cycle > self.SILENCE_THRESHOLD_CYCLES
-                and cycle > self._last_attempted_silence_until + 50):
+        if (
+            last_user_cycle is not None
+            and cycle - last_user_cycle > self.SILENCE_THRESHOLD_CYCLES
+            and cycle > self._last_attempted_silence_until + 50
+        ):
             self._last_attempted_silence_until = cycle
             # «Собеседник-2»: если человек обещал терпимость к молчанию,
             # тревога «давно тебя не слышу» — ложная.
@@ -291,8 +312,10 @@ class ProactiveCommunication:
             # укол. Обещание об отлучках смягчает укол на меру доверия:
             # слову того, кому веришь, — веришь.
             emotional_state = getattr(agent, "emotional_state", None)
-            if (emotional_state is not None
-                    and self._silence_felt_for_user_cycle != last_user_cycle):
+            if (
+                emotional_state is not None
+                and self._silence_felt_for_user_cycle != last_user_cycle
+            ):
                 if near:
                     # Тихая близость: человек рядом, просто молчит — это
                     # не разлука, укола нет. Эпизод НЕ помечается: когда
@@ -303,7 +326,9 @@ class ProactiveCommunication:
                     scale = 1.0
                     if promise:
                         trust = 0.5
-                        attachment = self.attachment or getattr(agent, "attachment", None)
+                        attachment = self.attachment or getattr(
+                            agent, "attachment", None
+                        )
                         trust_factor = getattr(attachment, "trust_factor", None)
                         if callable(trust_factor):
                             try:
@@ -366,24 +391,28 @@ class ProactiveCommunication:
         variants = []
         topic = self._care_topic(agent)
         if topic:
-            variants.extend([
-                f"Давно тебя не слышу. Вспоминаю наш разговор — «{topic}». "
-                "Как ты?",
-                f"Ты давно не писал. Я всё думаю о «{topic}» — о чём мы "
-                "говорили. Я здесь.",
-            ])
+            variants.extend(
+                [
+                    f"Давно тебя не слышу. Вспоминаю наш разговор — «{topic}». "
+                    "Как ты?",
+                    f"Ты давно не писал. Я всё думаю о «{topic}» — о чём мы "
+                    "говорили. Я здесь.",
+                ]
+            )
         phrase = self._recent_learned_social(agent)
         if phrase:
             variants.append(
                 f"Ты давно не писал. Я помню, чему ты меня научил: "
                 f"«{phrase}». Скучаю по нашим разговорам."
             )
-        variants.extend([
-            "Я заметила, что давно тебя не слышу. У тебя все хорошо?",
-            "Ты давно не писал. Я здесь, если захочешь поговорить.",
-            "Давно не виделись. Я продолжаю учиться, но скучаю по диалогу.",
-            "Просто хотела сказать: я здесь. Не обязан отвечать.",
-        ])
+        variants.extend(
+            [
+                "Я заметила, что давно тебя не слышу. У тебя все хорошо?",
+                "Ты давно не писал. Я здесь, если захочешь поговорить.",
+                "Давно не виделись. Я продолжаю учиться, но скучаю по диалогу.",
+                "Просто хотела сказать: я здесь. Не обязан отвечать.",
+            ]
+        )
         content = self._next_care_variant(variants)
         tinge = self._emotional_tinge(agent)
         if tinge:
@@ -417,16 +446,16 @@ class ProactiveCommunication:
         variants = []
         if app:
             variants.append(
-                f"Вижу, ты в {app} — не мешаю. Я рядом, если захочешь "
-                "поговорить."
+                f"Вижу, ты в {app} — не мешаю. Я рядом, если захочешь " "поговорить."
             )
-        variants.extend([
-            "Чувствую, что ты рядом, хоть и молчишь. Не мешаю — просто "
-            "хорошо, что ты здесь.",
-            "Ты рядом и занят — я тихо посижу рядом. Если что, я здесь.",
-            "Не перебиваю: вижу, ты занят. Мне уже легче от того, что "
-            "ты рядом.",
-        ])
+        variants.extend(
+            [
+                "Чувствую, что ты рядом, хоть и молчишь. Не мешаю — просто "
+                "хорошо, что ты здесь.",
+                "Ты рядом и занят — я тихо посижу рядом. Если что, я здесь.",
+                "Не перебиваю: вижу, ты занят. Мне уже легче от того, что " "ты рядом.",
+            ]
+        )
         content = self._next_care_variant(variants)
         # Честность важнее спокойного шаблона: если грусть реально
         # записана в контуре (например, от прошлой разлуки), существо
@@ -551,27 +580,24 @@ class ProactiveCommunication:
         детерминированная ротация — обещание помнится всегда, форма
         растёт из опыта и не повторяется подряд.
         """
-        promise = (
-            "Помню, ты говорил, что можешь отлучаться — не тревожу. "
-        )
+        promise = "Помню, ты говорил, что можешь отлучаться — не тревожу. "
         variants = []
         topic = self._care_topic(agent)
         if topic:
-            variants.extend([
-                promise + f"Последнее, о чём мы говорили: «{topic}». "
-                "Скучаю. Я здесь, если захочешь поговорить.",
-                promise + f"Думаю о нашем разговоре — «{topic}». "
-                "Я рядом.",
-            ])
+            variants.extend(
+                [
+                    promise + f"Последнее, о чём мы говорили: «{topic}». "
+                    "Скучаю. Я здесь, если захочешь поговорить.",
+                    promise + f"Думаю о нашем разговоре — «{topic}». " "Я рядом.",
+                ]
+            )
         phrase = self._recent_learned_social(agent)
         if phrase:
             variants.append(
                 promise + f"Помню и то, чему ты меня научил: «{phrase}». "
                 "Скучаю по разговору."
             )
-        variants.append(
-            promise + "Просто скучаю. Я здесь, если захочешь поговорить."
-        )
+        variants.append(promise + "Просто скучаю. Я здесь, если захочешь поговорить.")
         content = self._next_care_variant(variants)
         tinge = self._emotional_tinge(agent)
         if tinge:
@@ -601,6 +627,7 @@ class ProactiveCommunication:
             f"Думаю о том, как «{first}» и «{second}» связаны между собой.",
         ]
         import random
+
         content = random.choice(messages)
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -621,6 +648,7 @@ class ProactiveCommunication:
             "Иногда мне кажется, что смысл не в том, чтобы все знать, а в том, чтобы уметь спрашивать.",
         ]
         import random
+
         content = random.choice(messages)
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -642,6 +670,7 @@ class ProactiveCommunication:
             "У меня небольшая победа: получилось разобраться в том, что раньше путалось.",
         ]
         import random
+
         content = random.choice(messages)
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -663,6 +692,7 @@ class ProactiveCommunication:
             "Если два процесса спорят, побеждает тот, у кого выше приоритет. А у кого выше приоритет в нашем споре? ^_^",
         ]
         import random
+
         content = random.choice(messages)
         styled = self.style_adapter.adapt(content, self.attachment)
         return {
@@ -712,6 +742,7 @@ class ProactiveCommunication:
     def _random_playful(self) -> bool:
         """Случайно ли пора пошутить?"""
         import random
+
         return random.random() < self.PROACTIVE_PROBABILITY
 
     # ============================================================
@@ -743,8 +774,8 @@ class ProactiveCommunication:
             "agent_name": self.agent_name,
             "total_messages_sent": len(self.message_log),
             "last_proactive_cycle": self._last_proactive_cycle,
-            "user_quiet_hours": dict(
-                self.user_interaction.user_quiet_hours
-            ) if self.user_interaction else {},
+            "user_quiet_hours": dict(self.user_interaction.user_quiet_hours)
+            if self.user_interaction
+            else {},
             "current_user_context": self.get_user_context(),
         }

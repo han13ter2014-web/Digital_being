@@ -40,17 +40,21 @@ async def test_user_message_answers_latest_open_question():
     manager = OpenQuestionsManager(cycle_provider=lambda: 8)
     manager.ask("Ты понимаешь меня?", source="self")
     agent = SimpleNamespace(
-        name="Alpha", cycle_count=8,
+        name="Alpha",
+        cycle_count=8,
         naming_dialogue=SimpleNamespace(phase="completed"),
         user_interaction=UserInteraction("Alpha"),
         has_open_questions=manager.has_unanswered,
         answer_open_question=manager.answer,
     )
     runner = AgentRunner.__new__(AgentRunner)
-    runner.name = "Alpha"; runner.agent = agent
+    runner.name = "Alpha"
+    runner.agent = agent
     runner.bus = SimpleNamespace(publish=AsyncMock())
 
-    await runner._on_user_message(SimpleNamespace(data={"text": "Да, я тебя слышу и стараюсь понять."}))
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Да, я тебя слышу и стараюсь понять."})
+    )
 
     assert manager.list_public()[0]["answered"] is True
     assert agent.user_interaction.get_pending_question() is None
@@ -73,13 +77,15 @@ async def test_i_dont_know_is_recorded_as_unknown_not_fact():
     interaction.attach_bus(bus)
     interaction.ask_user("Что для тебя важно?", cycle=2)
     agent = SimpleNamespace(
-        name="Alpha", cycle_count=2,
+        name="Alpha",
+        cycle_count=2,
         naming_dialogue=SimpleNamespace(phase="completed"),
         user_interaction=interaction,
         has_open_questions=lambda: False,
     )
     runner = AgentRunner.__new__(AgentRunner)
-    runner.name = "Alpha"; runner.agent = agent
+    runner.name = "Alpha"
+    runner.agent = agent
     runner.bus = SimpleNamespace(publish=AsyncMock())
 
     await runner._on_user_message(SimpleNamespace(data={"text": "Не знаю"}))
@@ -105,13 +111,15 @@ async def test_direct_user_question_gets_priority_over_learning_queue():
     interaction.attach_bus(bus)
     interaction.ask_user("Как тебя поддержать?", cycle=2)
     agent = SimpleNamespace(
-        name="Alpha", cycle_count=2,
+        name="Alpha",
+        cycle_count=2,
         naming_dialogue=SimpleNamespace(phase="completed"),
         user_interaction=interaction,
         has_open_questions=lambda: False,
     )
     runner = AgentRunner.__new__(AgentRunner)
-    runner.name = "Alpha"; runner.agent = agent
+    runner.name = "Alpha"
+    runner.agent = agent
     runner.bus = SimpleNamespace(publish=AsyncMock())
 
     await runner._on_user_message(SimpleNamespace(data={"text": "Просто будь рядом."}))

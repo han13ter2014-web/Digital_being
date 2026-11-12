@@ -10,9 +10,18 @@ from contextlib import closing
 from uuid import uuid4
 
 
-DIRECTORIES = ("checkpoints", "mind", "memory", "nursery", "delamain")
-FILES = ("knowledge_base.json", "life_state.json", "life_requests.json", "life_events.log",
-         "active_profile.json", "access_settings.json")
+DIRECTORIES = (
+    "checkpoints", "lives", "mind", "memory", "nursery", "delamain",
+    "architecture_proposals",
+)
+FILES = (
+    "knowledge_base.json",
+    "life_state.json",
+    "life_requests.json",
+    "life_events.log",
+    "active_profile.json",
+    "access_settings.json",
+)
 
 
 def _digest(path):
@@ -24,7 +33,13 @@ def _digest(path):
 
 
 def _sqlite_copy(source, target):
-    with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as src:
+    source = source.resolve()
+    wal = Path(str(source) + "-wal")
+    wal_bytes = wal.stat().st_size if wal.is_file() else 0
+    # При пустом WAL immutable-чтение не создаёт побочные -wal/-shm рядом
+    # с оригиналом. Непустой WAL обязан читаться обычным mode=ro.
+    uri = source.as_uri() + ("?mode=ro&immutable=1" if wal_bytes == 0 else "?mode=ro")
+    with closing(sqlite3.connect(uri, uri=True)) as src:
         with closing(sqlite3.connect(target)) as dst:
             src.backup(dst)
             result = dst.execute("PRAGMA integrity_check").fetchall()
@@ -35,7 +50,11 @@ def _sqlite_copy(source, target):
 def verify_backup(directory):
     root = Path(directory).resolve()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict) or manifest.get("version") != 1 or manifest.get("complete") is not True:
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("version") != 1
+        or manifest.get("complete") is not True
+    ):
         raise ValueError("Незавершённый или неподдерживаемый резервный комплект")
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
@@ -49,13 +68,24 @@ def verify_backup(directory):
         if key in seen:
             raise ValueError("Повторный путь в manifest")
         seen.add(key)
-        if (relative.is_absolute() or relative.drive or ".." in relative.parts
-                or not relative.parts or relative.parts[0] not in (*DIRECTORIES, *FILES)):
+        if (
+            relative.is_absolute()
+            or relative.drive
+            or ".." in relative.parts
+            or not relative.parts
+            or relative.parts[0] not in (*DIRECTORIES, *FILES)
+        ):
             raise ValueError("Недопустимый путь в manifest")
         path = root / relative
-        if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file():
+        if (
+            path.is_symlink()
+            or not path.resolve().is_relative_to(root)
+            or not path.is_file()
+        ):
             raise ValueError(f"Нет безопасного файла {relative}")
-        if path.stat().st_size != item.get("bytes") or _digest(path) != item.get("sha256"):
+        if path.stat().st_size != item.get("bytes") or _digest(path) != item.get(
+            "sha256"
+        ):
             raise ValueError(f"Контрольная сумма не совпала: {relative}")
     return manifest
 
@@ -63,7 +93,10 @@ def verify_backup(directory):
 def create_backup(profile, destination):
     source = Path(profile).resolve()
     target = Path(destination).absolute()
-    if target.resolve().is_relative_to(source) and target.parent.resolve() != source / "snapshots":
+    if (
+        target.resolve().is_relative_to(source)
+        and target.parent.resolve() != source / "snapshots"
+    ):
         raise ValueError("Копия внутри профиля допускается только в snapshots")
     if not source.is_dir() or target.exists():
         raise ValueError("Нужен существующий профиль и новый путь копии")
@@ -96,13 +129,25 @@ def create_backup(profile, destination):
                 _sqlite_copy(path, output)
             else:
                 shutil.copy2(path, output)
-            entries.append({"path": relative.as_posix(), "bytes": output.stat().st_size,
-                            "sha256": _digest(output), "sqlite": sqlite})
+            entries.append(
+                {
+                    "path": relative.as_posix(),
+                    "bytes": output.stat().st_size,
+                    "sha256": _digest(output),
+                    "sqlite": sqlite,
+                }
+            )
         if not entries:
             raise ValueError("В профиле нет данных для копии")
-        manifest = {"version": 1, "complete": True, "files": entries,
-                    "consistency": "per_database; stop writers for cross_store consistency"}
-        (staging / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest = {
+            "version": 1,
+            "complete": True,
+            "files": entries,
+            "consistency": "per_database; stop writers for cross_store consistency",
+        }
+        (staging / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         verify_backup(staging)
         if target.exists():
             raise FileExistsError(target)
@@ -111,6 +156,44 @@ def create_backup(profile, destination):
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def _verify_restored_artifacts(root):
+    """Реестр ``artifacts`` каждой восстановленной жизни совпадает с файлами.
+
+    Этап 5C: зарегистрированные артефакты входят в проверенный
+    backup/restore. Отсутствующий файл, чужой путь или несовпавший
+    SHA-256 отменяют восстановление целиком.
+    """
+    from contextlib import closing
+
+    from src.memory.life_database import LifeDatabase
+
+    lives = root / "lives"
+    if not lives.is_dir():
+        return
+    for db_path in sorted(lives.glob("*/life.sqlite3")):
+        with closing(
+            sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'"
+            ).fetchone()
+            row = None
+            if table is not None:
+                row = connection.execute(
+                    "SELECT value_json FROM meta WHERE key='life_id'"
+                ).fetchone()
+        if row is None:
+            continue
+        life_id = json.loads(row[0])
+        report = LifeDatabase.verify_artifacts_readonly(db_path)
+        if not report["ok"]:
+            raise ValueError(
+                f"Артефакты жизни {life_id} не совпали с реестром: "
+                f"{report['problems']}"
+            )
 
 
 def restore_backup(backup, destination):
@@ -130,6 +213,7 @@ def restore_backup(backup, destination):
             shutil.copy2(source / path, output)
             if _digest(output) != item["sha256"]:
                 raise ValueError(f"Ошибка копирования {path}")
+        _verify_restored_artifacts(staging)
         if target.exists():
             raise FileExistsError(target)
         os.rename(staging, target)

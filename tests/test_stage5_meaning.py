@@ -14,7 +14,6 @@
   стратегии не попадает в анализ.
 """
 
-import re
 from pathlib import Path
 
 import pytest
@@ -67,8 +66,7 @@ def test_goal_progress_accumulates_and_completes_once(agent):
         "словарь",
     ]
     percentages = [
-        agent._check_goal_progress(topic, answered=True)["pct"]
-        for topic in topics
+        agent._check_goal_progress(topic, answered=True)["pct"] for topic in topics
     ]
 
     assert percentages == [20, 40, 60, 80, 100]
@@ -127,8 +125,7 @@ def test_goal_without_rule_has_general_progress(agent):
     _reset_progress(agent, goal)
 
     percentages = [
-        agent._check_goal_progress(f"произвольная тема {i}")["pct"]
-        for i in range(1, 6)
+        agent._check_goal_progress(f"произвольная тема {i}")["pct"] for i in range(1, 6)
     ]
 
     assert percentages == [20, 40, 60, 80, 100]
@@ -150,7 +147,18 @@ def test_subsystem_progress_is_integer_and_idempotent(agent):
         for i in range(10)
     ]
 
-    assert [item["pct"] for item in results] == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    assert [item["pct"] for item in results] == [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+        100,
+    ]
     assert results[-1]["completed"] is True
     assert isinstance(subsystem.completed_goals, int)
     assert subsystem.completed_goals == 1
@@ -220,9 +228,9 @@ def test_agent_owns_cycle_count():
     assert "cycle_count = cycle_count" not in entry_source
     assert "cycle_count += 1" not in entry_source
 
-    runner_source = (
-        PROJECT_ROOT / "src" / "core" / "agent_runner.py"
-    ).read_text(encoding="utf-8")
+    runner_source = (PROJECT_ROOT / "src" / "core" / "agent_runner.py").read_text(
+        encoding="utf-8"
+    )
     assert "self.agent.cycle_count += 1" in runner_source
 
 
@@ -299,14 +307,12 @@ def test_noun_phrase_is_not_split_into_separate_words(agent):
 
 def test_strategy_annotation_is_not_decomposed(agent):
     stimulus = (
-        "вопрос: что такое сознание "
-        "[стратегия=mental_model_lookup, попытка 1/5]"
+        "вопрос: что такое сознание " "[стратегия=mental_model_lookup, попытка 1/5]"
     )
     thought = agent.think(stimulus)
 
     assert "mental_model_lookup" not in thought
     assert "Декомпозиция" not in thought
     assert not any(
-        "mental_model_lookup" in q["text"]
-        for q in agent.get_open_questions()
+        "mental_model_lookup" in q["text"] for q in agent.get_open_questions()
     )

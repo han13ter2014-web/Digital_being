@@ -15,10 +15,10 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional
 
-STATE_UNKNOWN = "unknown"   # выключено или ОС не ответила
-STATE_ACTIVE = "active"     # человек рядом и работает
-STATE_QUIET = "quiet"       # рядом, но тихо (читает, думает, смотрит)
-STATE_AWAY = "away"         # отошёл
+STATE_UNKNOWN = "unknown"  # выключено или ОС не ответила
+STATE_ACTIVE = "active"  # человек рядом и работает
+STATE_QUIET = "quiet"  # рядом, но тихо (читает, думает, смотрит)
+STATE_AWAY = "away"  # отошёл
 
 NEAR_STATES = frozenset({STATE_ACTIVE, STATE_QUIET})
 
@@ -33,12 +33,17 @@ class PresenceSense:
     молчит (``unknown``).
     """
 
-    AWAY_AFTER_SEC = 300.0     # 5 минут без ввода — отошёл
-    ACTIVE_WITHIN_SEC = 60.0   # ввод в последнюю минуту — активен
-    CACHE_SEC = 30.0           # пересчёт не чаще, чем раз в 30 с
+    AWAY_AFTER_SEC = 300.0  # 5 минут без ввода — отошёл
+    ACTIVE_WITHIN_SEC = 60.0  # ввод в последнюю минуту — активен
+    CACHE_SEC = 30.0  # пересчёт не чаще, чем раз в 30 с
 
-    def __init__(self, enabled: bool = False, app_reader=None, idle_reader=None,
-                 clock=time.monotonic) -> None:
+    def __init__(
+        self,
+        enabled: bool = False,
+        app_reader=None,
+        idle_reader=None,
+        clock=time.monotonic,
+    ) -> None:
         self.enabled = bool(enabled)
         self._app_reader = app_reader or self._windows_active_app
         self._idle_reader = idle_reader or self._windows_idle_seconds
@@ -51,8 +56,7 @@ class PresenceSense:
     def snapshot(self, force: bool = False) -> Dict[str, Any]:
         """Снимок присутствия. Выключенный орган не трогает ОС вообще."""
         if not self.enabled:
-            return {"state": STATE_UNKNOWN, "active_app": None,
-                    "idle_seconds": None}
+            return {"state": STATE_UNKNOWN, "active_app": None, "idle_seconds": None}
         now = self._clock()
         if (
             not force

@@ -109,18 +109,18 @@ def step_body(obj, action_type: str, performed: bool = True) -> None:
 def _get_adaptive_cost_impl(self, action_type: str) -> int:
     """Получает адаптивную стоимость действия.
 
-        При ``ADAPTIVE_COSTS_ENABLED=True`` берётся текущая (адаптированная)
-        стоимость из ``self._action_costs`` (обновляется в
-        ``_adapt_costs_after_action``). При выключенной адаптации —
-        фиксированная базовая стоимость, чтобы поведение было детерминированным.
+    При ``ADAPTIVE_COSTS_ENABLED=True`` берётся текущая (адаптированная)
+    стоимость из ``self._action_costs`` (обновляется в
+    ``_adapt_costs_after_action``). При выключенной адаптации —
+    фиксированная базовая стоимость, чтобы поведение было детерминированным.
 
-        Раньше обе ветки возвращали одно и то же значение — мёртвая
-        логика адаптации (флаг ADAPTIVE_COSTS_ENABLED игнорировался).
+    Раньше обе ветки возвращали одно и то же значение — мёртвая
+    логика адаптации (флаг ADAPTIVE_COSTS_ENABLED игнорировался).
 
-        Восстановительные действия бесплатны всегда: это не «скидка», а
-        условие существования — платный отдых при нулевой энергии
-        превращается в отказ от отдыха.
-        """
+    Восстановительные действия бесплатны всегда: это не «скидка», а
+    условие существования — платный отдых при нулевой энергии
+    превращается в отказ от отдыха.
+    """
     if action_type in RECOVERY_ACTIONS:
         return 0
     if not LR_CONFIG.ADAPTIVE_COSTS_ENABLED:
@@ -134,11 +134,11 @@ def _get_adaptive_cost_impl(self, action_type: str) -> int:
 def _recover_energy_impl(self, deep: bool = False) -> float:
     """Возвращает энергию за отдых. Возвращает, сколько добавлено.
 
-        Отдых — единственный способ выйти из истощения: пассивная
-        регенерация EnergyPolicy ниже 20% даёт 0.1–1.2 за цикл, а действие
-        стоит 2–4. Без этого истощённый агент навсегда оставался в
-        состоянии «слишком устал» и не мог даже отдохнуть.
-        """
+    Отдых — единственный способ выйти из истощения: пассивная
+    регенерация EnergyPolicy ниже 20% даёт 0.1–1.2 за цикл, а действие
+    стоит 2–4. Без этого истощённый агент навсегда оставался в
+    состоянии «слишком устал» и не мог даже отдохнуть.
+    """
     amount = float(
         getattr(
             LR_CONFIG,
@@ -181,31 +181,25 @@ def _body_recovered_impl(self) -> bool:
             )
         except Exception:
             fatigue, atp_ratio = 0.0, 1.0
-        if fatigue > float(
-            getattr(LR_CONFIG, "REST_RECOVERY_FATIGUE", 0.3)
-        ):
+        if fatigue > float(getattr(LR_CONFIG, "REST_RECOVERY_FATIGUE", 0.3)):
             return False
-        if atp_ratio < float(
-            getattr(LR_CONFIG, "REST_RECOVERY_ATP_RATIO", 0.75)
-        ):
+        if atp_ratio < float(getattr(LR_CONFIG, "REST_RECOVERY_ATP_RATIO", 0.75)):
             return False
 
     max_energy = float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0))
     ratio = float(self.energy) / max_energy if max_energy > 0 else 1.0
-    return ratio >= float(
-        getattr(LR_CONFIG, "REST_RECOVERY_ENERGY_RATIO", 0.5)
-    )
+    return ratio >= float(getattr(LR_CONFIG, "REST_RECOVERY_ENERGY_RATIO", 0.5))
 
 
 def _update_rest_mode_impl(self) -> bool:
     """Гистерезис отдыха: решает, продолжает ли тело отдыхать.
 
-        Вход в отдых — по усталости или низкой энергии, выход — только
-        когда восстановлено и то, и другое. Без гистерезиса агент
-        возвращался к работе на пороге 0.6 с пустым АТФ и тут же снова
-        уставал: замер показывал 53 «работа→отдых» за 200 циклов и АТФ,
-        застрявший около нуля.
-        """
+    Вход в отдых — по усталости или низкой энергии, выход — только
+    когда восстановлено и то, и другое. Без гистерезиса агент
+    возвращался к работе на пороге 0.6 с пустым АТФ и тут же снова
+    уставал: замер показывал 53 «работа→отдых» за 200 циклов и АТФ,
+    застрявший около нуля.
+    """
     resting = bool(getattr(self, "_rest_mode", False))
     if self._body_needs_rest():
         resting = True
@@ -243,15 +237,15 @@ def _is_action_affordable_impl(self, action_type: str) -> bool:
 def _accumulate_sleep_impl(self, units: float) -> Dict:
     """Накопить «единицы сна» и, если хватит, осмыслить накопленное.
 
-        Один проход консолидации — это работа, а не отсчёт: связи,
-        разбросанные по формулировкам, укрепляются, опыт превращается в
-        определения. Поэтому сон измеряется не тиками, а накопленным
-        материалом: ``deep_rest`` даёт 1.0, ``rest`` — 0.5.
+    Один проход консолидации — это работа, а не отсчёт: связи,
+    разбросанные по формулировкам, укрепляются, опыт превращается в
+    определения. Поэтому сон измеряется не тиками, а накопленным
+    материалом: ``deep_rest`` даёт 1.0, ``rest`` — 0.5.
 
-        Returns:
-            Отчёт последнего прохода или пустой словарь, если порог не
-            набран.
-        """
+    Returns:
+        Отчёт последнего прохода или пустой словарь, если порог не
+        набран.
+    """
     if not bool(getattr(LR_CONFIG, "CONSOLIDATION_ENABLED", True)):
         return {}
     mental_models = getattr(self, "mental_models", None)
@@ -259,38 +253,26 @@ def _accumulate_sleep_impl(self, units: float) -> Dict:
         return {}
 
     self._sleep_units = float(getattr(self, "_sleep_units", 0.0)) + float(units)
-    threshold = float(
-        getattr(LR_CONFIG, "CONSOLIDATION_SLEEP_UNITS", 3.0) or 3.0
-    )
+    threshold = float(getattr(LR_CONFIG, "CONSOLIDATION_SLEEP_UNITS", 3.0) or 3.0)
     report: Dict = {}
     while self._sleep_units >= threshold:
         self._sleep_units -= threshold
         try:
             report = mental_models.consolidate(
-                link_delta=float(
-                    getattr(LR_CONFIG, "CONSOLIDATION_LINK_DELTA", 0.05)
-                ),
-                max_links=int(
-                    getattr(LR_CONFIG, "CONSOLIDATION_MAX_LINKS", 400)
-                ),
+                link_delta=float(getattr(LR_CONFIG, "CONSOLIDATION_LINK_DELTA", 0.05)),
+                max_links=int(getattr(LR_CONFIG, "CONSOLIDATION_MAX_LINKS", 400)),
                 max_definitions=int(
                     getattr(LR_CONFIG, "CONSOLIDATION_MAX_DEFINITIONS", 25)
                 ),
                 confidence_bonus=float(
-                    getattr(
-                        LR_CONFIG, "CONSOLIDATION_CONFIDENCE_BONUS", 0.02
-                    )
+                    getattr(LR_CONFIG, "CONSOLIDATION_CONFIDENCE_BONUS", 0.02)
                 ),
-                scan_batch=int(
-                    getattr(LR_CONFIG, "CONSOLIDATION_SCAN_BATCH", 400)
-                ),
+                scan_batch=int(getattr(LR_CONFIG, "CONSOLIDATION_SCAN_BATCH", 400)),
             )
         except Exception as exc:
             get_logger().log(f"[CONSOLIDATION] ошибка: {exc}")
             return {}
-        self._consolidation_count = int(
-            getattr(self, "_consolidation_count", 0)
-        ) + 1
+        self._consolidation_count = int(getattr(self, "_consolidation_count", 0)) + 1
         self._last_consolidation = dict(report)
         get_logger().flush_immediate(
             f"[CONSOLIDATION] связей +{report.get('links', 0)}, "

@@ -60,13 +60,16 @@ class NurseryWatcher(Subsystem):
         "README.md",
     )
 
-    def __init__(self, agent_name: str = "unknown",
-                 nursery_dir: Optional[str] = None) -> None:
+    def __init__(
+        self, agent_name: str = "unknown", nursery_dir: Optional[str] = None
+    ) -> None:
         super().__init__(agent_name=agent_name)
         self.nursery_dir = nursery_dir or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)
-            )))),
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+            ),
             "data",
             "nursery",
         )
@@ -105,11 +108,15 @@ class NurseryWatcher(Subsystem):
         # о seed-ах, которые уже были до первого тика.
         try:
             self._known_seeds = self._scan_existing_seeds()
-            logger.info(f"[{self.name}] инициализирован, известно seed-ов: {len(self._known_seeds)}")
+            logger.info(
+                f"[{self.name}] инициализирован, известно seed-ов: {len(self._known_seeds)}"
+            )
         except Exception as e:
             self._record_error(e)
 
-    def tick(self, cycle: int, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def tick(
+        self, cycle: int, context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Проверяет Ясли на новые seed-ы.
 
         Возвращает:
@@ -141,10 +148,12 @@ class NurseryWatcher(Subsystem):
                 continue
             self._seed_history.append(payload)
             self._latest_seed = payload
-            events.append({
-                "name": "nursery.new_seed",
-                "data": payload,
-            })
+            events.append(
+                {
+                    "name": "nursery.new_seed",
+                    "data": payload,
+                }
+            )
             self._emit_new_seed(payload)
 
         # Ограничиваем размер истории.
@@ -166,16 +175,18 @@ class NurseryWatcher(Subsystem):
 
     def status(self) -> Dict[str, Any]:
         base = super().status()
-        base.update({
-            "nursery_dir": self.nursery_dir,
-            "nursery_exists": os.path.isdir(self.nursery_dir),
-            "known_seeds_count": len(self._known_seeds),
-            "known_seeds": sorted(self._known_seeds),
-            "history_count": len(self._seed_history),
-            "latest_seed": self._latest_seed,
-            "last_change_ts": self._last_change_ts,
-            "agent_attached": self._agent_attached,
-        })
+        base.update(
+            {
+                "nursery_dir": self.nursery_dir,
+                "nursery_exists": os.path.isdir(self.nursery_dir),
+                "known_seeds_count": len(self._known_seeds),
+                "known_seeds": sorted(self._known_seeds),
+                "history_count": len(self._seed_history),
+                "latest_seed": self._latest_seed,
+                "last_change_ts": self._last_change_ts,
+                "agent_attached": self._agent_attached,
+            }
+        )
         return base
 
     # ----------------------------------------------------------------
@@ -217,8 +228,9 @@ class NurseryWatcher(Subsystem):
                 out.add(entry)
         return out
 
-    def _inspect_seed(self, seed_name: str,
-                       include_full_metadata: bool = False) -> Optional[Dict[str, Any]]:
+    def _inspect_seed(
+        self, seed_name: str, include_full_metadata: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Читает метаданные seed-а. Возвращает None если невалидный."""
         seed_path = os.path.join(self.nursery_dir, seed_name)
         if not os.path.isdir(seed_path):
@@ -295,8 +307,11 @@ class NurseryWatcher(Subsystem):
         )
         # Через EventBus (если подключена).
         try:
-            bus = getattr(self._context.get("registry"), "_global_event_bus", None) \
-                if self._context else None
+            bus = (
+                getattr(self._context.get("registry"), "_global_event_bus", None)
+                if self._context
+                else None
+            )
             if bus is not None:
                 bus.publish_sync("nursery.new_seed", payload, source="nursery_watcher")
         except Exception:
@@ -314,8 +329,11 @@ class NurseryWatcher(Subsystem):
         """Уведомить об удалении seed-а."""
         logger.info(f"[{self.name}] seed удалён из Яслей: {seed_name}")
         try:
-            bus = getattr(self._context.get("registry"), "_global_event_bus", None) \
-                if self._context else None
+            bus = (
+                getattr(self._context.get("registry"), "_global_event_bus", None)
+                if self._context
+                else None
+            )
             if bus is not None:
                 bus.publish_sync(
                     "nursery.seed_removed",

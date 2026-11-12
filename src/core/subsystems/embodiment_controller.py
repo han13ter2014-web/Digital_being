@@ -20,10 +20,12 @@ from typing import Dict
 class EmbodimentController:
     """Контроллер телесности — интерoцепция цифровой жизни."""
 
-    def __init__(self,
-                 energy_subsystem=None,
-                 cycle_count: int = 0,
-                 cognitive_load_limit: int = 1000):
+    def __init__(
+        self,
+        energy_subsystem=None,
+        cycle_count: int = 0,
+        cognitive_load_limit: int = 1000,
+    ):
         self.energy_subsystem = energy_subsystem
         self.cycle_count = cycle_count
         self.cognitive_load_limit = cognitive_load_limit

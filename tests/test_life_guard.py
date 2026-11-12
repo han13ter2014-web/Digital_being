@@ -5,9 +5,6 @@
 случайно остановить жизнь, который был в коде до LifeGuard.
 """
 
-import json
-import os
-
 import pytest
 
 from src.core.life_guard import (

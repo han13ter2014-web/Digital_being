@@ -24,26 +24,49 @@ def measure() -> list[dict]:
 
     def sample(stage):
         node = model.concepts["память"]
-        rows.append({
-            "stage": stage, "encounters": len(node.experiences),
-            "evidence": node.evidence()[0], "confidence": node.confidence,
-            "answerable": model.can_answer_about("память"),
-            "exploration_candidate": agent._pick_shallow_concept(model.concepts),
-        })
+        rows.append(
+            {
+                "stage": stage,
+                "encounters": len(node.experiences),
+                "evidence": node.evidence()[0],
+                "confidence": node.confidence,
+                "answerable": model.can_answer_about("память"),
+                "exploration_candidate": agent._pick_shallow_concept(model.concepts),
+            }
+        )
 
     for index in range(8):
         model.encounter_concept("память", f"вопрос_{index}", "Что такое память?", 0.9)
         model.consolidate()
     sample("повторение без ответа")
-    model.encounter_concept("память", "гипотеза", "Возможно, это сохранение опыта", 0.9,
-                            evidence_kind="hypothesis", source="self:hypothesis")
+    model.encounter_concept(
+        "память",
+        "гипотеза",
+        "Возможно, это сохранение опыта",
+        0.9,
+        evidence_kind="hypothesis",
+        source="self:hypothesis",
+    )
     sample("собственная гипотеза")
-    model.encounter_concept("память", "проверка записи", "После перезапуска запись сохранилась", -0.7,
-                            evidence_strength=0.8, evidence_kind="observation", source="action:restart:1")
+    model.encounter_concept(
+        "память",
+        "проверка записи",
+        "После перезапуска запись сохранилась",
+        -0.7,
+        evidence_strength=0.8,
+        evidence_kind="observation",
+        source="action:restart:1",
+    )
     sample("неприятное подтверждающее наблюдение")
     for index in range(8):
-        model.encounter_concept("память", f"вспоминание_{index}", "После перезапуска запись сохранилась",
-                                evidence_strength=0.8, evidence_kind="observation", source="action:restart:1")
+        model.encounter_concept(
+            "память",
+            f"вспоминание_{index}",
+            "После перезапуска запись сохранилась",
+            evidence_strength=0.8,
+            evidence_kind="observation",
+            source="action:restart:1",
+        )
         model.consolidate()
     sample("повтор того же свидетельства и сон")
     stored = model.concepts["память"].to_storage_dict()

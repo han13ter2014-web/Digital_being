@@ -17,6 +17,7 @@ UserModel — убеждения Core о человеке (участок «Со
 обещали. Реестры маркеров вынесены на уровень модуля для будущих
 ступеней (включая возможное саморазвитие таблиц самой сущностью).
 """
+
 from __future__ import annotations
 
 from typing import Dict, Optional
@@ -130,9 +131,7 @@ class UserModel:
 
     def to_dict(self) -> dict:
         return {
-            "promises": {
-                kind: dict(entry) for kind, entry in self.promises.items()
-            },
+            "promises": {kind: dict(entry) for kind, entry in self.promises.items()},
             "traits": dict(self.traits),
             "last_contact_cycle": self.last_contact_cycle,
         }

@@ -5,8 +5,9 @@ import pytest
 from src.core.workspace_request import creative_write_request
 from src.delamain.actions import ActionRegistry
 from src.delamain.memory import MemoryStore
-from src.delamain.sandbox import Sandbox, SandboxError
-from pathlib import Path
+from src.delamain.sandbox import Sandbox
+
+
 def test_creative_request_is_explicit_bounded_and_dangerous_action():
     request = creative_write_request("draft.txt", "текст")
     assert request.metadata["activity"] == "creative"
@@ -23,8 +24,12 @@ def test_registry_writes_only_under_creative_workspace(tmp_path):
     memory = MemoryStore(tmp_path / "memory.sqlite3")
     registry = ActionRegistry.default(Sandbox(root.parent, max_file_bytes=8192), memory)
     assert registry.get("write_creative_draft") is not None
-    result = registry.execute("write_creative_draft", {"path": "draft.txt", "content": "текст"})
+    result = registry.execute(
+        "write_creative_draft", {"path": "draft.txt", "content": "текст"}
+    )
     assert result.ok
     assert (root / "draft.txt").read_text(encoding="utf-8") == "текст"
-    outside = registry.execute("write_creative_draft", {"path": "../bad.txt", "content": "bad"})
+    outside = registry.execute(
+        "write_creative_draft", {"path": "../bad.txt", "content": "bad"}
+    )
     assert not outside.ok

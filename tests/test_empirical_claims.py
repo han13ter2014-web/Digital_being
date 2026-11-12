@@ -43,8 +43,15 @@ def test_unknown_and_conflicting_data_are_insufficient():
 
 def test_existing_exact_energy_claim_migrates_without_fatigue_inference():
     model = MentalModel()
-    model.encounter_concept("телесный опыт: rest повышает энергию ниже потолка", "trial:old", "роста нет",
-                            evidence_strength=0.5, evidence_kind="observation", source="action:old", evidence_direction=-1)
+    model.encounter_concept(
+        "телесный опыт: rest повышает энергию ниже потолка",
+        "trial:old",
+        "роста нет",
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="action:old",
+        evidence_direction=-1,
+    )
     energy = get_body_claim(model, "rest", "energy")
     fatigue = get_body_claim(model, "rest", "fatigue")
     assert energy.conclusion()["status"] == "refuted"
@@ -81,7 +88,9 @@ def test_real_action_claims_survive_normal_restart(tmp_path, monkeypatch):
     first.save_state(force=True)
     second, report = create_agent(env, "ClaimLife")
     assert report["source"] == "checkpoint"
-    assert {key: claim.to_dict() for key, claim in second.mental_models.claims.items()} == before
+    assert {
+        key: claim.to_dict() for key, claim in second.mental_models.claims.items()
+    } == before
     second.act("rest")
     assert second.action_expectations.last_trial["expected_direction"] == -1
     assert second.action_expectations.last_trial["fatigue_expected_direction"] == 1

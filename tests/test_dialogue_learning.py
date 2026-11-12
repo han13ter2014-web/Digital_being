@@ -281,7 +281,7 @@ def test_load_from_tolerates_corruption():
 
 @pytest.mark.asyncio
 async def test_first_unknown_phrase_produces_proposal_question():
-    """K13: первая нераспознанная фраза — вопрос-уточнение, не отклик."""
+    """Первая нераспознанная фраза — вопрос-уточнение, не отклик."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 

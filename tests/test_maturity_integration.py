@@ -77,9 +77,7 @@ def test_life_advances_maturity(agent):
 
     assert value(after, "cycles") > value(before, "cycles")
     assert value(after, "new_concepts") > value(before, "new_concepts")
-    assert value(after, "effective_ratio") > value(
-        before, "effective_ratio"
-    )
+    assert value(after, "effective_ratio") > value(before, "effective_ratio")
 
 
 def test_value_change_counts_toward_maturity(agent):
@@ -90,9 +88,7 @@ def test_value_change_counts_toward_maturity(agent):
     assert result.get("outcome") == "added", result
 
     report = assess(agent)
-    changes = next(
-        c for c in report.criteria if c.name == "value_changes"
-    )
+    changes = next(c for c in report.criteria if c.name == "value_changes")
     assert changes.value >= 1
     assert changes.met is True
 
@@ -168,9 +164,7 @@ def test_seed_contains_maturity_report(agent):
 
 def test_seed_readme_mentions_maturity(agent):
     seed_dir = _make_seed(agent, "Maturity_seed_readme")
-    with open(
-        os.path.join(seed_dir, "README.md"), encoding="utf-8"
-    ) as handle:
+    with open(os.path.join(seed_dir, "README.md"), encoding="utf-8") as handle:
         text = handle.read()
 
     assert "maturity.json" in text
@@ -199,14 +193,10 @@ def test_child_inherits_concepts_but_starts_own_maturity(agent):
     awaken_from_seed(child, os.path.basename(seed_dir))
 
     # Концепции унаследованы.
-    assert len(child.mental_models.concepts) >= len(
-        agent.mental_models.concepts
-    )
+    assert len(child.mental_models.concepts) >= len(agent.mental_models.concepts)
     # Но циклов у ребёнка нет, и порог не пройден.
     child_report = assess(child)
-    cycles = next(
-        c for c in child_report.criteria if c.name == "cycles"
-    )
+    cycles = next(c for c in child_report.criteria if c.name == "cycles")
     assert cycles.value == 0
     assert child_report.is_mature is False
 

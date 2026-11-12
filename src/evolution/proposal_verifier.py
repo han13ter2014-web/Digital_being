@@ -28,9 +28,12 @@ SPEC_ENV = "EVOLVE_VERIFY_SPEC"
 LOG_TAIL_CHARS = 800
 
 
-def verify_config_change(attr: str, value: object,
-                         cycles: int = VERIFY_CYCLES,
-                         timeout: int = VERIFY_TIMEOUT_SEC) -> Dict:
+def verify_config_change(
+    attr: str,
+    value: object,
+    cycles: int = VERIFY_CYCLES,
+    timeout: int = VERIFY_TIMEOUT_SEC,
+) -> Dict:
     """Проверяет изменение конфигурации в изолированном подпроцессе.
 
     Возвращает словарь с честным исходом пробы:

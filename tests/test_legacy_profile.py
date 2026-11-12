@@ -11,16 +11,26 @@ from src.core.checkpoint_serializer import CheckpointSerializer
 
 
 @pytest.mark.parametrize("backend", ["json", "sqlite"])
-def test_legacy_renamed_profile_restores_without_pointer(tmp_path, monkeypatch, backend):
+def test_legacy_renamed_profile_restores_without_pointer(
+    tmp_path, monkeypatch, backend
+):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     env = setup_environment(chdir=False, console=False)
-    agent, _ = create_agent(env, "Омелла", new=True)
-    agent.cycle_count = 74
+    from src.core.agent import DigitalBeing
     from src.core.checkpoint_serializer import build_state_from_agent
 
-    serializer = CheckpointSerializer(checkpoint_dir=tmp_path / "checkpoints", backend=backend)
-    serializer.save(build_state_from_agent(agent), agent.name, agent.cycle_count)
-    before = {p: p.read_bytes() for p in (tmp_path / "checkpoints").iterdir() if p.is_file()}
+    # Это именно legacy-профиль: до UUID-миграции не должно быть lives/<UUID>.
+    agent = DigitalBeing("Омелла")
+    agent.cycle_count = 74
+    state = build_state_from_agent(agent)
+    state.pop("life_id", None)
+    serializer = CheckpointSerializer(
+        checkpoint_dir=tmp_path / "checkpoints", backend=backend
+    )
+    serializer.save(state, agent.name, agent.cycle_count)
+    before = {
+        p: p.read_bytes() for p in (tmp_path / "checkpoints").iterdir() if p.is_file()
+    }
     selected = active_name(tmp_path, "Alpha")
     assert selected == "Омелла"
     assert all(p.read_bytes() == data for p, data in before.items())

@@ -13,11 +13,11 @@ from config.simulation_config import LR_CONFIG
 def _is_learnable_impl(self, name: str) -> bool:
     """Годится ли концепция как тема для изучения и вопросов.
 
-        Служебные узлы (``_bootstrap_loaded``) и врождённые убеждения
-        (``убеждение_1``) — не темы для исследования: спрашивать человека
-        про «_bootstrap_loaded» бессмысленно, а «изучать» собственный
-        маркер загрузки — имитация работы.
-        """
+    Служебные узлы (``_bootstrap_loaded``) и врождённые убеждения
+    (``убеждение_1``) — не темы для исследования: спрашивать человека
+    про «_bootstrap_loaded» бессмысленно, а «изучать» собственный
+    маркер загрузки — имитация работы.
+    """
     text = str(name or "").strip()
     if not text:
         return False
@@ -31,9 +31,9 @@ def _is_learnable_impl(self, name: str) -> bool:
 def _is_meta_topic_impl(self, name: str) -> bool:
     """Тема состоит из метаслов диалога, а не из содержания мира?
 
-        Проверка по целым словам: «ответственный» — обычная тема,
-        «вопрос» и «открытый вопрос» — метаслово.
-        """
+    Проверка по целым словам: «ответственный» — обычная тема,
+    «вопрос» и «открытый вопрос» — метаслово.
+    """
     text = str(name or "").strip().lower()
     if not text:
         return True
@@ -43,21 +43,17 @@ def _is_meta_topic_impl(self, name: str) -> bool:
 def _is_meaningful_topic_impl(self, name: str) -> bool:
     """Тема — содержание мира, а не шум диалога?
 
-        TICKET-8: среди живых целей всплыли «Понять: 🙂🙂🙂» и
-        «Понять: ты». Минимум две буквы; строка из одних местоимений —
-        не тема. Честное ограничение: осмысленный на вид мусор
-        («теминг тест») фильтр не отличит — источник такого мусора
-        закрыт «Собеседником-6», здесь добиваем буквенный шум.
-        """
+    Среди живых целей всплыли «Понять: 🙂🙂🙂» и
+    «Понять: ты». Минимум две буквы; строка из одних местоимений —
+    не тема. Честное ограничение: осмысленный на вид мусор
+    («теминг тест») фильтр не отличит — источник такого мусора
+    закрыт «Собеседником-6», здесь добиваем буквенный шум.
+    """
     text = str(name or "").strip()
     letters = [ch for ch in text if ch.isalpha()]
     if len(letters) < 2:
         return False
-    words = [
-        word
-        for word in text.lower().split()
-        if any(ch.isalpha() for ch in word)
-    ]
+    words = [word for word in text.lower().split() if any(ch.isalpha() for ch in word)]
     if words and all(word in self._NOISE_TOPIC_WORDS for word in words):
         return False
     return True
@@ -66,28 +62,26 @@ def _is_meaningful_topic_impl(self, name: str) -> bool:
 def _recently_explained_by_user_impl(self, topic: str) -> bool:
     """Тема, объяснённая человеком недавно, не переспрашивается.
 
-        Ответ пользователя записан как свидетельство — знание уже есть.
-        «Ты же спрашивал про это» после собственного объяснения — то, что
-        живой прогон 2026-11-01 показал на сущности Тэсс.
-        """
+    Ответ пользователя записан как свидетельство — знание уже есть.
+    «Ты же спрашивал про это» после собственного объяснения — то, что
+    живой прогон 2026-11-01 показал в тестовом профиле.
+    """
     stamps = getattr(self, "_user_explained_topics", None)
     if not isinstance(stamps, dict) or not stamps:
         return False
     stamped = stamps.get(str(topic or "").strip())
     if stamped is None:
         return False
-    cooldown = float(
-        getattr(LR_CONFIG, "USER_EXPLAINED_COOLDOWN_CYCLES", 200) or 0
-    )
+    cooldown = float(getattr(LR_CONFIG, "USER_EXPLAINED_COOLDOWN_CYCLES", 200) or 0)
     return cooldown > 0 and (self.cycle_count - stamped) < cooldown
 
 
 def _pick_shallow_concept_impl(self, concepts: Dict) -> Optional[str]:
     """Неуверенная тема вне текущего круга: формулировка ещё не знание.
 
-        Это только кандидат на исследование, не обязательство закрыть
-        пробел. Доля углубления и арбитр по-прежнему допускают иной выбор.
-        """
+    Это только кандидат на исследование, не обязательство закрыть
+    пробел. Доля углубления и арбитр по-прежнему допускают иной выбор.
+    """
     if not isinstance(concepts, dict):
         return None
     recently = set(getattr(self, "_exploration_history", []) or [])
@@ -118,24 +112,24 @@ def _pick_shallow_concept_impl(self, concepts: Dict) -> Optional[str]:
 def _pick_exploration_target_impl(self) -> Optional[str]:
     """Выбирает, что исследовать: то, чего агент ещё не изучал.
 
-        Порядок приоритетов:
-        1. Открытый вопрос без ответа — человек его задал, это важно.
-        2. Иногда — возврат к уже встреченной теме (углубление): без этого
-           агент только расширял охват, а собственная формулировка требует
-           вернуться к теме минимум дважды.
-        3. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
-           а не пережёвывает известное.
-        4. Концепция с наименьшей уверенностью, ещё не изученная в этом
-           круге.
+    Порядок приоритетов:
+    1. Открытый вопрос без ответа — человек его задал, это важно.
+    2. Иногда — возврат к уже встреченной теме (углубление): без этого
+       агент только расширял охват, а собственная формулировка требует
+       вернуться к теме минимум дважды.
+    3. Неизвестная тема из пула стимулов: агент идёт в неизвестное,
+       а не пережёвывает известное.
+    4. Концепция с наименьшей уверенностью, ещё не изученная в этом
+       круге.
 
-        Важно: цель не повторяется, пока не исчерпан круг. Иначе агент
-        «изучает» одну и ту же концепцию, ничего не узнаёт (уверенность не
-        растёт без новой информации) и застревает — именно это и
-        происходило до замыкания петли.
+    Важно: цель не повторяется, пока не исчерпан круг. Иначе агент
+    «изучает» одну и ту же концепцию, ничего не узнаёт (уверенность не
+    растёт без новой информации) и застревает — именно это и
+    происходило до замыкания петли.
 
-        Returns:
-            Название темы или ``None``, если исследовать нечего.
-        """
+    Returns:
+        Название темы или ``None``, если исследовать нечего.
+    """
     history = getattr(self, "_exploration_history", None)
     if not isinstance(history, list):
         history = []
@@ -161,9 +155,7 @@ def _pick_exploration_target_impl(self) -> Optional[str]:
     # глубина не наступала бы никогда — агент только расширял охват,
     # у каждой концепции оставалась одна встреча, а собственная
     # формулировка требует минимум двух.
-    depth_ratio = float(
-        getattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.35) or 0.0
-    )
+    depth_ratio = float(getattr(LR_CONFIG, "EXPLORATION_DEPTH_RATIO", 0.35) or 0.0)
     if depth_ratio > 0 and random.random() < depth_ratio:
         shallow = self._pick_shallow_concept(concepts)
         if shallow is not None:
@@ -223,12 +215,12 @@ def _pick_exploration_target_impl(self) -> Optional[str]:
 def _decomposable_targets_impl(self) -> List[str]:
     """Кандидаты на декомпозицию в порядке приоритета, без побочных эффектов.
 
-        Отдельный список, потому что у декомпозиции другое требование, чем
-        у исследования: ей нужно не «что угодно неизученное», а «то, что
-        делится на части». Раньше она брала первую попавшуюся цель и в
-        большинстве случаев возвращала «не разбивается на части» — цикл
-        потрачен, мир не изменился.
-        """
+    Отдельный список, потому что у декомпозиции другое требование, чем
+    у исследования: ей нужно не «что угодно неизученное», а «то, что
+    делится на части». Раньше она брала первую попавшуюся цель и в
+    большинстве случаев возвращала «не разбивается на части» — цикл
+    потрачен, мир не изменился.
+    """
     targets: List[str] = []
 
     questions = getattr(self, "_open_questions", None)
@@ -250,9 +242,7 @@ def _decomposable_targets_impl(self) -> List[str]:
         for name in concepts:
             if not self._is_learnable(name):
                 continue
-            confidence = float(
-                getattr(concepts[name], "confidence", 0.0) or 0.0
-            )
+            confidence = float(getattr(concepts[name], "confidence", 0.0) or 0.0)
             if confidence < 0.9:
                 targets.append(name)
 

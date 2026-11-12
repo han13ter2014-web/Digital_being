@@ -71,6 +71,7 @@ def test_signal_ripens_into_proposal(monkeypatch):
     assert "REST_FATIGUE_THRESHOLD" in pending[0]["diff"]
     # diff честный: старое значение — живое из конфига
     from config.simulation_config import LR_CONFIG
+
     expected = f"-    REST_FATIGUE_THRESHOLD = {LR_CONFIG.REST_FATIGUE_THRESHOLD!r}"
     assert expected in pending[0]["diff"]
 
@@ -80,7 +81,8 @@ def test_voice_message_sent_on_proposal(monkeypatch):
     for i in (1, 2, 3):
         _tick(agent, 150 * i, monkeypatch)
     messages = [
-        m for m in agent.user_interaction.message_history
+        m
+        for m in agent.user_interaction.message_history
         if (m.get("context") or "").startswith("evolution_proposal:")
     ]
     assert len(messages) == 1
@@ -122,8 +124,7 @@ def test_failed_verification_still_proposes_honestly(monkeypatch):
     agent = _make_agent("EvoFail")
     monkeypatch.setattr(
         "src.evolution.proposal_verifier.verify_config_change",
-        lambda *a, **k: {"ran": True, "passed": False, "cycles": 1,
-                         "log_tail": "boom"},
+        lambda *a, **k: {"ran": True, "passed": False, "cycles": 1, "log_tail": "boom"},
     )
     for i in (1, 2, 3):
         agent._evolution_tick(150 * i)
@@ -131,7 +132,8 @@ def test_failed_verification_still_proposes_honestly(monkeypatch):
     assert len(pending) == 1
     assert pending[0]["verification"]["passed"] is False
     messages = [
-        m for m in agent.user_interaction.message_history
+        m
+        for m in agent.user_interaction.message_history
         if (m.get("context") or "").startswith("evolution_proposal:")
     ]
     assert "НЕ пройдена" in messages[0]["content"]

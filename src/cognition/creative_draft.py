@@ -15,13 +15,20 @@ def validate_draft(state):
     if not isinstance(state, dict):
         raise ValueError("creative_draft: нужен словарь")
     identifier = state.get("id")
-    if not isinstance(identifier, str) or len(identifier) != 32 or any(ch not in "0123456789abcdef" for ch in identifier):
+    if (
+        not isinstance(identifier, str)
+        or len(identifier) != 32
+        or any(ch not in "0123456789abcdef" for ch in identifier)
+    ):
         raise ValueError("creative_draft.id")
     if type(state.get("revision")) is not int or not 1 <= state["revision"] <= LIMIT:
         raise ValueError("creative_draft.revision")
     if state.get("status", "active") not in {"active", "left"}:
         raise ValueError("creative_draft.status")
-    if state.get("status") == "left" and (not isinstance(state.get("leave_reason"), str) or not state["leave_reason"].strip()):
+    if state.get("status") == "left" and (
+        not isinstance(state.get("leave_reason"), str)
+        or not state["leave_reason"].strip()
+    ):
         raise ValueError("creative_draft.leave_reason")
     for key in ("theme", "sha256"):
         if not isinstance(state.get(key), str) or not state[key]:
@@ -37,40 +44,62 @@ def leave_draft(state, reason):
     return {**state, "status": "left", "leave_reason": reason.strip()[:1000]}
 
 
-def draft_available(state=None):
+def draft_available(state=None, workspace=None):
     if state is not None:
         validate_draft(state)
         if state.get("status", "active") == "active" and state["revision"] < LIMIT:
             return True
-    workspace = ActivityWorkspace()
+    workspace = workspace or ActivityWorkspace()
     return len(workspace.list()) < MAX_DRAFTS
 
 
-def draft_step(state=None):
-    workspace = ActivityWorkspace()
+def draft_step(state=None, *, workspace=None):
+    workspace = workspace or ActivityWorkspace()
     sandbox = workspace.sandbox
     if state is not None:
         validate_draft(state)
     if state is None or state["revision"] >= LIMIT or state.get("status") == "left":
         # Консервативно считаем все записи, не удаляем старые тексты ради места.
         if sum(1 for _ in sandbox.root.iterdir()) >= MAX_DRAFTS:
-            raise ValueError("Рабочая область черновиков заполнена; новые файлы не создаются")
+            raise ValueError(
+                "Рабочая область черновиков заполнена; новые файлы не создаются"
+            )
         identifier = uuid4().hex
         theme = random.choice(["тишина", "дорога", "свет", "ожидание"])
         previous = ""
         revision = 1
     else:
         identifier, theme = state["id"], state["theme"]
+        # Прежняя редакция может остаться в общем корне до перехода (5C):
+        # копируем её в каталог жизни, оригинал не трогаем.
+        workspace.ensure_from_legacy(f"{identifier}.txt")
         previous = sandbox.read_text(f"{identifier}.txt")
         if hashlib.sha256(previous.encode("utf-8")).hexdigest() != state["sha256"]:
-            raise ValueError("Черновик изменён извне; автоматическая перезапись отменена")
+            raise ValueError(
+                "Черновик изменён извне; автоматическая перезапись отменена"
+            )
         revision = state["revision"] + 1
-    line = random.choice([f"{theme.capitalize()} оставляет место для следующей строки.",
-                          f"Между словами остаётся {theme}.",
-                          f"Я представляю, как {theme} меняет очертания."])
+    line = random.choice(
+        [
+            f"{theme.capitalize()} оставляет место для следующей строки.",
+            f"Между словами остаётся {theme}.",
+            f"Я представляю, как {theme} меняет очертания.",
+        ]
+    )
     content = (previous + "\n" if previous else f"Черновик: {theme}\n\n") + line
-    sandbox.write_text(f"{identifier}.txt", content, overwrite=bool(previous))
+    workspace.write(
+        f"{identifier}.txt",
+        content,
+        overwrite=bool(previous),
+        kind="creative",
+        metadata={"activity": "draft", "work_id": identifier, "revision": revision},
+    )
     if sandbox.read_text(f"{identifier}.txt") != content:
         raise IOError("Не совпало обратное чтение черновика")
-    return {"id": identifier, "theme": theme, "revision": revision, "status": "active",
-            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
+    return {
+        "id": identifier,
+        "theme": theme,
+        "revision": revision,
+        "status": "active",
+        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    }

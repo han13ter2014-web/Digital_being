@@ -8,7 +8,9 @@ from src.cognition.intention_evidence import finish_evidence_goal
 from src.cognition.intention_continuation import continuation_candidate
 
 
-@pytest.mark.parametrize("topic,expected", [("дерево", "pending"), ("память", "satisfied")])
+@pytest.mark.parametrize(
+    "topic,expected", [("дерево", "pending"), ("память", "satisfied")]
+)
 def test_real_reply_only_satisfies_matching_evidence_goal(topic, expected):
     agent = DigitalBeing(name="RelevantReply")
     agent.cycle_count = 100
@@ -22,7 +24,10 @@ def test_real_reply_only_satisfies_matching_evidence_goal(topic, expected):
     finish_evidence_goal(agent, retry)
     agent.cycle_count += 1
     assert continuation_candidate(agent) is None
-    assert agent.user_interaction.ask_user(topic, cycle=agent.cycle_count)["status"] == "queued"
+    assert (
+        agent.user_interaction.ask_user(topic, cycle=agent.cycle_count)["status"]
+        == "queued"
+    )
     agent._process_user_answer("Содержательное объяснение, полученное от собеседника")
     assert continuation_candidate(agent) is None
     assert retry["evidence_goal"]["status"] == expected

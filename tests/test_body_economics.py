@@ -224,7 +224,9 @@ def test_reset_denial_keeps_no_effect_counter():
 
 def test_denial_survives_checkpoint():
     closer = LoopCloser()
-    closer.observe("explore", WorldSignature(), WorldSignature(), reason="denied:too_tired")
+    closer.observe(
+        "explore", WorldSignature(), WorldSignature(), reason="denied:too_tired"
+    )
 
     restored = LoopCloser()
     restored.restore_from_checkpoint(closer.to_checkpoint_dict())

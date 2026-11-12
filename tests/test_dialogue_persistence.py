@@ -1,4 +1,4 @@
-"""Ф3: диалоговое состояние переживает чекпоинт.
+"""Диалоговое состояние переживает чекпоинт.
 
 До этой секции question_history/pending_questions жили только в
 оперативной памяти: после рестарта сущность забывала разговор, а
@@ -110,26 +110,28 @@ def test_restore_skips_corrupt_and_answered_entries():
     """Битые записи пропускаются, мёртвые (отвечённые) вопросы не
     восстанавливаются, id без коллизий, маркеры цикла на месте."""
     ui = DigitalBeing(name="DC").user_interaction
-    ui.restore_from_checkpoint({
-        "question_history": [
-            {"question": "", "answer": "x", "cycle": 1},
-            "мусор",
-            {
-                "question": "Что такое X?",
-                "answer": "Y",
-                "context": "c",
-                "cycle": 5,
-                "priority": "high",
-            },
-        ],
-        "pending_questions": [
-            {"id": 1, "question": "Отвечен?", "answered": True},
-            {"id": 2, "question": "Живой?", "cycle": 7},
-            {"id": "битый", "question": "Странный?", "cycle": "нет"},
-        ],
-        "last_question_cycle": 10,
-        "last_user_message_cycle": 11,
-    })
+    ui.restore_from_checkpoint(
+        {
+            "question_history": [
+                {"question": "", "answer": "x", "cycle": 1},
+                "мусор",
+                {
+                    "question": "Что такое X?",
+                    "answer": "Y",
+                    "context": "c",
+                    "cycle": 5,
+                    "priority": "high",
+                },
+            ],
+            "pending_questions": [
+                {"id": 1, "question": "Отвечен?", "answered": True},
+                {"id": 2, "question": "Живой?", "cycle": 7},
+                {"id": "битый", "question": "Странный?", "cycle": "нет"},
+            ],
+            "last_question_cycle": 10,
+            "last_user_message_cycle": 11,
+        }
+    )
 
     assert len(ui.question_history) == 1
     assert ui.question_history[0]["question"] == "Что такое X?"
@@ -178,28 +180,48 @@ def test_restore_drops_meta_topic_and_duplicate_pending():
     — не напоминают вечно после рестарта. Обычные темы живут, проверка
     по целым словам: «ответственный» метасловом не считается."""
     ui = DigitalBeing(name="DM").user_interaction
-    ui.restore_from_checkpoint({
-        "pending_questions": [
-            {"id": 1, "question": "Расскажи про «вопрос»?",
-             "context": "самостоятельный вопрос по теме: вопрос",
-             "cycle": 900},
-            {"id": 2, "question": "Расскажи про «вопрос»?",
-             "context": "самостоятельный вопрос по теме: вопрос",
-             "cycle": 950},
-            {"id": 3, "question": "Расскажи про «темы»?",
-             "context": "самостоятельный вопрос по теме: темы",
-             "cycle": 1000},
-            {"id": 4, "question": "Я разбираюсь с темой «понимать»...",
-             "context": "самостоятельный вопрос по теме: понимать",
-             "cycle": 1100},
-            {"id": 5, "question": "Я разбираюсь с темой «понимать»...",
-             "context": "самостоятельный вопрос по теме: понимать",
-             "cycle": 1150},
-            {"id": 6, "question": "Что значит ответственный?",
-             "context": "самостоятельный вопрос по теме: ответственный",
-             "cycle": 1200},
-        ],
-    })
+    ui.restore_from_checkpoint(
+        {
+            "pending_questions": [
+                {
+                    "id": 1,
+                    "question": "Расскажи про «вопрос»?",
+                    "context": "самостоятельный вопрос по теме: вопрос",
+                    "cycle": 900,
+                },
+                {
+                    "id": 2,
+                    "question": "Расскажи про «вопрос»?",
+                    "context": "самостоятельный вопрос по теме: вопрос",
+                    "cycle": 950,
+                },
+                {
+                    "id": 3,
+                    "question": "Расскажи про «темы»?",
+                    "context": "самостоятельный вопрос по теме: темы",
+                    "cycle": 1000,
+                },
+                {
+                    "id": 4,
+                    "question": "Я разбираюсь с темой «понимать»...",
+                    "context": "самостоятельный вопрос по теме: понимать",
+                    "cycle": 1100,
+                },
+                {
+                    "id": 5,
+                    "question": "Я разбираюсь с темой «понимать»...",
+                    "context": "самостоятельный вопрос по теме: понимать",
+                    "cycle": 1150,
+                },
+                {
+                    "id": 6,
+                    "question": "Что значит ответственный?",
+                    "context": "самостоятельный вопрос по теме: ответственный",
+                    "cycle": 1200,
+                },
+            ],
+        }
+    )
 
     assert [q["id"] for q in ui.pending_questions] == [4, 6]
     assert ui.get_pending_question()["question"].startswith(
@@ -208,7 +230,7 @@ def test_restore_drops_meta_topic_and_duplicate_pending():
 
 
 def test_outgoing_trace_survives_json_checkpoint_without_replay():
-    """К5: две одинаковые публикации остаются двумя записями после
+    """Персистентный след: две одинаковые публикации остаются двумя записями после
     рестарта; входные реплики не попадают в след, старая очередь не
     показывается повторно, а новые сообщения продолжают историю."""
     original = DigitalBeing(name="DT")
@@ -219,17 +241,17 @@ def test_outgoing_trace_survives_json_checkpoint_without_replay():
     ui.send_reply(question, context=context, cycle=8150)
     ui.receive_user_message("Нет", cycle=8151)
 
-    state = json.loads(json.dumps(
-        build_state_from_agent(original), ensure_ascii=False,
-    ))
+    state = json.loads(
+        json.dumps(
+            build_state_from_agent(original),
+            ensure_ascii=False,
+        )
+    )
     validate_checkpoint_state(state)
     saved = state["user_interaction"]["outgoing_messages"]
     assert len(saved) == 2
     assert all(entry["sender"] == "agent" for entry in saved)
-    assert all(
-        {"id", "content", "cycle", "context"} <= entry.keys()
-        for entry in saved
-    )
+    assert all({"id", "content", "cycle", "context"} <= entry.keys() for entry in saved)
 
     restored = DigitalBeing(name="DT")
     apply_state_to_agent(restored, state)
@@ -238,7 +260,8 @@ def test_outgoing_trace_survives_json_checkpoint_without_replay():
 
     trace = rui.to_checkpoint_dict()["outgoing_messages"]
     matching = [
-        entry for entry in trace
+        entry
+        for entry in trace
         if entry["content"] == question and entry["context"] == context
     ]
     assert len(matching) == 2
@@ -246,14 +269,20 @@ def test_outgoing_trace_survives_json_checkpoint_without_replay():
 
     rui.send_reply(question, context=context, cycle=8152)
     trace = rui.to_checkpoint_dict()["outgoing_messages"]
-    assert len([
-        entry for entry in trace
-        if entry["content"] == question and entry["context"] == context
-    ]) == 3
+    assert (
+        len(
+            [
+                entry
+                for entry in trace
+                if entry["content"] == question and entry["context"] == context
+            ]
+        )
+        == 3
+    )
 
 
 def test_outgoing_trace_is_bounded_to_latest_messages(monkeypatch):
-    """К5: чекпоинт хранит кольцо последних публикаций, а не всю жизнь."""
+    """Персистентный след: чекпоинт хранит кольцо последних публикаций, а не всю жизнь."""
     ui = DigitalBeing(name="DR").user_interaction
     monkeypatch.setattr(ui, "OUTGOING_TRACE_MAX", 3)
     for index in range(5):
@@ -261,40 +290,56 @@ def test_outgoing_trace_is_bounded_to_latest_messages(monkeypatch):
 
     saved = ui.to_checkpoint_dict()["outgoing_messages"]
     assert [entry["content"] for entry in saved] == [
-        "Реплика 2", "Реплика 3", "Реплика 4",
+        "Реплика 2",
+        "Реплика 3",
+        "Реплика 4",
     ]
 
     restored = DigitalBeing(name="DR").user_interaction
     restored.restore_from_checkpoint({"outgoing_messages": saved})
-    assert [
-        entry["content"] for entry in restored.message_history
-    ] == ["Реплика 2", "Реплика 3", "Реплика 4"]
+    assert [entry["content"] for entry in restored.message_history] == [
+        "Реплика 2",
+        "Реплика 3",
+        "Реплика 4",
+    ]
 
 
 def test_outgoing_trace_restore_skips_corrupt_entries_and_legacy_payload():
-    """К5: старый чекпоинт без нового поля и мусор в новом поле безопасны."""
+    """Персистентный след: старый чекпоинт без нового поля и мусор в новом поле безопасны."""
     ui = DigitalBeing(name="DL").user_interaction
     ui.restore_from_checkpoint({"question_history": []})
     assert ui.message_history == []
 
-    ui.restore_from_checkpoint({
-        "outgoing_messages": [
-            "мусор",
-            {"id": "u1", "sender": "user", "content": "Вход", "cycle": 1},
-            {"id": "", "sender": "agent", "content": "Нет id", "cycle": 2},
-            {"id": "a1", "sender": "agent", "content": "", "cycle": 3},
-            {
-                "id": "a2", "sender": "agent", "content": "Битый цикл",
-                "cycle": "нет",
-            },
-            {
-                "id": "a3", "sender": "agent", "content": "Сохранить",
-                "cycle": 4, "context": "test",
-            },
-        ],
-    })
+    ui.restore_from_checkpoint(
+        {
+            "outgoing_messages": [
+                "мусор",
+                {"id": "u1", "sender": "user", "content": "Вход", "cycle": 1},
+                {"id": "", "sender": "agent", "content": "Нет id", "cycle": 2},
+                {"id": "a1", "sender": "agent", "content": "", "cycle": 3},
+                {
+                    "id": "a2",
+                    "sender": "agent",
+                    "content": "Битый цикл",
+                    "cycle": "нет",
+                },
+                {
+                    "id": "a3",
+                    "sender": "agent",
+                    "content": "Сохранить",
+                    "cycle": 4,
+                    "context": "test",
+                },
+            ],
+        }
+    )
     assert ui.message_queue == []
-    assert ui.message_history == [{
-        "id": "a3", "sender": "agent", "content": "Сохранить",
-        "cycle": 4, "context": "test",
-    }]
+    assert ui.message_history == [
+        {
+            "id": "a3",
+            "sender": "agent",
+            "content": "Сохранить",
+            "cycle": 4,
+            "context": "test",
+        }
+    ]

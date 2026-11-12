@@ -37,9 +37,7 @@ def runtime():
         searcher.toggle(False)
     bus = EventBus(max_queue_size=200, history_size=100)
     # Свежий watchdog вместо глобального синглтона: ассерты изолированы.
-    runner = AgentRunner(
-        agent, bus, watchdog=Watchdog(), name="WatchdogCancelRunner"
-    )
+    runner = AgentRunner(agent, bus, watchdog=Watchdog(), name="WatchdogCancelRunner")
     # Очередь сообщений создаётся лениво в start() — здесь нужен сразу.
     runner._pending_user_messages = PersistentMessageQueue(agent)
     return agent, bus, runner

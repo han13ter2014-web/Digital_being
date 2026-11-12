@@ -1,7 +1,5 @@
-"""Инициализация пакета perception."""
+"""Каналы восприятия основного контура Digital Being."""
 
-from src.perception.active_searcher import ActiveConceptSearcher
+from src.perception.sensory_interface import SensoryInterface
 
-__all__ = [
-    'ActiveConceptSearcher',
-]
+__all__ = ["SensoryInterface"]

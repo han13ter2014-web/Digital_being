@@ -1,4 +1,5 @@
 """Тесты «Творчество+»: рисунок как артефакт — детерминизм, редакции, гигиена."""
+
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,7 @@ def workspace(tmp_path):
 
 
 def test_art_step_creates_svg_file(workspace):
-    state = art_step(None, palette="joy", theme="свет", richness=5,
-                     workspace=workspace)
+    state = art_step(None, palette="joy", theme="свет", richness=5, workspace=workspace)
     assert state["revision"] == 1
     assert state["status"] == "active"
     assert state["palette"] == "joy"
@@ -34,10 +34,12 @@ def test_art_step_creates_svg_file(workspace):
 
 
 def test_art_is_deterministic_per_theme_and_palette(workspace):
-    first = art_step(None, palette="calm", theme="тишина", richness=5,
-                     workspace=workspace)
-    second = art_step(None, palette="calm", theme="тишина", richness=5,
-                      workspace=workspace)
+    first = art_step(
+        None, palette="calm", theme="тишина", richness=5, workspace=workspace
+    )
+    second = art_step(
+        None, palette="calm", theme="тишина", richness=5, workspace=workspace
+    )
     # Разные файлы (id), но одинаковое содержание: сцена воспроизводима.
     assert first["id"] != second["id"]
     assert first["sha256"] == second["sha256"]
@@ -50,8 +52,9 @@ def test_palette_changes_picture(workspace):
 
 
 def test_revision_appends_shapes(workspace):
-    state = art_step(None, palette="sadness", theme="дорога", richness=4,
-                     workspace=workspace)
+    state = art_step(
+        None, palette="sadness", theme="дорога", richness=4, workspace=workspace
+    )
     grown = art_step(state, workspace=workspace)
     assert grown["revision"] == 2
     assert grown["palette"] == "sadness"  # настроение рождения хранится
@@ -63,16 +66,16 @@ def test_revision_appends_shapes(workspace):
 
 
 def test_revision_keeps_palette_even_if_caller_changes(workspace):
-    state = art_step(None, palette="joy", theme="свет", richness=4,
-                     workspace=workspace)
+    state = art_step(None, palette="joy", theme="свет", richness=4, workspace=workspace)
     # Даже если вызывающий передал другую эмоцию, работа хранит свою.
     grown = art_step(state, palette="fear", workspace=workspace)
     assert grown["palette"] == "joy"
 
 
 def test_external_edit_blocks_rewrite(workspace):
-    state = art_step(None, palette="calm", theme="берег", richness=4,
-                     workspace=workspace)
+    state = art_step(
+        None, palette="calm", theme="берег", richness=4, workspace=workspace
+    )
     path = Path(workspace.root) / f"{state['id']}.svg"
     path.write_text("<svg>чужая правка</svg>", encoding="utf-8")
     with pytest.raises(ValueError, match="изменён извне"):
@@ -80,8 +83,9 @@ def test_external_edit_blocks_rewrite(workspace):
 
 
 def test_leave_art_requires_reason(workspace):
-    state = art_step(None, palette="calm", theme="вопрос", richness=4,
-                     workspace=workspace)
+    state = art_step(
+        None, palette="calm", theme="вопрос", richness=4, workspace=workspace
+    )
     with pytest.raises(ValueError):
         leave_art(state, "  ")
     left = leave_art(state, "она закончена")
@@ -114,8 +118,9 @@ def test_art_available_full_folder(workspace):
 
 
 def test_thumbnail_shape(workspace):
-    state = art_step(None, palette="fear", theme="след", richness=6,
-                     workspace=workspace)
+    state = art_step(
+        None, palette="fear", theme="след", richness=6, workspace=workspace
+    )
     thumb = art_thumbnail(state)
     lines = thumb.splitlines()
     assert len(lines) == 8
@@ -126,8 +131,9 @@ def test_thumbnail_shape(workspace):
 def test_art_limit(workspace):
     state = None
     for _ in range(ART_LIMIT):
-        state = art_step(state, palette="calm", theme="тишина", richness=3,
-                         workspace=workspace)
+        state = art_step(
+            state, palette="calm", theme="тишина", richness=3, workspace=workspace
+        )
     assert state["revision"] == ART_LIMIT
     # Сверх лимита — только новая работа.
     nxt = art_step(state, workspace=workspace)

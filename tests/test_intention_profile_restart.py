@@ -23,15 +23,27 @@ def test_intention_history_survives_normal_restart(tmp_path, monkeypatch, backen
         first, _ = create_agent(env, "IntentionLife", new=True)
         first.energy = 20
         first.cycle_count = 41
-        selected = {"action": "rest", "source": "test", "verdict": "proceed",
-                    "params": {"reason": "восстановиться"}}
-        with patch.object(first.decision_arbitrator, "choose_action", return_value=selected):
+        selected = {
+            "action": "rest",
+            "source": "test",
+            "verdict": "proceed",
+            "params": {"reason": "восстановиться"},
+        }
+        with patch.object(
+            first.decision_arbitrator, "choose_action", return_value=selected
+        ):
             report = first.autonomous_tick()
         completed = deepcopy(first._intention_history[-1])
         assert completed["id"] == report["intention_id"]
         assert completed["status"] == "performed"
-        unfinished = begin_intention(first, {"action": "explore", "source": "test",
-                                             "params": {"topic": "память", "reason": "продолжить"}})
+        unfinished = begin_intention(
+            first,
+            {
+                "action": "explore",
+                "source": "test",
+                "params": {"topic": "память", "reason": "продолжить"},
+            },
+        )
         unfinished_id = unfinished["id"]
         first.save_state(force=True)
         PluginRegistry.reset_global()
@@ -42,7 +54,9 @@ def test_intention_history_survives_normal_restart(tmp_path, monkeypatch, backen
         assert second._intention_history[1]["id"] == unfinished_id
         assert second._intention_history[1]["status"] == "interrupted"
         assert second._intention_history[1]["outcome"] is None
-        with patch.object(second.decision_arbitrator, "choose_action", return_value=selected):
+        with patch.object(
+            second.decision_arbitrator, "choose_action", return_value=selected
+        ):
             second.autonomous_tick()
         assert len(second._intention_history) == 3
         assert len({entry["id"] for entry in second._intention_history}) == 3

@@ -32,18 +32,14 @@ class SoulController:
         self._try_import(
             "dialogue", "src.consciousness.internal_dialogue", "InternalDialogueEngine"
         )
+        self._try_import("ethics", "src.emotion.ethical_core", "EthicalCoreSystem")
+        self._try_import("self", "src.core.self_identity_module", "CoreSelfModule")
         self._try_import(
-            "ethics", "src.emotion.ethical_core", "EthicalCoreSystem"
+            "meaning",
+            "src.motivation.intrinsic_meaning_finder",
+            "IntrinsicMeaningFinder",
         )
-        self._try_import(
-            "self", "src.core.self_identity_module", "CoreSelfModule"
-        )
-        self._try_import(
-            "meaning", "src.motivation.intrinsic_meaning_finder", "IntrinsicMeaningFinder"
-        )
-        self._try_import(
-            "immune", "src.emotion.immune_system", "ImmuneSystem"
-        )
+        self._try_import("immune", "src.emotion.immune_system", "ImmuneSystem")
         self._try_import(
             "survival", "src.emotion.survival_instincts", "SurvivalInstincts"
         )
@@ -59,17 +55,16 @@ class SoulController:
         """
         import importlib.util
         import os
+
         # Преобразуем 'src.emotion.ethical_core' → путь к файлу
-        parts = module_path.split('.')
-        file_path = os.path.join(*parts) + '.py'
+        parts = module_path.split(".")
+        file_path = os.path.join(*parts) + ".py"
         if not os.path.exists(file_path):
             self._systems[key] = None
             self._available[key] = False
             return
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"soul_{key}", file_path
-            )
+            spec = importlib.util.spec_from_file_location(f"soul_{key}", file_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             cls = getattr(module, class_name)
@@ -140,14 +135,18 @@ class SoulController:
         if self._available.get("self") and self.tick_count % 7 == 0:
             try:
                 core = self._systems["self"]
-                dominant = report["systems"].get(
-                    "dialogue", {}
-                ).get("dominant_voice", "Наблюдатель")
-                new_identity = core.synthesize({
-                    "dominant_voice": dominant,
-                    "voices": [dominant],
-                    "reason": f"cycle_{cycle_count}",
-                })
+                dominant = (
+                    report["systems"]
+                    .get("dialogue", {})
+                    .get("dominant_voice", "Наблюдатель")
+                )
+                new_identity = core.synthesize(
+                    {
+                        "dominant_voice": dominant,
+                        "voices": [dominant],
+                        "reason": f"cycle_{cycle_count}",
+                    }
+                )
                 report["systems"]["self"] = {
                     "stability": round(core.identity_stability_score, 3),
                     "identity_preview": new_identity[:80],

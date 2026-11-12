@@ -154,7 +154,7 @@ def test_status_lines_are_readable():
     assert "Интеллект    47" in text
     assert "Концепций    3" in text
     assert "Цели         3/7" in text
-    assert "Ускорение" in text          # режим fast
+    assert "Ускорение" in text  # режим fast
     assert "пауза" in text
     assert "жив" in text
     assert "Родитель     Parent" in text
@@ -166,9 +166,11 @@ def test_status_lines_labels_dormant():
     text = "\n".join(format_status_lines(snapshot))
     assert "спит" in text
 
+
 # ============================================================
 # Контур в панели
 # ============================================================
+
 
 class FakeLoopCloser:
     def status(self):

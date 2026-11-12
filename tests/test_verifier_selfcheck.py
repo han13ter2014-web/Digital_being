@@ -1,14 +1,13 @@
-"""K15 T2: self-check of verify_*.py stands.
+"""Self-check of verify_*.py stands.
 
-Auto-discovers ``verify_*.py`` in ``k*_decomposition_*`` evidence folders.
+Auto-discovers ``verify_*.py`` in local historical evidence folders.
 Verifiers anchored to ``git show HEAD:...`` are historical one-shot
-instruments (their green status at step time is recorded in
-``docs/verifier_selfcheck_matrix.md``); verifiers without a HEAD anchor
-are eternal and must pass honestly and must fail on semantic corruption
-of the product modules they exercise. All checks run in an isolated git
-worktree at HEAD; the live tree, K14 evidence and live data/ stay
-untouched. Environments without the local evidence folders (for example
-a fresh CI checkout) skip these tests honestly.
+instruments; verifiers without a HEAD anchor are eternal and must pass
+honestly and must fail on semantic corruption of the product modules they
+exercise. All checks run in an isolated git worktree at HEAD; the live
+tree, historical evidence and live data/ stay untouched. Environments
+without the local evidence folders (for example a fresh CI checkout)
+skip these tests honestly.
 """
 
 from __future__ import annotations
@@ -34,12 +33,21 @@ RUN_TIMEOUT = 300
 
 def discover_verifiers():
     discovered = []
-    for path in sorted(ROOT.glob("k*_decomposition_*/verify_*.py")):
+    paths = list(ROOT.glob("k*_decomposition_*/verify_*.py"))
+    # Локальный архив не является checkout-зависимостью, но если владелец
+    # убрал туда исторические доказательства, self-check обязан их найти,
+    # а не молча превратить пять проверок в skipped.
+    paths += list(ROOT.glob("_archive/*/history/k*_decomposition_*/verify_*.py"))
+    for path in sorted(paths):
         source = path.read_text(encoding="utf-8")
         discovered.append(
             {
                 "name": path.name,
+                # В изолированном worktree verifier остаётся на исходном
+                # уровне: исторические скрипты сами вычисляют ROOT по
+                # parents[1]. source — отдельный путь к архивной копии.
                 "evidence": path.parent.name,
+                "source": path.parent,
                 "eternal": not HEAD_ANCHOR_RE.search(source),
             }
         )
@@ -179,7 +187,7 @@ def isolated_worktree():
     for row in eternal:
         target = wt / row["evidence"]
         target.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / row["evidence"] / row["name"], target / row["name"])
+        shutil.copy2(row["source"] / row["name"], target / row["name"])
     yield wt
     _git("worktree", "remove", "--force", str(wt))
     _git("worktree", "prune")
@@ -218,7 +226,7 @@ def test_eternal_verifiers_pass_honestly(isolated_worktree):
 def test_eternal_verifiers_catch_substituted_body(isolated_worktree):
     caught = []
     for row in eternal_rows():
-        source = (ROOT / row["evidence"] / row["name"]).read_text(encoding="utf-8")
+        source = (row["source"] / row["name"]).read_text(encoding="utf-8")
         for rel in verification_surface(source):
             target = _module_file(isolated_worktree, rel)
             if not target.exists():
@@ -240,7 +248,7 @@ def test_eternal_verifiers_catch_substituted_body(isolated_worktree):
 def test_eternal_verifiers_catch_removed_import(isolated_worktree):
     caught = []
     for row in eternal_rows():
-        source = (ROOT / row["evidence"] / row["name"]).read_text(encoding="utf-8")
+        source = (row["source"] / row["name"]).read_text(encoding="utf-8")
         for rel in verification_surface(source):
             target = _module_file(isolated_worktree, rel)
             if not target.exists():
@@ -262,7 +270,7 @@ def test_eternal_verifiers_catch_removed_import(isolated_worktree):
 def test_eternal_verifiers_record_cosmetic_corruptions(isolated_worktree):
     verdicts = {}
     for row in eternal_rows():
-        source = (ROOT / row["evidence"] / row["name"]).read_text(encoding="utf-8")
+        source = (row["source"] / row["name"]).read_text(encoding="utf-8")
         surface = [
             rel
             for rel in verification_surface(source)

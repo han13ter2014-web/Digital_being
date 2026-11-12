@@ -11,9 +11,15 @@ def test_core_records_finished_intention_only_when_memory_is_present():
     agent = DigitalBeing(name="CoreEpisode")
     memory = Mock()
     agent.delamain = SimpleNamespace(runtime=SimpleNamespace(memory=memory))
-    entry = begin_intention(agent, {"action": "play", "source": "activity",
-                                   "params": {"topic": "партия"}})
-    finish_intention(entry, outcome=SimpleNamespace(reason="", as_dict=lambda: {"action": "play", "had_effect": True}))
+    entry = begin_intention(
+        agent, {"action": "play", "source": "activity", "params": {"topic": "партия"}}
+    )
+    finish_intention(
+        entry,
+        outcome=SimpleNamespace(
+            reason="", as_dict=lambda: {"action": "play", "had_effect": True}
+        ),
+    )
     record = agent._record_core_life_episode(entry)
     assert record is not None
     kwargs = memory.record_life_episode.call_args.kwargs
@@ -37,7 +43,9 @@ def test_episodes_are_append_only_for_retries():
     agent.delamain = SimpleNamespace(runtime=SimpleNamespace(memory=memory))
     for status in ("error", "performed", "denied"):
         entry = begin_intention(agent, {"action": "play", "params": {"topic": "игра"}})
-        finish_intention(entry, error=RuntimeError("bad") if status == "error" else None)
+        finish_intention(
+            entry, error=RuntimeError("bad") if status == "error" else None
+        )
         if status == "denied":
             entry["status"] = "denied"
         agent._record_core_life_episode(entry)

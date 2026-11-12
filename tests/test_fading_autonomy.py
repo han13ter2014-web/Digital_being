@@ -10,13 +10,26 @@ from src.cognition.intention_waiting import remember_wait
 
 def make_waiting():
     agent = DigitalBeing(name="FadingAutonomy")
-    first = begin_intention(agent, {"action": "explore", "params": {"topic": "память", "reason": "проверить"}})
+    first = begin_intention(
+        agent,
+        {"action": "explore", "params": {"topic": "память", "reason": "проверить"}},
+    )
     finish_intention(first)
     finish_evidence_goal(agent, first)
     agent.cycle_count += 1
     for _ in range(3):
-        entry = begin_intention(agent, {"action": "explore", "source": "continuation",
-                                       "params": {"topic": "память", "reason": "проверить", "continuation_of": first["id"]}})
+        entry = begin_intention(
+            agent,
+            {
+                "action": "explore",
+                "source": "continuation",
+                "params": {
+                    "topic": "память",
+                    "reason": "проверить",
+                    "continuation_of": first["id"],
+                },
+            },
+        )
         finish_intention(entry)
         finish_evidence_goal(agent, entry)
         remember_wait(agent, entry)
@@ -26,8 +39,13 @@ def make_waiting():
 
 def test_fading_is_candidate_and_arbitrator_can_choose_other_activity():
     agent = make_waiting()
-    with patch.object(agent.decision_arbitrator, "choose_action", side_effect=lambda candidates, context: next(
-            item for item in candidates if item["action"] != "let_go")):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        side_effect=lambda candidates, context: next(
+            item for item in candidates if item["action"] != "let_go"
+        ),
+    ):
         result = agent.autonomous_tick()
     assert "память" in result["fading_proposals"]
     assert agent._waiting_intentions
@@ -36,8 +54,13 @@ def test_fading_is_candidate_and_arbitrator_can_choose_other_activity():
 
 def test_agent_chosen_let_go_resolves_with_reason():
     agent = make_waiting()
-    with patch.object(agent.decision_arbitrator, "choose_action", side_effect=lambda candidates, context: next(
-            item for item in candidates if item["action"] == "let_go")):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        side_effect=lambda candidates, context: next(
+            item for item in candidates if item["action"] == "let_go"
+        ),
+    ):
         result = agent.autonomous_tick()
     entry = next(iter(agent._waiting_intentions.values()))
     assert entry["resolution"]["kind"] == "forgotten"

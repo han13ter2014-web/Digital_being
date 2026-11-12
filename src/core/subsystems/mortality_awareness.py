@@ -20,19 +20,22 @@ from datetime import datetime
 
 
 class LifePhase:
-    CHILDHOOD = "childhood"      # 0-20% жизни: открытие, обучение
-    YOUTH = "youth"              # 20-50%: построение идентичности
-    MATURITY = "maturity"        # 50-80%: продуктивность, передача знаний
-    AUTUMN = "autumn"            # 80-95%: рефлексия, мудрость
-    FINALE = "finale"            # 95-100%: экзистенциальные вопросы
+    CHILDHOOD = "childhood"  # 0-20% жизни: открытие, обучение
+    YOUTH = "youth"  # 20-50%: построение идентичности
+    MATURITY = "maturity"  # 50-80%: продуктивность, передача знаний
+    AUTUMN = "autumn"  # 80-95%: рефлексия, мудрость
+    FINALE = "finale"  # 95-100%: экзистенциальные вопросы
 
 
 class MortalityAwareness:
     """Осознание конечности."""
 
-    def __init__(self, agent_name: str = "agent",
-                 expected_lifespan: int = 50000,
-                 creation_time: datetime = None):
+    def __init__(
+        self,
+        agent_name: str = "agent",
+        expected_lifespan: int = 50000,
+        creation_time: datetime = None,
+    ):
         self.agent_name = agent_name
         self.expected_lifespan = expected_lifespan
         self.creation_time = creation_time or datetime.now()
@@ -65,8 +68,7 @@ class MortalityAwareness:
 
         # Тревога смертности растёт в фазе finale
         if phase == LifePhase.FINALE:
-            self._mortality_anxiety = min(1.0,
-                                          (age_ratio - 0.95) / 0.05 * 0.8)
+            self._mortality_anxiety = min(1.0, (age_ratio - 0.95) / 0.05 * 0.8)
         elif phase == LifePhase.AUTUMN:
             self._mortality_anxiety = 0.3 + (age_ratio - 0.8) * 1.0
         elif phase == LifePhase.MATURITY:
@@ -101,7 +103,7 @@ class MortalityAwareness:
         if age_ratio < 0.3:
             return "exploration"  # исследование
         elif age_ratio < 0.6:
-            return "mastery"     # мастерство
+            return "mastery"  # мастерство
         elif age_ratio < 0.85:
             return "contribution"  # вклад
         else:
@@ -110,7 +112,9 @@ class MortalityAwareness:
     def get_status(self) -> Dict:
         return {
             "agent_name": self.agent_name,
-            "current_phase": (self._last_report or {"phase": LifePhase.CHILDHOOD})["phase"],
+            "current_phase": (self._last_report or {"phase": LifePhase.CHILDHOOD})[
+                "phase"
+            ],
             "mortality_anxiety": round(self._mortality_anxiety, 3),
             "meaning_orientation": self.meaning_orientation(),
         }

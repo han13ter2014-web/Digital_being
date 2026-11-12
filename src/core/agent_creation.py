@@ -35,28 +35,12 @@ from src.core.social_cell import create_social_cell
 from src.core.subsystem_base import PluginRegistry, attach_existing_subsystem
 from src.core.subsystems import (
     ArchitectureProposal,
-    AttachmentSystem,
-    CheckpointSubsystem,
-    DecisionArbitrator,
-    EmbodimentController,
-    EnergySubsystem,
-    GoalSubsystem,
     IntentionalForgetting,
     KnowledgeSubsystem,
-    MindDream,
-    MortalityAwareness,
-    MotivationController,
-    NamingDialogue,
-    ProactiveCommunication,
-    ReflectionPipeline,
     RightToFail,
     RightToRefuse,
-    SelfTermination,
-    SleepCycle,
-    SoulController,
     SpontaneousGenerator,
     ValueEvolution,
-    WillRegistry,
     WillToRisk,
 )
 from src.memory import LongTermMemory
@@ -86,6 +70,17 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     # Новая система ментальных моделей (автономное понимание)
     self.mental_models = MentalModel(name=name)
+
+    # Текстовое восприятие и метакогниция — наблюдатели реального контура.
+    # Они не заменяют ThinkingPipeline и не участвуют в арбитраже.
+    from src.cognition.meta_cognition import MetaCognitiveSystem
+    from src.perception.sensory_interface import SensoryInterface
+
+    self.meta_cognition = MetaCognitiveSystem(agent_name=name)
+    self.sensory_interface = SensoryInterface()
+    self._last_sensory_perception = None
+    self._meta_trace_by_intention = {}
+    self._current_cognitive_load = 0.0
 
     # Инициализируем active_goal ДО bootstrap (bootstrap обращается к нему)
     self.preferences = {}
@@ -126,6 +121,7 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     # DecisionArbitrator для выбора действий (P1.1)
     from src.core.subsystems.decision_arbitrator import DecisionArbitrator
+
     self.decision_arbitrator = DecisionArbitrator(agent_name=name)
 
     # === Новые системы (Этап 4) ===
@@ -137,6 +133,12 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     # Мета-обучение гиперпараметров
     self.meta_learner = create_meta_learner(self)
+
+    # Внутренний прогноз эффекта действия. Ритм задаётся выбором и исходом,
+    # а не отдельным периодическим plugin-tick.
+    from src.cognition.internal_simulator import InternalSimulator
+
+    self.internal_simulator = InternalSimulator(agent_name=name)
 
     # Социальная клеточка (рекурсивное взаимное моделирование)
     self.social_cell = create_social_cell(self)
@@ -197,6 +199,7 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     # _open_questions_strategy) сохранены как property/fallback для обратной
     # совместимости с кодом, который читает их напрямую (main.py, agent_runner.py).
     from src.core.open_questions import OpenQuestionsManager
+
     self._open_questions_manager = OpenQuestionsManager(
         cycle_provider=lambda: self.cycle_count,
         log_info=lambda msg: get_logger().log(msg),
@@ -273,10 +276,10 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.emotional_state = EmotionalState()
 
-    os.makedirs(data_path('checkpoints'), exist_ok=True)
-    os.makedirs(data_path('logs'), exist_ok=True)
+    os.makedirs(data_path("checkpoints"), exist_ok=True)
+    os.makedirs(data_path("logs"), exist_ok=True)
 
-    self.knowledge_file = data_path('knowledge_base.json')
+    self.knowledge_file = data_path("knowledge_base.json")
 
     # Для умных чекпоинтов
     self._last_saved_intelligence = 0
@@ -298,6 +301,7 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     # Создаём ДО ThinkingPipeline, чтобы передать ему ссылку.
     if LR_CONFIG.WEB_SEARCH_ENABLED:
         from src.perception.web_search import WebSearcher
+
         self.web_searcher = WebSearcher(
             lang=LR_CONFIG.WEB_SEARCH_LANG,
             timeout=LR_CONFIG.WEB_SEARCH_TIMEOUT,
@@ -324,29 +328,39 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     self._embodiment_signals = self.embodiment.tick(self.cycle_count)
     self._mortality_state = self.mortality.tick(self.cycle_count)
 
+    # Сохранённые модели подключены только как наблюдатели реального опыта.
+    # Внешние адаптеры per-instance; голос и сеть остаются выключенными.
+    from src.cognition.integrated_experience import initialize_integrated_experience
+    from src.core.auxiliary_adapters import initialize_auxiliary_adapters
+
+    initialize_integrated_experience(self)
+    initialize_auxiliary_adapters(self)
+
     # === Этап 3.5: PluginRegistry — регистрируем все подсистемы ===
     self.plugin_registry = PluginRegistry.get_global()
     self._register_all_subsystems_in_registry()
     # setup() для всех подсистем — после этого enabled=True → tick доступен.
-    self.plugin_registry.setup_all({
-        "agent_name": self.name,
-        "agent": self,
-        "registry": self.plugin_registry,
-    })
+    self.plugin_registry.setup_all(
+        {
+            "agent_name": self.name,
+            "agent": self,
+            "registry": self.plugin_registry,
+        }
+    )
 
 
 def _init_subsystems_declaratively_impl(self, name: str) -> None:
     """Декларативная инициализация всех подсистем из SUBSYSTEM_SPECS.
 
-        Каждая подсистема:
-        1. Создаётся через factory.
-        2. Присваивается атрибуту по attr_name.
-        3. Инициализируется через post_init hook (если задан).
-        4. Регистрируется в PluginRegistry через _register_all_subsystems_in_registry().
+    Каждая подсистема:
+    1. Создаётся через factory.
+    2. Присваивается атрибуту по attr_name.
+    3. Инициализируется через post_init hook (если задан).
+    4. Регистрируется в PluginRegistry через _register_all_subsystems_in_registry().
 
-        Длинные подсистемы (knowledge, energy) хранятся в декларации как
-        lambdas с полной сигнатурой — это документирование в коде.
-        """
+    Длинные подсистемы (knowledge, energy) хранятся в декларации как
+    lambdas с полной сигнатурой — это документирование в коде.
+    """
     # === Пре-создание: long_term_memory (try/except) ===
     # LongTermMemory может упасть на legacy-импортах, оборачиваем в try.
     try:
@@ -390,8 +404,13 @@ def _init_subsystems_declaratively_impl(self, name: str) -> None:
         self.will_to_risk = WillToRisk(self.will_registry)
         self.right_to_fail = RightToFail(self.will_registry)
     # ArchitectureProposal — без сложных зависимостей, можно создать здесь.
+    # Managed-жизнь держит предложения в своей базе (этап 5C); standalone
+    # сохраняет файловый режим.
     if hasattr(self, "will_registry"):
-        self.architecture_proposal = ArchitectureProposal(registry=self.will_registry)
+        self.architecture_proposal = ArchitectureProposal(
+            registry=self.will_registry,
+            life_id=self.life_id if self._profile_managed else None,
+        )
 
 
 def _run_post_init_hooks_impl(self) -> None:
@@ -400,16 +419,16 @@ def _run_post_init_hooks_impl(self) -> None:
     # ПЕРВОЙ, потому что состояние жизни читают и смысловые
     # подсистемы, и главный цикл.
     self.life_guard = LifeGuard(
-        agent_name=self.name, name_provider=lambda: self.name
+        agent_name=self.name,
+        name_provider=lambda: self.name,
+        life_id=self.life_id if self._profile_managed else None,
     )
 
     # Замыкание петли: учёт наблюдаемых результатов действий.
     # max_no_effect=3: после трёх бесплодных повторов действие
     # считается тупиковым и больше не выбирается.
     self.loop_closer = LoopCloser(
-        max_no_effect=int(
-            getattr(LR_CONFIG, "LOOP_MAX_NO_EFFECT", 3)
-        )
+        max_no_effect=int(getattr(LR_CONFIG, "LOOP_MAX_NO_EFFECT", 3))
     )
     self._last_action_outcome = None
     # Тело: цикл последнего такта и режим отдыха (гистерезис).
@@ -441,15 +460,9 @@ def _run_post_init_hooks_impl(self) -> None:
         self.action_budget = ActionBudget(
             get_energy=lambda: self.energy,
             set_energy=lambda value: setattr(self, "energy", value),
-            max_energy=float(
-                getattr(LR_CONFIG, "ENERGY_MAX", 200.0)
-            ),
-            enabled=bool(
-                getattr(LR_CONFIG, "ACTION_BUDGET_ENABLED", False)
-            ),
-            min_reserve=float(
-                getattr(LR_CONFIG, "ACTION_BUDGET_MIN_RESERVE", 5.0)
-            ),
+            max_energy=float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0)),
+            enabled=bool(getattr(LR_CONFIG, "ACTION_BUDGET_ENABLED", False)),
+            min_reserve=float(getattr(LR_CONFIG, "ACTION_BUDGET_MIN_RESERVE", 5.0)),
             max_action_cost=float(
                 getattr(LR_CONFIG, "ACTION_BUDGET_MAX_ACTION_COST", 20.0)
             ),
@@ -466,7 +479,9 @@ def _run_post_init_hooks_impl(self) -> None:
 
     # CheckpointSubsystem: инициализируем _last_saved_intelligence.
     if hasattr(self, "checkpoint_subsystem"):
-        self._last_saved_intelligence = self.checkpoint_subsystem._last_saved_intelligence
+        self._last_saved_intelligence = (
+            self.checkpoint_subsystem._last_saved_intelligence
+        )
 
     # ReflectionPipeline: alias для обратной совместимости.
     if hasattr(self, "reflection_pipeline"):
@@ -515,7 +530,9 @@ def _run_post_init_hooks_impl(self) -> None:
         if self.soul.is_available("immune"):
             self.decision_arbitrator.attach_immune_system(self.soul.get("immune"))
         if self.soul.is_available("survival"):
-            self.decision_arbitrator.attach_survival_instincts(self.soul.get("survival"))
+            self.decision_arbitrator.attach_survival_instincts(
+                self.soul.get("survival")
+            )
         if self.soul.is_available("meaning"):
             self.decision_arbitrator.attach_meaning_finder(self.soul.get("meaning"))
 
@@ -530,11 +547,11 @@ def _wire_subsystem_dependencies_impl(self) -> None:
 def _register_all_subsystems_in_registry_impl(self) -> None:
     """Регистрирует все подсистемы агента в PluginRegistry (Этап 3.5).
 
-        Использует attach_existing_subsystem для оборачивания существующих
-        подсистем в Subsystem-адаптер (без поломки обратной совместимости).
-        Приоритеты:
-        - маленькие числа = раньше (energy/goals сначала, soul/long-running позже).
-        """
+    Использует attach_existing_subsystem для оборачивания существующих
+    подсистем в Subsystem-адаптер (без поломки обратной совместимости).
+    Приоритеты:
+    - маленькие числа = раньше (energy/goals сначала, soul/long-running позже).
+    """
     # Низкие приоритеты — базовая инфраструктура
     attach_existing_subsystem(self, "goal_subsystem", priority=10)
     attach_existing_subsystem(self, "energy_subsystem", priority=20)
@@ -565,9 +582,12 @@ def _register_all_subsystems_in_registry_impl(self) -> None:
     # вернёт False без ошибки.
     try:
         from src.core.subsystems.nursery_watcher import NurseryWatcher
+
         existing = self.plugin_registry.get("nursery_watcher")
         if existing is None:
-            watcher = NurseryWatcher(agent_name=self.name, nursery_dir=data_path("nursery"))
+            watcher = NurseryWatcher(
+                agent_name=self.name, nursery_dir=data_path("nursery")
+            )
             self.plugin_registry.register(watcher)
         # Подключаем агента для контекста
         w = self.plugin_registry.get("nursery_watcher")
@@ -580,9 +600,12 @@ def _register_all_subsystems_in_registry_impl(self) -> None:
     # Health Dashboard (Этап 2: уже был) — теперь как плагин
     try:
         from src.core.health_dashboard import HealthDashboardSubsystem
+
         existing = self.plugin_registry.get("health_dashboard")
         if existing is None:
-            self.plugin_registry.register(HealthDashboardSubsystem(agent_name=self.name))
+            self.plugin_registry.register(
+                HealthDashboardSubsystem(agent_name=self.name)
+            )
     except Exception as exc:
         get_logger().log(f"[{self.name}] HealthDashboard не подключён: {exc}")
     # Delamain-local (этап 8): нативная Subsystem, выключена по умолчанию.
@@ -593,10 +616,20 @@ def _register_all_subsystems_in_registry_impl(self) -> None:
 
         existing = self.plugin_registry.get("delamain")
         if existing is None:
-            self.delamain = DelamainSubsystem(agent_name=self.name)
+            self.delamain = DelamainSubsystem(
+                agent_name=self.name,
+                life_id=self.life_id if self._profile_managed else None,
+            )
             self.plugin_registry.register(self.delamain)
         else:
             self.delamain = existing
+        if (
+            self._profile_managed
+            and getattr(self.delamain, "life_id", None) != self.life_id
+        ):
+            # Реестр может уже содержать объект, созданный до привязки UUID.
+            # bind_life откажется переключать открытое соединение другой жизни.
+            self.delamain.bind_life(self.life_id)
         # Stage 18A: expose the core-owned effector boundary. The adapter
         # is disabled by default and does not change the live agent loop.
         self.delamain_effector = getattr(self.delamain, "effector", None)
@@ -604,9 +637,8 @@ def _register_all_subsystems_in_registry_impl(self) -> None:
         # cycle. Without the flag the old subsystem tick remains the sole
         # driver, so no default behavior changes.
         self.effector_driver = None
-        if (
-            self.delamain_effector is not None
-            and getattr(self.delamain_effector, "core_driven", False)
+        if self.delamain_effector is not None and getattr(
+            self.delamain_effector, "core_driven", False
         ):
             self.effector_driver = EffectorDriver(
                 self.delamain_effector,
@@ -628,19 +660,25 @@ def get_subsystems_status_impl(self) -> Dict:
     budget = getattr(self, "action_budget", None)
     if budget is not None:
         status["action_budget"] = budget.status()
+    integrated = getattr(self, "integrated_experience", None)
+    if integrated is not None:
+        status["integrated_experience"] = integrated.status()
+    from src.core.auxiliary_adapters import auxiliary_status
+
+    status.update(auxiliary_status(self))
     return status
 
 
 def tick_subsystems_impl(self, cycle: int) -> Dict:
     """Вызвать tick() всех подсистем через PluginRegistry (Этап 3.5).
 
-        Не заменяет основной evolve() — это лёгкий «параллельный» путь для
-        плагинов, которые хотят tick() без полного цикла эволюции.
+    Не заменяет основной evolve() — это лёгкий «параллельный» путь для
+    плагинов, которые хотят tick() без полного цикла эволюции.
 
-        Stage 18B: если включён core-driven режим, после реестра ядро делает
-        ровно один шаг эффектора. Сам DelamainSubsystem в этом режиме не
-        исполняет цели, поэтому второго tick-цикла не возникает.
-        """
+    Stage 18B: если включён core-driven режим, после реестра ядро делает
+    ровно один шаг эффектора. Сам DelamainSubsystem в этом режиме не
+    исполняет цели, поэтому второго tick-цикла не возникает.
+    """
     report = self.plugin_registry.tick_all(cycle, {"agent": self})
     driver = getattr(self, "effector_driver", None)
     if driver is not None:

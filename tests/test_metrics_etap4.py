@@ -25,9 +25,11 @@ if PROJECT_ROOT not in sys.path:
 # 3.6 MetricsCollector
 # ============================================================
 
+
 class TestMetricsCollector:
     def test_record_and_get_history(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         mc.record("energy", 100, cycle=1)
         mc.record("energy", 95, cycle=2)
@@ -40,6 +42,7 @@ class TestMetricsCollector:
 
     def test_get_current_returns_latest(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         assert mc.get_current("energy") is None
         mc.record("energy", 100)
@@ -48,6 +51,7 @@ class TestMetricsCollector:
 
     def test_get_stats(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         for v in [10, 20, 30, 40, 50]:
             mc.record("x", v)
@@ -60,6 +64,7 @@ class TestMetricsCollector:
 
     def test_maxlen_caps_history(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector(maxlen_per_channel=5)
         for i in range(20):
             mc.record("y", float(i))
@@ -70,6 +75,7 @@ class TestMetricsCollector:
 
     def test_increment_records_rate(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         for _ in range(10):
             mc.increment("events")
@@ -80,6 +86,7 @@ class TestMetricsCollector:
 
     def test_snapshot(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         mc.record("a", 1.0)
         mc.record("b", 2.0)
@@ -91,6 +98,7 @@ class TestMetricsCollector:
 
     def test_export_json(self, tmp_path):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector(persist_dir=str(tmp_path), agent_name="TestExport")
         mc.record("energy", 100)
         mc.record("energy", 90)
@@ -103,6 +111,7 @@ class TestMetricsCollector:
 
     def test_list_channels(self):
         from src.metrics import MetricsCollector
+
         mc = MetricsCollector()
         mc.record("foo", 1)
         mc.record("bar", 2)
@@ -117,15 +126,18 @@ class TestMetricsCollector:
 # 3.7 I18n
 # ============================================================
 
+
 class TestI18n:
     def test_default_language_loads(self):
         from src.metrics import I18n
+
         # Создаём с несуществующей директорией — должно работать с пустым dict
         i18n = I18n(locale_dir="/nonexistent")
         assert i18n.get_language() == "ru"
 
     def test_set_language_creates(self, tmp_path):
         from src.metrics import I18n
+
         # Создаём два языка в tmp_path
         with open(os.path.join(tmp_path, "ru.json"), "w", encoding="utf-8") as f:
             json.dump({"hello": "Привет"}, f, ensure_ascii=False)
@@ -138,6 +150,7 @@ class TestI18n:
 
     def test_fallback_to_default(self, tmp_path):
         from src.metrics import I18n
+
         with open(os.path.join(tmp_path, "ru.json"), "w", encoding="utf-8") as f:
             json.dump({"hello": "Привет", "bye": "Пока"}, f, ensure_ascii=False)
         with open(os.path.join(tmp_path, "en.json"), "w", encoding="utf-8") as f:
@@ -149,6 +162,7 @@ class TestI18n:
 
     def test_interpolation(self, tmp_path):
         from src.metrics import I18n
+
         with open(os.path.join(tmp_path, "ru.json"), "w", encoding="utf-8") as f:
             json.dump({"greeting": "Привет, {name}!"}, f, ensure_ascii=False)
         i18n = I18n(locale_dir=str(tmp_path))
@@ -156,11 +170,13 @@ class TestI18n:
 
     def test_missing_key_returns_key(self):
         from src.metrics import I18n
+
         i18n = I18n(locale_dir="/nonexistent")
         assert i18n.t("nonexistent_key") == "nonexistent_key"
 
     def test_save_translations(self, tmp_path):
         from src.metrics import I18n
+
         i18n = I18n(locale_dir=str(tmp_path))
         # Сначала сохраняем язык по умолчанию (ru) с тестовым ключом
         i18n.save_translations("ru", {"hello": "Привет"})
@@ -177,6 +193,7 @@ class TestI18n:
 
     def test_global_helpers(self, tmp_path):
         from src.metrics.i18n import reset_i18n, set_language, get_i18n
+
         reset_i18n()
         i = get_i18n()
         assert isinstance(i.t("missing"), str)
@@ -189,15 +206,18 @@ class TestI18n:
 # 3.8 Webhooks
 # ============================================================
 
+
 class TestWebhookManager:
     def test_empty_manager_send(self):
         from src.metrics import WebhookManager
+
         mgr = WebhookManager()
         # Нет ни одного webhook — send возвращает False
         assert mgr.send("hello") is False
 
     def test_add_remove(self):
         from src.metrics import WebhookManager, TelegramWebhook
+
         mgr = WebhookManager()
         w = TelegramWebhook(token="fake", chat_id="123")
         mgr.add(w)
@@ -207,12 +227,16 @@ class TestWebhookManager:
 
     def test_blocking_send_calls_all_webhooks(self):
         from src.metrics import (
-            WebhookManager, TelegramWebhook, DiscordWebhook,
+            WebhookManager,
+            TelegramWebhook,
+            DiscordWebhook,
         )
+
         mgr = WebhookManager()
         # Используем моки чтобы не делать реальных HTTP вызовов
-        with patch.object(TelegramWebhook, "_do_send", return_value=True), \
-             patch.object(DiscordWebhook, "_do_send", return_value=True):
+        with patch.object(TelegramWebhook, "_do_send", return_value=True), patch.object(
+            DiscordWebhook, "_do_send", return_value=True
+        ):
             mgr.add(TelegramWebhook(token="t", chat_id="c"))
             mgr.add(DiscordWebhook(url="https://example.com/hook"))
             ok = mgr.send("hello", blocking=True)
@@ -220,6 +244,7 @@ class TestWebhookManager:
 
     def test_rate_limit(self):
         from src.metrics import WebhookManager, TelegramWebhook
+
         mgr = WebhookManager(max_per_minute=2)
         with patch.object(TelegramWebhook, "_do_send", return_value=True):
             mgr.add(TelegramWebhook(token="t", chat_id="c"))
@@ -231,6 +256,7 @@ class TestWebhookManager:
 
     def test_async_queue_and_worker(self):
         from src.metrics import WebhookManager, TelegramWebhook
+
         mgr = WebhookManager(max_per_minute=100)
         with patch.object(TelegramWebhook, "_do_send", return_value=True):
             mgr.add(TelegramWebhook(token="t", chat_id="c"))
@@ -250,6 +276,7 @@ class TestWebhookManager:
 
     def test_webhook_status(self):
         from src.metrics import TelegramWebhook
+
         w = TelegramWebhook(token="t", chat_id="c")
         w._sent_count = 5
         w._error_count = 1
@@ -266,22 +293,28 @@ class TestWebhookManager:
         old_discord = os.environ.pop("DIGITAL_BEING_DISCORD_WEBHOOK_URL", None)
         try:
             from src.metrics.webhooks import create_default_manager
+
             mgr = create_default_manager()
             assert mgr.list_webhooks() == []
         finally:
-            if old_token: os.environ["DIGITAL_BEING_TELEGRAM_TOKEN"] = old_token
-            if old_chat: os.environ["DIGITAL_BEING_TELEGRAM_CHAT_ID"] = old_chat
-            if old_discord: os.environ["DIGITAL_BEING_DISCORD_WEBHOOK_URL"] = old_discord
+            if old_token:
+                os.environ["DIGITAL_BEING_TELEGRAM_TOKEN"] = old_token
+            if old_chat:
+                os.environ["DIGITAL_BEING_TELEGRAM_CHAT_ID"] = old_chat
+            if old_discord:
+                os.environ["DIGITAL_BEING_DISCORD_WEBHOOK_URL"] = old_discord
 
 
 # ============================================================
 # 3.2 Voice
 # ============================================================
 
+
 class TestVoiceRouter:
     def test_console_engine_capabilities(self):
         """ConsoleVoiceEngine имеет tts но не stt."""
         from src.metrics import ConsoleVoiceEngine
+
         eng = ConsoleVoiceEngine()
         assert eng.capabilities.get("tts") is True
         assert eng.capabilities.get("stt") is False
@@ -290,12 +323,14 @@ class TestVoiceRouter:
 
     def test_console_engine_disabled_returns_false(self):
         from src.metrics import ConsoleVoiceEngine
+
         eng = ConsoleVoiceEngine(enabled=False)
         # speak не должен ничего делать если disabled
         assert eng.speak("hi", blocking=True) is False
 
     def test_router_with_only_console(self):
         from src.metrics import VoiceRouter, ConsoleVoiceEngine
+
         r = VoiceRouter()
         r.add(ConsoleVoiceEngine())
         assert "console" in r.list_engines()
@@ -306,7 +341,8 @@ class TestVoiceRouter:
 
     def test_router_status(self):
         from src.metrics import VoiceRouter, ConsoleVoiceEngine
-        r = VoiceRouter()
+
+        r = VoiceRouter(enabled=True)
         r.add(ConsoleVoiceEngine())
         s = r.status()
         assert "console" in s["available_tts"]
@@ -315,16 +351,19 @@ class TestVoiceRouter:
     def test_router_speak_no_tts(self):
         """Если ни один движок не имеет TTS — speak возвращает False."""
         from src.metrics import VoiceRouter
+
         r = VoiceRouter()
         assert r.speak("text") is False
 
     def test_router_hear_no_stt(self):
         from src.metrics import VoiceRouter
+
         r = VoiceRouter()
         assert r.hear(timeout=0.1) is None
 
     def test_create_default_router_has_console(self):
         from src.metrics import create_default_router
+
         r = create_default_router(allow_pyttsx3=False, allow_whisper=False)
         assert "console" in r.list_engines()
         assert len(r.list_engines()) == 1
@@ -336,6 +375,7 @@ class TestVoiceRouter:
     def test_pyttsx_engine_handles_missing_module(self):
         """PyttsxVoiceEngine без установленного pyttsx3 должен быть безопасным."""
         from src.metrics import PyttsxVoiceEngine
+
         eng = PyttsxVoiceEngine()
         result = eng.speak("hello", blocking=True)
         assert isinstance(result, bool)
@@ -345,13 +385,13 @@ class TestVoiceRouter:
 # Помощник для ручного прогона
 # ============================================================
 
+
 def main():
     """Ручной запуск всех тестов без pytest."""
     print("=" * 60)
     print("  🧪 ТЕСТЫ ЭТАПА 4 (экспериментальные фичи)")
     print("=" * 60)
     import inspect
-    import sys as _sys
 
     classes = [
         TestMetricsCollector,
@@ -371,16 +411,15 @@ def main():
                 # Если метод требует capsys/tmp_path — пропускаем в manual mode
                 sig = inspect.signature(method)
                 needs_fixtures = any(
-                    p.default is inspect.Parameter.empty and
-                    p.name not in ("self",)
+                    p.default is inspect.Parameter.empty and p.name not in ("self",)
                     for p in sig.parameters.values()
                 )
                 if needs_fixtures:
-                    print(f"  ⏭️  пропущен (требует pytest fixtures)")
+                    print("  ⏭️  пропущен (требует pytest fixtures)")
                     continue
                 method(instance)
                 passed += 1
-                print(f"  ✅ PASS")
+                print("  ✅ PASS")
             except AssertionError as e:
                 print(f"  ❌ FAIL: {e}")
                 failed += 1

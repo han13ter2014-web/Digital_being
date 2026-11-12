@@ -7,6 +7,7 @@
 лимит редакций → честное «оставить с причиной», чекпоинт переживает
 рестарт.
 """
+
 import wave
 from pathlib import Path
 
@@ -82,10 +83,16 @@ def test_seed_is_deterministic(tmp_path):
     one = music_step(None, mood="sadness", theme="дорога", workspace=workspace)
     other_dir = tmp_path / "elsewhere"
     other_dir.mkdir()
-    two = music_step(None, mood="sadness", theme="дорога",
-                     workspace=ActivityWorkspace(root=other_dir))
+    two = music_step(
+        None,
+        mood="sadness",
+        theme="дорога",
+        workspace=ActivityWorkspace(root=other_dir),
+    )
     assert one["sha256"] == two["sha256"]
-    assert _compose_score("дорога", "sadness", 1) == _compose_score("дорога", "sadness", 1)
+    assert _compose_score("дорога", "sadness", 1) == _compose_score(
+        "дорога", "sadness", 1
+    )
 
 
 def test_mood_changes_character(tmp_path):
@@ -153,7 +160,9 @@ def test_notation_is_human_readable(tmp_path):
     text = music_notation(state)
     assert isinstance(text, str) and text
     # Есть имена нот и границы тактов.
-    assert "|" in text or any(name[:1] in text for name in ("C", "D", "E", "F", "G", "A", "B"))
+    assert "|" in text or any(
+        name[:1] in text for name in ("C", "D", "E", "F", "G", "A", "B")
+    )
 
 
 # ----------------------------------------------------------------------
@@ -246,9 +255,13 @@ def test_compose_music_availability():
     assert agent._is_action_available("compose_music")
     # Работа на лимите и без места в папке — недоступно.
     agent._music_work = {
-        "id": "0" * 32, "theme": "тема", "mood": "calm",
-        "revision": MUSIC_LIMIT, "status": "active",
-        "sha256": "0" * 64, "score": [],
+        "id": "0" * 32,
+        "theme": "тема",
+        "mood": "calm",
+        "revision": MUSIC_LIMIT,
+        "status": "active",
+        "sha256": "0" * 64,
+        "score": [],
     }
     root = Path(data_path("delamain", "workspace", "creative"))
     created = []

@@ -1,9 +1,10 @@
 """Детерминированные read-only мосты от вопроса к сохранённой памяти.
 
-K13: запись знания и умение ответить о нём не должны быть разорваны.
+Запись знания и умение ответить о нём не должны быть разорваны.
 Здесь нет генерации и новых вычислений смысла: только извлечение темы,
 осторожное совпадение словоформ и цитирование уже существующих записей.
 """
+
 from __future__ import annotations
 
 import re
@@ -21,16 +22,24 @@ _TOPIC_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"^(?:расскажи|объясни)(?:\s+мне)?\s+"
-        r"(?:про|о|об|обо)\s+(?P<topic>.+)$",
+        r"^(?:расскажи|объясни)(?:\s+мне)?\s+" r"(?:про|о|об|обо)\s+(?P<topic>.+)$",
         re.IGNORECASE,
     ),
 )
 
 _WORD_RE = re.compile(r"[а-яёa-z0-9]+", re.IGNORECASE)
 _NAME_FACT_MARKERS = (
-    "помнишь", "выбрала", "выбрал", "когда", "почему", "зачем",
-    "дата", "вчера", "сегодня", "назвала", "назвал",
+    "помнишь",
+    "выбрала",
+    "выбрал",
+    "когда",
+    "почему",
+    "зачем",
+    "дата",
+    "вчера",
+    "сегодня",
+    "назвала",
+    "назвал",
 )
 _USER_FACT_MARKERS = ("обо мне", "про меня", "обо мне ты", "про меня ты")
 _USER_FACT_VERBS = ("знаешь", "помнишь", "записала", "запомнила", "хранишь")
@@ -66,13 +75,54 @@ def _stem(word: str) -> str:
     if len(word) < 5:
         return word
     suffixes = (
-        "ирования", "ированию", "ированием", "ировании", "ирование",
-        "ениями", "ением", "ения", "ению", "ении", "ение",
-        "овать", "ировать", "евать", "ывать", "ивать",
-        "ать", "ять", "еть", "ить", "уть", "ыть",
-        "ами", "ями", "ого", "его", "ому", "ему", "ыми", "ими",
-        "ая", "яя", "ые", "ие", "ой", "ей", "ым", "им",
-        "а", "я", "ы", "и", "у", "ю", "е", "о", "й", "ь",
+        "ирования",
+        "ированию",
+        "ированием",
+        "ировании",
+        "ирование",
+        "ениями",
+        "ением",
+        "ения",
+        "ению",
+        "ении",
+        "ение",
+        "овать",
+        "ировать",
+        "евать",
+        "ывать",
+        "ивать",
+        "ать",
+        "ять",
+        "еть",
+        "ить",
+        "уть",
+        "ыть",
+        "ами",
+        "ями",
+        "ого",
+        "его",
+        "ому",
+        "ему",
+        "ыми",
+        "ими",
+        "ая",
+        "яя",
+        "ые",
+        "ие",
+        "ой",
+        "ей",
+        "ым",
+        "им",
+        "а",
+        "я",
+        "ы",
+        "и",
+        "у",
+        "ю",
+        "е",
+        "о",
+        "й",
+        "ь",
     )
     for suffix in suffixes:
         if word.endswith(suffix) and len(word) - len(suffix) >= 4:
@@ -87,7 +137,7 @@ def _roots(text) -> tuple:
 def _matched_name(topic: str, names) -> Optional[str]:
     names = [str(name) for name in names if str(name).strip()]
     normalized = _normalize(topic)
-    exact = { _normalize(name): name for name in names }
+    exact = {_normalize(name): name for name in names}
     if normalized in exact:
         return exact[normalized]
     wanted = _roots(topic)
@@ -121,13 +171,18 @@ def build_known_topic_reply(agent, text) -> Optional[str]:
     node = concepts.get(matched) if isinstance(concepts, dict) else None
     if node is None and isinstance(concepts, dict):
         node = next(
-            (value for key, value in concepts.items() if _normalize(key) == _normalize(matched)),
+            (
+                value
+                for key, value in concepts.items()
+                if _normalize(key) == _normalize(matched)
+            ),
             None,
         )
     if node is not None:
         testimony = next(
             (
-                exp for exp in reversed(getattr(node, "experiences", []) or [])
+                exp
+                for exp in reversed(getattr(node, "experiences", []) or [])
                 if isinstance(exp, dict)
                 and exp.get("evidence_kind") == "testimony"
                 and str(exp.get("outcome") or "").strip()
@@ -143,7 +198,11 @@ def build_known_topic_reply(agent, text) -> Optional[str]:
         raw = definitions.get(matched)
         if raw is None:
             raw = next(
-                (value for key, value in definitions.items() if _normalize(key) == _normalize(matched)),
+                (
+                    value
+                    for key, value in definitions.items()
+                    if _normalize(key) == _normalize(matched)
+                ),
                 "",
             )
         definition = " ".join(str(raw or "").split())
@@ -166,7 +225,9 @@ def _capabilities_reply() -> str:
 
 
 def _name_fact_reply(agent, normalized: str) -> Optional[str]:
-    if "имя" not in normalized or not any(marker in normalized for marker in _NAME_FACT_MARKERS):
+    if "имя" not in normalized or not any(
+        marker in normalized for marker in _NAME_FACT_MARKERS
+    ):
         return None
     name = str(getattr(agent, "name", "") or "").strip()
     if not name:
@@ -177,14 +238,17 @@ def _name_fact_reply(agent, normalized: str) -> Optional[str]:
         history = naming.get_name_history()
     latest = next(
         (
-            entry for entry in reversed(history)
+            entry
+            for entry in reversed(history)
             if isinstance(entry, dict) and str(entry.get("new_name") or "") == name
         ),
         None,
     )
     parts = [f"Я помню: моё имя — {name}, оно сохранено в моём состоянии."]
     if latest is None:
-        parts.append("Записи о дате и причине выбора у меня нет — не буду их выдумывать.")
+        parts.append(
+            "Записи о дате и причине выбора у меня нет — не буду их выдумывать."
+        )
         return " ".join(parts)
 
     cycle = latest.get("cycle", latest.get("at_cycle"))
@@ -198,7 +262,11 @@ def _name_fact_reply(agent, normalized: str) -> Optional[str]:
         parts.append("В истории имени сохранены " + ", ".join(record_bits) + ".")
 
     date = next(
-        (latest[key] for key in ("timestamp", "datetime", "date", "chosen_at") if latest.get(key)),
+        (
+            latest[key]
+            for key in ("timestamp", "datetime", "date", "chosen_at")
+            if latest.get(key)
+        ),
         None,
     )
     reason = str(latest.get("reason") or "").strip()
@@ -224,13 +292,15 @@ def _user_fact_reply(agent, normalized: str) -> Optional[str]:
     facts = []
     traits = getattr(user_model, "traits", None)
     if isinstance(traits, dict):
-        facts.extend(str(value).strip() for value in traits.values() if str(value).strip())
+        facts.extend(
+            str(value).strip() for value in traits.values() if str(value).strip()
+        )
     promises = getattr(user_model, "promises", None)
     if isinstance(promises, dict):
         facts.extend(
             str(entry.get("text") or "").strip()
-            for entry in promises.values() if isinstance(entry, dict)
-            and str(entry.get("text") or "").strip()
+            for entry in promises.values()
+            if isinstance(entry, dict) and str(entry.get("text") or "").strip()
         )
     facts = list(dict.fromkeys(facts))
     if not facts:

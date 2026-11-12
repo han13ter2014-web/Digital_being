@@ -149,7 +149,7 @@ class DialogueLearning:
         return phrase
 
     def immediate_candidate(self, text, cycle: int = 0) -> Optional[str]:
-        """Фраза для уточнения с первого входа (K13), без автообучения.
+        """Фраза для уточнения с первого входа, без автообучения.
 
         Порог повторов в ``observe`` остаётся прежним и нужен старому
         контуру. Здесь проверяются только запреты и кулдаун: категорию
@@ -201,7 +201,11 @@ class DialogueLearning:
         """
         entry = self.buffer.get(phrase, {})
         count = int(entry.get("count", 1))
-        displayed = phrase if len(phrase) <= PHRASE_MAX_LEN else phrase[: PHRASE_MAX_LEN - 1] + "…"
+        displayed = (
+            phrase
+            if len(phrase) <= PHRASE_MAX_LEN
+            else phrase[: PHRASE_MAX_LEN - 1] + "…"
+        )
         return {
             "question": (
                 f"Ты уже {count} раз(а) говоришь «{displayed}», а я этого "

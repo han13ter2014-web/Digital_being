@@ -35,7 +35,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Optional
 
 logger = logging.getLogger("app.main")
 
@@ -78,9 +78,7 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     parser.add_argument(
         "--new", action="store_true", help="Начать новую жизнь без чекпоинта"
     )
-    parser.add_argument(
-        "--seed", default=None, help="Имя папки семени в Яслях"
-    )
+    parser.add_argument("--seed", default=None, help="Имя папки семени в Яслях")
     parser.add_argument(
         "--maturity",
         action="store_true",
@@ -96,14 +94,26 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
         action="store_true",
         help="Не восстанавливать из чекпоинта",
     )
-    parser.add_argument("--stimuli", choices=("quiet", "pool"), default="quiet",
-                        help="quiet — без искусственных вопросов; pool — лабораторный пул")
-    parser.add_argument("--web-port", type=int, default=8765,
-                        help="Локальный веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)")
-    parser.add_argument("--no-web", action="store_true",
-                        help="Не запускать локальный веб рядом с Tk")
-    parser.add_argument("--no-web-open", action="store_true",
-                        help="Запустить веб, но не открывать браузер автоматически")
+    parser.add_argument(
+        "--stimuli",
+        choices=("quiet", "pool"),
+        default="quiet",
+        help="quiet — без искусственных вопросов; pool — лабораторный пул",
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=8765,
+        help="Локальный веб рядом с Tk на 127.0.0.1 (по умолчанию 8765)",
+    )
+    parser.add_argument(
+        "--no-web", action="store_true", help="Не запускать локальный веб рядом с Tk"
+    )
+    parser.add_argument(
+        "--no-web-open",
+        action="store_true",
+        help="Запустить веб, но не открывать браузер автоматически",
+    )
     # Совместимость с прежним main_tray.py
     parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-tray", action="store_true", help=argparse.SUPPRESS)
@@ -157,7 +167,9 @@ class Runtime:
 
     def start(self, speed_mode: str) -> None:
         self._thread = threading.Thread(
-            target=self._run, args=(speed_mode,), daemon=True,
+            target=self._run,
+            args=(speed_mode,),
+            daemon=True,
             name="agent-loop",
         )
         self._thread.start()
@@ -191,9 +203,12 @@ class Runtime:
         from src.ui.web_dashboard import CONTROL_EVENTS, DIALOGUE_EVENTS
 
         for name in (*DIALOGUE_EVENTS, *CONTROL_EVENTS):
+
             async def on_event(event, event_name=name) -> None:
                 self.dashboard.publish_event(
-                    event_name, event.data, source=event.source,
+                    event_name,
+                    event.data,
+                    source=event.source,
                     timestamp=event.timestamp,
                 )
 
@@ -260,19 +275,23 @@ class Runtime:
             asyncio.create_task(self.runner.run_forever(), name="AgentRunner"),
         ]
         if self.window is not None or self.dashboard is not None:
-            tasks.append(
-                asyncio.create_task(self._status_loop(), name="StatusLoop")
-            )
+            tasks.append(asyncio.create_task(self._status_loop(), name="StatusLoop"))
 
         shutdown_task = asyncio.create_task(self.shutdown.wait(), name="ShutdownWait")
         try:
-            done, _ = await asyncio.wait([*tasks, shutdown_task], return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(
+                [*tasks, shutdown_task], return_when=asyncio.FIRST_COMPLETED
+            )
             for task in done:
                 if task is not shutdown_task and not task.cancelled():
                     exception = task.exception()
                     if exception is not None:
                         self.error = str(exception)
-                        logger.error("Задача %s завершилась ошибкой: %s", task.get_name(), exception)
+                        logger.error(
+                            "Задача %s завершилась ошибкой: %s",
+                            task.get_name(),
+                            exception,
+                        )
         finally:
             self.shutdown.set()
             shutdown_task.cancel()
@@ -421,7 +440,8 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         ask = choose_life
 
     expected_life_id = (
-        None if args.name or args.new or args.seed or args.no_restore
+        None
+        if args.name or args.new or args.seed or args.no_restore
         else selected_life_id(env.data_root)
     )
     name = resolve_startup_name(

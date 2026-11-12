@@ -1,13 +1,13 @@
-"""TICKET-8/9: цели без мусора, дела — не только отдых.
+"""Цели без мусора, дела — не только отдых.
 
-TICKET-8 (наблюдатели 2026-11-05): среди живых целей всплыли
+В наблюдениях 2026-11-05 среди живых целей всплыли
 «Понять: 🙂🙂🙂», «Понять: ты», «Понять: теминг тест» — шум диалога
 старых сессий осел в концепциях и выбирался целями исследования.
 Теперь выбор цели требует осмысленной темы (≥2 букв, не одни
 местоимения), а дедупликация целей идёт по нормализованному тексту.
 
-TICKET-9: за 7115 циклов music_works=0, web_browses=0 — гипотеза
-наблюдателей: циклы съедал вечный отдых (TICKET-3). После фикса
+За 7115 циклов music_works=0, web_browses=0 — гипотеза
+наблюдателей: циклы съедал вечный отдых. После фикса
 отдыха проверяем симуляцией 200 циклов тишины на живом
 ``autonomous_tick``: хотя бы одно не-игровое дело (музыка, веб,
 синтез, исследование) должно быть выбрано и исполнено.
@@ -21,8 +21,9 @@ from src.core.agent import DigitalBeing
 
 
 # ============================================================
-# TICKET-8: фильтр осмысленности темы
+# Фильтр осмысленности темы
 # ============================================================
+
 
 @pytest.mark.parametrize(
     "topic,expected",
@@ -60,9 +61,7 @@ def _fill_concepts(agent, names, *, clear=False):
     if clear:
         agent.mental_models.concepts.clear()
     for name in names:
-        agent.mental_models.encounter_concept(
-            name, "контекст", "исход", source="test"
-        )
+        agent.mental_models.encounter_concept(name, "контекст", "исход", source="test")
 
 
 def _empty_pool(monkeypatch):
@@ -109,7 +108,7 @@ def test_own_goal_refuses_noise_target(monkeypatch):
 
 
 def test_own_goal_dedup_normalizes_whitespace():
-    """«Понять:  истина» и «Понять: истина» — одна цель (TICKET-8)."""
+    """«Понять:  истина» и «Понять: истина» — одна цель после нормализации."""
     agent = DigitalBeing(name="DedupGoal")
     agent.set_goal("Понять:  истина", difficulty=1)
 
@@ -122,21 +121,27 @@ def test_own_goal_dedup_normalizes_whitespace():
 
 
 # ============================================================
-# TICKET-9 + приёмка TICKET-8: 200 циклов тишины на живом цикле
+# Работа после отдыха и чистота целей: 200 циклов тишины на живом цикле
 # ============================================================
 
 # Не-игровые дела из критерия приёмки: музыка, веб, синтез — плюс
 # исследовательская работа (explore/synthesis/hypothesis/decomposition).
 _NON_GAME_ACTIONS = {
-    "compose_music", "browse_web", "web_search", "read_news",
-    "synthesis", "hypothesis", "explore", "decomposition",
+    "compose_music",
+    "browse_web",
+    "web_search",
+    "read_news",
+    "synthesis",
+    "hypothesis",
+    "explore",
+    "decomposition",
 }
 
 
 def test_silence_200_cycles_work_happens_and_goals_stay_clean():
-    """TICKET-9: после фикса отдыха циклы не съедаются сном целиком —
+    """После фикса отдыха циклы не съедаются сном целиком —
     за 200 циклов тишины хотя бы одно не-игровое дело исполнено.
-    Приёмка TICKET-8: ни одной цели с эмодзи/одиночными символами."""
+    Проверка фильтра: ни одной цели с эмодзи/одиночными символами."""
     random.seed(20261105)
     agent = DigitalBeing(name="SilenceSim")
     # Материал для любопытства: немного неуверенных тем, включая мусор
@@ -156,7 +161,7 @@ def test_silence_200_cycles_work_happens_and_goals_stay_clean():
         agent.cycle_count += 1
         agent.autonomous_tick()
 
-    # TICKET-9: хотя бы одно не-игровое дело за 200 циклов тишины.
+    # Хотя бы одно не-игровое дело за 200 циклов тишины.
     non_game = [a for a in performed if a in _NON_GAME_ACTIONS]
     assert non_game, (
         "за 200 циклов тишины ни одного не-игрового дела — "
@@ -164,7 +169,7 @@ def test_silence_200_cycles_work_happens_and_goals_stay_clean():
         "нужно смотреть механику выбора"
     )
 
-    # TICKET-8: ноль целей с эмодзи/одиночными символами.
+    # Ноль целей с эмодзи/одиночными символами.
     titles = [str(g.get("title", "")) for g in agent.goals]
     for title in titles:
         assert "🙂" not in title

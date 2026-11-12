@@ -15,15 +15,32 @@ def _agent_with_memory():
 
 
 def _result(status="succeeded", *, intention_id="", ok=True, error=None):
-    return {"status": status, "request_id": "req-1", "ok": ok, "error": error,
-            "detail": {"activity": "creative", "metadata": {
-                "intention_id": intention_id, "target": "память", "core_cycle": 4}}}
+    return {
+        "status": status,
+        "request_id": "req-1",
+        "ok": ok,
+        "error": error,
+        "detail": {
+            "activity": "creative",
+            "metadata": {
+                "intention_id": intention_id,
+                "target": "память",
+                "core_cycle": 4,
+            },
+        },
+    }
 
 
 def test_terminal_success_finishes_linked_intention_and_records_once():
     agent, memory = _agent_with_memory()
-    entry = begin_intention(agent, {"action": "create_draft", "source": "activity",
-                                    "params": {"topic": "память", "reason": "интерес"}})
+    entry = begin_intention(
+        agent,
+        {
+            "action": "create_draft",
+            "source": "activity",
+            "params": {"topic": "память", "reason": "интерес"},
+        },
+    )
 
     agent._on_effector_result(_result(intention_id=entry["id"]))
 
@@ -43,8 +60,9 @@ def test_failure_finishes_linked_intention_as_error():
     agent, memory = _agent_with_memory()
     entry = begin_intention(agent, {"action": "create_draft", "params": {"topic": "x"}})
 
-    agent._on_effector_result(_result("failed", intention_id=entry["id"], ok=False,
-                                      error="sandbox stopped"))
+    agent._on_effector_result(
+        _result("failed", intention_id=entry["id"], ok=False, error="sandbox stopped")
+    )
 
     assert entry["status"] == "error"
     assert "sandbox stopped" in entry["outcome"]["error"]
@@ -56,8 +74,9 @@ def test_rejection_finishes_linked_intention_as_denied():
     agent, memory = _agent_with_memory()
     entry = begin_intention(agent, {"action": "create_draft", "params": {"topic": "x"}})
 
-    agent._on_effector_result(_result("rejected", intention_id=entry["id"], ok=False,
-                                      error="не сейчас"))
+    agent._on_effector_result(
+        _result("rejected", intention_id=entry["id"], ok=False, error="не сейчас")
+    )
 
     assert entry["status"] == "denied"
     assert entry["outcome"]["result_status"] == "rejected"
@@ -76,7 +95,9 @@ def test_queued_result_does_not_close_intention():
     agent, memory = _agent_with_memory()
     entry = begin_intention(agent, {"action": "create_draft", "params": {"topic": "x"}})
 
-    agent._on_effector_result(_result("waiting_approval", intention_id=entry["id"], ok=False))
+    agent._on_effector_result(
+        _result("waiting_approval", intention_id=entry["id"], ok=False)
+    )
 
     assert entry["status"] == "started"
     assert memory.record_life_episode.call_count == 0

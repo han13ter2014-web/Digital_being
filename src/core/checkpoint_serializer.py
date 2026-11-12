@@ -40,10 +40,12 @@ checkpoint_serializer.py — сериализация/десериализаци
     state = CheckpointSerializer.load(checkpoint_path)
     apply_state_to_agent(agent, state)
 """
+
 from __future__ import annotations
 
 from copy import deepcopy
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -61,11 +63,16 @@ logger = logging.getLogger(__name__)
 
 class CheckpointCorruptedError(Exception):
     """Raised when checkpoint file is corrupted (disk error, bit rot, truncation).
-    
+
     This is DIFFERENT from structural drift - the agent's state has evolved normally,
     but the saved file itself is unreadable or invalid.
     """
+
     pass
+
+
+class CheckpointMirrorError(RuntimeError):
+    """Диагностическое SQLite-зеркало не прошло проверку после записи."""
 
 
 # ============================================================
@@ -88,13 +95,25 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
     """
     from src.core.checkpoint_migrations import SCHEMA_VERSION
     from src.core.personal_continuity import capture_personal_state
+    from src.core.auxiliary_adapters import capture_cooperation
     from src.cognition.inference_continuity import capture_inference
+    from src.cognition.experience_observers import meta_cognition_checkpoint
+    from src.cognition.integrated_experience import capture_integrated_experience
 
     return {
         "personal_state": capture_personal_state(agent),
+        "meta_cognition": meta_cognition_checkpoint(agent),
+        "integrated_experience": capture_integrated_experience(agent),
+        "cooperation": capture_cooperation(agent),
         "active_inference": (
             capture_inference(agent.active_inference)
-            if getattr(agent, "active_inference", None) is not None else None
+            if getattr(agent, "active_inference", None) is not None
+            else None
+        ),
+        **(
+            {"internal_simulation": agent.internal_simulator.to_checkpoint_dict()}
+            if getattr(agent, "internal_simulator", None) is not None
+            else {}
         ),
         "schema_version": SCHEMA_VERSION,
         **({"life_id": agent.life_id} if getattr(agent, "life_id", None) else {}),
@@ -106,7 +125,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         # mind/mental_models.json — экспорт, а не источник поверх чекпоинта.
         "mental_models": (
             agent.mental_models.to_storage_dict()
-            if getattr(agent, "mental_models", None) is not None else None
+            if getattr(agent, "mental_models", None) is not None
+            else None
         ),
         "intelligence": agent.intelligence,
         "completed_goals": agent.completed_goals,
@@ -148,7 +168,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         # сущность забывает обещания («не переживай, если молчу»).
         "user_model": (
             agent.user_model.to_dict()
-            if getattr(agent, "user_model", None) is not None else None
+            if getattr(agent, "user_model", None) is not None
+            else None
         ),
         # «Собеседник-3»: штампы «тема объяснена пользователем в цикле N».
         # После рестарта сущность не переспрашивает объяснённое.
@@ -157,9 +178,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         # «Собеседник-4»: темы, уже рассказанные человеку, — после
         # рестарта сущность не начинает повторяться.
-        "shared_topics": dict(
-            getattr(agent, "_shared_topics", {}) or {}
-        ),
+        "shared_topics": dict(getattr(agent, "_shared_topics", {}) or {}),
         # «Собеседник»: диалоговое состояние — история вопросов-ответов
         # и ожидающие вопросы с полями цепочек сложных вопросов. Без
         # них после рестарта сущность забывает разговор, а синтез
@@ -185,7 +204,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             else None
         ),
         # NEW: Интероцепция
-        "interoception": getattr(agent, 'interoception', None) and {
+        "interoception": getattr(agent, "interoception", None)
+        and {
             "glucose": agent.interoception.state.glucose,
             "atp": agent.interoception.state.atp,
             "mitochondrial_health": agent.interoception.state.mitochondrial_health,
@@ -193,27 +213,37 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             "action_cost_multiplier": agent.interoception.state.action_cost_multiplier,
             "cognitive_throughput": agent.interoception.state.cognitive_throughput,
             "exploration_drive": agent.interoception.state.exploration_drive,
-        } or {},
+        }
+        or {},
         # NEW: Непрерывное время
-        "continuous_time": getattr(agent, 'continuous_time', None) and {
+        "continuous_time": getattr(agent, "continuous_time", None)
+        and {
             "total_objective_time": agent.continuous_time.total_objective_time,
             "total_subjective_time": agent.continuous_time.total_subjective_time,
             "subjective_time_dilation": agent.continuous_time.subjective_time.dilation,
-        } or {},
+        }
+        or {},
         # NEW: Мета-обучение
-        "meta_learning": getattr(agent, 'meta_learner', None) and {
+        "meta_learning": getattr(agent, "meta_learner", None)
+        and {
             "current_config": agent.meta_learner._get_current_config(),
-            "current_fitness": agent.meta_learner.fitness_history[-1] if agent.meta_learner.fitness_history else 0.0,
+            "current_fitness": agent.meta_learner.fitness_history[-1]
+            if agent.meta_learner.fitness_history
+            else 0.0,
+            "fitness_history": list(agent.meta_learner.fitness_history),
             "best_config": agent.meta_learner.best_config,
             "best_fitness": (
                 agent.meta_learner.best_fitness
-                if agent.meta_learner.best_fitness != float("-inf") else None
+                if agent.meta_learner.best_fitness != float("-inf")
+                else None
             ),
             "population": agent.meta_learner.population,
             "cycle_counter": agent.meta_learner.cycle_counter,
-        } or {},
+        }
+        or {},
         # NEW: Социальная клеточка
-        "social_cell": getattr(agent, 'social_cell', None) and {
+        "social_cell": getattr(agent, "social_cell", None)
+        and {
             "agent_models": {
                 agent_id: {
                     "agent_id": model.agent_id,
@@ -230,9 +260,11 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             },
             "self_model_as_seen_by_others": agent.social_cell.self_model_as_seen_by_others,
             "current_tom_level": int(agent.social_cell.current_tom_level),
-        } or {},
+        }
+        or {},
         # NEW: Риск смерти
-        "death_risk": getattr(agent, 'death_risk', None) and {
+        "death_risk": getattr(agent, "death_risk", None)
+        and {
             "cognitive_coherence": agent.death_risk.integrity.cognitive_coherence,
             "memory_consistency": agent.death_risk.integrity.memory_consistency,
             "value_stability": agent.death_risk.integrity.value_stability,
@@ -252,9 +284,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
                 }
                 for cp in agent.death_risk.integrity.checkpoints[-5:]  # последние 5
             ],
-        } or {},
+        }
+        or {},
         # NEW: Unified Motivation (needs + drives)
-        "motivation": getattr(agent, 'motivation_system', None) and agent.motivation_system.to_checkpoint_dict() or {},
+        "motivation": getattr(agent, "motivation_system", None)
+        and agent.motivation_system.to_checkpoint_dict()
+        or {},
         # Замыкание петли: тупики не должны исчезать после рестарта,
         # иначе агент снова начнёт повторять бесполезное действие.
         "loop_closure": (
@@ -275,13 +310,15 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "waiting_intentions": deepcopy(getattr(agent, "_waiting_intentions", {})),
         "method_preferences": deepcopy(getattr(agent, "_method_preferences", {})),
         "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
-        "pending_user_messages": list(getattr(agent, "_pending_message_texts", []) or []),
-        "deferred_stimulus": getattr(agent, "_deferred_stimulus", None),
-        "method_information_context": getattr(agent, "_method_information_context", None),
-        "last_experiment_cycle": getattr(agent, "_last_experiment_cycle", None),
-        "exploration_history": list(
-            getattr(agent, "_exploration_history", [])[-200:]
+        "pending_user_messages": list(
+            getattr(agent, "_pending_message_texts", []) or []
         ),
+        "deferred_stimulus": getattr(agent, "_deferred_stimulus", None),
+        "method_information_context": getattr(
+            agent, "_method_information_context", None
+        ),
+        "last_experiment_cycle": getattr(agent, "_last_experiment_cycle", None),
+        "exploration_history": list(getattr(agent, "_exploration_history", [])[-200:]),
         # Отметки рождения: без них после рестарта нельзя отличить
         # нажитое от родового, и оценка зрелости станет невозможной.
         "birth_concepts": getattr(agent, "_birth_concepts", None),
@@ -324,12 +361,46 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # Фаза 1: разбор и валидация. Ни одного присваивания агенту.
     # ================================================================
     validate_checkpoint_state(state)
+    from src.cognition.internal_simulator import InternalSimulator
+
+    staged_internal_simulation = state.get("internal_simulation")
+    if staged_internal_simulation is None:
+        staged_internal_simulation = InternalSimulator().to_checkpoint_dict()
+    else:
+        InternalSimulator.validate_checkpoint_dict(staged_internal_simulation)
+        staged_internal_simulation = deepcopy(staged_internal_simulation)
+    staged_meta_cognition = deepcopy(state.get("meta_cognition") or {})
+    from src.cognition.integrated_experience import (
+        stage_integrated_experience,
+        validate_integrated_experience,
+    )
+    from src.cognition.agent_cooperation import (
+        AgentCooperationHub,
+        validate_cooperation_checkpoint,
+    )
+
+    integrated_state = state.get("integrated_experience") or {}
+    if integrated_state:
+        validate_integrated_experience(integrated_state)
+    staged_integrated_experience = stage_integrated_experience(
+        integrated_state, agent.name
+    )
+    cooperation_state = state.get("cooperation") or {}
+    if cooperation_state:
+        validate_cooperation_checkpoint(cooperation_state)
+        staged_cooperation = AgentCooperationHub.from_checkpoint(
+            deepcopy(cooperation_state)
+        )
+    else:
+        staged_cooperation = AgentCooperationHub()
     inference_data = state.get("active_inference")
     if inference_data is not None:
         from src.cognition.inference_continuity import validate_inference
 
         if getattr(agent, "active_inference", None) is None:
-            raise ValueError("active_inference: подсистема недоступна для восстановления")
+            raise ValueError(
+                "active_inference: подсистема недоступна для восстановления"
+            )
         validate_inference(inference_data, agent.active_inference)
     saved_models = state.get("mental_models")
     restored_nodes = None
@@ -391,24 +462,28 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     if "open_questions" in state and hasattr(agent, "_open_questions"):
         staged_questions = []
         for q_data in state.get("open_questions") or []:
-            staged_questions.append({
-                "text": q_data.get("text", ""),
-                "source": q_data.get("source", "user"),
-                "started_at": q_data.get("started_at", default_cycle),
-                "last_explored_at": q_data.get("last_explored_at", default_cycle),
-                "explorations": [dict(entry) for entry in q_data.get("explorations", [])],
-                "max_explorations": q_data.get("max_explorations", 5),
-                "hint": q_data.get("hint"),
-                "answered": q_data.get("answered", False),
-                "answer": q_data.get("answer"),
-            })
+            staged_questions.append(
+                {
+                    "text": q_data.get("text", ""),
+                    "source": q_data.get("source", "user"),
+                    "started_at": q_data.get("started_at", default_cycle),
+                    "last_explored_at": q_data.get("last_explored_at", default_cycle),
+                    "explorations": [
+                        dict(entry) for entry in q_data.get("explorations", [])
+                    ],
+                    "max_explorations": q_data.get("max_explorations", 5),
+                    "hint": q_data.get("hint"),
+                    "answered": q_data.get("answered", False),
+                    "answer": q_data.get("answer"),
+                }
+            )
 
     # Социальная клеточка: ToMLevel может не принять мусорное значение —
     # строим все модели до мутаций.
     sc_state = state.get("social_cell", {})
     staged_social_models = None
     staged_social_tom = None
-    if sc_state and hasattr(agent, 'social_cell') and agent.social_cell:
+    if sc_state and hasattr(agent, "social_cell") and agent.social_cell:
         from src.core.social_cell import AgentModel, ToMLevel
 
         staged_social_models = {}
@@ -418,25 +493,35 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             model.believed_goals = model_data.get("believed_goals", {})
             model.believed_beliefs = model_data.get("believed_beliefs", {})
             model.believed_intentions = model_data.get("believed_intentions", {})
-            model.believed_emotional_state = model_data.get("believed_emotional_state", {})
+            model.believed_emotional_state = model_data.get(
+                "believed_emotional_state", {}
+            )
             model.believed_model_of_self = model_data.get("believed_model_of_self", {})
             model.model_precision = model_data.get("model_precision", 0.5)
-            model.interaction_history = deque(model_data.get("interaction_history", []), maxlen=200)
+            model.interaction_history = deque(
+                model_data.get("interaction_history", []), maxlen=200
+            )
             staged_social_models[agent_id] = model
         staged_social_tom = ToMLevel(sc_state.get("current_tom_level", 2))
 
     # Мотивация: собираем новый объект заранее — сборка может упасть.
     mot_state = state.get("motivation", {})
     staged_motivation = None
-    if mot_state and hasattr(agent, 'motivation_system') and agent.motivation_system:
+    if mot_state and hasattr(agent, "motivation_system") and agent.motivation_system:
         from src.core.motivation.unified_motivation import UnifiedMotivationSystem
 
-        staged_motivation = UnifiedMotivationSystem.from_checkpoint_dict(agent, mot_state)
+        staged_motivation = UnifiedMotivationSystem.from_checkpoint_dict(
+            agent, mot_state
+        )
 
     # ================================================================
     # Фаза 2: применение. Только присваивания и in-place restore.
     # ================================================================
-    for marker in ("_last_soul_tick_cycle", "_last_will_tick_cycle", "_last_communication_tick_cycle"):
+    for marker in (
+        "_last_soul_tick_cycle",
+        "_last_will_tick_cycle",
+        "_last_communication_tick_cycle",
+    ):
         if hasattr(agent, marker):
             setattr(agent, marker, None)
     # Прежняя незавершённая попытка не является наблюдением. Следующее
@@ -465,6 +550,25 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             # и другие подсистемы, созданные при рождении агента.
             if getattr(agent.long_term_memory, "life_id", None) != agent.life_id:
                 agent.long_term_memory.rebind(agent.life_id)
+            life_guard = getattr(agent, "life_guard", None)
+            if (
+                life_guard is not None
+                and getattr(life_guard, "life_id", None) != agent.life_id
+            ):
+                life_guard.rebind(agent.life_id)
+            proposals = getattr(agent, "architecture_proposal", None)
+            if (
+                proposals is not None
+                and hasattr(proposals, "rebind")
+                and (getattr(proposals, "life_id", None) != agent.life_id)
+            ):
+                proposals.rebind(agent.life_id)
+            delamain = getattr(agent, "delamain", None)
+            if (
+                delamain is not None
+                and getattr(delamain, "life_id", None) != agent.life_id
+            ):
+                delamain.bind_life(agent.life_id)
     if isinstance(state.get("name"), str):
         agent.name = state["name"]
     agent.energy = state.get("energy", 150)
@@ -508,6 +612,11 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # и не изучать ту же тему заново.
     if getattr(agent, "loop_closer", None) is not None:
         agent.loop_closer.restore_from_checkpoint(state.get("loop_closure"))
+    if getattr(agent, "internal_simulator", None) is not None:
+        agent.internal_simulator.restore_from_checkpoint(staged_internal_simulation)
+    from src.cognition.experience_observers import restore_meta_cognition
+
+    restore_meta_cognition(agent, staged_meta_cognition)
     from src.cognition.intention_history import restore_history
 
     agent._creative_catalog = deepcopy(state.get("creative_catalog", {}))
@@ -526,7 +635,12 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent._deferred_stimulus = state.get("deferred_stimulus")
     agent._method_information_context = state.get("method_information_context")
     last_experiment = state.get("last_experiment_cycle")
-    agent._last_experiment_cycle = last_experiment if isinstance(last_experiment, int) and 0 <= last_experiment <= agent.cycle_count else None
+    agent._last_experiment_cycle = (
+        last_experiment
+        if isinstance(last_experiment, int)
+        and 0 <= last_experiment <= agent.cycle_count
+        else None
+    )
     saved_history = state.get("exploration_history")
     if isinstance(saved_history, list):
         agent._exploration_history = [str(item) for item in saved_history]
@@ -580,9 +694,7 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
 
     # «Собеседник-3»: штампы объяснённых тем переживают рестарт.
     saved_explained = state.get("user_explained_topics")
-    if isinstance(saved_explained, dict) and hasattr(
-        agent, "_user_explained_topics"
-    ):
+    if isinstance(saved_explained, dict) and hasattr(agent, "_user_explained_topics"):
         restored = {}
         for topic, cycle in list(saved_explained.items())[:50]:
             if isinstance(cycle, (int, float)) and not isinstance(cycle, bool):
@@ -634,65 +746,108 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             get_logger().flush_immediate(
                 f"[OpenQ] Восстановлено {len(agent._open_questions)} открытых вопросов"
             )
-    
+
     # NEW: Восстанавливаем Интероцепцию
     intero_state = state.get("interoception", {})
-    if intero_state and hasattr(agent, 'interoception') and agent.interoception:
+    if intero_state and hasattr(agent, "interoception") and agent.interoception:
         s = agent.interoception.state
         s.glucose = intero_state.get("glucose", s.glucose)
         s.atp = intero_state.get("atp", s.atp)
-        s.mitochondrial_health = intero_state.get("mitochondrial_health", s.mitochondrial_health)
+        s.mitochondrial_health = intero_state.get(
+            "mitochondrial_health", s.mitochondrial_health
+        )
         s.fatigue = intero_state.get("fatigue", s.fatigue)
-        s.action_cost_multiplier = intero_state.get("action_cost_multiplier", s.action_cost_multiplier)
-        s.cognitive_throughput = intero_state.get("cognitive_throughput", s.cognitive_throughput)
+        s.action_cost_multiplier = intero_state.get(
+            "action_cost_multiplier", s.action_cost_multiplier
+        )
+        s.cognitive_throughput = intero_state.get(
+            "cognitive_throughput", s.cognitive_throughput
+        )
         s.exploration_drive = intero_state.get("exploration_drive", s.exploration_drive)
         # Пересчитываем производные величины без проживания ещё одного
         # такта: раньше здесь вызывался step(), и загрузка чекпоинта
         # тратила глюкозу и АТФ.
         agent.interoception._refresh_derived()
-    
+
     # NEW: Восстанавливаем Непрерывное время
     ct_state = state.get("continuous_time", {})
-    if ct_state and hasattr(agent, 'continuous_time') and agent.continuous_time:
-        agent.continuous_time.total_objective_time = ct_state.get("total_objective_time", 0.0)
-        agent.continuous_time.total_subjective_time = ct_state.get("total_subjective_time", 0.0)
-        if hasattr(agent.continuous_time, 'subjective_time'):
-            agent.continuous_time.subjective_time.dilation = ct_state.get("subjective_time_dilation", 1.0)
-    
+    if ct_state and hasattr(agent, "continuous_time") and agent.continuous_time:
+        agent.continuous_time.total_objective_time = ct_state.get(
+            "total_objective_time", 0.0
+        )
+        agent.continuous_time.total_subjective_time = ct_state.get(
+            "total_subjective_time", 0.0
+        )
+        if hasattr(agent.continuous_time, "subjective_time"):
+            agent.continuous_time.subjective_time.dilation = ct_state.get(
+                "subjective_time_dilation", 1.0
+            )
+
     # NEW: Восстанавливаем Мета-обучение
     ml_state = state.get("meta_learning", {})
-    if ml_state and hasattr(agent, 'meta_learner') and agent.meta_learner:
+    if ml_state and hasattr(agent, "meta_learner") and agent.meta_learner:
         # Применяем сохраненную конфигурацию к гиперпараметрам
         saved_config = ml_state.get("current_config", {})
         for name, value in saved_config.items():
             if name in agent.meta_learner.hyperparams:
                 agent.meta_learner.hyperparams[name].value = value
-        agent.meta_learner.best_config = ml_state.get("best_config", agent.meta_learner.best_config)
+        agent.meta_learner.best_config = ml_state.get(
+            "best_config", agent.meta_learner.best_config
+        )
         if ml_state.get("best_fitness") is not None:
             agent.meta_learner.best_fitness = ml_state["best_fitness"]
-        agent.meta_learner.population = ml_state.get("population", agent.meta_learner.population)
-        agent.meta_learner.cycle_counter = ml_state.get("cycle_counter", agent.meta_learner.cycle_counter)
-    
+        agent.meta_learner.population = ml_state.get(
+            "population", agent.meta_learner.population
+        )
+        if "fitness_history" in ml_state:
+            agent.meta_learner.fitness_history = deque(
+                ml_state["fitness_history"],
+                maxlen=agent.meta_learner.fitness_history.maxlen,
+            )
+        elif ml_state.get("current_fitness") is not None:
+            # Совместимость со старыми чекпоинтами: сохранить хотя бы
+            # последнее наблюдение, не выдумывая отсутствующую историю.
+            agent.meta_learner.fitness_history = deque(
+                [ml_state["current_fitness"]],
+                maxlen=agent.meta_learner.fitness_history.maxlen,
+            )
+        agent.meta_learner.cycle_counter = ml_state.get(
+            "cycle_counter", agent.meta_learner.cycle_counter
+        )
+
     # NEW: Восстанавливаем Социальную клеточку (модели собраны в фазе 1)
     if staged_social_models is not None:
         agent.social_cell.agent_models = staged_social_models
-        agent.social_cell.self_model_as_seen_by_others = sc_state.get("self_model_as_seen_by_others", {})
+        agent.social_cell.self_model_as_seen_by_others = sc_state.get(
+            "self_model_as_seen_by_others", {}
+        )
         agent.social_cell.current_tom_level = staged_social_tom
-    
+
     # NEW: Восстанавливаем Риск смерти
     dr_state = state.get("death_risk", {})
-    if dr_state and hasattr(agent, 'death_risk') and agent.death_risk:
+    if dr_state and hasattr(agent, "death_risk") and agent.death_risk:
         integ = agent.death_risk.integrity
-        integ.cognitive_coherence = dr_state.get("cognitive_coherence", integ.cognitive_coherence)
-        integ.memory_consistency = dr_state.get("memory_consistency", integ.memory_consistency)
+        integ.cognitive_coherence = dr_state.get(
+            "cognitive_coherence", integ.cognitive_coherence
+        )
+        integ.memory_consistency = dr_state.get(
+            "memory_consistency", integ.memory_consistency
+        )
         integ.value_stability = dr_state.get("value_stability", integ.value_stability)
-        integ.metabolic_viability = dr_state.get("metabolic_viability", integ.metabolic_viability)
-        integ.social_coherence = dr_state.get("social_coherence", integ.social_coherence)
-        integ.corruption_accumulator = dr_state.get("corruption_accumulator", integ.corruption_accumulator)
-        integ.last_checkpoint_step = dr_state.get("last_checkpoint_step", integ.last_checkpoint_step)
+        integ.metabolic_viability = dr_state.get(
+            "metabolic_viability", integ.metabolic_viability
+        )
+        integ.social_coherence = dr_state.get(
+            "social_coherence", integ.social_coherence
+        )
+        integ.corruption_accumulator = dr_state.get(
+            "corruption_accumulator", integ.corruption_accumulator
+        )
+        integ.last_checkpoint_step = dr_state.get(
+            "last_checkpoint_step", integ.last_checkpoint_step
+        )
         # Чекпоинты не восстанавливаем полностью - только хеши для верификации
         # Они будут пересозданы при следующих шагах
-
 
     # NEW: Unified Motivation (needs + drives) — объект собран в фазе 1
     if staged_motivation is not None:
@@ -706,6 +861,15 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         from src.core.personal_continuity import restore_personal_state
 
         restore_personal_state(agent, state["personal_state"])
+
+    # Наблюдатели применяются после канонических эмоций и ценностей:
+    # их производные проекции должны описывать именно восстановленную жизнь.
+    from src.cognition.integrated_experience import restore_integrated_experience
+    from src.core.auxiliary_adapters import restore_cooperation
+
+    restore_integrated_experience(agent, staged_integrated_experience)
+    restore_cooperation(agent, staged_cooperation)
+
 
 # ============================================================
 # Сериализатор (I/O)
@@ -736,6 +900,8 @@ class CheckpointSerializer:
         compress: bool = False,
         compress_level: int = 6,
         backend: str = "json",
+        sqlite_mirror_path: str = None,
+        sqlite_mirror_life_id: str = None,
     ) -> None:
         """
         Args:
@@ -743,14 +909,24 @@ class CheckpointSerializer:
             max_checkpoints: максимум файлов на диске.
             compress: использовать ли gzip-сжатие (Этап 5 оптимизации).
             compress_level: уровень сжатия 1-9 (по умолчанию 6 — хороший баланс).
+            sqlite_mirror_path: необязательная база диагностического зеркала.
+            sqlite_mirror_life_id: UUID жизни, которой принадлежит зеркало.
         """
         if backend not in {"json", "sqlite"}:
             raise ValueError("Неизвестный backend чекпоинтов")
+        if bool(sqlite_mirror_path) != bool(sqlite_mirror_life_id):
+            raise ValueError("Для SQLite-зеркала нужны путь и life_id")
+        if backend == "sqlite" and sqlite_mirror_path:
+            raise ValueError("SQLite backend не нуждается в SQLite-зеркале")
         self.backend = backend
         self.checkpoint_dir = checkpoint_dir or data_path("checkpoints")
         self.max_checkpoints = max_checkpoints
         self.compress = compress
         self.compress_level = max(1, min(9, compress_level))
+        self.sqlite_mirror_path = (
+            os.path.abspath(sqlite_mirror_path) if sqlite_mirror_path else None
+        )
+        self.sqlite_mirror_life_id = sqlite_mirror_life_id
 
     # ---------------- Сохранение ----------------
 
@@ -768,16 +944,41 @@ class CheckpointSerializer:
         with CheckpointSerializer._save_lock:
             return self._save_locked(state, agent_name, cycle_count)
 
-    def _save_locked(self, state: Dict[str, Any], agent_name: str, cycle_count: int) -> str:
+    def _save_locked(
+        self, state: Dict[str, Any], agent_name: str, cycle_count: int
+    ) -> str:
         """Тело ``save()`` под процессным lock (см. ``_save_lock``)."""
         if self.backend == "sqlite":
-            from src.memory.checkpoint_store import SQLiteCheckpointStore
-
-            database = os.path.abspath(os.path.join(self.checkpoint_dir, "life.sqlite3"))
-            snapshot_id = SQLiteCheckpointStore(database).save(
-                json.loads(json.dumps(state, ensure_ascii=False, allow_nan=False)),
-                agent_name, cycle_count, max_checkpoints=self.max_checkpoints,
+            normalized = json.loads(
+                json.dumps(state, ensure_ascii=False, allow_nan=False)
             )
+            database = os.path.abspath(
+                os.path.join(self.checkpoint_dir, "life.sqlite3")
+            )
+            from src.core.life_identity import validate_life_id
+
+            try:
+                life_id = validate_life_id(agent_name)
+            except ValueError:
+                life_id = None
+            if life_id is not None:
+                from src.memory.life_database import LifeDatabase
+
+                snapshot_id = LifeDatabase(database, life_id).save_checkpoint(
+                    normalized,
+                    cycle_count,
+                    max_checkpoints=self.max_checkpoints,
+                    saved_at=normalized.get("saved_at"),
+                )
+            else:
+                from src.memory.checkpoint_store import SQLiteCheckpointStore
+
+                snapshot_id = SQLiteCheckpointStore(database).save(
+                    normalized,
+                    agent_name,
+                    cycle_count,
+                    max_checkpoints=self.max_checkpoints,
+                )
             return f"{database}#snapshot={snapshot_id}"
         import tempfile
 
@@ -794,7 +995,12 @@ class CheckpointSerializer:
             ) as temporary_file:
                 temporary_path = temporary_file.name
             if self.compress:
-                with gzip.open(temporary_path, "wt", encoding="utf-8", compresslevel=self.compress_level) as f:
+                with gzip.open(
+                    temporary_path,
+                    "wt",
+                    encoding="utf-8",
+                    compresslevel=self.compress_level,
+                ) as f:
                     f.write(json_text)
             else:
                 with open(temporary_path, "w", encoding="utf-8") as f:
@@ -809,11 +1015,47 @@ class CheckpointSerializer:
                     pass
 
         self._prune_old_checkpoints(agent_name)
+        if self.sqlite_mirror_path is not None:
+            self._save_sqlite_mirror(state, cycle_count)
 
         get_logger().flush_immediate(
             f"Состояние сохранено: {os.path.basename(filename)}"
         )
         return filename
+
+    def _save_sqlite_mirror(self, state: Dict[str, Any], cycle_count: int) -> None:
+        """Записать копию и доказать round-trip хешем; JSON остаётся основным."""
+        from src.memory.life_database import LifeDatabase
+
+        normalized = json.loads(json.dumps(state, ensure_ascii=False, allow_nan=False))
+        database = LifeDatabase(self.sqlite_mirror_path, self.sqlite_mirror_life_id)
+        snapshot_id = database.checkpoints.save(
+            normalized,
+            self.sqlite_mirror_life_id,
+            cycle_count,
+            max_checkpoints=self.max_checkpoints,
+            saved_at=normalized.get("saved_at"),
+        )
+        database.set_meta("latest_snapshot_id", snapshot_id)
+        restored = database.checkpoints.load(snapshot_id)
+
+        def state_hash(value):
+            payload = json.dumps(
+                value,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            return hashlib.sha256(payload).hexdigest()
+
+        expected_hash = state_hash(normalized)
+        actual_hash = state_hash(restored)
+        if actual_hash != expected_hash:
+            raise CheckpointMirrorError(
+                f"SQLite-зеркало не совпало с JSON: snapshot={snapshot_id}, "
+                f"expected={expected_hash}, actual={actual_hash}"
+            )
 
     # ---------------- Загрузка ----------------
 
@@ -829,9 +1071,9 @@ class CheckpointSerializer:
 
         Returns:
             Словарь state или ``None``, если файл не найден.
-            
+
         Raises:
-            CheckpointCorruptedError: если файл чекпоинта повреждён (невалидный JSON, 
+            CheckpointCorruptedError: если файл чекпоинта повреждён (невалидный JSON,
                 отсутствуют обязательные поля и т.д.)
         """
         checkpoint_file = str(checkpoint_file)
@@ -844,7 +1086,9 @@ class CheckpointSerializer:
             try:
                 state = SQLiteCheckpointStore(database).load(int(snapshot_id))
             except (ValueError, KeyError) as exc:
-                raise CheckpointCorruptedError(f"Повреждён снимок SQLite: {exc}") from exc
+                raise CheckpointCorruptedError(
+                    f"Повреждён снимок SQLite: {exc}"
+                ) from exc
             return migrate_state(state)
         if not os.path.exists(checkpoint_file):
             logger.warning(f"Чекпоинт не найден: {checkpoint_file}")
@@ -852,7 +1096,7 @@ class CheckpointSerializer:
 
         # P0.3: Verify file integrity BEFORE parsing (catches corruption early)
         file_verification = self._verify_checkpoint_file_integrity(checkpoint_file)
-        if file_verification.get('file_corrupted', False):
+        if file_verification.get("file_corrupted", False):
             raise CheckpointCorruptedError(
                 f"Checkpoint file corrupted: {file_verification.get('reason')} "
                 f"(path: {file_verification.get('path')})"
@@ -877,7 +1121,7 @@ class CheckpointSerializer:
 
     def _verify_checkpoint_file_integrity(self, checkpoint_file: str) -> Dict:
         """Verify checkpoint FILE integrity (readable, valid JSON, required fields).
-        
+
         This is a lightweight check that doesn't require an agent instance.
         """
         try:
@@ -888,16 +1132,25 @@ class CheckpointSerializer:
             else:
                 with open(checkpoint_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            
+
             # Verify required fields exist
-            required_fields = ['schema_version', 'name', 'cycle_count', 'energy']
+            required_fields = ["schema_version", "name", "cycle_count", "energy"]
             missing = [f for f in required_fields if f not in data]
             if missing:
-                return {'file_corrupted': True, 'reason': f'missing_fields: {missing}', 'path': checkpoint_file}
-            
-            return {'file_corrupted': False, 'path': checkpoint_file}
-        except (json.JSONDecodeError, gzip.BadGzipFile, OSError, UnicodeDecodeError) as e:
-            return {'file_corrupted': True, 'reason': str(e), 'path': checkpoint_file}
+                return {
+                    "file_corrupted": True,
+                    "reason": f"missing_fields: {missing}",
+                    "path": checkpoint_file,
+                }
+
+            return {"file_corrupted": False, "path": checkpoint_file}
+        except (
+            json.JSONDecodeError,
+            gzip.BadGzipFile,
+            OSError,
+            UnicodeDecodeError,
+        ) as e:
+            return {"file_corrupted": True, "reason": str(e), "path": checkpoint_file}
 
     def load_latest(self, agent_name: str) -> Optional[Dict[str, Any]]:
         """Загрузить последний чекпоинт агента (по номеру цикла).
@@ -913,9 +1166,11 @@ class CheckpointSerializer:
             return None
         return self.load(path)
 
-    def apply_to_agent(self, agent, state: Dict[str, Any], checkpoint_path: Optional[str] = None) -> None:
+    def apply_to_agent(
+        self, agent, state: Dict[str, Any], checkpoint_path: Optional[str] = None
+    ) -> None:
         """Применить state к агенту (обёртка над ``apply_state_to_agent``).
-        
+
         Args:
             agent: агент для восстановления
             state: словарь состояния
@@ -923,14 +1178,16 @@ class CheckpointSerializer:
         """
         # NEW: Verify checkpoint FILE integrity before applying (P0.3)
         # This detects actual file corruption (disk errors, bit rot), NOT structural drift
-        if checkpoint_path and hasattr(agent, 'death_risk') and agent.death_risk:
-            file_verification = agent.death_risk.verify_checkpoint_file_integrity(checkpoint_path)
-            if file_verification.get('file_corrupted', False):
+        if checkpoint_path and hasattr(agent, "death_risk") and agent.death_risk:
+            file_verification = agent.death_risk.verify_checkpoint_file_integrity(
+                checkpoint_path
+            )
+            if file_verification.get("file_corrupted", False):
                 raise CheckpointCorruptedError(
                     f"Checkpoint file corrupted: {file_verification.get('reason')} "
                     f"(path: {file_verification.get('path')})"
                 )
-        
+
         apply_state_to_agent(agent, state)
 
     # ---------------- Поиск/служебные ----------------
@@ -944,15 +1201,13 @@ class CheckpointSerializer:
             return None
         prefix = f"{agent_name}_cycle_"
         checkpoints = [
-            f for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix)
-            and (f.endswith(".json") or f.endswith(".json.gz"))
+            f
+            for f in os.listdir(self.checkpoint_dir)
+            if f.startswith(prefix) and (f.endswith(".json") or f.endswith(".json.gz"))
         ]
         if not checkpoints:
             return None
-        checkpoints.sort(
-            key=lambda x: int(_extract_cycle_number(x, prefix))
-        )
+        checkpoints.sort(key=lambda x: int(_extract_cycle_number(x, prefix)))
         return os.path.join(self.checkpoint_dir, checkpoints[-1])
 
     def list_checkpoints(self, agent_name: str) -> List[str]:
@@ -964,9 +1219,9 @@ class CheckpointSerializer:
             return []
         prefix = f"{agent_name}_cycle_"
         files = [
-            f for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix)
-            and (f.endswith(".json") or f.endswith(".json.gz"))
+            f
+            for f in os.listdir(self.checkpoint_dir)
+            if f.startswith(prefix) and (f.endswith(".json") or f.endswith(".json.gz"))
         ]
         files.sort(key=lambda x: int(_extract_cycle_number(x, prefix)))
         return [os.path.join(self.checkpoint_dir, f) for f in files]
@@ -982,9 +1237,7 @@ class CheckpointSerializer:
             f"{agent_name}_cycle_{cycle_count}{ext}",
         )
 
-    def _prune_old_checkpoints(
-        self, agent_name: str, keep_after_save: int = 0
-    ) -> int:
+    def _prune_old_checkpoints(self, agent_name: str, keep_after_save: int = 0) -> int:
         """Удалить старые чекпоинты сверх лимита.
 
         Args:
@@ -1002,7 +1255,7 @@ class CheckpointSerializer:
         target = keep_after_save if keep_after_save > 0 else self.max_checkpoints
         if len(checkpoints) <= target:
             return 0
-        to_remove = checkpoints[:len(checkpoints) - target]
+        to_remove = checkpoints[: len(checkpoints) - target]
         removed = 0
         for old in to_remove:
             try:
@@ -1027,17 +1280,18 @@ def _extract_cycle_number(filename: str, prefix: str) -> str:
     Returns:
         Строковое представление номера цикла.
     """
-    rest = filename[len(prefix):]
+    rest = filename[len(prefix) :]
     # Убираем .json или .json.gz
     if rest.endswith(".json.gz"):
-        rest = rest[:-len(".json.gz")]
+        rest = rest[: -len(".json.gz")]
     elif rest.endswith(".json"):
-        rest = rest[:-len(".json")]
+        rest = rest[: -len(".json")]
     return rest
 
 
 __all__ = [
     "CheckpointSerializer",
+    "CheckpointMirrorError",
     "DEFAULT_CHECKPOINT_DIR",
     "build_state_from_agent",
     "apply_state_to_agent",

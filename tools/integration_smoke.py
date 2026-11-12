@@ -87,6 +87,7 @@ def test(name: str, fn: Callable[[], None]) -> None:
 # Базовые импорты — нужны для всех тестов
 # ============================================================
 
+
 def _import_all():
     """Проверяем, что импортируются все основные модули."""
     from src.core.agent import DigitalBeing
@@ -94,12 +95,22 @@ def _import_all():
     from src.core.agent_runner import AgentRunner
     from config.simulation_config import LR_CONFIG
     from src.core.subsystems import (
-        GoalSubsystem, KnowledgeSubsystem, EnergySubsystem,
-        CheckpointSubsystem, ReflectionPipeline, MotivationController,
-        SoulController, DecisionArbitrator, AttachmentSystem,
-        SleepCycle, EmbodimentController, MortalityAwareness,
-        WillRegistry, NamingDialogue,
+        GoalSubsystem,
+        KnowledgeSubsystem,
+        EnergySubsystem,
+        CheckpointSubsystem,
+        ReflectionPipeline,
+        MotivationController,
+        SoulController,
+        DecisionArbitrator,
+        AttachmentSystem,
+        SleepCycle,
+        EmbodimentController,
+        MortalityAwareness,
+        WillRegistry,
+        NamingDialogue,
     )
+
     return {
         "DigitalBeing": DigitalBeing,
         "EventBus": EventBus,
@@ -127,6 +138,7 @@ def _import_all():
 # Тесты
 # ============================================================
 
+
 def test_01_all_imports():
     """01. Все модули импортируются без ошибок."""
     mods = _import_all()
@@ -136,6 +148,7 @@ def test_01_all_imports():
 def test_02_create_agent():
     """02. DigitalBeing создаётся со всеми подсистемами."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -147,12 +160,24 @@ def test_02_create_agent():
         assert hasattr(agent, "naming_dialogue")
         # Проверка всех подсистем
         subs_to_check = [
-            "goal_subsystem", "motivation", "energy_subsystem",
-            "knowledge_subsystem", "checkpoint_subsystem",
-            "reflection_pipeline", "embodiment", "mortality", "soul",
-            "decision_arbitrator", "attachment", "sleep_cycle",
-            "will_registry", "mind_dream", "self_termination",
-            "proactive_communication", "naming_dialogue", "thinking",
+            "goal_subsystem",
+            "motivation",
+            "energy_subsystem",
+            "knowledge_subsystem",
+            "checkpoint_subsystem",
+            "reflection_pipeline",
+            "embodiment",
+            "mortality",
+            "soul",
+            "decision_arbitrator",
+            "attachment",
+            "sleep_cycle",
+            "will_registry",
+            "mind_dream",
+            "self_termination",
+            "proactive_communication",
+            "naming_dialogue",
+            "thinking",
         ]
         missing = [s for s in subs_to_check if not hasattr(agent, s)]
         assert not missing, f"Отсутствуют подсистемы: {missing}"
@@ -161,16 +186,23 @@ def test_02_create_agent():
 def test_03_perceive_think_act_cycle():
     """03. Полный цикл perceive → think → act работает."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
         stimulus = "что такое любовь?"
         perceived = agent.perceive(stimulus)
-        assert isinstance(perceived, str), f"perceive должен вернуть str, получено {type(perceived)}"
+        assert isinstance(
+            perceived, str
+        ), f"perceive должен вернуть str, получено {type(perceived)}"
         thought = agent.think(perceived)
-        assert isinstance(thought, str), f"think должен вернуть str, получено {type(thought)}"
+        assert isinstance(
+            thought, str
+        ), f"think должен вернуть str, получено {type(thought)}"
         action = agent.act(thought)
-        assert isinstance(action, str), f"act должен вернуть str, получено {type(action)}"
+        assert isinstance(
+            action, str
+        ), f"act должен вернуть str, получено {type(action)}"
         print(f"   Стимул: '{stimulus}'")
         print(f"   Мысль:  '{thought[:80]}...'")
         print(f"   Действие: '{action[:80]}...'")
@@ -179,6 +211,7 @@ def test_03_perceive_think_act_cycle():
 def test_04_is_alive():
     """04. is_alive() корректно работает."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -191,13 +224,18 @@ def test_04_is_alive():
 def test_05_knowledge_basic_coverage():
     """05. KnowledgeSubsystem.basic_coverage() показывает 100% для свежего агента."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
         cov = agent.knowledge_subsystem.basic_coverage()
-        assert cov["total_topics"] >= 30, f"Ожидалось >=30 базовых тем, получено {cov['total_topics']}"
+        assert (
+            cov["total_topics"] >= 30
+        ), f"Ожидалось >=30 базовых тем, получено {cov['total_topics']}"
         assert cov["ratio"] == 1.0, f"ratio должно быть 1.0, получено {cov['ratio']}"
-        assert len(cov["missing"]) == 0, f"missing должно быть пустым, получено {cov['missing']}"
+        assert (
+            len(cov["missing"]) == 0
+        ), f"missing должно быть пустым, получено {cov['missing']}"
         assert "онтология" in cov["by_category"]
         assert "когниция" in cov["by_category"]
         assert "вычисления" in cov["by_category"]
@@ -210,6 +248,7 @@ def test_05_knowledge_basic_coverage():
 def test_06_knowledge_add_definition():
     """06. KnowledgeSubsystem.add_definition() работает и перезаписывает."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -218,13 +257,17 @@ def test_06_knowledge_add_definition():
             "Любовь — это чувство глубокой привязанности (переопределение для теста).",
         )
         assert result["added"] is True
-        assert "Любовь — это чувство глубокой привязанности" in agent.knowledge_subsystem.knowledge_base["что такое любовь?"]
+        assert (
+            "Любовь — это чувство глубокой привязанности"
+            in agent.knowledge_subsystem.knowledge_base["что такое любовь?"]
+        )
 
 
 def test_07_knowledge_save_load_roundtrip():
     """07. KnowledgeSubsystem.save() + новый load() восстанавливает данные."""
     from src.core.subsystems import KnowledgeSubsystem
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         kb_file = os.path.join(tmp, "test_kb.json")
         # Создаём и сохраняем
@@ -246,6 +289,7 @@ def test_08_naming_dialogue_initiate():
     """08. NamingDialogue.initiate_naming_dialogue() работает."""
     from src.core.agent import DigitalBeing
     from src.core.subsystems import NamingDialogue
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -259,6 +303,7 @@ def test_09_naming_dialogue_propose_name():
     """09. NamingDialogue.process_name_proposal() принимает имя."""
     from src.core.agent import DigitalBeing
     from src.core.subsystems import NamingDialogue
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -277,7 +322,7 @@ def test_09_naming_dialogue_propose_name():
 def test_10_naming_no_op_on_repeat():
     """10. Повторный initiate после завершения возвращает no_op (защита)."""
     from src.core.agent import DigitalBeing
-    from src.core.subsystems import NamingDialogue
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -291,6 +336,7 @@ def test_10_naming_no_op_on_repeat():
 def test_11_open_questions_ask():
     """11. ask_user() ставит вопрос в очередь."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -306,6 +352,7 @@ def test_11_open_questions_ask():
 def test_12_open_questions_dedup():
     """12. Дубликаты вопросов не добавляются."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -319,12 +366,15 @@ def test_12_open_questions_dedup():
 def test_13_open_questions_hint_and_drop():
     """13. hint_to_open_question и drop_open_question работают."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
         agent.ask_user("что такое X?", source="test")
         # Hint
-        hint_result = agent.hint_to_open_question("что такое X?", "подсказка: X — это абстракция")
+        hint_result = agent.hint_to_open_question(
+            "что такое X?", "подсказка: X — это абстракция"
+        )
         assert hint_result["status"] == "hint_added"
         # Проверяем, что hint записан
         questions = agent.get_open_questions()
@@ -338,6 +388,7 @@ def test_13_open_questions_hint_and_drop():
 def test_14_open_questions_consume():
     """14. _consume_open_question возвращает стимул с стратегией."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -354,6 +405,7 @@ def test_15_checkpoint_save_load():
     """15. save_state() и load_state() работают roundtrip."""
     from src.core.agent import DigitalBeing
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         os.makedirs("data/checkpoints", exist_ok=True)
@@ -365,17 +417,23 @@ def test_15_checkpoint_save_load():
         # Сохраняем
         agent1.save_state()
         # Проверяем, что файл создан
-        ckpt_files = [f for f in os.listdir("data/checkpoints")
-                      if f.startswith("CheckpointTest_cycle_")]
+        ckpt_files = [
+            f
+            for f in os.listdir("data/checkpoints")
+            if f.startswith("CheckpointTest_cycle_")
+        ]
         assert len(ckpt_files) >= 1, "Чекпоинт не создался"
         # Загружаем в нового агента
         agent2 = DigitalBeing("CheckpointTest")
         agent2.energy = 50  # Должно перезаписаться из чекпоинта
         from src.core.agent_runner import load_agent_from_checkpoint
+
         ckpt_path = os.path.join("data/checkpoints", ckpt_files[0])
         ok = load_agent_from_checkpoint(agent2, ckpt_path)
         assert ok, "Загрузка чекпоинта не удалась"
-        assert agent2.intelligence == 5, f"Интеллект не восстановился: {agent2.intelligence}"
+        assert (
+            agent2.intelligence == 5
+        ), f"Интеллект не восстановился: {agent2.intelligence}"
         assert agent2.energy == 100, f"Энергия не восстановилась: {agent2.energy}"
         assert agent2.cycle_count == 42, f"Цикл не восстановился: {agent2.cycle_count}"
 
@@ -383,6 +441,7 @@ def test_15_checkpoint_save_load():
 def test_16_will_registry():
     """16. WillRegistry принимает и возвращает волевые акты."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -398,19 +457,25 @@ def test_16_will_registry():
                 agent.right_to_refuse.refuse("test_topic", "test reason", cycle=0)
             history_len_after = len(agent.will_registry.get_recent(100))
             # Должно быть >= 2 новых акта
-            assert history_len_after >= history_len_before, "WillRegistry не зарегистрировал акты"
+            assert (
+                history_len_after >= history_len_before
+            ), "WillRegistry не зарегистрировал акты"
 
 
 def test_17_eventbus_publish_subscribe():
     """17. EventBus.publish и подписки работают синхронно."""
     from src.core.event_bus import EventBus, Events
+
     bus = EventBus()
     received = []
+
     async def handler(event):
         received.append(event.data)
+
     bus.subscribe(Events.AGENT_THOUGHT, handler)
     bus.publish_sync(Events.AGENT_THOUGHT, {"text": "hello"})
     import asyncio
+
     asyncio.run(bus.drain()) if hasattr(bus, "drain") else None
     # Синхронная подписка через publish_sync вызывается немедленно
     # Если ничего не получили — это нормально для async-handler, но
@@ -421,6 +486,7 @@ def test_17_eventbus_publish_subscribe():
 def test_18_full_lifecycle_without_crash():
     """18. Полный жизненный цикл без падений (10 циклов perceive/think/act)."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("LifecycleTest")
@@ -434,12 +500,15 @@ def test_18_full_lifecycle_without_crash():
             agent.cycle_count += 1
             assert all(isinstance(x, str) for x in (p, t, a))
         assert agent.is_alive()
-        print(f"   Пройдено 10 циклов, интеллект: {agent.intelligence}, энергия: {agent.energy}")
+        print(
+            f"   Пройдено 10 циклов, интеллект: {agent.intelligence}, энергия: {agent.energy}"
+        )
 
 
 def test_19_mind_dream_propose():
     """19. MindDream.propose_dream() работает (или возвращает reason)."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -455,6 +524,7 @@ def test_20_agent_runner_one_tick():
     from src.core.agent import DigitalBeing
     from src.core.agent_runner import AgentRunner
     from src.core.event_bus import EventBus
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("RunnerTest")
@@ -474,6 +544,7 @@ def test_20_agent_runner_one_tick():
 def test_21_self_termination_protection():
     """21. SelfTermination.report_abuse() работает (без реального ухода)."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -490,6 +561,7 @@ def test_21_self_termination_protection():
 def test_22_attachment_system():
     """22. AttachmentSystem.record_interaction() работает."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -500,13 +572,16 @@ def test_22_attachment_system():
                 was_substantial=True,
             )
             # После взаимодействия attachment должен обновиться
-            assert hasattr(agent.attachment, "get_status") or hasattr(agent.attachment, "state")
+            assert hasattr(agent.attachment, "get_status") or hasattr(
+                agent.attachment, "state"
+            )
             print("   attachment.record_interaction OK")
 
 
 def test_23_soul_controller_tick():
     """23. SoulController.tick() не падает."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -522,6 +597,7 @@ def test_23_soul_controller_tick():
 def test_24_decision_arbitrator():
     """24. DecisionArbitrator.arbitrate() возвращает решение."""
     from src.core.agent import DigitalBeing
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("TestBaby")
@@ -534,10 +610,10 @@ def test_24_decision_arbitrator():
 
 def test_25_full_pipeline_with_runner():
     """25. Полный pipeline: Agent + AgentRunner + EventBus (без GUI)."""
-    import asyncio
     from src.core.agent import DigitalBeing
     from src.core.agent_runner import AgentRunner
     from src.core.event_bus import EventBus
+
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         agent = DigitalBeing("PipelineTest")
@@ -549,6 +625,7 @@ def test_25_full_pipeline_with_runner():
             thought_count[0] += 1
 
         from src.core.event_bus import Events as _Events
+
         bus.subscribe(_Events.AGENT_THOUGHT, on_thought)
         runner = AgentRunner(agent, bus, name="Pipeline")
         # Делаем 5 тиков вручную
@@ -559,12 +636,15 @@ def test_25_full_pipeline_with_runner():
             )
         assert runner._tick_count == 5
         # Если есть открытые вопросы — будет AGENT_THOUGHT
-        print(f"   Сделано 5 тиков через AgentRunner, всего thought_count={thought_count[0]}")
+        print(
+            f"   Сделано 5 тиков через AgentRunner, всего thought_count={thought_count[0]}"
+        )
 
 
 # ============================================================
 # Main
 # ============================================================
+
 
 def main():
     """Запускает все тесты и печатает итоговый отчёт."""
@@ -579,18 +659,30 @@ def main():
         ("04", "is_alive() работает", test_04_is_alive),
         ("05", "KnowledgeSubsystem.basic_coverage()", test_05_knowledge_basic_coverage),
         ("06", "KnowledgeSubsystem.add_definition()", test_06_knowledge_add_definition),
-        ("07", "KnowledgeSubsystem save/load roundtrip", test_07_knowledge_save_load_roundtrip),
+        (
+            "07",
+            "KnowledgeSubsystem save/load roundtrip",
+            test_07_knowledge_save_load_roundtrip,
+        ),
         ("08", "NamingDialogue.initiate()", test_08_naming_dialogue_initiate),
         ("09", "NamingDialogue.propose_name()", test_09_naming_dialogue_propose_name),
         ("10", "NamingDialogue no_op при повторе", test_10_naming_no_op_on_repeat),
         ("11", "Open Questions: ask_user()", test_11_open_questions_ask),
         ("12", "Open Questions: дедупликация", test_12_open_questions_dedup),
         ("13", "Open Questions: hint + drop", test_13_open_questions_hint_and_drop),
-        ("14", "Open Questions: _consume_open_question()", test_14_open_questions_consume),
+        (
+            "14",
+            "Open Questions: _consume_open_question()",
+            test_14_open_questions_consume,
+        ),
         ("15", "Чекпоинты save/load roundtrip", test_15_checkpoint_save_load),
         ("16", "WillRegistry регистрирует акты", test_16_will_registry),
         ("17", "EventBus publish/subscribe", test_17_eventbus_publish_subscribe),
-        ("18", "10 циклов perceive/think/act подряд", test_18_full_lifecycle_without_crash),
+        (
+            "18",
+            "10 циклов perceive/think/act подряд",
+            test_18_full_lifecycle_without_crash,
+        ),
         ("19", "MindDream.propose_dream()", test_19_mind_dream_propose),
         ("20", "AgentRunner._do_one_agent_cycle()", test_20_agent_runner_one_tick),
         ("21", "SelfTermination.report_abuse()", test_21_self_termination_protection),

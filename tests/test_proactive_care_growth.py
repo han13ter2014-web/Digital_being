@@ -9,6 +9,7 @@
 
 Триггеры, пороги и воля здесь не проверяются — только текст заботы.
 """
+
 from types import SimpleNamespace
 
 from src.core.subsystems.proactive_communication import ProactiveCommunication
@@ -46,7 +47,7 @@ def _agent(history=(), learned=None, tolerance=False):
 
 def _comm(agent):
     return ProactiveCommunication(
-        agent_name="Тэсс",
+        agent_name="Нова",
         user_interaction=agent.user_interaction,
         attachment=None,
     )
@@ -74,8 +75,7 @@ def test_care_uses_learned_social_phrase():
     agent = _agent(learned={LEARNED: {"act": "social", "cycle": 5}})
     comm = _comm(agent)
     seen = {
-        comm._compose_care_message(agent, 100 + i * 60)["content"]
-        for i in range(3)
+        comm._compose_care_message(agent, 100 + i * 60)["content"] for i in range(3)
     }
     assert any(LEARNED[:20] in text for text in seen)
     assert any("научил" in text for text in seen)
@@ -85,8 +85,7 @@ def test_care_ignores_non_social_learned():
     agent = _agent(learned={LEARNED: {"act": "request", "cycle": 5}})
     comm = _comm(agent)
     seen = {
-        comm._compose_care_message(agent, 100 + i * 60)["content"]
-        for i in range(5)
+        comm._compose_care_message(agent, 100 + i * 60)["content"] for i in range(5)
     }
     assert all(LEARNED[:20] not in text for text in seen)
 
@@ -98,8 +97,7 @@ def test_care_rotation_has_no_immediate_repeats():
     )
     comm = _comm(agent)
     sequence = [
-        comm._compose_care_message(agent, 100 + i * 60)["content"]
-        for i in range(10)
+        comm._compose_care_message(agent, 100 + i * 60)["content"] for i in range(10)
     ]
     for previous, current in zip(sequence, sequence[1:]):
         assert previous != current
@@ -113,8 +111,7 @@ def test_care_rotation_is_deterministic():
         )
         comm = _comm(agent)
         return [
-            comm._compose_care_message(agent, 100 + i * 60)["content"]
-            for i in range(6)
+            comm._compose_care_message(agent, 100 + i * 60)["content"] for i in range(6)
         ]
 
     assert run() == run()
@@ -127,10 +124,7 @@ def test_promise_care_keeps_promise_and_rotates():
         tolerance=True,
     )
     comm = _comm(agent)
-    sequence = [
-        comm._compose_care_with_promise(agent, 100 + i * 60)
-        for i in range(8)
-    ]
+    sequence = [comm._compose_care_with_promise(agent, 100 + i * 60) for i in range(8)]
     for msg in sequence:
         assert msg["context"] == "silence_with_promise"
         assert "не тревожу" in msg["content"]

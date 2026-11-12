@@ -1,11 +1,12 @@
-"""«Окно-1» (k16-07): окно кандидатов, фильтр валидных хендлеров, мост teaching.
+"""Окно кандидатов, фильтр валидных хендлеров и мост teaching.
 
-Гипотезы k16-05, подтверждённые ревизией k16-09: окно [:4] даёт арбитру
+Проверка гипотез маршрутизации: окно [:4] даёт арбитру
 имена, которые контур исполнения не ловит (legacy/helping_others);
 виновник — канонизация окна, а не сироты сами по себе. Фильтр living в
 motivation не изымает желание (goal_types и генерация целей untouched) —
 арбитр лишь не получает пустышку.
 """
+
 from src.core.agent import DigitalBeing
 from src.core.agent_act import executable_action
 from src.core.motivation.unified_motivation import ACTION_ALIASES as MOTIVATION_ALIASES
@@ -23,11 +24,14 @@ def _agent_with_drive(drive_name: str):
 
 # === 1. Фильтр арбитра ===
 
+
 def test_unexecutable_names_never_reach_arbitrator():
     """legacy/helping_others не проходят в кандидаты как исполняемые."""
     agent = _agent_with_drive("self_transcendence")
     candidates = agent.motivation_system.get_action_candidates({})
-    offered = {c["action"] for c in candidates if c.get("drive") == "self_transcendence"}
+    offered = {
+        c["action"] for c in candidates if c.get("drive") == "self_transcendence"
+    }
     assert "legacy" not in offered
     assert "helping_others" not in offered
 
@@ -36,7 +40,9 @@ def test_executable_names_still_reach_arbitrator():
     """Валидные имена окна не потеряны фильтром."""
     agent = _agent_with_drive("self_transcendence")
     candidates = agent.motivation_system.get_action_candidates({})
-    offered = {c["action"] for c in candidates if c.get("drive") == "self_transcendence"}
+    offered = {
+        c["action"] for c in candidates if c.get("drive") == "self_transcendence"
+    }
     assert "teaching" in offered
     assert "contribution" in offered
 
@@ -46,7 +52,10 @@ def test_desire_is_not_removed_from_goal_types():
     agent = _agent_with_drive("self_transcendence")
     system = agent.motivation_system
     assert system.drives["self_transcendence"].goal_types == [
-        "teaching", "contribution", "legacy", "helping_others"
+        "teaching",
+        "contribution",
+        "legacy",
+        "helping_others",
     ]
     goals_hints: list[str] = []
     for _ in range(40):
@@ -73,13 +82,15 @@ def test_executable_action_mirrors_parser_table():
 
 # === 2. Мост teaching ===
 
+
 def test_teaching_bridge_added():
-    """Фоллоу-ап k16-10: мост communicate знает имя teaching. ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ РЕВИЗИИ."""
+    """Мост communicate знает имя teaching."""
     assert "teaching" in MOTIVATION_ALIASES["communicate"]
     assert "teach_other" in MOTIVATION_ALIASES["communicate"]
 
 
 # === 3. Окно канонизировано в одном месте ===
+
 
 def test_window_is_single_canonical_slice():
     """У драйвов одно окно ([:4]); слот-перестановка creativity не применялась."""
@@ -101,11 +112,12 @@ def test_window_is_single_canonical_slice():
 
 
 def test_creativity_window_still_offers_all_organs():
-    """Правка окна не сломала проводку органов k16-04."""
+    """Правка окна не сломала проводку творческих действий."""
     agent = _agent_with_drive("creativity")
     candidates = agent.motivation_system.get_action_candidates({})
     offered = {
         agent._normalize_action(c["action"])
-        for c in candidates if c.get("drive") == "creativity"
+        for c in candidates
+        if c.get("drive") == "creativity"
     }
     assert offered == {"play", "create_draft", "draw", "compose_music"}

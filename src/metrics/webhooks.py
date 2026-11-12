@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 # Базовый класс Webhook
 # ============================================================
 
+
 class Webhook(ABC):
     """Базовый класс для всех webhook-ов."""
 
@@ -56,13 +57,23 @@ class Webhook(ABC):
         self._error_count = 0
 
     @abstractmethod
-    def _do_send(self, text: str, *, title: Optional[str] = None,
-                 meta: Optional[Dict[str, Any]] = None) -> bool:
+    def _do_send(
+        self,
+        text: str,
+        *,
+        title: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Реализация отправки. Возвращает True при успехе."""
         ...
 
-    def send(self, text: str, *, title: Optional[str] = None,
-             meta: Optional[Dict[str, Any]] = None) -> bool:
+    def send(
+        self,
+        text: str,
+        *,
+        title: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Публичный метод отправки. Считает статистику."""
         if not self.enabled:
             return False
@@ -91,6 +102,7 @@ class Webhook(ABC):
 # Telegram webhook
 # ============================================================
 
+
 class TelegramWebhook(Webhook):
     """Отправляет сообщения в Telegram через Bot API.
 
@@ -102,14 +114,20 @@ class TelegramWebhook(Webhook):
     name = "telegram"
     API_BASE = "https://api.telegram.org/bot{token}/{method}"
 
-    def __init__(self, token: str, chat_id: str,
-                 *, enabled: bool = True, timeout: float = 10.0) -> None:
+    def __init__(
+        self, token: str, chat_id: str, *, enabled: bool = True, timeout: float = 10.0
+    ) -> None:
         super().__init__(enabled=enabled, timeout=timeout)
         self.token = token
         self.chat_id = chat_id
 
-    def _do_send(self, text: str, *, title: Optional[str] = None,
-                 meta: Optional[Dict[str, Any]] = None) -> bool:
+    def _do_send(
+        self,
+        text: str,
+        *,
+        title: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         # Markdown-форматирование: *жирный* и _курсив_
         body = text
         if title:
@@ -129,7 +147,8 @@ class TelegramWebhook(Webhook):
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                url, data=data,
+                url,
+                data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -149,6 +168,7 @@ class TelegramWebhook(Webhook):
 # Discord webhook
 # ============================================================
 
+
 class DiscordWebhook(Webhook):
     """Отправляет сообщения в Discord через Incoming Webhook.
 
@@ -158,24 +178,37 @@ class DiscordWebhook(Webhook):
 
     name = "discord"
 
-    def __init__(self, url: str, *, username: str = "Digital Being",
-                 enabled: bool = True, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        username: str = "Digital Being",
+        enabled: bool = True,
+        timeout: float = 10.0,
+    ) -> None:
         super().__init__(enabled=enabled, timeout=timeout)
         self.url = url
         self.username = username
 
-    def _do_send(self, text: str, *, title: Optional[str] = None,
-                 meta: Optional[Dict[str, Any]] = None) -> bool:
+    def _do_send(
+        self,
+        text: str,
+        *,
+        title: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         # Discord supports embeds — для простоты шлём plain content.
         # Если есть title — используем embed.
         if title:
             payload = {
                 "username": self.username,
-                "embeds": [{
-                    "title": title[:256],
-                    "description": text[:4096],
-                    "color": 0x58a6ff,  # Синий (как в дашборде)
-                }],
+                "embeds": [
+                    {
+                        "title": title[:256],
+                        "description": text[:4096],
+                        "color": 0x58A6FF,  # Синий (как в дашборде)
+                    }
+                ],
             }
         else:
             payload = {
@@ -188,7 +221,8 @@ class DiscordWebhook(Webhook):
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                url, data=data,
+                url,
+                data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
@@ -206,6 +240,7 @@ class DiscordWebhook(Webhook):
 # WebhookManager — управление несколькими webhook-ами
 # ============================================================
 
+
 class WebhookManager:
     """Менеджер webhook-ов с очередью и rate-limiting.
 
@@ -216,8 +251,9 @@ class WebhookManager:
     def __init__(self, max_per_minute: int = 20, queue_maxsize: int = 100) -> None:
         self._webhooks: List[Webhook] = []
         self._max_per_minute = max_per_minute
-        self._queue: "queue.Queue[Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]]" = \
-            queue.Queue(maxsize=queue_maxsize)
+        self._queue: "queue.Queue[Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]]" = queue.Queue(
+            maxsize=queue_maxsize
+        )
         self._stopped = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
         self._rate_lock = threading.Lock()
@@ -242,10 +278,15 @@ class WebhookManager:
     # Отправка
     # ----------------------------------------------------------------
 
-    def send(self, text: str, *, title: Optional[str] = None,
-             meta: Optional[Dict[str, Any]] = None,
-             priority: str = "normal",
-             blocking: bool = False) -> bool:
+    def send(
+        self,
+        text: str,
+        *,
+        title: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        priority: str = "normal",
+        blocking: bool = False,
+    ) -> bool:
         """Поставить сообщение в очередь.
 
         Args:
@@ -270,7 +311,9 @@ class WebhookManager:
             logger.warning("[webhook] очередь переполнена, сообщение отброшено")
             return False
 
-    def _send_now(self, item: Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]) -> bool:
+    def _send_now(
+        self, item: Tuple[int, str, Optional[str], Optional[Dict[str, Any]]]
+    ) -> bool:
         """Отправить синхронно во все webhook-и."""
         priority, text, title, meta = item
         if not self._check_rate_limit():
@@ -364,13 +407,16 @@ class WebhookManager:
             "queue_size": self._queue.qsize(),
             "rate_limit_per_min": self._max_per_minute,
             "current_rate_last_min": current_rate,
-            "worker_alive": bool(self._worker_thread and self._worker_thread.is_alive()),
+            "worker_alive": bool(
+                self._worker_thread and self._worker_thread.is_alive()
+            ),
         }
 
 
 # ============================================================
 # Автоконфигурация из env
 # ============================================================
+
 
 def create_default_manager() -> WebhookManager:
     """Создаёт менеджер с webhook-ами из переменных окружения.

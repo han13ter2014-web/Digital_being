@@ -12,10 +12,11 @@
 - NamingDialogue фазы диалога об имени.
 - ProactiveCommunication тики.
 """
+
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.core.agent import DigitalBeing
 
@@ -25,14 +26,31 @@ def test_subsystems_initialized():
     a = DigitalBeing("TestSubject")
 
     expected = [
-        "goal_subsystem", "motivation", "energy_subsystem",
-        "knowledge_subsystem", "reflection_pipeline", "checkpoint_subsystem",
-        "long_term_memory", "soul", "decision_arbitrator", "attachment",
-        "sleep_cycle", "embodiment", "mortality",
-        "will_registry", "right_to_refuse", "intentional_forgetting",
-        "value_evolution", "spontaneous_generator", "will_to_risk",
-        "right_to_fail", "mind_dream", "architecture_proposal",
-        "self_termination", "proactive_communication", "naming_dialogue",
+        "goal_subsystem",
+        "motivation",
+        "energy_subsystem",
+        "knowledge_subsystem",
+        "reflection_pipeline",
+        "checkpoint_subsystem",
+        "long_term_memory",
+        "soul",
+        "decision_arbitrator",
+        "attachment",
+        "sleep_cycle",
+        "embodiment",
+        "mortality",
+        "will_registry",
+        "right_to_refuse",
+        "intentional_forgetting",
+        "value_evolution",
+        "spontaneous_generator",
+        "will_to_risk",
+        "right_to_fail",
+        "mind_dream",
+        "architecture_proposal",
+        "self_termination",
+        "proactive_communication",
+        "naming_dialogue",
     ]
 
     missing = [name for name in expected if not hasattr(a, name)]
@@ -46,9 +64,15 @@ def test_user_interaction_extended():
 
     # Все новые методы присутствуют
     methods = [
-        "send_message", "get_pending_messages", "acknowledge_message",
-        "get_history", "get_last_user_message_cycle", "receive_user_message",
-        "add_quiet_app", "remove_quiet_app", "is_quiet_app",
+        "send_message",
+        "get_pending_messages",
+        "acknowledge_message",
+        "get_history",
+        "get_last_user_message_cycle",
+        "receive_user_message",
+        "add_quiet_app",
+        "remove_quiet_app",
+        "is_quiet_app",
     ]
     for m in methods:
         assert hasattr(ui, m), f"UserInteraction должен иметь метод {m}"
@@ -56,8 +80,9 @@ def test_user_interaction_extended():
     # send_message ставит сообщение в очередь
     msg_id = ui.send_message("Привет, я тут подумал...", msg_type="sharing", cycle=10)
     pending = ui.get_pending_messages()
-    assert any(m.get("id") == msg_id for m in pending), \
-        f"Сообщение {msg_id} должно быть в очереди"
+    assert any(
+        m.get("id") == msg_id for m in pending
+    ), f"Сообщение {msg_id} должно быть в очереди"
 
     # receive_user_message + get_history
     ui.receive_user_message("Привет, агент!", cycle=11)
@@ -70,18 +95,22 @@ def test_quiet_hours():
     a = DigitalBeing("TestSubject")
 
     a.add_quiet_app("MyGame")
-    assert a.user_interaction.is_quiet_app("MyGame"), \
-        "MyGame должен быть в quiet_hours после add_quiet_app"
+    assert a.user_interaction.is_quiet_app(
+        "MyGame"
+    ), "MyGame должен быть в quiet_hours после add_quiet_app"
 
     a.remove_quiet_app("MyGame")
-    assert not a.user_interaction.is_quiet_app("MyGame"), \
-        "MyGame должен быть удалён из quiet_hours после remove_quiet_app"
+    assert not a.user_interaction.is_quiet_app(
+        "MyGame"
+    ), "MyGame должен быть удалён из quiet_hours после remove_quiet_app"
 
     # Стандартные quiet apps загружены
-    assert hasattr(a, "user_quiet_hours"), \
-        "У агента должен быть атрибут user_quiet_hours"
-    assert len(a.user_quiet_hours) > 0, \
-        "user_quiet_hours должен содержать стандартные приложения"
+    assert hasattr(
+        a, "user_quiet_hours"
+    ), "У агента должен быть атрибут user_quiet_hours"
+    assert (
+        len(a.user_quiet_hours) > 0
+    ), "user_quiet_hours должен содержать стандартные приложения"
 
 
 def test_naming_dialogue():
@@ -116,8 +145,9 @@ def test_proactive_communication():
     for tick in range(3):
         a.cycle_count = 40 + tick * 50
         result = a.tick_communication(a.cycle_count)
-        assert result is not None, \
-            f"tick_communication должен вернуть результат (tick {tick})"
+        assert (
+            result is not None
+        ), f"tick_communication должен вернуть результат (tick {tick})"
 
     # Статистика
     stats = a.get_communication_stats()

@@ -25,8 +25,12 @@ def _ground(agent, concept: str, times: int = 3, valence: float = 0.3) -> None:
     """Дать концепции достаточно свидетельств и формулировку."""
     for index in range(times):
         agent.mental_models.encounter_concept(
-            concept, f"наблюдение_цикл_{index}", "следы памяти и связи", valence,
-            evidence_strength=abs(valence), evidence_kind="observation",
+            concept,
+            f"наблюдение_цикл_{index}",
+            "следы памяти и связи",
+            valence,
+            evidence_strength=abs(valence),
+            evidence_kind="observation",
             source=f"наблюдение_цикл_{index}",
             evidence_direction=-1 if valence < 0 else 1,
         )

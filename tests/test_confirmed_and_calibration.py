@@ -1,6 +1,6 @@
-"""«Подтверждение-1» и «Калибровка-1» (k16-14).
+"""«Подтверждение-1» и «Калибровка-1» (подтверждённых результатов).
 
-Слепое пятно k16-12 (вариант C): флаг confirmed_result ставили только
+Слепое пятно подтверждения результатов: флаг confirmed_result ставили только
 deep_rest и play — rest, let_go, create_draft, set_own_goal, repair,
 checkpoint_now давали успех без флага, и фон качнулся в sadness-за-успех.
 Флаг живёт в ветке обработчика, где знание семантики и место; условие —
@@ -10,10 +10,12 @@ checkpoint_now давали успех без флага, и фон качнул
 COOLED_EVENTS) — иначе при частых семьях joy насыщается до хронической
 единицы (расчёт: L_eq = I/период/0.002 >= 1.0 при периоде < 200).
 """
+
 from src.core.agent import DigitalBeing
 from src.core.emotional_state import EmotionalState
 
 # === 1. Флаги confirmed_result ===
+
 
 def test_rest_recovery_confirms():
     agent = DigitalBeing(name="ConfirmRest")
@@ -34,22 +36,40 @@ def test_let_go_forgotten_confirms_but_not_found_does_not():
     closer = agent.loop_closer
 
     # not_found: нечего отпускать — честный промах, флага нет.
-    agent.act("let_go", intention={"params": {
-        "action": "explore", "topic": "несуществующая тема",
-        "reason": "проверка промаха",
-    }})
+    agent.act(
+        "let_go",
+        intention={
+            "params": {
+                "action": "explore",
+                "topic": "несуществующая тема",
+                "reason": "проверка промаха",
+            }
+        },
+    )
     assert not closer.last_outcome.confirmed_result
 
     # forgotten: намерение существовало и реально помечено — флаг есть.
-    entry = begin_intention(agent, {"action": "explore", "source": "new_interest",
-                                    "params": {"topic": "реальная тема", "reason": "интерес"}})
+    entry = begin_intention(
+        agent,
+        {
+            "action": "explore",
+            "source": "new_interest",
+            "params": {"topic": "реальная тема", "reason": "интерес"},
+        },
+    )
     entry["continuation_of"] = "x"
     entry["status"] = "unobserved"
     remember_wait(agent, entry)
-    agent.act("let_go", intention={"params": {
-        "action": "explore", "topic": "реальная тема",
-        "reason": "остыла",
-    }})
+    agent.act(
+        "let_go",
+        intention={
+            "params": {
+                "action": "explore",
+                "topic": "реальная тема",
+                "reason": "остыла",
+            }
+        },
+    )
     assert closer.last_outcome.confirmed_result
     assert "помечено forgotten" in closer.last_outcome.result_description
 
@@ -66,7 +86,7 @@ def test_create_draft_confirms_written_revision():
 def test_leaving_draft_is_not_effectual_success():
     """mode='leave' — сознательное оставление работы: не достижение.
 
-    Флага confirmed_result нет (k16-02: валентность для leave — ноль),
+    Флага confirmed_result нет (валентность для leave — ноль),
     в описании результата нет «редакции» — описание результата
     зарезервировано за подтверждённым фактом записанной ревизии.
     """
@@ -77,9 +97,15 @@ def test_leaving_draft_is_not_effectual_success():
     agent.act("create_draft")
     assert closer.last_outcome.confirmed_result
 
-    agent.act("create_draft", intention={"params": {
-        "draft_mode": "leave", "reason": "остыла",
-    }})
+    agent.act(
+        "create_draft",
+        intention={
+            "params": {
+                "draft_mode": "leave",
+                "reason": "остыла",
+            }
+        },
+    )
     outcome = closer.last_outcome
     assert not outcome.confirmed_result
     assert "редакция" not in outcome.result_description
@@ -138,6 +164,7 @@ def test_checkpoint_confirms_created_checkpoint():
 
 # === 2. Калибровка: кулдаун на частые события ===
 
+
 def test_intention_completed_does_not_accumulate_into_chronic_joy():
     """События каждые 2 цикла: радость не накапливается выше одного пика."""
     state = EmotionalState()
@@ -170,7 +197,7 @@ def test_cooldown_allows_new_peak_after_fade():
         state.tick(cycle)
     assert state.levels["joy"] == 0.0
     # После кулдауна — новый честный всплеск на одну интенсивность,
-    # а не накопление поверх незатухшего остатка (k16-29).
+    # а не накопление поверх незатухшего остатка.
     episode = state.handle_event("intention_completed", cycle=400)
     assert episode is not None
     assert state.levels["joy"] == 0.40
@@ -186,6 +213,7 @@ def test_rare_events_still_fire_every_time():
 
 
 # === 3. Классификатор: слышимая поломка регистрации ===
+
 
 def test_unregistered_table_is_loud_not_silent(tmp_path, monkeypatch):
     from src.core import buffered_logger as bl

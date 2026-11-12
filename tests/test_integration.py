@@ -13,6 +13,7 @@
 - кэширование src/* индекса
 - поведение энергии (property ↔ energy_subsystem)
 """
+
 import os
 import sys
 import io
@@ -33,20 +34,38 @@ if sys.stdout.encoding != "utf-8":
 # 1. Инициализация подсистем
 # =====================================================================
 SUBSYSTEMS = [
-    "goal_subsystem", "motivation", "energy_subsystem",
-    "knowledge_subsystem", "reflection_pipeline", "checkpoint_subsystem",
-    "long_term_memory", "soul", "decision_arbitrator", "attachment",
-    "sleep_cycle", "embodiment", "mortality",
-    "will_registry", "right_to_refuse", "intentional_forgetting",
-    "value_evolution", "spontaneous_generator", "will_to_risk",
-    "right_to_fail", "mind_dream", "architecture_proposal",
-    "self_termination", "proactive_communication", "naming_dialogue",
+    "goal_subsystem",
+    "motivation",
+    "energy_subsystem",
+    "knowledge_subsystem",
+    "reflection_pipeline",
+    "checkpoint_subsystem",
+    "long_term_memory",
+    "soul",
+    "decision_arbitrator",
+    "attachment",
+    "sleep_cycle",
+    "embodiment",
+    "mortality",
+    "will_registry",
+    "right_to_refuse",
+    "intentional_forgetting",
+    "value_evolution",
+    "spontaneous_generator",
+    "will_to_risk",
+    "right_to_fail",
+    "mind_dream",
+    "architecture_proposal",
+    "self_termination",
+    "proactive_communication",
+    "naming_dialogue",
 ]
 
 
 def test_all_subsystems_initialized():
     """Все 24 подсистемы должны быть проинициализированы."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     missing = [name for name in SUBSYSTEMS if not hasattr(agent, name)]
     assert not missing, f"Отсутствуют подсистемы: {missing}"
@@ -55,6 +74,7 @@ def test_all_subsystems_initialized():
 def test_energy_starts_positive():
     """Энергия должна быть положительной после инициализации."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     assert agent.energy > 0
     assert agent.energy_subsystem.energy == agent.energy
@@ -63,6 +83,7 @@ def test_energy_starts_positive():
 def test_energy_property_sync():
     """self.energy и energy_subsystem.energy должны быть синхронизированы."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     agent.energy = 42
     assert agent.energy == 42
@@ -72,6 +93,7 @@ def test_energy_property_sync():
 def test_typing_imports_work():
     """Проверяем, что Optional/Dict/List импортированы (был баг)."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     # Optional используется в type hints
     assert agent.parent_seed is None
@@ -89,11 +111,16 @@ class _StubUserInteraction:
         self.sent = []
 
     def send_message(self, content, msg_type, tone, urgency, context, cycle):
-        self.sent.append({
-            "content": content, "msg_type": msg_type,
-            "tone": tone, "urgency": urgency,
-            "context": context, "cycle": cycle,
-        })
+        self.sent.append(
+            {
+                "content": content,
+                "msg_type": msg_type,
+                "tone": tone,
+                "urgency": urgency,
+                "context": context,
+                "cycle": cycle,
+            }
+        )
         return f"msg_{len(self.sent)}"
 
 
@@ -132,6 +159,7 @@ def test_naming_dialogue_timeout():
 def test_naming_dialogue_no_timeout_when_completed():
     """После завершения диалога таймаут не должен срабатывать."""
     from src.core.subsystems.naming_dialogue import NamingDialogue
+
     nd = NamingDialogue(agent_name="TestBot")
     nd.phase = NamingDialogue.PHASE_COMPLETED
     assert nd.check_timeout(999999) == "ok"
@@ -143,6 +171,7 @@ def test_naming_dialogue_no_timeout_when_completed():
 def test_goal_progress_rules_present():
     """LR_CONFIG должен содержать GOAL_PROGRESS_RULES с правилами."""
     from config.simulation_config import LR_CONFIG
+
     assert hasattr(LR_CONFIG, "GOAL_PROGRESS_RULES")
     assert len(LR_CONFIG.GOAL_PROGRESS_RULES) >= 1
 
@@ -181,6 +210,7 @@ def test_topic_matches_rule():
 def test_check_goal_progress_uses_rules():
     """_check_goal_progress должен применять конфигурируемые правила."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     # Установим активную цель «Выучить основы Python»
     for g in agent.goals:
@@ -206,6 +236,7 @@ def test_check_goal_progress_uses_rules():
 def test_src_file_index_cached():
     """После первого вызова _get_src_file_index кэш должен быть заполнен."""
     from src.core.agent import DigitalBeing
+
     # Сбрасываем кэш, чтобы тест был детерминированным
     DigitalBeing._SRC_FILE_INDEX = None
 
@@ -224,6 +255,7 @@ def test_src_file_index_cached():
 def test_invalidate_src_file_index():
     """_invalidate_src_file_index сбрасывает кэш."""
     from src.core.agent import DigitalBeing
+
     DigitalBeing._get_src_file_index()  # наполнить кэш
     assert DigitalBeing._SRC_FILE_INDEX is not None
 
@@ -237,6 +269,7 @@ def test_invalidate_src_file_index():
 def test_basic_cycle():
     """Базовый цикл жизни агента не должен падать."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
 
     stimulus = "вопрос: что такое тест"
@@ -257,6 +290,7 @@ def test_basic_cycle():
 def test_is_alive_initially():
     """Свежесозданный агент должен быть жив."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     assert agent.is_alive() is True
 
@@ -279,9 +313,9 @@ def test_tick_communication_naming_timeout():
     timeout_cycles = 1 + NamingDialogue.NAME_TIMEOUT_CYCLES + 5
     result = agent.tick_communication(cycle_count=timeout_cycles)
 
-    assert result.get("naming_timeout") is not None, (
-        f"Ожидался naming_timeout, got: {result}"
-    )
+    assert (
+        result.get("naming_timeout") is not None
+    ), f"Ожидался naming_timeout, got: {result}"
     assert result["naming_timeout"]["handled"] is True
 
 
@@ -314,13 +348,11 @@ def test_naming_dialogue_initiated_in_main_flow():
     assert result.get("status") == "initiated", f"Ожидался initiated, got: {result}"
     assert agent.naming_dialogue.phase == NamingDialogue.PHASE_AWAITING_NAME
     # Должно быть опубликовано хотя бы одно сообщение типа "naming"
-    pending = agent.user_interaction.get_pending_messages(
-        include_acknowledged=False
-    )
+    pending = agent.user_interaction.get_pending_messages(include_acknowledged=False)
     naming_msgs = [m for m in pending if m.get("msg_type") == "naming"]
-    assert len(naming_msgs) >= 1, (
-        f"Должно быть хотя бы одно naming-сообщение, got: {pending}"
-    )
+    assert (
+        len(naming_msgs) >= 1
+    ), f"Должно быть хотя бы одно naming-сообщение, got: {pending}"
 
 
 def test_naming_dialogue_phase_persisted_in_checkpoint():
@@ -343,14 +375,17 @@ def test_naming_dialogue_phase_persisted_in_checkpoint():
         # 1. Создаём агента и завершаем NamingDialogue
         agent = DigitalBeing("TestSubject")
         agent.naming_dialogue.phase = NamingDialogue.PHASE_COMPLETED
-        agent.naming_dialogue._name_history.append({
-            "old_name": "TestSubject",
-            "new_name": "Luna",
-            "reason": "user_proposed",
-        })
+        agent.naming_dialogue._name_history.append(
+            {
+                "old_name": "TestSubject",
+                "new_name": "Luna",
+                "reason": "user_proposed",
+            }
+        )
 
         # 2. Сохраняем state вручную с нашим путём
         from src.core.checkpoint_migrations import SCHEMA_VERSION
+
         state = {
             "schema_version": SCHEMA_VERSION,
             "name": agent.name,
@@ -360,9 +395,7 @@ def test_naming_dialogue_phase_persisted_in_checkpoint():
             "intelligence": agent.intelligence,
             "completed_goals": agent.completed_goals,
             "goals": list(agent.goals),
-            "active_goal": (
-                agent.active_goal["title"] if agent.active_goal else None
-            ),
+            "active_goal": (agent.active_goal["title"] if agent.active_goal else None),
             "success_streak": agent.success_streak,
             "saved_at": "now",
             "_goal_progress": {
@@ -386,9 +419,9 @@ def test_naming_dialogue_phase_persisted_in_checkpoint():
         new_agent.load_state(ckpt_path)
 
         # 4. Проверяем, что фаза восстановлена
-        assert new_agent.naming_dialogue.phase == NamingDialogue.PHASE_COMPLETED, (
-            f"Phase не восстановлен: {new_agent.naming_dialogue.phase}"
-        )
+        assert (
+            new_agent.naming_dialogue.phase == NamingDialogue.PHASE_COMPLETED
+        ), f"Phase не восстановлен: {new_agent.naming_dialogue.phase}"
         # История имён должна содержать Luna
         names = [h.get("new_name") for h in new_agent.naming_dialogue._name_history]
         assert "Luna" in names, f"История имён не восстановлена: {names}"
@@ -418,22 +451,26 @@ def test_naming_dialogue_not_reinitiated_after_checkpoint():
     # 2. Принудительно завершаем диалог (минуем случайность propose_name,
     #    который в 30% предлагает альтернативу и фаза остаётся CONSIDERING).
     agent.naming_dialogue.phase = NamingDialogue.PHASE_COMPLETED
-    agent.naming_dialogue._name_history.append({
-        "old_name": "TestSubject",
-        "new_name": "Luna",
-        "cycle": 0,
-        "source": "test",
-    })
+    agent.naming_dialogue._name_history.append(
+        {
+            "old_name": "TestSubject",
+            "new_name": "Luna",
+            "cycle": 0,
+            "source": "test",
+        }
+    )
 
     # 3. Считаем сообщения ДО повторного вызова
-    initial_msgs = agent.user_interaction.get_pending_messages(include_acknowledged=True)
+    initial_msgs = agent.user_interaction.get_pending_messages(
+        include_acknowledged=True
+    )
     initial_naming_msgs = [m for m in initial_msgs if m.get("msg_type") == "naming"]
 
     # 4. Повторный вызов — должен вернуть no_op и НЕ создавать новое сообщение
     repeat_result = agent.start_naming_dialogue(cycle=1)
-    assert repeat_result.get("status") == "no_op", (
-        f"Ожидался no_op, got: {repeat_result}"
-    )
+    assert (
+        repeat_result.get("status") == "no_op"
+    ), f"Ожидался no_op, got: {repeat_result}"
     assert repeat_result.get("phase") == NamingDialogue.PHASE_COMPLETED
 
     # 5. Количество naming-сообщений НЕ должно измениться
@@ -451,6 +488,7 @@ def test_naming_dialogue_not_reinitiated_after_checkpoint():
 def test_open_questions_basic_queue():
     """agent.ask_user() должен добавлять вопрос в очередь."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     assert agent.has_open_questions() is False
 
@@ -473,6 +511,7 @@ def test_open_question_takes_priority_over_stimuli():
     решает думать над открытым вопросом.
     """
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     # Активная цель по умолчанию — "Выучить основы Python".
     # Пользователь задаёт открытый вопрос НЕ про Python.
@@ -495,14 +534,13 @@ def test_open_question_takes_priority_over_stimuli():
     assert not any(
         "import" in s.lower() or " def " in s.lower() or "object" in s.lower()
         for s in explored_stimuli
-    ), (
-        f"Агент продолжил туннель Python. Стимулы: {explored_stimuli}"
-    )
+    ), f"Агент продолжил туннель Python. Стимулы: {explored_stimuli}"
 
 
 def test_open_question_duplicate_not_added():
     """Дубликат открытого вопроса НЕ должен добавляться дважды."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     r1 = agent.ask_user("что такое любовь?")
     r2 = agent.ask_user("Что такое любовь?")  # разный регистр
@@ -517,6 +555,7 @@ def test_open_question_duplicate_not_added():
 def test_open_question_hint_and_drop():
     """hint_to_open_question и drop_open_question работают."""
     from src.core.agent import DigitalBeing
+
     agent = DigitalBeing("TestSubject")
     agent.ask_user("что такое сознание?")
 
@@ -524,8 +563,7 @@ def test_open_question_hint_and_drop():
     r = agent.hint_to_open_question("что такое сознание?", "это связано с нейронами")
     assert r["status"] == "hint_added"
     assert any(
-        q.get("hint") == "это связано с нейронами"
-        for q in agent._open_questions
+        q.get("hint") == "это связано с нейронами" for q in agent._open_questions
     )
 
     # Удалить вопрос
@@ -562,9 +600,7 @@ def test_open_questions_persisted_in_checkpoint():
             "intelligence": agent.intelligence,
             "completed_goals": agent.completed_goals,
             "goals": list(agent.goals),
-            "active_goal": (
-                agent.active_goal["title"] if agent.active_goal else None
-            ),
+            "active_goal": (agent.active_goal["title"] if agent.active_goal else None),
             "success_streak": agent.success_streak,
             "saved_at": "now",
             "_goal_progress": {},

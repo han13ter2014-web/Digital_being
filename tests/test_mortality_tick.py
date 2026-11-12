@@ -9,7 +9,9 @@ def test_status_does_not_tick_or_modify_state():
     mortality = MortalityAwareness(expected_lifespan=100)
     mortality.tick(97)
     before = dict(mortality.__dict__)
-    with patch.object(mortality, "tick", side_effect=AssertionError("status must be read only")):
+    with patch.object(
+        mortality, "tick", side_effect=AssertionError("status must be read only")
+    ):
         assert mortality.get_status()["current_phase"] == "finale"
     assert mortality.__dict__ == before
 

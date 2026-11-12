@@ -15,9 +15,7 @@ async def test_user_message_during_naming_changes_core_name():
         name="Alpha",
         cycle_count=4,
         naming_dialogue=NamingDialogue(agent_name="Alpha"),
-        propose_name=Mock(return_value={
-            "status": "accepted", "new_name": "Малютка"
-        }),
+        propose_name=Mock(return_value={"status": "accepted", "new_name": "Малютка"}),
     )
     agent.naming_dialogue.phase = NamingDialogue.PHASE_AWAITING_NAME
     runner = AgentRunner.__new__(AgentRunner)

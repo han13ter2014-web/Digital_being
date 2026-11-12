@@ -73,7 +73,9 @@ def test_self_model_goals_and_skills(tmp_path: Path) -> None:
 
         store.record_skill("write-and-verify", [{"action": "write_file"}], success=True)
         store.record_skill("write-and-verify", [{"action": "write_file"}], success=True)
-        store.record_skill("write-and-verify", [{"action": "write_file"}], success=False)
+        store.record_skill(
+            "write-and-verify", [{"action": "write_file"}], success=False
+        )
         skill = store.get_skill("write-and-verify")
         assert skill is not None
         assert skill["success_count"] == 2
@@ -123,3 +125,61 @@ def test_failed_skill_keeps_last_successful_plan(tmp_path: Path) -> None:
         assert store.list_skills()[0]["name"] == "keep-plan"
     finally:
         store.close()
+
+
+def test_managed_store_roundtrip_uses_shared_life_schema(tmp_path: Path) -> None:
+    import sqlite3
+    from uuid import uuid4
+
+    life_id = str(uuid4())
+    path = tmp_path / "lives" / life_id / "life.sqlite3"
+    with MemoryStore(path, life_id=life_id) as store:
+        store.record_episode(
+            task_id="task-managed",
+            task="demo",
+            action="test",
+            output={"ok": True},
+            metadata={"life_id": life_id},
+        )
+        store.remember_fact("язык", "Python", source="test", confidence=0.9)
+        store.set_self_model("name", "Нова")
+        goal_id = store.save_goal(
+            "Проверить общую базу", metadata={"command": "test"}, priority=0.8
+        )
+        assert (
+            store.update_goal(goal_id, status="done", metadata={"attempts": 1}) is True
+        )
+        store.record_skill("managed-skill", [{"action": "test"}], success=True)
+        approval = store.create_approval(
+            task_id="task-managed",
+            task="demo",
+            goal_id=goal_id,
+            plan=[{"action": "test", "args": {}}],
+        )
+        assert store.approve_approval(approval["id"])["status"] == "approved"
+        assert store.consume_approval(approval["id"]) is True
+
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert "execution_goals" in tables
+        assert "goals" not in tables
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    with MemoryStore(path, life_id=life_id) as reopened:
+        assert reopened.life_id == life_id
+        assert reopened.recent_episodes(task_id="task-managed")[0]["action"] == "test"
+        assert reopened.recall_facts("Python")[0]["confidence"] == 0.9
+        assert reopened.get_self_model("name") == "Нова"
+        assert reopened.get_goal(goal_id)["metadata"] == {
+            "command": "test",
+            "attempts": 1,
+        }
+        assert reopened.list_goals(status="done")[0]["id"] == goal_id
+        assert reopened.get_skill("managed-skill")["success_count"] == 1
+        assert reopened.get_approval(approval["id"])["status"] == "consumed"

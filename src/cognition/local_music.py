@@ -23,18 +23,17 @@ import math
 import random
 import struct
 import wave
-from pathlib import Path
 from uuid import uuid4
 
 from src.core.activity_workspace import ActivityWorkspace
 
 
-MUSIC_LIMIT = 6        # редакций (фраз) одной работы
-MAX_MUSIC = 16         # мелодий в папке (своя квота, отдельно от рисунков)
+MUSIC_LIMIT = 6  # редакций (фраз) одной работы
+MAX_MUSIC = 16  # мелодий в папке (своя квота, отдельно от рисунков)
 
-SAMPLE_RATE = 22050    # Гц, 16-бит моно
-MAX_SECONDS = 24.0     # потолок длительности: 6 тактов по 4 доли на самом
-                       # медленном темпе (72 уд/мин) умещаются ровно
+SAMPLE_RATE = 22050  # Гц, 16-бит моно
+MAX_SECONDS = 24.0  # потолок длительности: 6 тактов по 4 доли на самом
+# медленном темпе (72 уд/мин) умещаются ровно
 AMPLITUDE = 0.45
 
 # Лады в полутонах от тоники.
@@ -48,10 +47,10 @@ _SCALES = {
 # Настроение = (лад, midi тоники, ударов в минуту). Эмоция задаёт колорит,
 # не содержание. A3 = 57, A4 = 69 (стандартный MIDI-номер).
 MOODS = {
-    "fear":    ("minor_pent", 45, 72),    # низко, медленно, рублено
-    "sadness": ("minor", 50, 76),         # минор, неспешно
-    "joy":     ("major_pent", 57, 120),   # светло, быстро
-    "calm":    ("major_pent", 52, 92),    # ровно, умеренно
+    "fear": ("minor_pent", 45, 72),  # низко, медленно, рублено
+    "sadness": ("minor", 50, 76),  # минор, неспешно
+    "joy": ("major_pent", 57, 120),  # светло, быстро
+    "calm": ("major_pent", 52, 92),  # ровно, умеренно
 }
 
 DEFAULT_THEMES = ("тишина", "дорога", "свет", "след", "вопрос", "берег")
@@ -71,11 +70,16 @@ def validate_music(state):
     if not isinstance(state, dict):
         raise ValueError("local_music: нужен словарь")
     identifier = state.get("id")
-    if not isinstance(identifier, str) or len(identifier) != 32 or any(
-        ch not in "0123456789abcdef" for ch in identifier
+    if (
+        not isinstance(identifier, str)
+        or len(identifier) != 32
+        or any(ch not in "0123456789abcdef" for ch in identifier)
     ):
         raise ValueError("local_music.id")
-    if type(state.get("revision")) is not int or not 1 <= state["revision"] <= MUSIC_LIMIT:
+    if (
+        type(state.get("revision")) is not int
+        or not 1 <= state["revision"] <= MUSIC_LIMIT
+    ):
         raise ValueError("local_music.revision")
     if state.get("status", "active") not in {"active", "left"}:
         raise ValueError("local_music.status")
@@ -106,7 +110,10 @@ def music_available(state=None, workspace=None):
     """Можно ли сочинять: активная работа с запасом редакций или место."""
     if state is not None:
         validate_music(state)
-        if state.get("status", "active") == "active" and state["revision"] < MUSIC_LIMIT:
+        if (
+            state.get("status", "active") == "active"
+            and state["revision"] < MUSIC_LIMIT
+        ):
             return True
     workspace = workspace or ActivityWorkspace()
     return len(workspace.list("*.wav")) < MAX_MUSIC
@@ -178,9 +185,13 @@ def _synthesize(bars, mood):
                 else:
                     freq = _midi_freq(midi)
                     t = i / SAMPLE_RATE
-                    sample = AMPLITUDE * envelope * (
-                        math.sin(2.0 * math.pi * freq * t)
-                        + 0.2 * math.sin(4.0 * math.pi * freq * t)
+                    sample = (
+                        AMPLITUDE
+                        * envelope
+                        * (
+                            math.sin(2.0 * math.pi * freq * t)
+                            + 0.2 * math.sin(4.0 * math.pi * freq * t)
+                        )
                     )
                 value = int(max(-1.0, min(1.0, sample)) * 32767)
                 frames += struct.pack("<h", value)
@@ -216,7 +227,11 @@ def music_step(state=None, *, mood="calm", theme=None, workspace=None):
     root = workspace.root
     if state is not None:
         validate_music(state)
-    if state is None or state["revision"] >= MUSIC_LIMIT or state.get("status") == "left":
+    if (
+        state is None
+        or state["revision"] >= MUSIC_LIMIT
+        or state.get("status") == "left"
+    ):
         if len(workspace.list("*.wav")) >= MAX_MUSIC:
             raise ValueError("Папка мелодий заполнена; новые файлы не создаются")
         identifier = uuid4().hex
@@ -226,16 +241,26 @@ def music_step(state=None, *, mood="calm", theme=None, workspace=None):
         revision = 1
     else:
         identifier, theme, mood = state["id"], state["theme"], state["mood"]
+        # Прежняя редакция может остаться в общем корне до перехода (5C):
+        # копируем её в каталог жизни, оригинал не трогаем.
+        workspace.ensure_from_legacy(f"{identifier}.wav")
         previous = (root / f"{identifier}.wav").read_bytes()
         if hashlib.sha256(previous).hexdigest() != state["sha256"]:
-            raise ValueError("Мелодия изменена извне; автоматическая перезапись отменена")
+            raise ValueError(
+                "Мелодия изменена извне; автоматическая перезапись отменена"
+            )
         revision = state["revision"] + 1
 
     bars = _compose_score(theme, mood, revision)
     content = _synthesize(bars, mood)
 
-    target = workspace.sandbox.resolve(f"{identifier}.wav")
-    target.write_bytes(content)
+    workspace.write_bytes(
+        f"{identifier}.wav",
+        content,
+        overwrite=True,
+        kind="creative",
+        metadata={"activity": "music", "work_id": identifier, "revision": revision},
+    )
     if (root / f"{identifier}.wav").read_bytes() != content:
         raise IOError("Не совпало обратное чтение мелодии")
 
@@ -246,7 +271,5 @@ def music_step(state=None, *, mood="calm", theme=None, workspace=None):
         "revision": revision,
         "status": "active",
         "sha256": hashlib.sha256(content).hexdigest(),
-        "score": [
-            _midi_name(m) if m is not None else "—" for m, _d in bars[-1]
-        ],
+        "score": [_midi_name(m) if m is not None else "—" for m, _d in bars[-1]],
     }

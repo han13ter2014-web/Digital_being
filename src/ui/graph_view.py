@@ -43,11 +43,15 @@ def value_label(name: str) -> str:
 
 def _concept_detail(node: Any) -> Dict[str, Any]:
     """Что известно о концепции: свидетельства, уверенность, источники, связи."""
-    experiences = [item for item in (getattr(node, "experiences", []) or [])
-                   if isinstance(item, dict)]
+    experiences = [
+        item
+        for item in (getattr(node, "experiences", []) or [])
+        if isinstance(item, dict)
+    ]
     sources = {str(item.get("source")) for item in experiences if item.get("source")}
-    timestamps = [str(item.get("timestamp")) for item in experiences
-                  if item.get("timestamp")]
+    timestamps = [
+        str(item.get("timestamp")) for item in experiences if item.get("timestamp")
+    ]
     detail: Dict[str, Any] = {
         "свидетельств": len(experiences),
         "уверенность": round(float(getattr(node, "confidence", 0.0) or 0.0), 2),
@@ -94,39 +98,50 @@ def build_life_graph(
     seen_edges: set = set()
     omitted = 0
 
-    def add_node(node_id: str, kind: str, label: Any, weight: float,
-                 detail: Optional[Dict[str, Any]] = None) -> bool:
+    def add_node(
+        node_id: str,
+        kind: str,
+        label: Any,
+        weight: float,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         if node_id in seen_ids:
             return False
         seen_ids.add(node_id)
-        nodes.append({
-            "id": node_id,
-            "kind": kind,
-            "label": str(label),
-            "weight": max(0.0, min(1.0, float(weight))),
-            "detail": dict(detail or {}),
-        })
+        nodes.append(
+            {
+                "id": node_id,
+                "kind": kind,
+                "label": str(label),
+                "weight": max(0.0, min(1.0, float(weight))),
+                "detail": dict(detail or {}),
+            }
+        )
         return True
 
-    def add_edge(source: str, target: str, kind: str, label: str,
-                 weight: float = 0.5) -> None:
+    def add_edge(
+        source: str, target: str, kind: str, label: str, weight: float = 0.5
+    ) -> None:
         if source == target or source not in seen_ids or target not in seen_ids:
             return
         pair: Tuple[str, ...] = (
-            tuple(sorted((source, target))) if kind == "association"
+            tuple(sorted((source, target)))
+            if kind == "association"
             else (source, target)
         )
         key = (pair, kind)
         if key in seen_edges:
             return
         seen_edges.add(key)
-        edges.append({
-            "source": source,
-            "target": target,
-            "kind": kind,
-            "label": label,
-            "weight": max(0.0, min(1.0, float(weight))),
-        })
+        edges.append(
+            {
+                "source": source,
+                "target": target,
+                "kind": kind,
+                "label": label,
+                "weight": max(0.0, min(1.0, float(weight))),
+            }
+        )
 
     # --- Концепции: только те, что реально есть в ментальной модели ---
     mental_models = getattr(agent, "mental_models", None)
@@ -143,16 +158,26 @@ def build_life_graph(
     kept = ordered[:MAX_CONCEPTS]
     omitted = max(0, len(visible) - len(kept))
     for name, node in kept:
-        add_node(f"concept:{name}", "concept", name,
-                 getattr(node, "confidence", 0.1), _concept_detail(node))
+        add_node(
+            f"concept:{name}",
+            "concept",
+            name,
+            getattr(node, "confidence", 0.1),
+            _concept_detail(node),
+        )
 
     kept_names = {name for name, _ in kept}
     for name, node in kept:
         for other, weight in (getattr(node, "connections", {}) or {}).items():
             if other not in kept_names:
                 continue
-            add_edge(f"concept:{name}", f"concept:{other}",
-                     "association", "связано с", weight)
+            add_edge(
+                f"concept:{name}",
+                f"concept:{other}",
+                "association",
+                "связано с",
+                weight,
+            )
 
     # --- Намерения: из снимка жизни, без повторной записи в Core ---
     snapshot = life_snapshot or {}
@@ -173,25 +198,35 @@ def build_life_graph(
             continue
         kind = "forgotten" if _is_forgotten(entry) else "intention"
         weight = 0.8 if str(entry.get("status") or "") == "started" else 0.45
-        add_node(f"intention:{entry_id}", kind, _intention_label(entry), weight, {
-            "действие": entry.get("action"),
-            "тема": entry.get("target"),
-            "статус": entry.get("status"),
-        })
+        add_node(
+            f"intention:{entry_id}",
+            kind,
+            _intention_label(entry),
+            weight,
+            {
+                "действие": entry.get("action"),
+                "тема": entry.get("target"),
+                "статус": entry.get("status"),
+            },
+        )
 
         target = entry.get("target")
         if isinstance(target, str) and f"concept:{target}" in seen_ids:
-            add_edge(f"intention:{entry_id}", f"concept:{target}",
-                     "about", "о теме", 0.6)
+            add_edge(
+                f"intention:{entry_id}", f"concept:{target}", "about", "о теме", 0.6
+            )
 
         action = str(entry.get("action") or "")
         if action:
             activity_id = f"activity:{action}"
-            add_node(activity_id, "activity",
-                     _ACTIVITY_LABELS.get(action, action), 0.5,
-                     {"действие": action})
-            add_edge(f"intention:{entry_id}", activity_id, "uses",
-                     "породило", 0.6)
+            add_node(
+                activity_id,
+                "activity",
+                _ACTIVITY_LABELS.get(action, action),
+                0.5,
+                {"действие": action},
+            )
+            add_edge(f"intention:{entry_id}", activity_id, "uses", "породило", 0.6)
 
     # --- Разрывы процесса: те же автобиографические эпизоды, что и дневник ---
     # Никаких рёбер без основания: запись фиксирует границы опыта, но не
@@ -202,37 +237,55 @@ def build_life_graph(
             continue
         metadata = episode.get("metadata") or {}
         output = episode.get("output") or {}
-        if (not isinstance(metadata, dict) or metadata.get("kind") != "biography_seam"
-                or not isinstance(output, dict) or not output.get("text")):
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("kind") != "biography_seam"
+            or not isinstance(output, dict)
+            or not output.get("text")
+        ):
             continue
         episode_id = str(episode.get("id") or "")
         if not episode_id:
             continue
-        add_node(f"episode:{episode_id}", "biography_seam", output["text"], 0.9, {
-            "начало разрыва": output.get("gap_started_at"),
-            "конец разрыва": output.get("gap_ended_at"),
-            "причина": output.get("reason"),
-            "источник": "автобиографическая память",
-        })
+        add_node(
+            f"episode:{episode_id}",
+            "biography_seam",
+            output["text"],
+            0.9,
+            {
+                "начало разрыва": output.get("gap_started_at"),
+                "конец разрыва": output.get("gap_ended_at"),
+                "причина": output.get("reason"),
+                "источник": "автобиографическая память",
+            },
+        )
 
     # --- Ценности ядра: реальные ключи innate_values, без выдуманных ---
     values = getattr(agent, "innate_values", None) or {}
     if isinstance(values, dict):
         for name in list(values)[:MAX_VALUES]:
             if isinstance(name, str) and name.strip():
-                add_node(f"value:{name}", "value", value_label(name), 0.5,
-                         {"ценность ядра": True})
+                add_node(
+                    f"value:{name}",
+                    "value",
+                    value_label(name),
+                    0.5,
+                    {"ценность ядра": True},
+                )
 
     # --- Ограничения объёма: рабочая карта, а не вся память ---
     if len(nodes) > limit:
         ranked = sorted(nodes, key=lambda n: (-n["weight"], n["id"]))
         keep_ids = {n["id"] for n in ranked[:limit]}
         nodes = [n for n in nodes if n["id"] in keep_ids]
-        edges = [e for e in edges
-                 if e["source"] in keep_ids and e["target"] in keep_ids]
+        edges = [
+            e for e in edges if e["source"] in keep_ids and e["target"] in keep_ids
+        ]
 
     if len(edges) > MAX_EDGES:
-        edges = sorted(edges, key=lambda e: (-e["weight"], e["source"], e["target"]))[:MAX_EDGES]
+        edges = sorted(edges, key=lambda e: (-e["weight"], e["source"], e["target"]))[
+            :MAX_EDGES
+        ]
 
     nodes.sort(key=lambda n: (n["kind"], n["id"]))
     return {
@@ -305,7 +358,9 @@ def _place_ring(
         )
 
 
-def layout_nodes(nodes: List[Dict[str, Any]], width: float, height: float) -> Dict[str, Tuple[float, float]]:
+def layout_nodes(
+    nodes: List[Dict[str, Any]], width: float, height: float
+) -> Dict[str, Tuple[float, float]]:
     """Детерминированная раскладка кольцами: без случайности и дрожания.
 
     Концепции идут от центра к краю по уверенности, остальные группы —
@@ -324,10 +379,16 @@ def layout_nodes(nodes: List[Dict[str, Any]], width: float, height: float) -> Di
     )
     index = 0
     for ring_index, (fraction, capacity) in enumerate(_CONCEPT_RINGS):
-        chunk = concepts[index:index + capacity]
+        chunk = concepts[index : index + capacity]
         index += capacity
-        _place_ring(positions, chunk, center_x, center_y,
-                    max_radius * fraction, offset=0.4 * (ring_index + 1))
+        _place_ring(
+            positions,
+            chunk,
+            center_x,
+            center_y,
+            max_radius * fraction,
+            offset=0.4 * (ring_index + 1),
+        )
 
     kind_offsets = {"forgotten": 0.9, "intention": 1.7, "activity": 2.5, "value": 3.3}
     for kind, (inner, outer) in _GROUP_RINGS.items():
@@ -336,30 +397,45 @@ def layout_nodes(nodes: List[Dict[str, Any]], width: float, height: float) -> Di
             key=lambda item: (-float(item.get("weight") or 0.0), str(item.get("id"))),
         )
         first, rest = items[:16], items[16:]
-        _place_ring(positions, first, center_x, center_y,
-                    max_radius * inner, offset=kind_offsets[kind])
-        _place_ring(positions, rest, center_x, center_y,
-                    max_radius * outer, offset=kind_offsets[kind] + 0.3)
+        _place_ring(
+            positions,
+            first,
+            center_x,
+            center_y,
+            max_radius * inner,
+            offset=kind_offsets[kind],
+        )
+        _place_ring(
+            positions,
+            rest,
+            center_x,
+            center_y,
+            max_radius * outer,
+            offset=kind_offsets[kind] + 0.3,
+        )
 
     # Неизвестный тип не выбрасываем с карты, а ставим на тихую орбиту.
     for kind, items in sorted(groups.items()):
-        _place_ring(positions, items, center_x, center_y,
-                    max_radius * 0.5, offset=0.0)
+        _place_ring(positions, items, center_x, center_y, max_radius * 0.5, offset=0.0)
     return positions
 
 
 def short_label(text: Any, limit: int = MAX_LABEL_CHARS) -> str:
     """Подпись узла, укороченная по границе символов."""
     value = str(text)
-    return value if len(value) <= limit else value[:limit - 1] + "…"
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
-def _boxes_overlap(first: Tuple[float, float, float, float],
-                   second: Tuple[float, float, float, float],
-                   padding: float = 3.0) -> bool:
+def _boxes_overlap(
+    first: Tuple[float, float, float, float],
+    second: Tuple[float, float, float, float],
+    padding: float = 3.0,
+) -> bool:
     return not (
-        first[2] + padding < second[0] or second[2] + padding < first[0]
-        or first[3] + padding < second[1] or second[3] + padding < first[1]
+        first[2] + padding < second[0]
+        or second[2] + padding < first[0]
+        or first[3] + padding < second[1]
+        or second[3] + padding < first[1]
     )
 
 
@@ -381,16 +457,21 @@ def layout_labels(
         position = positions.get(str(node.get("id")))
         if position is None:
             continue
-        centers.append((
-            position[0], position[1],
-            node_radius(node.get("weight"), str(node.get("kind"))),
-        ))
+        centers.append(
+            (
+                position[0],
+                position[1],
+                node_radius(node.get("weight"), str(node.get("kind"))),
+            )
+        )
 
     def hits_node(box: Tuple[float, float, float, float]) -> bool:
         for center_x, center_y, radius in centers:
             nearest_x = min(max(center_x, box[0]), box[2])
             nearest_y = min(max(center_y, box[1]), box[3])
-            if (nearest_x - center_x) ** 2 + (nearest_y - center_y) ** 2 < (radius + 4.0) ** 2:
+            if (nearest_x - center_x) ** 2 + (nearest_y - center_y) ** 2 < (
+                radius + 4.0
+            ) ** 2:
                 return True
         return False
 
@@ -414,18 +495,50 @@ def layout_labels(
         text_height = 17.0
         gap = 8.0
         candidates = (
-            (x + radius + gap, y, "w",
-             (x + radius + gap, y - text_height / 2,
-              x + radius + gap + text_width, y + text_height / 2)),
-            (x - radius - gap, y, "e",
-             (x - radius - gap - text_width, y - text_height / 2,
-              x - radius - gap, y + text_height / 2)),
-            (x, y + radius + gap, "n",
-             (x - text_width / 2, y + radius + gap,
-              x + text_width / 2, y + radius + gap + text_height)),
-            (x, y - radius - gap, "s",
-             (x - text_width / 2, y - radius - gap - text_height,
-              x + text_width / 2, y - radius - gap)),
+            (
+                x + radius + gap,
+                y,
+                "w",
+                (
+                    x + radius + gap,
+                    y - text_height / 2,
+                    x + radius + gap + text_width,
+                    y + text_height / 2,
+                ),
+            ),
+            (
+                x - radius - gap,
+                y,
+                "e",
+                (
+                    x - radius - gap - text_width,
+                    y - text_height / 2,
+                    x - radius - gap,
+                    y + text_height / 2,
+                ),
+            ),
+            (
+                x,
+                y + radius + gap,
+                "n",
+                (
+                    x - text_width / 2,
+                    y + radius + gap,
+                    x + text_width / 2,
+                    y + radius + gap + text_height,
+                ),
+            ),
+            (
+                x,
+                y - radius - gap,
+                "s",
+                (
+                    x - text_width / 2,
+                    y - radius - gap - text_height,
+                    x + text_width / 2,
+                    y - radius - gap,
+                ),
+            ),
         )
         for label_x, label_y, anchor, box in candidates:
             if box[0] < 4 or box[1] < 4 or box[2] > width - 4 or box[3] > height - 4:

@@ -8,7 +8,9 @@ from src.core.checkpoint_serializer import apply_state_to_agent, build_state_fro
 
 def test_will_generates_at_most_once_per_cycle():
     agent = DigitalBeing(name="WillClockTest")
-    with patch.object(agent.spontaneous_generator, "maybe_generate", return_value=None) as generate:
+    with patch.object(
+        agent.spontaneous_generator, "maybe_generate", return_value=None
+    ) as generate:
         agent.tick_will(10)
         assert agent.tick_will(10)["skipped"] == "duplicate_cycle"
         generate.assert_called_once()
@@ -18,7 +20,9 @@ def test_will_generates_at_most_once_per_cycle():
 
 def test_communication_checks_initiative_once_per_cycle():
     agent = DigitalBeing(name="CommunicationClockTest")
-    with patch.object(agent.proactive_communication, "maybe_initiate", return_value=None) as initiate:
+    with patch.object(
+        agent.proactive_communication, "maybe_initiate", return_value=None
+    ) as initiate:
         agent.tick_communication(10)
         assert agent.tick_communication(10)["skipped"] == "duplicate_cycle"
         initiate.assert_called_once()

@@ -97,6 +97,37 @@ def test_subsystem_is_disabled_and_lazy_by_default(tmp_path: Path) -> None:
     assert sub.status()["runtime_ready"] is False
 
 
+def test_managed_subsystem_uses_life_database_and_safe_rebind(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from uuid import uuid4
+    from src.core.paths import data_path
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("DELAMAIN_DB", str(tmp_path / "wrong.sqlite3"))
+    first_life = str(uuid4())
+    second_life = str(uuid4())
+    sub = DelamainSubsystem(
+        workspace=tmp_path / "workspace", enabled=False, life_id=first_life
+    )
+    assert sub.db_path == Path(data_path("lives", first_life, "life.sqlite3"))
+    assert sub.workspace == Path(data_path("lives", first_life, "artifacts"))
+
+    assert sub.enable()["ok"] is True
+    goal = sub.queue_goal("durable managed goal", "test")
+    assert sub.runtime.memory.life_id == first_life
+    assert sub.get_goal(goal["id"])["title"] == "durable managed goal"
+    with pytest.raises(RuntimeError, match="открытым runtime"):
+        sub.bind_life(second_life)
+    sub.teardown()
+
+    sub.bind_life(second_life)
+    assert sub.db_path == Path(data_path("lives", second_life, "life.sqlite3"))
+    assert sub.enable()["ok"] is True
+    assert sub.list_goals() == []
+    sub.teardown()
+
+
 def test_enable_creates_runtime_and_disable_stops_ticks(tmp_path: Path) -> None:
     sub = make_sub(tmp_path, enabled=False)
 
@@ -535,9 +566,7 @@ def test_successful_skill_is_reused_only_for_same_command(tmp_path: Path) -> Non
     second = sub.tick(2, {})["events"][0]["data"]
     assert second["ok"] is True
     assert second["reused_skill"] is True
-    assert (tmp_path / "workspace" / "reused.txt").read_text(
-        encoding="utf-8"
-    ) == "one"
+    assert (tmp_path / "workspace" / "reused.txt").read_text(encoding="utf-8") == "one"
     skill = sub.runtime.memory.get_skill("repeat write")
     assert skill["success_count"] == 2
 
@@ -555,7 +584,10 @@ def test_explicit_plan_goal_runs_without_planner(tmp_path: Path) -> None:
         "write planned",
         plan=[
             {"action": "write_file", "args": {"path": "planned.txt", "content": "ok"}},
-            {"action": "verify_file", "args": {"path": "planned.txt", "contains": "ok"}},
+            {
+                "action": "verify_file",
+                "args": {"path": "planned.txt", "contains": "ok"},
+            },
         ],
     )
 
@@ -588,7 +620,9 @@ def test_run_now_and_status_summary(tmp_path: Path) -> None:
 
     result = sub.run_now("запиши в direct.txt: hello")
     assert result["ok"] is True
-    assert (tmp_path / "workspace" / "direct.txt").read_text(encoding="utf-8") == "hello"
+    assert (tmp_path / "workspace" / "direct.txt").read_text(
+        encoding="utf-8"
+    ) == "hello"
 
     status = sub.status()
     assert status["runtime_ready"] is True
@@ -620,34 +654,7 @@ def test_planner_is_heuristic_by_default(tmp_path: Path) -> None:
     sub.enable()
 
     info = sub.status()["planner"]
-    assert info["enabled"] is False
     assert info["mode"] == "heuristic"
-    assert sub.runtime.planner.__class__.__name__ == "HeuristicPlanner"
-    sub.teardown()
-
-
-def test_llm_planner_status_does_not_require_network(tmp_path: Path) -> None:
-    sub = make_sub(tmp_path, llm_enabled=True, llm_model="fake-model")
-    sub.enable()
-
-    info = sub.status()["planner"]
-    assert info["enabled"] is True
-    assert info["mode"] == "ollama:fake-model+fallback"
-    assert info["model"] == "fake-model"
-    assert info["base_url"] == "http://127.0.0.1:11434"
-    assert info["last_used"] == "none"
-    assert info["last_error"] is None
-    assert sub.runtime.planner.__class__.__name__ == "FallbackPlanner"
-    sub.teardown()
-
-
-def test_invalid_llm_config_falls_back_to_heuristic(tmp_path: Path) -> None:
-    sub = make_sub(tmp_path, llm_enabled=True, llm_model="   ")
-    sub.enable()
-
-    info = sub.status()["planner"]
-    assert info["mode"] == "heuristic (LLM setup failed)"
-    assert "model" in (info["error"] or "").lower()
     assert sub.runtime.planner.__class__.__name__ == "HeuristicPlanner"
     sub.teardown()
 
@@ -683,9 +690,13 @@ def test_agent_runner_delamain_commands(tmp_path: Path) -> None:
 
         result = await runner.handle_command("/delamain run запиши в cmd.txt: привет")
         assert "✅" in result
-        assert (tmp_path / "workspace" / "cmd.txt").read_text(encoding="utf-8") == "привет"
+        assert (tmp_path / "workspace" / "cmd.txt").read_text(
+            encoding="utf-8"
+        ) == "привет"
 
-        queued = await runner.handle_command("/delamain goal Note | запиши в goal.txt: ok")
+        queued = await runner.handle_command(
+            "/delamain goal Note | запиши в goal.txt: ok"
+        )
         assert "поставлена в очередь" in queued
         assert sub.tick(1, {}) is not None
         goals = await runner.handle_command("/delamain goals")

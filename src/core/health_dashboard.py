@@ -131,7 +131,9 @@ def format_health_report(report: Dict) -> str:
     lines.append(f"   RSS сейчас: {sys_info.get('current_rss_mb', 0)} МБ")
     lines.append(f"   RSS пик:    {sys_info.get('peak_rss_mb', 0)} МБ")
     lines.append(f"   Лимит:      {sys_info.get('max_rss_mb', 0)} МБ")
-    lines.append(f"   psutil:     {'✅' if sys_info.get('psutil_available') else '⚠️ недоступен'}")
+    lines.append(
+        f"   psutil:     {'✅' if sys_info.get('psutil_available') else '⚠️ недоступен'}"
+    )
     lines.append(f"   Forced forgets: {sys_info.get('forced_forget_count', 0)}")
 
     # Агент
@@ -152,7 +154,7 @@ def format_health_report(report: Dict) -> str:
     mm = report.get("mental_models")
     if mm and "error" not in mm:
         lines.append("")
-        lines.append(f"🧠 МЕНТАЛЬНЫЕ МОДЕЛИ:")
+        lines.append("🧠 МЕНТАЛЬНЫЕ МОДЕЛИ:")
         lines.append(f"   Концепций:          {mm.get('total_concepts', 0)}")
         lines.append(f"   Уверенных (>70%):   {mm.get('high_confidence', 0)}")
         lines.append(f"   Ассоциаций:         {mm.get('total_associations', 0)}")
@@ -166,8 +168,10 @@ def format_health_report(report: Dict) -> str:
     goals = report.get("goals")
     if goals:
         lines.append("")
-        lines.append(f"🎯 ЦЕЛИ:")
-        lines.append(f"   Завершено: {goals.get('completed', 0)}/{goals.get('total', 0)}")
+        lines.append("🎯 ЦЕЛИ:")
+        lines.append(
+            f"   Завершено: {goals.get('completed', 0)}/{goals.get('total', 0)}"
+        )
         lines.append(f"   Активная:  {str(goals.get('active', '—'))[:40]}")
 
     # Долгосрочная память
@@ -203,7 +207,9 @@ def format_health_report(report: Dict) -> str:
         lines.append("")
         lines.append("⚠️  ПОСЛЕДНИЕ АЛЕРТЫ WATCHDOG:")
         for a in alerts[-5:]:
-            lines.append(f"   [{a.get('cycle', '?')}] {a.get('kind', '?')}: {a.get('message', '')}")
+            lines.append(
+                f"   [{a.get('cycle', '?')}] {a.get('kind', '?')}: {a.get('message', '')}"
+            )
 
     lines.append("")
     lines.append("=" * 60)
@@ -227,7 +233,7 @@ class HealthDashboardSubsystem(Subsystem):
         super().__init__(agent_name=agent_name)
         self._cached_report: Dict = {}
         self._tick_interval: int = 25  # собирать каждые 25 циклов
-        self._last_collected_cycle: int = -10**9
+        self._last_collected_cycle: int = -(10**9)
 
     def set_tick_interval(self, n: int) -> None:
         """Настройка частоты сбора метрик (1 = каждый цикл)."""
@@ -254,7 +260,9 @@ class HealthDashboardSubsystem(Subsystem):
                         "agent_alive": report.get("agent", {}).get("is_alive"),
                         "energy": report.get("agent", {}).get("energy"),
                         "rss_mb": report.get("system", {}).get("current_rss_mb"),
-                        "concepts": report.get("mental_models", {}).get("total_concepts"),
+                        "concepts": report.get("mental_models", {}).get(
+                            "total_concepts"
+                        ),
                     },
                 }
             ]
@@ -266,9 +274,11 @@ class HealthDashboardSubsystem(Subsystem):
 
     def status(self) -> Dict:
         base = super().status()
-        base.update({
-            "tick_interval": self._tick_interval,
-            "last_collected_cycle": self._last_collected_cycle,
-            "cached": bool(self._cached_report),
-        })
+        base.update(
+            {
+                "tick_interval": self._tick_interval,
+                "last_collected_cycle": self._last_collected_cycle,
+                "cached": bool(self._cached_report),
+            }
+        )
         return base

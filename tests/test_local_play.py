@@ -16,7 +16,9 @@ def test_play_does_not_search_or_add_concept_experience():
     agent = DigitalBeing(name="PlayNotResearch")
     before = agent.mental_models.to_storage_dict()
     play_level = agent.motivation_system.needs["play"].current_level
-    with patch.object(agent, "think", side_effect=AssertionError("game is not research")) as think:
+    with patch.object(
+        agent, "think", side_effect=AssertionError("game is not research")
+    ) as think:
         agent.act("play")
     think.assert_not_called()
     assert agent._local_play["turns"] == 1
@@ -34,13 +36,27 @@ def test_play_need_proposes_game_and_can_lose_arbitration():
     for drive in system.drives.values():
         drive.current_level = 0
     system.needs["play"].current_level = 0
-    candidate = next(c for c in system.get_action_candidates({}) if c["action"] == "play")
-    verdict = {"score": 0.5, "verdict": "proceed", "confidence": 0.5, "reasoning": "test", "voices": {}}
+    candidate = next(
+        c for c in system.get_action_candidates({}) if c["action"] == "play"
+    )
+    verdict = {
+        "score": 0.5,
+        "verdict": "proceed",
+        "confidence": 0.5,
+        "reasoning": "test",
+        "voices": {},
+    }
     with patch.object(agent.decision_arbitrator, "arbitrate", return_value=verdict):
         other = {"action": "communicate", "source": "other_desire", "strength": 1.0}
-        assert agent.decision_arbitrator.choose_action([candidate, other], {})["action"] == "communicate"
+        assert (
+            agent.decision_arbitrator.choose_action([candidate, other], {})["action"]
+            == "communicate"
+        )
         other["strength"] = 0.1
-        assert agent.decision_arbitrator.choose_action([candidate, other], {})["action"] == "play"
+        assert (
+            agent.decision_arbitrator.choose_action([candidate, other], {})["action"]
+            == "play"
+        )
 
 
 def test_round_ends_and_new_round_only_begins_on_next_chosen_turn():

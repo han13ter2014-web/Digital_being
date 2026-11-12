@@ -17,15 +17,14 @@ test_benchmarks.py — pytest-benchmark suite для автодетекции р
 Базовый снимок (baseline.json) — коммитится в репо. При существенном
 замедлении CI может падать, требуя ревью.
 """
+
 import gzip
 import os
 import sys
 import time
 import random
 
-PROJECT_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..")
-)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -48,6 +47,7 @@ class TestMentalModelBenchmarks:
     def _make_populated_mm(self, n_concepts: int = 200):
         """Создаёт MentalModel с N концепциями и связями."""
         from src.cognition.mental_models import MentalModel
+
         mm = MentalModel(name="bench")
         for i in range(n_concepts):
             mm.encounter_concept(f"c_{i}", f"ctx_{i}", "outcome", 0.5)
@@ -60,6 +60,7 @@ class TestMentalModelBenchmarks:
     def test_bench_encounter_concept(self, benchmark):
         """encounter_concept — добавление новой концепции. Цель: < 5 мс."""
         from src.cognition.mental_models import MentalModel
+
         mm = MentalModel(name="bench")
         counter = {"i": 0}
 
@@ -100,6 +101,7 @@ class TestMentalModelBenchmarks:
     def test_bench_apply_concept_limit_no_op(self, benchmark):
         """apply_concept_limit когда лимит не превышен. Цель: < 1 мс."""
         from src.cognition.mental_models import MentalModel
+
         mm = MentalModel(name="bench")
         for i in range(10):  # сильно ниже MAX_CONCEPTS
             mm.encounter_concept(f"c_{i}", f"ctx_{i}", "o", 0.5)
@@ -109,7 +111,6 @@ class TestMentalModelBenchmarks:
     def test_bench_apply_concept_limit_overflow(self, benchmark):
         """apply_concept_limit при переполнении (200 → 100). Цель: < 50 мс."""
         from config import simulation_config
-        from src.cognition.mental_models import MentalModel
 
         mm = self._make_populated_mm(n_concepts=200)
         original = simulation_config.LR_CONFIG.MAX_CONCEPTS
@@ -135,7 +136,9 @@ class TestWatchdogBenchmarks:
         """on_cycle_end — фиксация длительности цикла. Цель: < 1 мс."""
         from src.core.watchdog import Watchdog
 
-        wd = Watchdog(max_rss_mb=10_000.0, max_cycle_seconds=60.0, check_interval_cycles=1000)
+        wd = Watchdog(
+            max_rss_mb=10_000.0, max_cycle_seconds=60.0, check_interval_cycles=1000
+        )
 
         def run():
             wd.on_cycle_start()
@@ -148,7 +151,9 @@ class TestWatchdogBenchmarks:
         """get_status — лёгкий словарь для dashboard. Цель: < 100 мкс."""
         from src.core.watchdog import Watchdog
 
-        wd = Watchdog(max_rss_mb=10_000.0, max_cycle_seconds=60.0, check_interval_cycles=10)
+        wd = Watchdog(
+            max_rss_mb=10_000.0, max_cycle_seconds=60.0, check_interval_cycles=10
+        )
         # Прогреваем — 10 циклов.
         for _ in range(10):
             wd.on_cycle_start()
@@ -172,12 +177,15 @@ class TestCheckpointBenchmarks:
             "intelligence": 3.0,
             "is_alive": True,
             "agent_name": "TestAgent_" + "x" * 50,
-            "concepts": {f"concept_{i}": {
-                "name": f"c_{i}",
-                "confidence": random.random(),
-                "valence": random.random(),
-                "contexts": [f"ctx_{j}" for j in range(5)],
-            } for i in range(n_keys)},
+            "concepts": {
+                f"concept_{i}": {
+                    "name": f"c_{i}",
+                    "confidence": random.random(),
+                    "valence": random.random(),
+                    "contexts": [f"ctx_{j}" for j in range(5)],
+                }
+                for i in range(n_keys)
+            },
             "episodes": [{"ts": time.time(), "text": "x" * 100} for _ in range(20)],
             "meta": {"version": "1.0.0", "tags": ["a", "b", "c"]},
         }
@@ -186,6 +194,7 @@ class TestCheckpointBenchmarks:
     def test_bench_checkpoint_dump(self, benchmark, tmp_path):
         """CheckpointSerializer.save — полная запись на диск. Цель: < 100 мс для 100 ключей."""
         from src.core.checkpoint_serializer import CheckpointSerializer
+
         state = self._make_state_dict(n_keys=100)
         serializer = CheckpointSerializer(checkpoint_dir=str(tmp_path), compress=False)
 
@@ -200,6 +209,7 @@ class TestCheckpointBenchmarks:
         """save + gzip компрессия + load. Цель: < 300 мс для 100 ключей."""
         from pathlib import Path
         from src.core.checkpoint_serializer import CheckpointSerializer
+
         state = self._make_state_dict(n_keys=100)
         serializer = CheckpointSerializer(checkpoint_dir=str(tmp_path), compress=True)
         dest = tmp_path / "ckpt.json.gz"
@@ -226,6 +236,7 @@ class TestMetricsCollectorBenchmarks:
     def test_bench_metrics_collect(self, benchmark):
         """snapshot — снятие всех метрик. Цель: < 5 мс."""
         from src.metrics.metrics_collector import MetricsCollector
+
         mc = MetricsCollector(maxlen_per_channel=720, agent_name="bench")
         # Добавляем немного данных для реалистичности
         mc.record("energy", 100.0)
@@ -243,11 +254,13 @@ class TestHealthDashboardBenchmarks:
     def test_bench_health_collect(self, benchmark):
         """collect_health — сбор health-метрик. Цель: < 10 мс."""
         from src.core.health_dashboard import collect_health
+
         benchmark(collect_health, agent=None)
 
     def test_bench_health_format(self, benchmark):
         """format_health_report — форматирование отчёта. Цель: < 5 мс."""
         from src.core.health_dashboard import collect_health, format_health_report
+
         report = collect_health(agent=None)
         benchmark(format_health_report, report)
 
@@ -264,18 +277,20 @@ class TestMetricsEndpointBenchmarks:
         from src.ui.web_dashboard import SharedState, handle_metrics, STATE_KEY
 
         state = SharedState()
-        state.update_status({
-            "agent": {
-                "name": "BenchAgent",
-                "energy": 145.5,
-                "intelligence": 3.0,
-                "cycle_count": 12345,
-                "completed_goals": 42,
-                "success_streak": 5,
-            },
-            "mental_models": {"total_concepts": 87},
-            "system": {"current_rss_mb": 42.0},
-        })
+        state.update_status(
+            {
+                "agent": {
+                    "name": "BenchAgent",
+                    "energy": 145.5,
+                    "intelligence": 3.0,
+                    "cycle_count": 12345,
+                    "completed_goals": 42,
+                    "success_streak": 5,
+                },
+                "mental_models": {"total_concepts": 87},
+                "system": {"current_rss_mb": 42.0},
+            }
+        )
         state.update_subsystems({"subsystem_count": 12, "subsystems": []})
 
         class _Req:
@@ -301,6 +316,7 @@ class TestSharedStateBenchmarks:
     def test_bench_shared_state_update_status(self, benchmark):
         """update_status — пишется каждый цикл. Цель: < 50 мкс."""
         from src.ui.web_dashboard import SharedState
+
         state = SharedState()
         payload = {
             "agent": {"name": "X", "energy": 100, "cycle_count": 5},
@@ -312,10 +328,13 @@ class TestSharedStateBenchmarks:
     def test_bench_shared_state_snapshot(self, benchmark):
         """snapshot — читается на каждый HTTP-запрос. Цель: < 100 мкс."""
         from src.ui.web_dashboard import SharedState
+
         state = SharedState()
-        state.update_status({
-            "agent": {"name": "X", "energy": 100, "cycle_count": 5},
-            "mental_models": {"total_concepts": 10},
-            "system": {"current_rss_mb": 5.0},
-        })
+        state.update_status(
+            {
+                "agent": {"name": "X", "energy": 100, "cycle_count": 5},
+                "mental_models": {"total_concepts": 10},
+                "system": {"current_rss_mb": 5.0},
+            }
+        )
         benchmark(state.snapshot)

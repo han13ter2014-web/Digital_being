@@ -7,12 +7,15 @@ import pytest
 from src.memory.profile_backup import create_backup, verify_backup, restore_backup
 
 
-@pytest.mark.parametrize("entries", [[], None, [{"path": "../outside"}],
-                                       [{"path": "unlisted.txt"}], [None]])
+@pytest.mark.parametrize(
+    "entries", [[], None, [{"path": "../outside"}], [{"path": "unlisted.txt"}], [None]]
+)
 def test_invalid_file_list_rejected(tmp_path, entries):
     backup = tmp_path / "backup"
     backup.mkdir()
-    (backup / "manifest.json").write_text(json.dumps({"version": 1, "complete": True, "files": entries}))
+    (backup / "manifest.json").write_text(
+        json.dumps({"version": 1, "complete": True, "files": entries})
+    )
     with pytest.raises(ValueError):
         restore_backup(backup, tmp_path / "restored")
     assert not (tmp_path / "restored").exists()

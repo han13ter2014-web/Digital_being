@@ -52,9 +52,7 @@ def _make_runner(name="EvoDoor"):
 
 def _replies(bus):
     return [
-        dict(data or {})
-        for name, data in bus.published
-        if name == Events.AGENT_MESSAGE
+        dict(data or {}) for name, data in bus.published if name == Events.AGENT_MESSAGE
     ]
 
 
@@ -74,9 +72,7 @@ async def test_approve_by_id_changes_status_only():
     )
     pid = created["proposal_id"]
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": f"одобри {pid}"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": f"одобри {pid}"}))
 
     stored = _read_proposal(agent, pid)
     assert stored["status"] == "approved"
@@ -107,9 +103,7 @@ async def test_decision_door_is_silent_without_pending():
     """«Одобряю твой поступок» в обычной речи — не команда решения."""
     agent, runner, bus = _make_runner()
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Одобряю твой выбор."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Одобряю твой выбор."}))
 
     # Дверь не сработала: ответа «одобрено/отклонено» нет.
     texts = [d.get("content", "") for d in _replies(bus)]

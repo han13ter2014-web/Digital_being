@@ -24,14 +24,20 @@ def _episodes(store):
 
 
 def _seams(store):
-    return [row for row in _episodes(store)
-            if row["metadata"].get("kind") == "biography_seam"]
+    return [
+        row
+        for row in _episodes(store)
+        if row["metadata"].get("kind") == "biography_seam"
+    ]
 
 
 def _ordinary_episode(store, intention_id="intention-1"):
     episode_id = store.record_life_episode(
-        life_id=LIFE, intention_id=intention_id, action="reflect",
-        target="память", outcome={"result": "записано"},
+        life_id=LIFE,
+        intention_id=intention_id,
+        action="reflect",
+        target="память",
+        outcome={"result": "записано"},
     )
     return next(row for row in _episodes(store) if row["id"] == episode_id)
 
@@ -91,19 +97,31 @@ def test_graceful_restart_records_exactly_one_seam_with_recorded_bounds(tmp_path
 
 def test_two_restarts_create_two_distinct_seams_without_duplicates(tmp_path):
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00"
+    )
     _ordinary_episode(store)
-    store.record_graceful_shutdown(life_id=LIFE, run_id="run-1", ended_at="2026-11-06T10:01:00+00:00")
+    store.record_graceful_shutdown(
+        life_id=LIFE, run_id="run-1", ended_at="2026-11-06T10:01:00+00:00"
+    )
     store.close()
 
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:02:00+00:00")
-    store.record_graceful_shutdown(life_id=LIFE, run_id="run-2", ended_at="2026-11-06T10:03:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:02:00+00:00"
+    )
+    store.record_graceful_shutdown(
+        life_id=LIFE, run_id="run-2", ended_at="2026-11-06T10:03:00+00:00"
+    )
     store.close()
 
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:04:00+00:00")
-    store.begin_biography_run(life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:04:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:04:00+00:00"
+    )
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:04:00+00:00"
+    )
 
     seams = _seams(store)
     assert len(seams) == 2
@@ -113,12 +131,16 @@ def test_two_restarts_create_two_distinct_seams_without_duplicates(tmp_path):
 
 def test_hard_interruption_uses_last_saved_episode_not_invented_crash_time(tmp_path):
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00"
+    )
     original = _ordinary_episode(store)
     store.close()  # Никакого graceful shutdown: аналог потери процесса.
 
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-2", started_at="2026-11-06T11:00:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-2", started_at="2026-11-06T11:00:00+00:00"
+    )
 
     seam = _seams(store)[0]
     assert seam["output"]["reason"] == "external_interruption"
@@ -131,10 +153,16 @@ def test_hard_interruption_uses_last_saved_episode_not_invented_crash_time(tmp_p
 def test_new_seams_do_not_modify_previous_episode_rows(tmp_path):
     store = _store(tmp_path)
     original = _ordinary_episode(store)
-    store.begin_biography_run(life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00"
+    )
     store.record_graceful_shutdown(life_id=LIFE, run_id="run-1")
-    store.begin_biography_run(life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:10:00+00:00")
-    store.begin_biography_run(life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:20:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:10:00+00:00"
+    )
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-3", started_at="2026-11-06T10:20:00+00:00"
+    )
 
     rows = _episodes(store)
     assert next(row for row in rows if row["id"] == original["id"]) == original
@@ -144,8 +172,12 @@ def test_new_seams_do_not_modify_previous_episode_rows(tmp_path):
 def test_run_journal_is_scoped_to_life(tmp_path):
     store = _store(tmp_path)
     other_life = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    store.begin_biography_run(life_id=LIFE, run_id="life-run", started_at="2026-11-06T10:00:00+00:00")
-    store.begin_biography_run(life_id=other_life, run_id="other-run", started_at="2026-11-06T10:01:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="life-run", started_at="2026-11-06T10:00:00+00:00"
+    )
+    store.begin_biography_run(
+        life_id=other_life, run_id="other-run", started_at="2026-11-06T10:01:00+00:00"
+    )
 
     assert store.record_graceful_shutdown(life_id=other_life, run_id="other-run")
     assert not store.record_graceful_shutdown(life_id=LIFE, run_id="other-run")
@@ -154,9 +186,13 @@ def test_run_journal_is_scoped_to_life(tmp_path):
 
 def test_seam_is_visible_in_diary_episodes_and_life_graph(tmp_path):
     store = _store(tmp_path)
-    store.begin_biography_run(life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-1", started_at="2026-11-06T10:00:00+00:00"
+    )
     store.record_graceful_shutdown(life_id=LIFE, run_id="run-1")
-    store.begin_biography_run(life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:10:00+00:00")
+    store.begin_biography_run(
+        life_id=LIFE, run_id="run-2", started_at="2026-11-06T10:10:00+00:00"
+    )
     seam = _seams(store)[0]
 
     agent = DigitalBeing(name="BiographyView")
@@ -168,7 +204,9 @@ def test_seam_is_visible_in_diary_episodes_and_life_graph(tmp_path):
 
     assert any(row["id"] == seam["id"] for row in diary)
     assert episode_title(seam) == seam["output"]["text"]
-    node = next(node for node in graph["nodes"] if node["id"] == f"episode:{seam['id']}")
+    node = next(
+        node for node in graph["nodes"] if node["id"] == f"episode:{seam['id']}"
+    )
     assert node["kind"] == "biography_seam"
     assert node["label"] == seam["output"]["text"]
     assert node["detail"]["начало разрыва"] == seam["output"]["gap_started_at"]

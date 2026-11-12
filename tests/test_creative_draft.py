@@ -16,12 +16,16 @@ from src.core.paths import data_path
 def test_creating_draft_does_not_search_or_change_knowledge():
     agent = DigitalBeing(name="DraftNotKnowledge")
     before = agent.mental_models.to_storage_dict()
-    with patch.object(agent, "think", side_effect=AssertionError("not research")) as think:
+    with patch.object(
+        agent, "think", side_effect=AssertionError("not research")
+    ) as think:
         agent.act("creative_act")
     think.assert_not_called()
     draft = agent._creative_draft
     assert draft["revision"] == 1
-    assert (Path(data_path("delamain", "workspace", "creative")) / f"{draft['id']}.txt").is_file()
+    assert (
+        Path(data_path("delamain", "workspace", "creative")) / f"{draft['id']}.txt"
+    ).is_file()
     assert agent.mental_models.to_storage_dict() == before
 
 
@@ -50,7 +54,9 @@ def test_leaving_keeps_file_and_next_choice_starts_different_draft():
     agent = DigitalBeing(name="LeaveDraft")
     agent.act("creative_act")
     original = dict(agent._creative_draft)
-    path = Path(data_path("delamain", "workspace", "creative")) / f"{original['id']}.txt"
+    path = (
+        Path(data_path("delamain", "workspace", "creative")) / f"{original['id']}.txt"
+    )
     content = path.read_text(encoding="utf-8")
     agent.leave_creative_draft("хочу заняться другим")
     assert agent._creative_draft["status"] == "left"

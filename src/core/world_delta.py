@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 @dataclass(frozen=True)
@@ -183,16 +183,12 @@ def between(before: WorldSignature, after: WorldSignature) -> WorldDelta:
         knowledge_entries=after.knowledge_entries - before.knowledge_entries,
         concepts=after.concepts - before.concepts,
         confidence_milli=after.confidence_milli - before.confidence_milli,
-        answered_questions=(
-            after.answered_questions - before.answered_questions
-        ),
+        answered_questions=(after.answered_questions - before.answered_questions),
         open_questions=after.open_questions - before.open_questions,
         web_hits=after.web_hits - before.web_hits,
         notes=after.notes - before.notes,
         experiences=after.experiences - before.experiences,
-        pending_questions=(
-            after.pending_questions - before.pending_questions
-        ),
+        pending_questions=(after.pending_questions - before.pending_questions),
         messages_sent=after.messages_sent - before.messages_sent,
     )
 
@@ -225,9 +221,7 @@ def _count_open_questions(agent: Any) -> int:
     if not isinstance(questions, list):
         return 0
     return sum(
-        1
-        for item in questions
-        if isinstance(item, dict) and not item.get("answered")
+        1 for item in questions if isinstance(item, dict) and not item.get("answered")
     )
 
 

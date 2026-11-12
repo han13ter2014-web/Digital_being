@@ -37,6 +37,7 @@ for _stream_name in ("stdout", "stderr"):
 def _reset_global_registry():
     """Каждый тест начинается с чистого реестра."""
     from src.core.subsystem_base import PluginRegistry
+
     PluginRegistry.reset_global()
     yield
     PluginRegistry.reset_global()
@@ -46,11 +47,14 @@ def _reset_global_registry():
 # 1. Базовый класс Subsystem
 # ============================================================
 
+
 def test_subsystem_creates_with_default_name():
     """Если name не задан — берётся из имени класса."""
     from src.core.subsystem_base import Subsystem
+
     class MySub(Subsystem):
         pass
+
     sub = MySub(agent_name="TestAgent")
     assert sub.name == "mysub"
     assert sub.agent_name == "TestAgent"
@@ -61,8 +65,10 @@ def test_subsystem_creates_with_default_name():
 def test_subsystem_status_returns_dict():
     """status() возвращает JSON-сериализуемый dict."""
     from src.core.subsystem_base import Subsystem
+
     class MySub(Subsystem):
         name = "test_status"
+
     sub = MySub(agent_name="X")
     sub.tick(1)
     sub.tick(2)
@@ -77,8 +83,10 @@ def test_subsystem_status_returns_dict():
 def test_subsystem_tick_records_count():
     """tick() инкрементирует _tick_count и обновляет timestamp."""
     from src.core.subsystem_base import Subsystem
+
     class MySub(Subsystem):
         name = "test_tick"
+
     sub = MySub()
     assert sub._tick_count == 0
     sub.tick(1)
@@ -90,8 +98,10 @@ def test_subsystem_tick_records_count():
 def test_subsystem_can_be_disabled():
     """set_enabled(False) меняет флаг."""
     from src.core.subsystem_base import Subsystem
+
     class MySub(Subsystem):
         pass
+
     sub = MySub()
     assert sub.is_enabled() is True
     sub.set_enabled(False)
@@ -101,8 +111,10 @@ def test_subsystem_can_be_disabled():
 def test_subsystem_records_error():
     """_record_error инкрементирует счётчик и записывает последнюю ошибку."""
     from src.core.subsystem_base import Subsystem
+
     class MySub(Subsystem):
         pass
+
     sub = MySub()
     try:
         raise ValueError("boom")
@@ -117,9 +129,11 @@ def test_subsystem_records_error():
 # 2. PluginRegistry
 # ============================================================
 
+
 def test_registry_singleton():
     """get_global() возвращает один и тот же реестр."""
     from src.core.subsystem_base import PluginRegistry
+
     r1 = PluginRegistry.get_global()
     r2 = PluginRegistry.get_global()
     assert r1 is r2
@@ -128,8 +142,10 @@ def test_registry_singleton():
 def test_registry_register_and_get():
     """register() + get() возвращают подсистему."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class Foo(Subsystem):
         name = "foo"
+
     reg = PluginRegistry()
     foo = Foo()
     assert reg.register(foo) is True
@@ -139,8 +155,10 @@ def test_registry_register_and_get():
 def test_registry_register_duplicate_returns_false():
     """Повторная регистрация (без replace) возвращает False."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class Bar(Subsystem):
         name = "bar"
+
     reg = PluginRegistry()
     assert reg.register(Bar()) is True
     assert reg.register(Bar()) is False
@@ -151,11 +169,14 @@ def test_registry_register_duplicate_returns_false():
 def test_registry_register_class_lazy():
     """register_class() — инстанциируется при первом get()."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class Lazy(Subsystem):
         name = "lazy"
+
         def __init__(self, agent_name="unknown", **kw):
             super().__init__(agent_name=agent_name, **kw)
             self.instantiated = True
+
     reg = PluginRegistry()
     reg.register_class(Lazy)
     assert "lazy" not in reg._items  # ещё не инстанциирован
@@ -167,10 +188,13 @@ def test_registry_register_class_lazy():
 def test_registry_has_method():
     """has() проверяет наличие по имени (в items и classes)."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class A(Subsystem):
         name = "a"
+
     class B(Subsystem):
         name = "b"
+
     reg = PluginRegistry()
     reg.register(A())
     reg.register_class(B)
@@ -182,12 +206,16 @@ def test_registry_has_method():
 def test_registry_unregister_calls_teardown():
     """unregister() вызывает teardown()."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     torn_down = {"called": False}
+
     class T(Subsystem):
         name = "t"
+
         def teardown(self):
             super().teardown()
             torn_down["called"] = True
+
     reg = PluginRegistry()
     reg.register(T())
     assert reg.unregister("t") is True
@@ -199,21 +227,31 @@ def test_registry_unregister_calls_teardown():
 # 3. Tick по приоритетам и изоляция ошибок
 # ============================================================
 
+
 def test_tick_all_runs_in_priority_order():
     """tick_all() вызывает подсистемы по priority (меньше = раньше)."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     order = []
 
     class P1(Subsystem):
-        name = "p1"; priority = 50
+        name = "p1"
+        priority = 50
+
         def tick(self, cycle, context=None):
             order.append("p1")
+
     class P2(Subsystem):
-        name = "p2"; priority = 10
+        name = "p2"
+        priority = 10
+
         def tick(self, cycle, context=None):
             order.append("p2")
+
     class P3(Subsystem):
-        name = "p3"; priority = 30
+        name = "p3"
+        priority = 30
+
         def tick(self, cycle, context=None):
             order.append("p3")
 
@@ -230,14 +268,19 @@ def test_tick_all_runs_in_priority_order():
 def test_tick_all_isolates_errors():
     """Ошибка одной подсистемы не валит остальные."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class Good(Subsystem):
         name = "good"
+
         def tick(self, cycle, context=None):
             return {"events": [{"name": "x", "data": 1}]}
+
     class Bad(Subsystem):
         name = "bad"
+
         def tick(self, cycle, context=None):
             raise RuntimeError("intended")
+
     reg = PluginRegistry()
     reg.register(Good())
     reg.register(Bad())
@@ -251,11 +294,15 @@ def test_tick_all_isolates_errors():
 def test_tick_all_skips_disabled():
     """set_enabled(False) — подсистема пропускается."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     ran = []
+
     class S(Subsystem):
         name = "s"
+
         def tick(self, cycle, context=None):
             ran.append(cycle)
+
     reg = PluginRegistry()
     inst = S()
     inst.set_enabled(False)
@@ -268,12 +315,16 @@ def test_tick_all_skips_disabled():
 def test_setup_all_calls_setup():
     """setup_all() вызывает setup для всех."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     setups = []
+
     class S(Subsystem):
         name = "s"
+
         def setup(self, context):
             super().setup(context)
             setups.append(context.get("agent_name"))
+
     reg = PluginRegistry()
     reg.register(S())
     count = reg.setup_all({"agent_name": "Ctx"})
@@ -284,17 +335,23 @@ def test_setup_all_calls_setup():
 def test_teardown_all_calls_teardown():
     """teardown_all() вызывает teardown для всех."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     torn = []
+
     class S1(Subsystem):
         name = "teardown_s1"
+
         def teardown(self):
             super().teardown()
             torn.append(self.name)
+
     class S2(Subsystem):
         name = "teardown_s2"
+
         def teardown(self):
             super().teardown()
             torn.append(self.name)
+
     reg = PluginRegistry()
     reg.register(S1())
     reg.register(S2())
@@ -307,13 +364,18 @@ def test_teardown_all_calls_teardown():
 # 4. status_all и история
 # ============================================================
 
+
 def test_status_all_summary():
     """status_all() возвращает сводный снимок."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class A(Subsystem):
         name = "a"
+
     class B(Subsystem):
-        name = "b"; priority = 50
+        name = "b"
+        priority = 50
+
     reg = PluginRegistry()
     reg.register(A())
     reg.register(B())
@@ -327,8 +389,10 @@ def test_status_all_summary():
 def test_history_records_tick_reports():
     """get_history() возвращает последние отчёты tick_all()."""
     from src.core.subsystem_base import Subsystem, PluginRegistry
+
     class S(Subsystem):
         name = "s"
+
     reg = PluginRegistry()
     reg.register(S())
     for i in range(5):
@@ -342,15 +406,18 @@ def test_history_records_tick_reports():
 # 5. LegacySubsystemAdapter
 # ============================================================
 
+
 def test_legacy_adapter_wraps_existing_subsystem():
     """Адаптер корректно оборачивает подсистему без Subsystem-родителя."""
-    from src.core.subsystem_base import LegacySubsystemAdapter, PluginRegistry
+    from src.core.subsystem_base import LegacySubsystemAdapter
 
     class _OldStyle:
         def __init__(self):
             self.calls = 0
+
         def get_status(self):
             return {"old": True}
+
         def state(self):
             return "running"
 
@@ -401,6 +468,7 @@ def test_attach_existing_subsystem_returns_none_for_missing():
 # 6. Интеграция с DigitalBeing
 # ============================================================
 
+
 def test_digital_being_has_plugin_registry():
     """DigitalBeing имеет plugin_registry и get_subsystems_status."""
     from src.core.agent import DigitalBeing
@@ -413,8 +481,13 @@ def test_digital_being_has_plugin_registry():
     names = agent.plugin_registry.list_names()
     assert len(names) >= 5
     # Обязательные подсистемы
-    for must in ("goal_subsystem", "energy_subsystem", "knowledge_subsystem",
-                  "soul", "embodiment"):
+    for must in (
+        "goal_subsystem",
+        "energy_subsystem",
+        "knowledge_subsystem",
+        "soul",
+        "embodiment",
+    ):
         assert must in names, f"Подсистема {must} не зарегистрирована"
 
 

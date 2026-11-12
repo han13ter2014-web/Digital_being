@@ -49,7 +49,9 @@ async def measure(cycles, seed, burst=1, restart=False):
                 if not hasattr(runner, "_pending_user_messages"):
                     raise RuntimeError("runner queue missing")
                 for index in range(burst):
-                    runner._pending_user_messages.put_nowait(f"вопрос: что такое память {step}:{index}")
+                    runner._pending_user_messages.put_nowait(
+                        f"вопрос: что такое память {step}:{index}"
+                    )
                     counts["user_injected"] += 1
             before = executed
             runner.energy_policy.regenerate(5.0)
@@ -71,10 +73,13 @@ async def measure(cycles, seed, burst=1, restart=False):
                 before_deferred = getattr(agent, "_deferred_stimulus", None)
                 await runner.stop()
                 from src.core.subsystem_base import PluginRegistry
+
                 PluginRegistry.reset_global()
                 agent, _ = create_agent(env, "AttentionMeasure")
-                restart_equal = (before_pending == agent._pending_message_texts
-                                 and before_deferred == agent._deferred_stimulus)
+                restart_equal = (
+                    before_pending == agent._pending_message_texts
+                    and before_deferred == agent._deferred_stimulus
+                )
                 original_act = agent.act
                 agent.act = act
                 runner = AgentRunner(agent, EventBus())
@@ -83,13 +88,21 @@ async def measure(cycles, seed, burst=1, restart=False):
                 await runner.start()
     finally:
         await runner.stop()
-    return {"seed": seed, "cycles": cycles, "counts": dict(counts),
-            "actions_per_tick": dict(actions_per_tick), "actual_act_calls": executed,
-            "max_completed_wait": max(waits, default=0),
-            "unfinished_wait": cycles - pending_since if pending_since is not None else None,
-            "queued_user_messages": runner._pending_user_messages.qsize(),
-            "restart_queue_equal": restart_equal, "burst": burst,
-            "final_cycle": agent.cycle_count}
+    return {
+        "seed": seed,
+        "cycles": cycles,
+        "counts": dict(counts),
+        "actions_per_tick": dict(actions_per_tick),
+        "actual_act_calls": executed,
+        "max_completed_wait": max(waits, default=0),
+        "unfinished_wait": cycles - pending_since
+        if pending_since is not None
+        else None,
+        "queued_user_messages": runner._pending_user_messages.qsize(),
+        "restart_queue_equal": restart_equal,
+        "burst": burst,
+        "final_cycle": agent.cycle_count,
+    }
 
 
 if __name__ == "__main__":
@@ -104,7 +117,10 @@ if __name__ == "__main__":
         os.environ["DIGITAL_BEING_DATA_DIR"] = directory
         os.environ["DIGITAL_BEING_TEST_MODE"] = "1"
         from config.simulation_config import LR_CONFIG
+
         LR_CONFIG.WEB_SEARCH_ENABLED = False
         result = asyncio.run(measure(args.cycles, args.seed, args.burst, args.restart))
-        args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        args.report.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logging.shutdown()

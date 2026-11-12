@@ -79,8 +79,12 @@ class WebSearcher:
     # источнику в цепочке. Сетевые ошибки цепочку прерывают: при
     # DNS-ошибке делать четыре запроса — учетверять время отказа.
     NOT_FOUND_REASONS = (
-        "no_pages", "no_extract", "not_found",
-        "low_quality", "irrelevant", "no_search_results",
+        "no_pages",
+        "no_extract",
+        "not_found",
+        "low_quality",
+        "irrelevant",
+        "no_search_results",
     )
 
     # Источник находки → слот статистики found_by.
@@ -128,15 +132,14 @@ class WebSearcher:
 
         # Статистика для отладки.
         self._stats: Dict[str, Any] = {
-            "hits": 0,         # найдено в кэше
+            "hits": 0,  # найдено в кэше
             "cache_hits": 0,
             "network_calls": 0,
-            "found": 0,        # найдено в Wikipedia
-            "misses": 0,       # не найдено
-            "errors": 0,       # сетевые/HTTP ошибки
+            "found": 0,  # найдено в Wikipedia
+            "misses": 0,  # не найдено
+            "errors": 0,  # сетевые/HTTP ошибки
             # Диета существа: из какого источника пришла находка.
-            "found_by": {"title": 0, "search": 0, "wiktionary": 0,
-                         "wikibooks": 0},
+            "found_by": {"title": 0, "search": 0, "wiktionary": 0, "wikibooks": 0},
             # «Источники-2»: новости — не еда, а впечатления; считаются
             # отдельно от находок в базу знаний.
             "news_reads": 0,
@@ -316,15 +319,21 @@ class WebSearcher:
                 body = resp.read()
         except urllib.error.HTTPError as e:
             self._stats["errors"] += 1
-            logger.warning(f"[WebSearcher] HTTP {e.code} для '{query}' (lang={lang}): {e.reason}")
+            logger.warning(
+                f"[WebSearcher] HTTP {e.code} для '{query}' (lang={lang}): {e.reason}"
+            )
             return None, f"http_{e.code}"
         except urllib.error.URLError as e:
             self._stats["errors"] += 1
-            logger.warning(f"[WebSearcher] URL error для '{query}' (lang={lang}): {e.reason}")
+            logger.warning(
+                f"[WebSearcher] URL error для '{query}' (lang={lang}): {e.reason}"
+            )
             return None, "network_error"
         except (TimeoutError, OSError) as e:
             self._stats["errors"] += 1
-            logger.warning(f"[WebSearcher] Timeout/OSError для '{query}' (lang={lang}): {e}")
+            logger.warning(
+                f"[WebSearcher] Timeout/OSError для '{query}' (lang={lang}): {e}"
+            )
             return None, "timeout"
         except Exception as e:
             # Неизвестная ошибка — никогда не валим цикл агента.
@@ -368,16 +377,20 @@ class WebSearcher:
         params = {
             "action": "query",
             "prop": "extracts|info",
-            "explaintext": "1",      # plaintext, без HTML
+            "explaintext": "1",  # plaintext, без HTML
             "inprop": "url",
-            "redirects": "1",        # следовать за редиректами
+            "redirects": "1",  # следовать за редиректами
             "titles": query,
             "format": "json",
-            "formatversion": "1",    # современный формат без обёртки ["query"]
+            "formatversion": "1",  # современный формат без обёртки ["query"]
         }
         if intro_only:
             params["exintro"] = "1"  # только введение (2-3 параграфа)
-        url = (base_url or self.BASE_URL).format(lang=lang) + "?" + urllib.parse.urlencode(params)
+        url = (
+            (base_url or self.BASE_URL).format(lang=lang)
+            + "?"
+            + urllib.parse.urlencode(params)
+        )
 
         data, error = self._request_json(url, lang=lang, query=query)
         if error is not None or data is None:
@@ -475,7 +488,8 @@ class WebSearcher:
             if not title:
                 continue
             candidate = self._fetch(
-                title, lang=lang,
+                title,
+                lang=lang,
                 source="wikipedia:search",
                 relevance_query=query,
             )
@@ -549,7 +563,11 @@ class WebSearcher:
             "format": "json",
             "formatversion": "1",
         }
-        url = self.WIKINEWS_BASE_URL.format(lang=self.lang) + "?" + urllib.parse.urlencode(params)
+        url = (
+            self.WIKINEWS_BASE_URL.format(lang=self.lang)
+            + "?"
+            + urllib.parse.urlencode(params)
+        )
 
         data, error = self._request_json(url, lang=self.lang, query=query)
         if error is not None or data is None:
@@ -588,7 +606,11 @@ class WebSearcher:
             "format": "json",
             "formatversion": "1",
         }
-        url = self.WIKINEWS_BASE_URL.format(lang=self.lang) + "?" + urllib.parse.urlencode(params)
+        url = (
+            self.WIKINEWS_BASE_URL.format(lang=self.lang)
+            + "?"
+            + urllib.parse.urlencode(params)
+        )
 
         data, error = self._request_json(url, lang=self.lang, query=title)
         if error is not None or data is None:

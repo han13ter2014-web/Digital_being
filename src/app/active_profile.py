@@ -34,10 +34,14 @@ def active_name(root, default):
             raise ValueError("пустое имя профиля")
         from src.app.bootstrap import checkpoint_candidates
 
-        if not checkpoint_candidates(payload.get("life_id") or value, str(Path(root) / "checkpoints")):
+        if not checkpoint_candidates(
+            payload.get("life_id") or value, str(Path(root) / "checkpoints")
+        ):
             raise RecoveryRequiredError(
                 "Для выбранной жизни не найден чекпоинт; новая жизнь не создана"
             )
         return value
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise RecoveryRequiredError("Не удалось прочитать выбранный профиль; данные не заменены") from exc
+        raise RecoveryRequiredError(
+            "Не удалось прочитать выбранный профиль; данные не заменены"
+        ) from exc

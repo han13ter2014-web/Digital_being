@@ -22,6 +22,7 @@ class MotivationController:
         # Импортируем лениво — чтобы не ломать загрузку, если модуль недоступен
         try:
             from src.motivation.needs_system import InternalMotivationSystem
+
             self._system = InternalMotivationSystem(agent_name=agent_name)
             self._available = True
         except Exception as e:
@@ -76,31 +77,33 @@ class MotivationController:
         if self._goal_subsystem is not None:
             # Генерируем цели только если активных < 3 (не перегружаем)
             active_count = sum(
-                1 for g in self._goal_subsystem.goals
-                if g.get("status") == "active"
+                1 for g in self._goal_subsystem.goals if g.get("status") == "active"
             )
             if active_count < 3:
-                generated = self._system.generate_motivated_goals(
-                    agent_context or {}
-                )
+                generated = self._system.generate_motivated_goals(agent_context or {})
                 # Импортируем как цели в GoalSubsystem (только если их ещё нет)
                 existing_titles = {g["title"] for g in self._goal_subsystem.goals}
                 for g in generated:
                     if g.get("title") not in existing_titles:
                         new_goals.append(g)
                         start_id = (
-                            max((gg["id"] for gg in self._goal_subsystem.goals),
-                                default=0) + 1
+                            max(
+                                (gg["id"] for gg in self._goal_subsystem.goals),
+                                default=0,
+                            )
+                            + 1
                         )
-                        self._goal_subsystem.goals.append({
-                            "id": start_id,
-                            "title": g.get("title", "Новая цель"),
-                            "status": "pending",
-                            "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
-                            "source": "motivation",
-                            "drive": g.get("drive", "knowledge_acquisition"),
-                            "type": g.get("type", "general"),
-                        })
+                        self._goal_subsystem.goals.append(
+                            {
+                                "id": start_id,
+                                "title": g.get("title", "Новая цель"),
+                                "status": "pending",
+                                "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
+                                "source": "motivation",
+                                "drive": g.get("drive", "knowledge_acquisition"),
+                                "type": g.get("type", "general"),
+                            }
+                        )
 
         return {
             "needs_state": profile.get("needs", {}),

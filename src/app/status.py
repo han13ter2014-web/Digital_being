@@ -15,8 +15,6 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from src.core.paths import data_path
-
 
 def energy_bar(energy: float, maximum: float, width: int = 10) -> str:
     """Полоска энергии из блоков. Максимум — заполненная полоса."""
@@ -108,9 +106,7 @@ def build_status_snapshot(
     try:
         from config.simulation_config import LR_CONFIG
 
-        snapshot["max_energy"] = float(
-            getattr(LR_CONFIG, "ENERGY_MAX", 200.0)
-        )
+        snapshot["max_energy"] = float(getattr(LR_CONFIG, "ENERGY_MAX", 200.0))
     except Exception:
         pass
 
@@ -125,9 +121,7 @@ def build_status_snapshot(
         goals_view = agent.get_goals_status()
         if isinstance(goals_view, dict):
             snapshot["goals_total"] = int(goals_view.get("total", 0) or 0)
-            snapshot["goals_completed"] = int(
-                goals_view.get("completed", 0) or 0
-            )
+            snapshot["goals_completed"] = int(goals_view.get("completed", 0) or 0)
             snapshot["goals_active"] = str(goals_view.get("active", "") or "")
     except Exception:
         pass
@@ -175,9 +169,7 @@ def build_status_snapshot(
             loop_state = loop_closer.status()
             snapshot["last_action"] = loop_state.get("last_action")
             snapshot["last_effect"] = loop_state.get("last_effect")
-            snapshot["stuck_actions"] = list(
-                loop_state.get("stuck_actions") or []
-            )
+            snapshot["stuck_actions"] = list(loop_state.get("stuck_actions") or [])
         except Exception:
             pass
 

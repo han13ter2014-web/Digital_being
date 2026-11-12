@@ -16,7 +16,12 @@ def test_alias_diagnostic_uses_same_state_as_choice():
     assert rows[0]["normalized_action"] == "explore"
     assert rows[0]["stuck"]
     assert rows[0]["no_effect_streak"] == 3
-    assert closer.choose([{"action": "exploration"}], normalize=normalize, fallback="rest")["action"] == "rest"
+    assert (
+        closer.choose(
+            [{"action": "exploration"}], normalize=normalize, fallback="rest"
+        )["action"]
+        == "rest"
+    )
     assert closer.to_checkpoint_dict() == before
 
 

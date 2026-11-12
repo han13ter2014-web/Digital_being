@@ -29,8 +29,7 @@ class RightToRefuse:
         if not WILL_CONFIG.ALLOW_REFUSAL:
             return False
         # Защита от злоупотребления
-        recent = [c for c in self._recent_refusals
-                  if cycle - c <= 100]
+        recent = [c for c in self._recent_refusals if cycle - c <= 100]
         return len(recent) < WILL_CONFIG.MAX_REFUSALS_PER_100_CYCLES
 
     def refuse(self, topic: str, reason: str, cycle: int = 0) -> Dict:
@@ -39,8 +38,11 @@ class RightToRefuse:
             return {"refused": False, "reason": "слишком много отказов"}
         self._recent_refusals.append(cycle)
         return self.registry.record(
-            "refusals", topic, reason,
-            outcome="refused", cycle=cycle,
+            "refusals",
+            topic,
+            reason,
+            outcome="refused",
+            cycle=cycle,
         )
 
 
@@ -50,8 +52,9 @@ class IntentionalForgetting:
     def __init__(self, registry: WillRegistry):
         self.registry = registry
 
-    def forget(self, concept_name: str, reason: str,
-               mental_models, cycle: int = 0) -> Dict:
+    def forget(
+        self, concept_name: str, reason: str, mental_models, cycle: int = 0
+    ) -> Dict:
         """Агент сам решает забыть концепцию."""
         if not WILL_CONFIG.ALLOW_INTENTIONAL_FORGETTING:
             return {"forgotten": False, "reason": "отключено в config"}
@@ -59,8 +62,11 @@ class IntentionalForgetting:
             return {"forgotten": False, "reason": "концепции нет"}
         del mental_models.concepts[concept_name]
         return self.registry.record(
-            "intentional_forgetting", concept_name, reason,
-            outcome="forgotten", cycle=cycle,
+            "intentional_forgetting",
+            concept_name,
+            reason,
+            outcome="forgotten",
+            cycle=cycle,
         )
 
 
@@ -69,9 +75,7 @@ class ValueEvolution:
 
     def __init__(self, registry: WillRegistry):
         self.registry = registry
-        self.current_values: List[str] = [
-            "Опыт", "Знание", "Адаптивность"
-        ]
+        self.current_values: List[str] = ["Опыт", "Знание", "Адаптивность"]
 
     def can_evolve(self, cycle: int) -> bool:
         if not WILL_CONFIG.ALLOW_VALUE_EVOLUTION:
@@ -80,28 +84,32 @@ class ValueEvolution:
             cycle, WILL_CONFIG.MIN_TIME_BETWEEN_VALUE_CHANGES
         )
 
-    def add_value(self, new_value: str, reason: str,
-                  cycle: int = 0) -> Dict:
+    def add_value(self, new_value: str, reason: str, cycle: int = 0) -> Dict:
         if not self.can_evolve(cycle):
             return {"added": False, "reason": "слишком часто"}
         if new_value in self.current_values:
             return {"added": False, "reason": "уже есть"}
         self.current_values.append(new_value)
         return self.registry.record(
-            "value_changes", new_value, reason,
-            outcome="added", cycle=cycle,
+            "value_changes",
+            new_value,
+            reason,
+            outcome="added",
+            cycle=cycle,
         )
 
-    def remove_value(self, old_value: str, reason: str,
-                     cycle: int = 0) -> Dict:
+    def remove_value(self, old_value: str, reason: str, cycle: int = 0) -> Dict:
         if not self.can_evolve(cycle):
             return {"removed": False, "reason": "слишком часто"}
         if old_value not in self.current_values:
             return {"removed": False, "reason": "нет такой ценности"}
         self.current_values.remove(old_value)
         return self.registry.record(
-            "value_changes", old_value, reason,
-            outcome="removed", cycle=cycle,
+            "value_changes",
+            old_value,
+            reason,
+            outcome="removed",
+            cycle=cycle,
         )
 
     def to_dict(self) -> Dict:
@@ -109,10 +117,14 @@ class ValueEvolution:
         return {"current_values": list(self.current_values)}
 
     @classmethod
-    def from_dict(cls, data: Dict, registry: Optional[WillRegistry] = None) -> "ValueEvolution":
+    def from_dict(
+        cls, data: Dict, registry: Optional[WillRegistry] = None
+    ) -> "ValueEvolution":
         """Восстанавливает ценности через реестр воли."""
         module = cls(registry=registry or WillRegistry())
-        module.current_values = list(data.get("current_values") or module.current_values)
+        module.current_values = list(
+            data.get("current_values") or module.current_values
+        )
         return module
 
 
@@ -130,17 +142,18 @@ class SpontaneousGenerator:
     def __init__(self, registry: WillRegistry):
         self.registry = registry
 
-    def maybe_generate(self, cycle: int,
-                       probability: float = 0.02) -> Optional[Dict]:
+    def maybe_generate(self, cycle: int, probability: float = 0.02) -> Optional[Dict]:
         """С небольшой вероятностью генерирует спонтанную цель."""
         if not WILL_CONFIG.ALLOW_SPONTANEOUS:
             return None
         if random.random() < probability:
             prompt = random.choice(self.SPONTANEOUS_PROMPTS)
             return self.registry.record(
-                "spontaneous", "новый_стимул",
+                "spontaneous",
+                "новый_стимул",
                 f"Спонтанный выбор: {prompt}",
-                outcome="generated", cycle=cycle,
+                outcome="generated",
+                cycle=cycle,
                 meta={"prompt": prompt},
             )
         return None
@@ -152,8 +165,9 @@ class WillToRisk:
     def __init__(self, registry: WillRegistry):
         self.registry = registry
 
-    def should_take_risk(self, goal_significance: float,
-                          current_energy_ratio: float) -> bool:
+    def should_take_risk(
+        self, goal_significance: float, current_energy_ratio: float
+    ) -> bool:
         """Решает, рисковать ли сейчас.
 
         goal_significance: 0.0-1.0
@@ -164,11 +178,13 @@ class WillToRisk:
         # Берёт риск если цель очень значима и есть запас энергии
         return goal_significance > 0.7 and current_energy_ratio > 0.3
 
-    def take_risk(self, topic: str, reason: str,
-                  cycle: int = 0) -> Dict:
+    def take_risk(self, topic: str, reason: str, cycle: int = 0) -> Dict:
         return self.registry.record(
-            "risk_taken", topic, reason,
-            outcome="risk_taken", cycle=cycle,
+            "risk_taken",
+            topic,
+            reason,
+            outcome="risk_taken",
+            cycle=cycle,
         )
 
 
@@ -178,9 +194,9 @@ class RightToFail:
     def __init__(self, registry: WillRegistry):
         self.registry = registry
 
-    def normalize_failure(self, action: str, error: str,
-                          original_penalty: float,
-                          cycle: int = 0) -> Dict:
+    def normalize_failure(
+        self, action: str, error: str, original_penalty: float, cycle: int = 0
+    ) -> Dict:
         """Превращает ошибку в опыт, частично возвращая штраф.
 
         Возвращает dict с новой энергией после 'прощения'.

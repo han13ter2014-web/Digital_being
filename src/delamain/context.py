@@ -122,18 +122,14 @@ def build_failure_context(
     context: Dict[str, Any] = {
         "stage": stage,
         "attempt": None if attempt is None else max(1, int(attempt)),
-        "failed_step": (
-            selected_index + 1 if selected_index is not None else None
-        ),
+        "failed_step": (selected_index + 1 if selected_index is not None else None),
         "action": (
             str(failed_action.get("action"))
             if failed_action and failed_action.get("action")
             else None
         ),
         "args": (
-            compact_value(failed_action.get("args") or {})
-            if failed_action
-            else {}
+            compact_value(failed_action.get("args") or {}) if failed_action else {}
         ),
         "error": _short(result.error, 1000),
         "output": (
@@ -144,16 +140,10 @@ def build_failure_context(
         "completed_steps": compact_value(completed),
     }
     if remaining_steps is not None:
-        context["remaining_steps"] = compact_value(
-            _step_dicts(remaining_steps)
-        )
+        context["remaining_steps"] = compact_value(_step_dicts(remaining_steps))
     if repair_count is not None:
         context["repair_count"] = max(0, int(repair_count))
-    return {
-        key: value
-        for key, value in context.items()
-        if value is not None
-    }
+    return {key: value for key, value in context.items() if value is not None}
 
 
 __all__ = ["build_failure_context", "compact_value"]

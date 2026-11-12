@@ -36,7 +36,9 @@ def _node(*valences: float, name: str = "тема") -> ConceptNode:
             node.add_experience(context, "результат", valence)
         else:
             node.add_experience(
-                context, "результат", valence,
+                context,
+                "результат",
+                valence,
                 evidence_strength=abs(valence),
                 evidence_kind="observation",
                 source=context,
@@ -85,7 +87,10 @@ def test_repeated_hypotheses_are_not_evidence():
     model = MentalModel()
     for index in range(8):
         model.encounter_concept(
-            "тема", f"гипотеза_цикл_{index}", "догадка о теме", 0.3,
+            "тема",
+            f"гипотеза_цикл_{index}",
+            "догадка о теме",
+            0.3,
             evidence_kind="hypothesis",
         )
 
@@ -116,12 +121,22 @@ def test_single_weak_encounter_is_not_enough_to_answer():
 def test_two_consistent_encounters_allow_answering():
     model = MentalModel()
     node = model.encounter_concept(
-        "тема", "ctx_1", "следы памяти", 0.3,
-        evidence_strength=0.3, evidence_kind="observation", source="ctx_1",
+        "тема",
+        "ctx_1",
+        "следы памяти",
+        0.3,
+        evidence_strength=0.3,
+        evidence_kind="observation",
+        source="ctx_1",
     )
     model.encounter_concept(
-        "тема", "ctx_2", "следы памяти", 0.3,
-        evidence_strength=0.3, evidence_kind="observation", source="ctx_2",
+        "тема",
+        "ctx_2",
+        "следы памяти",
+        0.3,
+        evidence_strength=0.3,
+        evidence_kind="observation",
+        source="ctx_2",
     )
 
     assert node.confidence > 0.4
@@ -152,8 +167,13 @@ def test_one_real_source_is_enough_to_answer():
     """Прочитал источник — можешь пересказать. Догадка — нет."""
     model = MentalModel()
     model.encounter_concept(
-        "энтропия", "web:wikipedia", "мера беспорядка", 0.7,
-        evidence_strength=0.7, evidence_kind="observation", source="web:wikipedia",
+        "энтропия",
+        "web:wikipedia",
+        "мера беспорядка",
+        0.7,
+        evidence_strength=0.7,
+        evidence_kind="observation",
+        source="web:wikipedia",
     )
     model.encounter_concept("энтропия", "ctx", "мера беспорядка", 0.0)
 
@@ -177,9 +197,14 @@ def test_contradiction_can_block_answering():
     for index, valence in enumerate((0.3, 0.3, -0.3)):
         context = f"ctx_{index}"
         model.encounter_concept(
-            "риск", context, "что-то о риске", valence,
-            evidence_strength=abs(valence), evidence_kind="observation",
-            source=context, evidence_direction=-1 if valence < 0 else 1,
+            "риск",
+            context,
+            "что-то о риске",
+            valence,
+            evidence_strength=abs(valence),
+            evidence_kind="observation",
+            source=context,
+            evidence_direction=-1 if valence < 0 else 1,
         )
 
     assert model.can_answer_about("риск") is False
@@ -199,8 +224,13 @@ def test_definition_synthesis_does_not_override_confidence():
     """
     model = MentalModel()
     model.encounter_concept(
-        "тема", "ctx_1", "первый результат", 0.3,
-        evidence_strength=0.3, evidence_kind="observation", source="ctx_1",
+        "тема",
+        "ctx_1",
+        "первый результат",
+        0.3,
+        evidence_strength=0.3,
+        evidence_kind="observation",
+        source="ctx_1",
     )
     node = model.concepts["тема"]
     expected = node.confidence

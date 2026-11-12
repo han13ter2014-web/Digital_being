@@ -54,9 +54,15 @@ class WillRegistry:
         # в цикле 0 и после рестарта с обнулённым полем).
         self._last_risk_cycle = -1
 
-    def record(self, will_type: str, topic: str, reason: str,
-                outcome: str = "executed", cycle: int = 0,
-                meta: Optional[Dict] = None) -> Dict:
+    def record(
+        self,
+        will_type: str,
+        topic: str,
+        reason: str,
+        outcome: str = "executed",
+        cycle: int = 0,
+        meta: Optional[Dict] = None,
+    ) -> Dict:
         """Регистрирует волевой акт."""
         entry = {
             "timestamp": datetime.now().isoformat(),
@@ -110,9 +116,9 @@ class WillRegistry:
         counters = dict(registry._counters)
         counters.update(data.get("counters") or {})
         registry._counters = counters
-        registry._last_value_change_cycle = int(data.get("last_value_change_cycle") or 0)
-        raw_last_risk = data.get("last_risk_cycle", -1)
-        registry._last_risk_cycle = (
-            -1 if raw_last_risk is None else int(raw_last_risk)
+        registry._last_value_change_cycle = int(
+            data.get("last_value_change_cycle") or 0
         )
+        raw_last_risk = data.get("last_risk_cycle", -1)
+        registry._last_risk_cycle = -1 if raw_last_risk is None else int(raw_last_risk)
         return registry

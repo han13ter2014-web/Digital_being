@@ -1,6 +1,6 @@
 """Тишина не замораживает время; evolve не повторяет уже прожитый soul tick."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from src.core.agent import DigitalBeing
 from src.core.agent_runner import AgentRunner

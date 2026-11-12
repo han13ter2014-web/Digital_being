@@ -1,13 +1,8 @@
-"""Deterministic fallback planner.
+"""Deterministic planner and generic fallback composition.
 
-This is not an LLM. It recognizes a small set of explicit Russian/English
-commands and turns them into action requests. It exists so the runtime is
-useful even when no model is installed, and so tests can exercise the whole
-loop without network access or model downloads.
-
-A model-backed planner can produce the same ``ActionRequest`` objects;
-``FallbackPlanner`` keeps this deterministic implementation as the safety
-net for unavailable or malformed model output.
+The built-in planner recognizes explicit Russian/English commands and turns
+them into action requests. Custom deterministic planners can produce the same
+``ActionRequest`` objects; no model-backed implementation is included.
 """
 
 from __future__ import annotations
@@ -28,10 +23,9 @@ class PlannerError(Exception):
 
 @runtime_checkable
 class Planner(Protocol):
-    """Minimal interface shared by heuristic, LLM and fallback planners."""
+    """Minimal interface shared by heuristic and custom planners."""
 
-    def plan(self, task: str) -> List[ActionRequest]:
-        ...
+    def plan(self, task: str) -> List[ActionRequest]: ...
 
 
 def _clean(value: str) -> str:
@@ -220,9 +214,9 @@ class HeuristicPlanner:
 class FallbackPlanner:
     """Try a primary planner, then a deterministic fallback.
 
-    A model-backed planner may be unavailable, return malformed JSON or time
-    out. The agent loop must still work, so the fallback is mandatory by
-    design. The last primary error is kept for ``/delamain status`` and logs.
+    A custom primary planner may fail or return an empty plan. The agent loop
+    must still work, so the deterministic fallback handles those cases. The
+    last primary error is kept for ``/delamain status`` and logs.
     """
 
     def __init__(

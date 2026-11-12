@@ -70,9 +70,12 @@ class MetricsCollector:
     # Дефолтные лимиты для каждого канала.
     DEFAULT_CAPACITY = 720  # ~12 минут при тике раз в секунду
 
-    def __init__(self, maxlen_per_channel: int = DEFAULT_CAPACITY,
-                 persist_dir: Optional[str] = None,
-                 agent_name: str = "unknown") -> None:
+    def __init__(
+        self,
+        maxlen_per_channel: int = DEFAULT_CAPACITY,
+        persist_dir: Optional[str] = None,
+        agent_name: str = "unknown",
+    ) -> None:
         self._lock = threading.RLock()
         self._maxlen = maxlen_per_channel
         self._channels: Dict[str, Deque[Dict[str, Any]]] = {}
@@ -95,9 +98,14 @@ class MetricsCollector:
     # Запись метрик
     # ----------------------------------------------------------------
 
-    def record(self, channel: str, value: float, *,
-               cycle: Optional[int] = None,
-               meta: Optional[Dict[str, Any]] = None) -> None:
+    def record(
+        self,
+        channel: str,
+        value: float,
+        *,
+        cycle: Optional[int] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Записать точку в канал. Создаёт канал при первом использовании.
 
         Args:
@@ -129,8 +137,9 @@ class MetricsCollector:
             if value < self._channels_min[channel]:
                 self._channels_min[channel] = float(value)
 
-    def increment(self, channel: str, amount: float = 1.0, *,
-                  cycle: Optional[int] = None) -> None:
+    def increment(
+        self, channel: str, amount: float = 1.0, *, cycle: Optional[int] = None
+    ) -> None:
         """Записать инкремент (rate-counter). Используется для подсчёта
         событий за минуту."""
         self.record(channel, amount, cycle=cycle)
@@ -138,13 +147,17 @@ class MetricsCollector:
             self._counters.setdefault(channel, []).append(time.time())
             # Очищаем старые точки
             cutoff = time.time() - self._counters_window_sec
-            self._counters[channel] = [t for t in self._counters[channel] if t >= cutoff]
+            self._counters[channel] = [
+                t for t in self._counters[channel] if t >= cutoff
+            ]
 
     # ----------------------------------------------------------------
     # Чтение
     # ----------------------------------------------------------------
 
-    def get_history(self, channel: str, last_n: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_history(
+        self, channel: str, last_n: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Возвращает последние N точек канала (или все)."""
         with self._lock:
             ch = self._channels.get(channel)
@@ -233,8 +246,9 @@ class MetricsCollector:
             logger.warning(f"[metrics] ошибка экспорта: {e}")
             return ""
 
-    def append_ndjson(self, path: str, channel: str, value: float,
-                       cycle: Optional[int] = None) -> bool:
+    def append_ndjson(
+        self, path: str, channel: str, value: float, cycle: Optional[int] = None
+    ) -> bool:
         """Дописывает одну точку в NDJSON-файл (быстрая персистентность)."""
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

@@ -119,9 +119,7 @@ def _configure_console_encoding(logger: logging.Logger) -> None:
         try:
             reconfigure(encoding="utf-8", errors="replace")
         except Exception as exc:
-            logger.debug(
-                "Не удалось перевести %s в UTF-8: %s", stream_name, exc
-            )
+            logger.debug("Не удалось перевести %s в UTF-8: %s", stream_name, exc)
 
 
 def _configure_logging(
@@ -163,9 +161,7 @@ def _configure_logging(
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler._digital_being = True  # type: ignore[attr-defined]
         stream_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-            )
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         )
         root.addHandler(stream_handler)
 
@@ -197,9 +193,7 @@ def setup_environment(*, chdir: bool = True, console: bool = True) -> AppEnv:
     # DIGITAL_BEING_DATA_DIR перенаправляет изменяемые данные (тесты,
     # отдельный профиль) и указывает прямо на папку data.
     data_root = (
-        os.path.abspath(override)
-        if override
-        else os.path.join(user_data_dir, "data")
+        os.path.abspath(override) if override else os.path.join(user_data_dir, "data")
     )
 
     # Устанавливаем до создания любых хранилищ и агента: все data_path

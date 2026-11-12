@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 try:
     import pystray
     from PIL import Image, ImageDraw, ImageFont
+
     _HAS_PYSTRAY = True
 except Exception as exc:
     _HAS_PYSTRAY = False
@@ -48,6 +49,7 @@ except Exception as exc:
 # ============================================================
 # Генерация иконки (без зависимости от внешних файлов)
 # ============================================================
+
 
 def _generate_icon(energy_level: str = "full", size: int = 64) -> "Image.Image":
     """Генерирует иконку программно (без файлов).
@@ -64,11 +66,11 @@ def _generate_icon(energy_level: str = "full", size: int = 64) -> "Image.Image":
         size: размер иконки в пикселях.
     """
     color_map = {
-        "full":      (76, 175, 80),     # green
-        "normal":    (33, 150, 243),    # blue
-        "slow":      (255, 235, 59),    # yellow
-        "tired":     (255, 152, 0),     # orange
-        "exhausted": (244, 67, 54),     # red
+        "full": (76, 175, 80),  # green
+        "normal": (33, 150, 243),  # blue
+        "slow": (255, 235, 59),  # yellow
+        "tired": (255, 152, 0),  # orange
+        "exhausted": (244, 67, 54),  # red
     }
     bg = color_map.get(energy_level, color_map["normal"])
 
@@ -101,9 +103,16 @@ def _generate_icon(energy_level: str = "full", size: int = 64) -> "Image.Image":
     if energy_level in ("full", "normal"):
         # Улыбка
         draw.arc(
-            [cx - mouth_w // 2, mouth_y - mouth_w // 4,
-             cx + mouth_w // 2, mouth_y + mouth_w // 2],
-            start=20, end=160, fill=(0, 0, 0), width=max(1, size // 24),
+            [
+                cx - mouth_w // 2,
+                mouth_y - mouth_w // 4,
+                cx + mouth_w // 2,
+                mouth_y + mouth_w // 2,
+            ],
+            start=20,
+            end=160,
+            fill=(0, 0, 0),
+            width=max(1, size // 24),
         )
     elif energy_level == "exhausted":
         # Z (спит) — букву сложно, делаем закрытые глаза
@@ -112,7 +121,8 @@ def _generate_icon(energy_level: str = "full", size: int = 64) -> "Image.Image":
         # Нейтральный/усталый — прямая линия
         draw.line(
             [cx - mouth_w // 2, mouth_y, cx + mouth_w // 2, mouth_y],
-            fill=(0, 0, 0), width=max(1, size // 24),
+            fill=(0, 0, 0),
+            width=max(1, size // 24),
         )
 
     # Если спит — добавляем "zZz"
@@ -129,6 +139,7 @@ def _generate_icon(energy_level: str = "full", size: int = 64) -> "Image.Image":
 # ============================================================
 # TrayIcon
 # ============================================================
+
 
 class TrayIcon:
     """Иконка в трее с динамическим меню и иконкой."""
@@ -293,6 +304,7 @@ class TrayIcon:
 # ============================================================
 # Headless-режим (для CI/тестов, когда нет дисплея)
 # ============================================================
+
 
 class TrayIconStub:
     """Заглушка для тестов и серверов без GUI.

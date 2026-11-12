@@ -35,19 +35,20 @@ class Checkpoint:
     personality_hash: str
     integrity_score: float
     metadata: Dict = field(default_factory=dict)
-    
+
     def verify(self, current_agent) -> Dict:
         current = current_agent.capture_structural_state()
         return {
-            'structural_match': current['structural_hash'] == self.structural_hash,
-            'cognitive_match': current['cognitive_state_hash'] == self.cognitive_state_hash,
-            'memory_match': current['memory_hash'] == self.memory_hash,
-            'personality_match': current['personality_hash'] == self.personality_hash,
-            'integrity_drift': self.integrity_score - current['integrity_score'],
+            "structural_match": current["structural_hash"] == self.structural_hash,
+            "cognitive_match": current["cognitive_state_hash"]
+            == self.cognitive_state_hash,
+            "memory_match": current["memory_hash"] == self.memory_hash,
+            "personality_match": current["personality_hash"] == self.personality_hash,
+            "integrity_drift": self.integrity_score - current["integrity_score"],
             # Structural drift (hash mismatch during growth) is NOT corruption;
             # the authoritative corrupted/drift decision lives in
             # StructuralIntegrity.verify_latest_checkpoint / check_death.
-            'corrupted': False
+            "corrupted": False,
         }
 
 
@@ -81,52 +82,54 @@ class StructuralIntegrity:
         self.max_checkpoints = 50
         self.last_checkpoint_step = 0
         logger.log("[DEATH_RISK] Structural Integrity initialized")
-    
+
     def compute_overall_integrity(self) -> float:
         components = [
             self.cognitive_coherence,
             self.memory_consistency,
             self.value_stability,
             self.metabolic_viability,
-            self.social_coherence
+            self.social_coherence,
         ]
         return float(np.prod(components) ** (1.0 / len(components)))
-    
+
     def step(self, dt: float = 1.0):
         self.corruption_accumulator += self.corruption_rate * dt
         decay = self.corruption_accumulator * 0.01
         self.cognitive_coherence = max(0.0, self.cognitive_coherence - decay)
         self.memory_consistency = max(0.0, self.memory_consistency - decay * 0.5)
         self.value_stability = max(0.0, self.value_stability - decay * 0.3)
-        
-        if hasattr(self.agent, 'interoception'):
+
+        if hasattr(self.agent, "interoception"):
             ic = self.agent.interoception
             mito_health = ic.state.mitochondrial_health
             self.metabolic_viability = np.clip(mito_health / 1.5, 0.0, 1.0)
-        
-        if hasattr(self.agent, 'social_cell'):
+
+        if hasattr(self.agent, "social_cell"):
             sc = self.agent.social_cell
             if sc.agent_models:
-                avg_precision = np.mean([m.model_precision for m in sc.agent_models.values()])
+                avg_precision = np.mean(
+                    [m.model_precision for m in sc.agent_models.values()]
+                )
                 self.social_coherence = avg_precision
-        
+
         self._maybe_checkpoint()
-        
+
         if self.compute_overall_integrity() > self.repair_threshold:
             self._auto_repair(dt)
-        
+
         return self.get_status()
-    
+
     def _maybe_checkpoint(self):
-        current_step = getattr(self.agent, 'cycle_count', 0)
+        current_step = getattr(self.agent, "cycle_count", 0)
         if current_step - self.last_checkpoint_step >= self.checkpoint_interval:
             self.create_checkpoint()
             self.last_checkpoint_step = current_step
-    
+
     def create_checkpoint(self) -> Checkpoint:
         state = self.agent.capture_structural_state()
         # Store checkpoint file path in metadata for later file integrity verification
-        current_step = getattr(self.agent, 'cycle_count', 0)
+        current_step = getattr(self.agent, "cycle_count", 0)
         checkpoint_filename = f"{self.agent.name}_cycle_{current_step}.json"
         # Путь через data_path: учитывает DIGITAL_BEING_DATA_DIR и папку
         # пользовательских данных в собранном .exe. Раньше здесь был
@@ -139,109 +142,131 @@ class StructuralIntegrity:
         cp = Checkpoint(
             timestamp=time.time(),
             step=current_step,
-            structural_hash=state['structural_hash'],
-            cognitive_state_hash=state['cognitive_state_hash'],
-            memory_hash=state['memory_hash'],
-            personality_hash=state['personality_hash'],
+            structural_hash=state["structural_hash"],
+            cognitive_state_hash=state["cognitive_state_hash"],
+            memory_hash=state["memory_hash"],
+            personality_hash=state["personality_hash"],
             integrity_score=self.compute_overall_integrity(),
             metadata={
-                'energy': self.agent.energy,
-                'intelligence': self.agent.intelligence,
-                'goals_count': len(self.agent.goals),
-                'beliefs_count': len(getattr(self.agent, 'beliefs', {})),
-                'checkpoint_file': checkpoint_path
-            }
+                "energy": self.agent.energy,
+                "intelligence": self.agent.intelligence,
+                "goals_count": len(self.agent.goals),
+                "beliefs_count": len(getattr(self.agent, "beliefs", {})),
+                "checkpoint_file": checkpoint_path,
+            },
         )
         self.checkpoints.append(cp)
         if len(self.checkpoints) > self.max_checkpoints:
             self.checkpoints.pop(0)
-        logger.log(f"[DEATH_RISK] Checkpoint created at step {cp.step}, integrity={cp.integrity_score:.3f}")
+        logger.log(
+            f"[DEATH_RISK] Checkpoint created at step {cp.step}, integrity={cp.integrity_score:.3f}"
+        )
         return cp
-    
+
     def verify_latest_checkpoint(self) -> Dict:
         """Verify structural integrity against latest checkpoint.
-        
+
         Note: Hash mismatches are NORMAL during learning/growth - they indicate
         the agent has evolved. This method returns the drift info but does NOT
         mark as 'corrupted' for hash mismatches. File corruption is checked separately.
         """
         if not self.checkpoints:
-            return {'verified': False, 'reason': 'no_checkpoints'}
+            return {"verified": False, "reason": "no_checkpoints"}
         latest = self.checkpoints[-1]
         verification = latest.verify(self.agent)
-        verification['checkpoint_step'] = latest.step
-        verification['integrity_at_checkpoint'] = latest.integrity_score
-        verification['current_integrity'] = self.compute_overall_integrity()
+        verification["checkpoint_step"] = latest.step
+        verification["integrity_at_checkpoint"] = latest.integrity_score
+        verification["current_integrity"] = self.compute_overall_integrity()
         # Hash mismatches are expected during normal operation - not corruption
-        verification['corrupted'] = False
-        verification['structural_drift'] = {
-            'structural_match': verification['structural_match'],
-            'cognitive_match': verification['cognitive_match'],
-            'memory_match': verification['memory_match'],
-            'personality_match': verification['personality_match'],
-            'integrity_drift': verification['integrity_drift']
+        verification["corrupted"] = False
+        verification["structural_drift"] = {
+            "structural_match": verification["structural_match"],
+            "cognitive_match": verification["cognitive_match"],
+            "memory_match": verification["memory_match"],
+            "personality_match": verification["personality_match"],
+            "integrity_drift": verification["integrity_drift"],
         }
-        logger.log(f"[DEATH_RISK] Checkpoint verified at step {latest.step}: "
-                   f"drift={verification['integrity_drift']:.3f}")
+        logger.log(
+            f"[DEATH_RISK] Checkpoint verified at step {latest.step}: "
+            f"drift={verification['integrity_drift']:.3f}"
+        )
         return verification
 
-    def verify_checkpoint_file_integrity(self, checkpoint_path: Optional[str] = None) -> Dict:
+    def verify_checkpoint_file_integrity(
+        self, checkpoint_path: Optional[str] = None
+    ) -> Dict:
         """Verify that the checkpoint FILE is readable and valid JSON.
-        
+
         This detects actual file corruption (disk errors, bit rot, truncation),
         NOT structural drift from agent learning.
         """
         if checkpoint_path is None:
             if not self.checkpoints:
-                return {'file_corrupted': False, 'reason': 'no_checkpoints'}
+                return {"file_corrupted": False, "reason": "no_checkpoints"}
             latest = self.checkpoints[-1]
-            checkpoint_path = latest.metadata.get('checkpoint_file')
-        
+            checkpoint_path = latest.metadata.get("checkpoint_file")
+
         if not checkpoint_path or not os.path.exists(checkpoint_path):
             # Отсутствие файла — это НЕ повреждение. Файла может не быть,
             # потому что чекпоинт ещё не записан на диск или был удалён
             # ротацией (MAX_CHECKPOINTS). Раньше это считалось коррупцией
             # и агент умирал мгновенно, хотя ничего не было испорчено.
             return {
-                'file_corrupted': False,
-                'file_missing': True,
-                'reason': 'file_not_found',
-                'path': checkpoint_path,
+                "file_corrupted": False,
+                "file_missing": True,
+                "reason": "file_not_found",
+                "path": checkpoint_path,
             }
-        
+
         try:
             # Try to open and parse the file
-            if checkpoint_path.endswith('.gz'):
-                with gzip.open(checkpoint_path, 'rt', encoding='utf-8') as f:
+            if checkpoint_path.endswith(".gz"):
+                with gzip.open(checkpoint_path, "rt", encoding="utf-8") as f:
                     data = json.load(f)
             else:
-                with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                with open(checkpoint_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            
+
             # Verify required fields exist
-            required_fields = ['schema_version', 'name', 'cycle_count', 'energy']
+            required_fields = ["schema_version", "name", "cycle_count", "energy"]
             missing = [f for f in required_fields if f not in data]
             if missing:
-                return {'file_corrupted': True, 'reason': f'missing_fields: {missing}', 'path': checkpoint_path}
-            
-            return {'file_corrupted': False, 'path': checkpoint_path}
-        except (json.JSONDecodeError, gzip.BadGzipFile, OSError, UnicodeDecodeError) as e:
-            return {'file_corrupted': True, 'reason': str(e), 'path': checkpoint_path}
-    
-    def record_damage(self, damage_type: str, severity: float, 
-                     affected_component: str, description: str):
+                return {
+                    "file_corrupted": True,
+                    "reason": f"missing_fields: {missing}",
+                    "path": checkpoint_path,
+                }
+
+            return {"file_corrupted": False, "path": checkpoint_path}
+        except (
+            json.JSONDecodeError,
+            gzip.BadGzipFile,
+            OSError,
+            UnicodeDecodeError,
+        ) as e:
+            return {"file_corrupted": True, "reason": str(e), "path": checkpoint_path}
+
+    def record_damage(
+        self,
+        damage_type: str,
+        severity: float,
+        affected_component: str,
+        description: str,
+    ):
         damage = StructuralDamage(
             timestamp=time.time(),
             damage_type=damage_type,
             severity=severity,
             affected_component=affected_component,
-            description=description
+            description=description,
         )
         self.damage_log.append(damage)
         self._apply_damage(damage)
-        logger.log(f"[DEATH_RISK] Damage recorded: {damage_type} severity={severity:.2f} "
-                   f"component={affected_component}")
-    
+        logger.log(
+            f"[DEATH_RISK] Damage recorded: {damage_type} severity={severity:.2f} "
+            f"component={affected_component}"
+        )
+
     def _apply_damage(self, damage: StructuralDamage):
         severity = damage.severity
         if damage.affected_component == "cognitive":
@@ -255,11 +280,16 @@ class StructuralIntegrity:
         elif damage.affected_component == "social":
             self.social_coherence = max(0.0, self.social_coherence - severity)
         elif damage.affected_component == "structural_verification":
-            for attr in ['cognitive_coherence', 'memory_consistency', 
-                        'value_stability', 'metabolic_viability', 'social_coherence']:
+            for attr in [
+                "cognitive_coherence",
+                "memory_consistency",
+                "value_stability",
+                "metabolic_viability",
+                "social_coherence",
+            ]:
                 current = getattr(self, attr)
                 setattr(self, attr, max(0.0, current - severity * 0.5))
-    
+
     def repair_damage(self, damage_index: int, repair_amount: float = 0.2) -> bool:
         if 0 <= damage_index < len(self.damage_log):
             damage = self.damage_log[damage_index]
@@ -267,10 +297,12 @@ class StructuralIntegrity:
                 damage.repaired = True
                 damage.repair_timestamp = time.time()
                 self._apply_repair(damage.affected_component, repair_amount)
-                logger.log(f"[DEATH_RISK] Repaired damage {damage_index}: {damage.damage_type}")
+                logger.log(
+                    f"[DEATH_RISK] Repaired damage {damage_index}: {damage.damage_type}"
+                )
                 return True
         return False
-    
+
     def _apply_repair(self, component: str, amount: float):
         if component == "cognitive":
             self.cognitive_coherence = min(1.0, self.cognitive_coherence + amount)
@@ -282,43 +314,56 @@ class StructuralIntegrity:
             self.metabolic_viability = min(1.0, self.metabolic_viability + amount)
         elif component == "social":
             self.social_coherence = min(1.0, self.social_coherence + amount)
-    
+
     def _auto_repair(self, dt: float):
         repair_rate = 0.001 * dt
-        for attr in ['cognitive_coherence', 'memory_consistency', 
-                    'value_stability', 'social_coherence']:
+        for attr in [
+            "cognitive_coherence",
+            "memory_consistency",
+            "value_stability",
+            "social_coherence",
+        ]:
             current = getattr(self, attr)
             if current < 1.0:
                 setattr(self, attr, min(1.0, current + repair_rate))
-        self.corruption_accumulator = max(0.0, self.corruption_accumulator - repair_rate * 10)
+        self.corruption_accumulator = max(
+            0.0, self.corruption_accumulator - repair_rate * 10
+        )
 
     def manual_repair(self, intensity: float = 1.0) -> Dict:
         """Принудительное восстановление целостности (вызывается действием repair).
-        
+
         Args:
             intensity: сила восстановления (1.0 = базовое)
-            
+
         Returns:
             Словарь с изменениями по компонентам
         """
         repair_rate = 0.05 * intensity  # 5% за раз, намного сильнее auto_repair
         changes = {}
-        for attr in ['cognitive_coherence', 'memory_consistency',
-                    'value_stability', 'metabolic_viability', 'social_coherence']:
+        for attr in [
+            "cognitive_coherence",
+            "memory_consistency",
+            "value_stability",
+            "metabolic_viability",
+            "social_coherence",
+        ]:
             current = getattr(self, attr)
             if current < 1.0:
                 new_val = min(1.0, current + repair_rate)
                 changes[attr] = new_val - current
                 setattr(self, attr, new_val)
-        
+
         # Также снижаем коррупцию
         old_corruption = self.corruption_accumulator
-        self.corruption_accumulator = max(0.0, self.corruption_accumulator - repair_rate * 5)
-        changes['corruption_accumulator'] = old_corruption - self.corruption_accumulator
-        
+        self.corruption_accumulator = max(
+            0.0, self.corruption_accumulator - repair_rate * 5
+        )
+        changes["corruption_accumulator"] = old_corruption - self.corruption_accumulator
+
         logger.log(f"[DEATH_RISK] Manual repair: {changes}")
         return changes
-    
+
     def has_intact_checkpoint(self, *, skip_latest: bool = True) -> bool:
         """Есть ли хоть одна читаемая копия чекпоинта.
 
@@ -328,10 +373,10 @@ class StructuralIntegrity:
         """
         candidates = self.checkpoints[:-1] if skip_latest else self.checkpoints
         for checkpoint in reversed(candidates):
-            path = checkpoint.metadata.get('checkpoint_file')
+            path = checkpoint.metadata.get("checkpoint_file")
             verification = self.verify_checkpoint_file_integrity(path)
-            if not verification.get('file_corrupted', False) and not (
-                verification.get('file_missing', False)
+            if not verification.get("file_corrupted", False) and not (
+                verification.get("file_missing", False)
             ):
                 return True
         return False
@@ -340,13 +385,13 @@ class StructuralIntegrity:
         integrity = self.compute_overall_integrity()
         if integrity < self.critical_threshold:
             return DeathCause.STRUCTURAL_COLLAPSE
-        
+
         # Check checkpoint FILE integrity (actual file corruption, not structural drift)
         if self.checkpoints:
             latest = self.checkpoints[-1]
-            checkpoint_path = latest.metadata.get('checkpoint_file')
+            checkpoint_path = latest.metadata.get("checkpoint_file")
             file_verification = self.verify_checkpoint_file_integrity(checkpoint_path)
-            if file_verification.get('file_corrupted', False):
+            if file_verification.get("file_corrupted", False):
                 # Один битый файл — ещё не смерть: когнитивная структура
                 # сохранена в более ранних чекпоинтах. Умираем только если
                 # целых копий не осталось, иначе откатываемся.
@@ -362,50 +407,54 @@ class StructuralIntegrity:
                         f"{file_verification.get('reason')} (целых копий нет)"
                     )
                     return DeathCause.CHECKPOINT_FILE_CORRUPTION
-        
+
         if self.cognitive_coherence < 0.1 and self.memory_consistency < 0.1:
             return DeathCause.COGNITIVE_FRAGMENTATION
         if self.metabolic_viability < 0.05:
             return DeathCause.METABOLIC_FAILURE
-        if (len(self.agent.goals) == 0 and 
-            self.value_stability < 0.1 and 
-            getattr(self.agent, 'intelligence', 0) < 0.5):
+        if (
+            len(self.agent.goals) == 0
+            and self.value_stability < 0.1
+            and getattr(self.agent, "intelligence", 0) < 0.5
+        ):
             return DeathCause.EXISTENTIAL_VOID
         return None
-    
+
     def get_status(self) -> Dict:
         integrity = self.compute_overall_integrity()
         return {
-            'overall_integrity': integrity,
-            'components': {
-                'cognitive_coherence': self.cognitive_coherence,
-                'memory_consistency': self.memory_consistency,
-                'value_stability': self.value_stability,
-                'metabolic_viability': self.metabolic_viability,
-                'social_coherence': self.social_coherence
+            "overall_integrity": integrity,
+            "components": {
+                "cognitive_coherence": self.cognitive_coherence,
+                "memory_consistency": self.memory_consistency,
+                "value_stability": self.value_stability,
+                "metabolic_viability": self.metabolic_viability,
+                "social_coherence": self.social_coherence,
             },
-            'thresholds': {
-                'critical': self.critical_threshold,
-                'warning': self.warning_threshold,
-                'repair': self.repair_threshold
+            "thresholds": {
+                "critical": self.critical_threshold,
+                "warning": self.warning_threshold,
+                "repair": self.repair_threshold,
             },
-            'corruption_accumulator': self.corruption_accumulator,
-            'damage_count': len(self.damage_log),
-            'unrepaired_damage': sum(1 for d in self.damage_log if not d.repaired),
-            'checkpoints': len(self.checkpoints),
-            'last_checkpoint_step': self.last_checkpoint_step,
-            'death_risk': self._compute_death_risk(integrity),
-            'status': self._integrity_status(integrity)
+            "corruption_accumulator": self.corruption_accumulator,
+            "damage_count": len(self.damage_log),
+            "unrepaired_damage": sum(1 for d in self.damage_log if not d.repaired),
+            "checkpoints": len(self.checkpoints),
+            "last_checkpoint_step": self.last_checkpoint_step,
+            "death_risk": self._compute_death_risk(integrity),
+            "status": self._integrity_status(integrity),
         }
-    
+
     def _compute_death_risk(self, integrity: float) -> float:
         if integrity < self.critical_threshold:
             return 1.0
         elif integrity < self.warning_threshold:
-            return (self.warning_threshold - integrity) / (self.warning_threshold - self.critical_threshold)
+            return (self.warning_threshold - integrity) / (
+                self.warning_threshold - self.critical_threshold
+            )
         else:
             return 0.0
-    
+
     def _integrity_status(self, integrity: float) -> str:
         if integrity < self.critical_threshold:
             return "CRITICAL — DEATH IMMINENT"
@@ -415,7 +464,7 @@ class StructuralIntegrity:
             return "DEGRADED — repair needed"
         else:
             return "HEALTHY"
-    
+
     def attempt_recovery_from_checkpoint(self, checkpoint_index: int = -1) -> bool:
         if not self.checkpoints:
             return False
@@ -423,29 +472,38 @@ class StructuralIntegrity:
         # Recovery is gated by CHECKPOINT FILE integrity, not by structural
         # drift: hash mismatches during growth are normal, real corruption is
         # a file-level problem (see verify_checkpoint_file_integrity).
-        file_verification = self.verify_checkpoint_file_integrity(cp.metadata.get('checkpoint_file'))
-        if not file_verification.get('file_corrupted', False):
+        file_verification = self.verify_checkpoint_file_integrity(
+            cp.metadata.get("checkpoint_file")
+        )
+        if not file_verification.get("file_corrupted", False):
             self.agent.restore_from_checkpoint(cp)
-            logger.log(f"[DEATH_RISK] Recovery from checkpoint step {cp.step} successful")
+            logger.log(
+                f"[DEATH_RISK] Recovery from checkpoint step {cp.step} successful"
+            )
             return True
         else:
-            logger.log(f"[DEATH_RISK] Checkpoint {cp.step} corrupted, cannot recover: {file_verification.get('reason')}")
+            logger.log(
+                f"[DEATH_RISK] Checkpoint {cp.step} corrupted, cannot recover: {file_verification.get('reason')}"
+            )
             return False
-    
+
     def get_legacy_package(self) -> Dict:
         return {
-            'final_integrity': self.compute_overall_integrity(),
-            'total_lifetime_steps': getattr(self.agent, 'cycle_count', 0),
-            'completed_goals': getattr(self.agent, 'completed_goals', 0),
-            'intelligence_achieved': getattr(self.agent, 'intelligence', 0),
-            'unique_beliefs': len(getattr(self.agent, 'beliefs', {})),
-            'social_bonds': len(getattr(self.agent, 'social_cell', {}).agent_models) 
-                           if hasattr(self.agent, 'social_cell') else 0,
-            'checkpoints_survived': len(self.checkpoints),
-            'damages_survived': len(self.damage_log),
-            'cause_of_death': None,
-            'structural_hash': self.agent.capture_structural_state()['structural_hash'],
-            'personality_hash': self.agent.capture_structural_state()['personality_hash']
+            "final_integrity": self.compute_overall_integrity(),
+            "total_lifetime_steps": getattr(self.agent, "cycle_count", 0),
+            "completed_goals": getattr(self.agent, "completed_goals", 0),
+            "intelligence_achieved": getattr(self.agent, "intelligence", 0),
+            "unique_beliefs": len(getattr(self.agent, "beliefs", {})),
+            "social_bonds": len(getattr(self.agent, "social_cell", {}).agent_models)
+            if hasattr(self.agent, "social_cell")
+            else 0,
+            "checkpoints_survived": len(self.checkpoints),
+            "damages_survived": len(self.damage_log),
+            "cause_of_death": None,
+            "structural_hash": self.agent.capture_structural_state()["structural_hash"],
+            "personality_hash": self.agent.capture_structural_state()[
+                "personality_hash"
+            ],
         }
 
 
@@ -458,61 +516,69 @@ class DeathRiskEngine:
         self.death_timestamp: Optional[float] = None
         self.legacy_package: Optional[Dict] = None
         logger.log("[DEATH_RISK] Death Risk Engine initialized")
-    
+
     def step(self, dt: float = 1.0) -> Dict:
         if not self.is_alive:
-            return {'alive': False, 'cause': self.death_cause.value if self.death_cause else 'unknown'}
+            return {
+                "alive": False,
+                "cause": self.death_cause.value if self.death_cause else "unknown",
+            }
         integrity_status = self.integrity.step(dt)
         cause = self.integrity.check_death()
         if cause:
             self._die(cause)
         return {
-            'alive': self.is_alive,
-            'integrity': integrity_status,
-            'death_cause': cause.value if cause else None
+            "alive": self.is_alive,
+            "integrity": integrity_status,
+            "death_cause": cause.value if cause else None,
         }
-    
+
     def _die(self, cause: DeathCause):
         self.is_alive = False
         self.death_cause = cause
         self.death_timestamp = time.time()
         self.legacy_package = self.integrity.get_legacy_package()
-        self.legacy_package['cause_of_death'] = cause.value
-        self.legacy_package['death_timestamp'] = self.death_timestamp
-        logger.log(f"[DEATH_RISK] ═══ DEATH ═══")
+        self.legacy_package["cause_of_death"] = cause.value
+        self.legacy_package["death_timestamp"] = self.death_timestamp
+        logger.log("[DEATH_RISK] ═══ DEATH ═══")
         logger.log(f"[DEATH_RISK] Cause: {cause.value}")
-        logger.log(f"[DEATH_RISK] Lifetime steps: {self.legacy_package['total_lifetime_steps']}")
-        logger.log(f"[DEATH_RISK] Legacy prepared for inheritance")
-    
-    def record_external_damage(self, damage_type: str, severity: float, 
-                              component: str, description: str):
+        logger.log(
+            f"[DEATH_RISK] Lifetime steps: {self.legacy_package['total_lifetime_steps']}"
+        )
+        logger.log("[DEATH_RISK] Legacy prepared for inheritance")
+
+    def record_external_damage(
+        self, damage_type: str, severity: float, component: str, description: str
+    ):
         self.integrity.record_damage(damage_type, severity, component, description)
-    
+
     def force_checkpoint(self) -> Checkpoint:
         return self.integrity.create_checkpoint()
-    
+
     def verify_integrity(self) -> Dict:
         return self.integrity.verify_latest_checkpoint()
-    
-    def verify_checkpoint_file_integrity(self, checkpoint_path: Optional[str] = None) -> Dict:
+
+    def verify_checkpoint_file_integrity(
+        self, checkpoint_path: Optional[str] = None
+    ) -> Dict:
         """Verify checkpoint FILE integrity (actual file corruption, not structural drift)."""
         return self.integrity.verify_checkpoint_file_integrity(checkpoint_path)
-    
+
     def get_status(self) -> Dict:
         return {
-            'alive': self.is_alive,
-            'death_cause': self.death_cause.value if self.death_cause else None,
-            'death_timestamp': self.death_timestamp,
-            'integrity': self.integrity.get_status(),
-            'legacy': self.legacy_package
+            "alive": self.is_alive,
+            "death_cause": self.death_cause.value if self.death_cause else None,
+            "death_timestamp": self.death_timestamp,
+            "integrity": self.integrity.get_status(),
+            "legacy": self.legacy_package,
         }
-    
+
     def inject_corruption(self, amount: float, component: str = "cognitive"):
         self.integrity.record_damage(
             damage_type="external_corruption",
             severity=amount,
             affected_component=component,
-            description=f"Injected corruption: {amount:.2f}"
+            description=f"Injected corruption: {amount:.2f}",
         )
 
 

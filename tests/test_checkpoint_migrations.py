@@ -37,10 +37,18 @@ def test_failed_migrator_cannot_mutate_input(monkeypatch):
 
 def test_complete_chain_applied_in_order(monkeypatch):
     monkeypatch.setattr(migrations, "SCHEMA_VERSION", 2)
-    monkeypatch.setitem(migrations.MIGRATIONS, (0, 1), lambda data: {**data, "first": True})
-    monkeypatch.setitem(migrations.MIGRATIONS, (1, 2), lambda data: {**data, "second": data["first"]})
+    monkeypatch.setitem(
+        migrations.MIGRATIONS, (0, 1), lambda data: {**data, "first": True}
+    )
+    monkeypatch.setitem(
+        migrations.MIGRATIONS, (1, 2), lambda data: {**data, "second": data["first"]}
+    )
     original = {"schema_version": 0}
-    assert migrate_state(original) == {"schema_version": 2, "first": True, "second": True}
+    assert migrate_state(original) == {
+        "schema_version": 2,
+        "first": True,
+        "second": True,
+    }
     assert original == {"schema_version": 0}
 
 
@@ -51,6 +59,8 @@ def test_invalid_or_future_version_rejected(version):
 
 
 def test_unknown_jump_rejected(monkeypatch):
-    monkeypatch.setitem(migrations.MIGRATIONS, (0, 1), lambda data: {"schema_version": 88})
+    monkeypatch.setitem(
+        migrations.MIGRATIONS, (0, 1), lambda data: {"schema_version": 88}
+    )
     with pytest.raises(CheckpointMigrationError):
         migrate_state({"schema_version": 0})

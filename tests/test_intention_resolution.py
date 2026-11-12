@@ -10,7 +10,9 @@ from src.core.checkpoint_serializer import build_state_from_agent, apply_state_t
 
 def waiting_agent():
     agent = DigitalBeing(name="ResolutionTest")
-    original = begin_intention(agent, {"action": "explore", "params": {"topic": "память"}})
+    original = begin_intention(
+        agent, {"action": "explore", "params": {"topic": "память"}}
+    )
     finish_intention(original)
     finish_evidence_goal(agent, original)
     agent.cycle_count += 1
@@ -23,9 +25,16 @@ def waiting_agent():
 
 def test_cancellation_is_not_success_and_survives_restore():
     agent = waiting_agent()
-    result = resolve_wait(agent, "explore", "память", kind="cancelled", reason="сейчас мне важнее другое")
+    result = resolve_wait(
+        agent, "explore", "память", kind="cancelled", reason="сейчас мне важнее другое"
+    )
     assert result["status"] == "cancelled"
-    assert resolve_wait(agent, "explore", "память", kind="completed", reason="другая причина")["status"] == "already_resolved"
+    assert (
+        resolve_wait(
+            agent, "explore", "память", kind="completed", reason="другая причина"
+        )["status"]
+        == "already_resolved"
+    )
     state = build_state_from_agent(agent)
     apply_state_to_agent(agent, state)
     agent.knowledge_base["новый материал"] = "Новые сведения"
@@ -36,35 +45,79 @@ def test_cancellation_is_not_success_and_survives_restore():
 
 
 def test_forgetting_releases_attention_but_keeps_lesson_and_survives_restore():
-    from src.core.checkpoint_serializer import build_state_from_agent, apply_state_to_agent
+    from src.core.checkpoint_serializer import (
+        build_state_from_agent,
+        apply_state_to_agent,
+    )
 
     agent = waiting_agent()
-    result = resolve_wait(agent, "explore", "память", kind="forgotten", reason="сейчас это больше не важно")
+    result = resolve_wait(
+        agent,
+        "explore",
+        "память",
+        kind="forgotten",
+        reason="сейчас это больше не важно",
+    )
     assert result["status"] == "forgotten"
     entry = next(iter(agent._waiting_intentions.values()))
     assert entry["resolution"]["reason"] == "сейчас это больше не важно"
     state = build_state_from_agent(agent)
     apply_state_to_agent(agent, state)
     assert continuation_candidate(agent) is None
-    assert next(iter(agent._waiting_intentions.values()))["resolution"]["kind"] == "forgotten"
+    assert (
+        next(iter(agent._waiting_intentions.values()))["resolution"]["kind"]
+        == "forgotten"
+    )
 
 
 def test_forgotten_topic_can_start_new_independent_intention():
     from src.cognition.intention_waiting import start_new_intention
 
     agent = waiting_agent()
-    assert resolve_wait(agent, "explore", "память", kind="forgotten", reason="отпустить")['status'] == "forgotten"
-    entry = start_new_intention(agent, "explore", "память", reason="интерес вернулся после нового опыта")
+    assert (
+        resolve_wait(agent, "explore", "память", kind="forgotten", reason="отпустить")[
+            "status"
+        ]
+        == "forgotten"
+    )
+    entry = start_new_intention(
+        agent, "explore", "память", reason="интерес вернулся после нового опыта"
+    )
     assert entry["new_interest"] is True
     assert entry["continuation_of"] is None
     assert entry["reason"] == "интерес вернулся после нового опыта"
-    assert resolve_wait(agent, "explore", "память", kind="forgotten", reason="новое решение")["status"] == "already_resolved"
+    assert (
+        resolve_wait(
+            agent, "explore", "память", kind="forgotten", reason="новое решение"
+        )["status"]
+        == "already_resolved"
+    )
 
 
 def test_completion_requires_actual_evidence_not_operator_label():
     agent = waiting_agent()
-    assert resolve_wait(agent, "explore", "память", kind="completed", reason="готово")["status"] == "not_satisfied"
-    agent.mental_models.encounter_concept("память", "источник", "Память сохраняет и использует пережитый опыт",
-        evidence_strength=0.8, evidence_kind="testimony", source="book:new")
-    assert resolve_wait(agent, "explore", "память", kind="completed", reason="свидетельство получено")["status"] == "completed"
+    assert (
+        resolve_wait(agent, "explore", "память", kind="completed", reason="готово")[
+            "status"
+        ]
+        == "not_satisfied"
+    )
+    agent.mental_models.encounter_concept(
+        "память",
+        "источник",
+        "Память сохраняет и использует пережитый опыт",
+        evidence_strength=0.8,
+        evidence_kind="testimony",
+        source="book:new",
+    )
+    assert (
+        resolve_wait(
+            agent,
+            "explore",
+            "память",
+            kind="completed",
+            reason="свидетельство получено",
+        )["status"]
+        == "completed"
+    )
     assert continuation_candidate(agent) is None

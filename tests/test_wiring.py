@@ -57,16 +57,28 @@ def test_no_known_action_falls_into_default(agent):
     hypothesis и set_own_goal.
     """
     motivation_actions = [
-        "explore", "ask_question", "communicate", "web_search",
-        "hypothesis", "synthesize", "reflect", "organize_knowledge",
-        "set_own_goal", "make_choice", "creative_act", "experiment",
-        "self_reflect", "teach_other", "user_answer", "act",
+        "explore",
+        "ask_question",
+        "communicate",
+        "web_search",
+        "hypothesis",
+        "synthesize",
+        "reflect",
+        "organize_knowledge",
+        "set_own_goal",
+        "make_choice",
+        "creative_act",
+        "experiment",
+        "self_reflect",
+        "teach_other",
+        "user_answer",
+        "act",
     ]
     for action in motivation_actions:
         normalized = agent._normalize_action(action)
-        assert normalized in DigitalBeing.ACTION_ALIASES.values(), (
-            f"{action!r} → {normalized!r} не ведёт к обработчику"
-        )
+        assert (
+            normalized in DigitalBeing.ACTION_ALIASES.values()
+        ), f"{action!r} → {normalized!r} не ведёт к обработчику"
 
 
 # ============================================================
@@ -130,13 +142,9 @@ def test_communicate_sends_message(agent):
 
     result = agent.act("communicate")
 
-    messages = agent.user_interaction.get_pending_messages(
-        include_acknowledged=False
-    )
+    messages = agent.user_interaction.get_pending_messages(include_acknowledged=False)
     assert messages, "сообщение не отправлено"
-    assert any(
-        m.get("msg_type") == "statement" for m in messages
-    )
+    assert any(m.get("msg_type") == "statement" for m in messages)
     assert "рассказала человеку" in result
 
 
@@ -257,6 +265,7 @@ def test_web_search_without_searcher_does_not_crash(agent):
     result = agent.act("web_search")
     assert "недоступен" in result
 
+
 # ============================================================
 # 8. hypothesis и set_own_goal
 # ============================================================
@@ -272,7 +281,9 @@ def test_hypothesis_records_experience(agent):
     assert outcome.action == "hypothesis"
     # Либо появился опыт/концепция, либо честный отказ.
     if "гипотеза о" in result:
-        assert after.experiences > before.experiences or after.concepts > before.concepts
+        assert (
+            after.experiences > before.experiences or after.concepts > before.concepts
+        )
         assert outcome.had_effect is True
 
 
@@ -342,8 +353,8 @@ def test_denied_streak_grows(agent):
 def test_ask_is_unavailable_during_cooldown(agent):
     """Вопрос при кулдауне не должен попадать в выбор."""
     agent.cycle_count = 60
-    agent.act("ask_user")          # вопрос задан, пошёл кулдаун
-    agent.cycle_count = 61         # ещё рано
+    agent.act("ask_user")  # вопрос задан, пошёл кулдаун
+    agent.cycle_count = 61  # ещё рано
 
     assert agent._is_action_available("ask_question") is False
 

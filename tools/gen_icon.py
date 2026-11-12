@@ -5,6 +5,7 @@
 
 Используется как fallback в build.py, если иконка не найдена.
 """
+
 import os
 import sys
 

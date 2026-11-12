@@ -8,7 +8,7 @@ first working vertical slice of the new architecture:
 * SQLite episodic/semantic memory;
 * a runtime that executes a plan and records every step;
 * an optional, disabled-by-default subsystem adapter for Digital Being;
-* an optional local LLM planner with a deterministic fallback;
+* a deterministic planner and generic deterministic fallback composition;
 * an optional approval gate for dangerous actions, disabled by default;
 * an optional bridge from cognitive goals to executable goals, disabled by
   default;
@@ -22,9 +22,8 @@ first working vertical slice of the new architecture:
   marked dangerous and meant to run behind the approval gate;
 * an offline, deterministic capability evaluation harness.
 
-The LLM layer is never required: constructing the core does not start Ollama
-or make network requests, and every planning failure falls back to the
-heuristic planner.
+Planning is deterministic and does not require a model runtime or network
+requests.
 """
 
 from .actions import Action, ActionError, ActionRegistry
@@ -51,7 +50,6 @@ from .models import (
     TaskResult,
     utc_now_iso,
 )
-from .llm_planner import OllamaPlanner
 from .planner import FallbackPlanner, HeuristicPlanner, Planner, PlannerError
 from .runner import CodeRunner, RunnerError, RunOutcome
 from .runtime import DelamainRuntime
@@ -81,7 +79,6 @@ __all__ = [
     "GoalExecutionProposal",
     "HeuristicPlanner",
     "MemoryStore",
-    "OllamaPlanner",
     "PROPOSAL_STATUSES",
     "Planner",
     "PlannerError",

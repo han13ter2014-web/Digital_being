@@ -9,6 +9,7 @@ test_health_endpoint.py — тесты для /health endpoint в web_dashboard.
 - /health не требует наличия агента (работает в standalone-режиме).
 - Endpoint зарегистрирован в роутере.
 """
+
 import os
 import socket
 import sys
@@ -24,7 +25,8 @@ aiohttp = pytest.importorskip("aiohttp", reason="aiohttp не установле
 from aiohttp import ClientSession  # noqa: E402
 
 from src.ui.web_dashboard import (  # noqa: E402
-    WebDashboard, SharedState, AIOHTTP_AVAILABLE,
+    WebDashboard,
+    AIOHTTP_AVAILABLE,
 )
 
 
@@ -37,7 +39,7 @@ def _free_port() -> int:
 
 @pytest.fixture
 def dash():
-    """WebDashboard с подключённой заглушкой шины; standalone проверен в К10."""
+    """WebDashboard с подключённой заглушкой шины и отдельный standalone."""
     if not AIOHTTP_AVAILABLE:
         pytest.skip("aiohttp не установлен")
     port = _free_port()
@@ -108,9 +110,7 @@ async def test_health_liveness_after_recent_update(dash):
 async def test_health_readiness_empty_returns_503(dash):
     """readiness при пустом state — 503 (not_ready)."""
     _, port = dash
-    status, body = await _get_json(
-        f"http://127.0.0.1:{port}/health?check=ready"
-    )
+    status, body = await _get_json(f"http://127.0.0.1:{port}/health?check=ready")
     assert status == 503
     assert body["status"] == "not_ready"
     assert body["agent_responsive"] is False
@@ -122,9 +122,7 @@ async def test_health_readiness_after_update_returns_200(dash):
     """readiness с свежими данными — 200 (ready)."""
     d, port = dash
     d.state.update_status({"agent": {"name": "Test"}, "system": {}})
-    status, body = await _get_json(
-        f"http://127.0.0.1:{port}/health?check=ready"
-    )
+    status, body = await _get_json(f"http://127.0.0.1:{port}/health?check=ready")
     assert status == 200
     assert body["status"] == "ready"
     assert body["agent_responsive"] is True
@@ -136,9 +134,7 @@ async def test_health_readiness_stale_data_returns_503(dash):
     d, port = dash
     # Устанавливаем last_update_ts = now - 120 сек
     d.state._last_update_ts = time.time() - 120
-    status, body = await _get_json(
-        f"http://127.0.0.1:{port}/health?check=ready"
-    )
+    status, body = await _get_json(f"http://127.0.0.1:{port}/health?check=ready")
     assert status == 503
     assert body["status"] == "not_ready"
     assert body["agent_responsive"] is False
@@ -163,11 +159,13 @@ async def test_health_response_is_json(dash):
 async def test_health_contains_expected_fields(dash):
     """Health-ответ содержит все ожидаемые поля."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "TestAgent", "energy": 100},
-        "subsystem_count": 5,
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "TestAgent", "energy": 100},
+            "subsystem_count": 5,
+            "system": {},
+        }
+    )
     _, body = await _get_json(f"http://127.0.0.1:{port}/health")
     assert "status" in body
     assert "agent_responsive" in body

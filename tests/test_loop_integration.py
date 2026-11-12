@@ -83,9 +83,7 @@ def test_empty_evidence_does_not_credit_goal(agent):
 
     from src.core.world_delta import WorldDelta
 
-    result = agent._check_goal_progress(
-        "python", answered=True, evidence=WorldDelta()
-    )
+    result = agent._check_goal_progress("python", answered=True, evidence=WorldDelta())
 
     assert result["pct"] == 0
     assert result["completed"] is False
@@ -149,7 +147,9 @@ def test_repeated_dead_action_is_escaped(agent):
 # ============================================================
 
 
-def test_chosen_research_records_exposure_and_relevant_goal_progress(agent, monkeypatch):
+def test_chosen_research_records_exposure_and_relevant_goal_progress(
+    agent, monkeypatch
+):
     """Явно выбранное исследование связано с темой и учётом результата.
 
     Не требует, чтобы любое автономное существование производило знания.
@@ -158,10 +158,19 @@ def test_chosen_research_records_exposure_and_relevant_goal_progress(agent, monk
     agent.set_goal("Понять: квантовая память", activate=True)
     goal_id = agent.active_goal["id"]
     before = len(agent.mental_models.concepts)
-    monkeypatch.setattr(agent.decision_arbitrator, "choose_action", lambda candidates, context: {
-        "action": "explore", "source": "test", "verdict": "proceed",
-        "params": {"topic": "квантовая память", "reason": "контроль выбранного исследования"},
-    })
+    monkeypatch.setattr(
+        agent.decision_arbitrator,
+        "choose_action",
+        lambda candidates, context: {
+            "action": "explore",
+            "source": "test",
+            "verdict": "proceed",
+            "params": {
+                "topic": "квантовая память",
+                "reason": "контроль выбранного исследования",
+            },
+        },
+    )
     result = agent.autonomous_tick()
     assert result["autonomous_action"]["action"] == "explore"
     assert agent._last_action_outcome.topic == "квантовая память"
@@ -178,9 +187,11 @@ def test_loop_status_exposed_for_ui(agent):
     assert "effective_actions" in state["loop"]
     assert "stuck_actions" in state["loop"]
 
+
 # ============================================================
 # 5. Состояние контура переживает рестарт
 # ============================================================
+
 
 def test_loop_state_survives_checkpoint(agent):
     """Тупик и история исследования не забываются после перезапуска."""
@@ -227,7 +238,7 @@ def _restart_with_loop_state(source):
 
 
 def test_deep_rest_no_effect_streak_survives_restart(agent):
-    """К4: рестарт сам по себе не объявляет неудачи успехами."""
+    """рестарт сам по себе не объявляет неудачи успехами."""
     from config.simulation_config import LR_CONFIG
 
     agent._accumulate_sleep = lambda units: {}
@@ -243,8 +254,10 @@ def test_deep_rest_no_effect_streak_survives_restart(agent):
     assert reborn.loop_closer.no_effect_streak("deep_rest") == 2
 
 
-def test_deep_rest_recovery_resets_streak_and_restart_preserves_zero(agent, monkeypatch):
-    """К4: N неудач → прирост энергии → 0, включая рестарт."""
+def test_deep_rest_recovery_resets_streak_and_restart_preserves_zero(
+    agent, monkeypatch
+):
+    """N неудач → прирост энергии → 0, включая рестарт."""
     from config.simulation_config import LR_CONFIG
     from src.cognition.action_expectations import ActionExpectations
 
@@ -274,7 +287,7 @@ def test_deep_rest_recovery_resets_streak_and_restart_preserves_zero(agent, monk
 
 
 def test_play_turn_resets_no_effect_streak(agent):
-    """К4: игровой ход — результат, но не вымышленное знание."""
+    """игровой ход — результат, но не вымышленное знание."""
     from src.core.world_delta import WorldSignature
 
     empty = WorldSignature()
@@ -296,6 +309,7 @@ def test_play_turn_resets_no_effect_streak(agent):
 # ============================================================
 # 6. Прогресс только по теме цели
 # ============================================================
+
 
 def test_topic_must_match_goal_subject():
     """Цель «Понять, что такое время» не закрывается случайными темами."""

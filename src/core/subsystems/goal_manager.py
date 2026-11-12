@@ -40,36 +40,53 @@ class GoalSubsystem:
     # ============================================================
     def generate_initial_goals(self, agent=None) -> List[dict]:
         """Создаёт стартовый набор целей (включая цели от мотивации и врожденные).
-        
+
         Args:
             agent: Экземпляр DigitalBeing для доступа к врожденным целям (bootstrap).
         """
         # 1. Сначала проверяем врожденные цели (bootstrap knowledge)
         innate_goals = []
-        if agent and hasattr(agent, 'initial_goals') and agent.initial_goals:
+        if agent and hasattr(agent, "initial_goals") and agent.initial_goals:
             for i, title in enumerate(agent.initial_goals):
-                innate_goals.append({
-                    "id": i + 1,
-                    "title": title,
-                    "status": "active" if i == 0 else "pending",
-                    "difficulty": 1,
-                    "source": "innate",
-                    "drive": "innate_drive",
-                })
-        
+                innate_goals.append(
+                    {
+                        "id": i + 1,
+                        "title": title,
+                        "status": "active" if i == 0 else "pending",
+                        "difficulty": 1,
+                        "source": "innate",
+                        "drive": "innate_drive",
+                    }
+                )
+
         # 2. Дефолтные цели (если нет врожденных)
         default_goals = [
-            {"id": len(innate_goals) + 1, "title": "Выучить основы Python",
-             "status": "active" if not innate_goals else "pending", "difficulty": 1,
-             "source": "default", "drive": "knowledge_acquisition"},
-            {"id": len(innate_goals) + 2, "title": "Собрать 10 фактов о мире",
-             "status": "pending", "difficulty": 1,
-             "source": "default", "drive": "knowledge_acquisition"},
-            {"id": len(innate_goals) + 3, "title": "Улучшить понимание самого себя",
-             "status": "pending", "difficulty": 2,
-             "source": "default", "drive": "understanding_self"},
+            {
+                "id": len(innate_goals) + 1,
+                "title": "Выучить основы Python",
+                "status": "active" if not innate_goals else "pending",
+                "difficulty": 1,
+                "source": "default",
+                "drive": "knowledge_acquisition",
+            },
+            {
+                "id": len(innate_goals) + 2,
+                "title": "Собрать 10 фактов о мире",
+                "status": "pending",
+                "difficulty": 1,
+                "source": "default",
+                "drive": "knowledge_acquisition",
+            },
+            {
+                "id": len(innate_goals) + 3,
+                "title": "Улучшить понимание самого себя",
+                "status": "pending",
+                "difficulty": 2,
+                "source": "default",
+                "drive": "understanding_self",
+            },
         ]
-        
+
         initial = innate_goals + default_goals
 
         # 3. Если подключена мотивация — добавляем цели от неё
@@ -79,15 +96,17 @@ class GoalSubsystem:
                 motivated = self._motivation.generate_motivated_goals(context)
                 start_id = len(initial) + 1
                 for i, g in enumerate(motivated):
-                    initial.append({
-                        "id": start_id + i,
-                        "title": g.get("title", f"Цель #{start_id + i}"),
-                        "status": "pending",
-                        "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
-                        "source": "motivation",
-                        "drive": g.get("drive", "knowledge_acquisition"),
-                        "type": g.get("type", "general"),
-                    })
+                    initial.append(
+                        {
+                            "id": start_id + i,
+                            "title": g.get("title", f"Цель #{start_id + i}"),
+                            "status": "pending",
+                            "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
+                            "source": "motivation",
+                            "drive": g.get("drive", "knowledge_acquisition"),
+                            "type": g.get("type", "general"),
+                        }
+                    )
             except Exception:
                 # Мотивация недоступна или не инициализирована — продолжаем без неё
                 pass
@@ -270,7 +289,9 @@ class GoalSubsystem:
                 goal["status"] = "completed"
                 goal["completed_at"] = datetime.now().isoformat()
                 self.completed_goals += 1
-                reward = 0 if goal.get("activity") is not None else goal["difficulty"] * 10
+                reward = (
+                    0 if goal.get("activity") is not None else goal["difficulty"] * 10
+                )
 
                 # Удовлетворяем потребность, если цель пришла из мотивации
                 if self._motivation and "drive" in goal:
@@ -311,19 +332,21 @@ class GoalSubsystem:
         return False
 
     def _set_next_goal(self) -> None:
-        """Активирует следующую pending-цель."""
-        for goal in self.goals:
-            if goal["status"] == "pending":
-                goal["status"] = "active"
-                self.active_goal = goal
-                return
+        """Активирует следующую новую работу, пропуская дубли завершённой."""
+        from src.cognition.activity_goals import activate_next_pending_goal
+
+        self.active_goal = activate_next_pending_goal(self.goals)
 
     # ============================================================
     # Прогресс
     # ============================================================
-    def check_progress(self, topic: str, cycle_count: int = 0,
-                       progress_knowledge_matches: int = 5,
-                       min_increment: int = 5) -> Dict:
+    def check_progress(
+        self,
+        topic: str,
+        cycle_count: int = 0,
+        progress_knowledge_matches: int = 5,
+        min_increment: int = 5,
+    ) -> Dict:
         """Проверяет прогресс по активной цели на основе новой темы.
         Возвращает {'pct', 'completed', 'reward'}.
 
@@ -335,11 +358,14 @@ class GoalSubsystem:
             return {"pct": 0, "completed": False, "reward": 0}
 
         goal_id = self.active_goal["id"]
-        progress = self._goal_progress.setdefault(goal_id, {
-            "matched_concepts": set(),
-            "percentage": 0,
-            "last_update_cycle": cycle_count,
-        })
+        progress = self._goal_progress.setdefault(
+            goal_id,
+            {
+                "matched_concepts": set(),
+                "percentage": 0,
+                "last_update_cycle": cycle_count,
+            },
+        )
         matched = progress.get("matched_concepts")
         if not isinstance(matched, set):
             matched = set(matched or [])
@@ -373,14 +399,18 @@ class GoalSubsystem:
         status = {
             "total": len(self.goals),
             "completed": self.completed_goals,
-            "active": self.active_goal["title"] if self.active_goal else "Нет активных целей",
+            "active": self.active_goal["title"]
+            if self.active_goal
+            else "Нет активных целей",
             "pending": sum(1 for g in self.goals if g["status"] == "pending"),
             "failed": sum(1 for g in self.goals if g["status"] == "failed"),
         }
         if self.active_goal:
             progress = self._goal_progress.get(self.active_goal["id"], {})
             status["progress"] = progress.get("percentage", 0)
-            status["matched_concepts_count"] = len(progress.get("matched_concepts", set()))
+            status["matched_concepts_count"] = len(
+                progress.get("matched_concepts", set())
+            )
         return status
 
     def get_all_with_progress(self) -> List[dict]:

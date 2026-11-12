@@ -1,6 +1,6 @@
-"""Тесты TICKET-2: вечное отложенное намерение и ложные тревоги.
+"""Вечное отложенное намерение и ложные тревоги.
 
-Наблюдение (сессии DeepSeek/BigPickle, 2026-11-05): 75 из 121 цикла —
+Наблюдение (тестовые сессии 2026-11-05): 75 из 121 цикла —
 ask_user с результатом «отложен (не сейчас)», намерение не закрывается
 и не теряет вес; «⚠️ Нарушен гомеостаз: 2 тревоги» — каждый цикл.
 
@@ -11,6 +11,7 @@ ask_user с результатом «отложен (не сейчас)», на�
 Решение: тревога — выход за жизнеспособную полосу [min, max];
 отложенный ask_user получает экспоненциальный backoff (5,10,20,40,50).
 """
+
 from types import SimpleNamespace
 
 from src.core.agent import DigitalBeing
@@ -18,6 +19,7 @@ from src.emotion.survival_instincts import SurvivalInstincts
 
 
 # ---------------- гомеостаз ----------------
+
 
 def test_default_levels_raise_no_phantom_alarms():
     instincts = SurvivalInstincts()
@@ -41,6 +43,7 @@ def test_real_violation_still_alarms():
 
 
 # ---------------- backoff отложенного вопроса ----------------
+
 
 class _BusyInteraction:
     """Вопрос нельзя задать: пауза/лимит (status != queued)."""
@@ -103,7 +106,7 @@ def test_successful_question_resets_backoff():
 
 
 def test_recently_explained_refusal_also_defers():
-    """V-1 (верификация 2026-11-06): «не переспрашиваю» гасит намерение.
+    """Верификация 2026-11-06: «не переспрашиваю» гасит намерение.
 
     Живой прогон: отказ «человек недавно объяснил 'обучение'» не писал
     backoff — тема выбиралась 214 из 309 циклов, сжигая АТФ тела и
@@ -133,8 +136,12 @@ def test_continuation_skips_deferred_topic():
     from src.cognition.intention_continuation import continuation_candidate
 
     entry = {
-        "id": 1, "action": "ask_user", "target": "обучение",
-        "status": "performed", "cycle": 90, "outcome": {"had_effect": False},
+        "id": 1,
+        "action": "ask_user",
+        "target": "обучение",
+        "status": "performed",
+        "cycle": 90,
+        "outcome": {"had_effect": False},
     }
     agent = SimpleNamespace(
         cycle_count=100,

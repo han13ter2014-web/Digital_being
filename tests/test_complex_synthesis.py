@@ -47,21 +47,27 @@ def _reply_texts(bus):
 # Цепочка под-вопросов: точное накопление ответов
 # ============================================================
 
+
 def test_sub_question_chain_accumulates_exact_answers():
-    ui = UserInteraction("Тэсс")
+    ui = UserInteraction("Нова")
     subs = ["что такое жизнь?", "что такое смысл?"]
     r1 = ui.ask_user(
         "Я изучаю концепцию 'жизнь'. Мне сложно понять без внешней помощи. "
         "Можете кратко объяснить: что такое жизнь?",
         context="Концепция: жизнь, под-запросы: что такое жизнь?",
-        cycle=100, complex_question="жизнь", sub_questions=subs,
+        cycle=100,
+        complex_question="жизнь",
+        sub_questions=subs,
         sub_question_index=0,
     )
     assert r1["status"] == "queued"
 
     calls = []
-    ui.submit_answer(r1["id"], "Жизнь — это процесс",
-                     on_synthesis_needed=lambda c, sa: calls.append((c, sa)))
+    ui.submit_answer(
+        r1["id"],
+        "Жизнь — это процесс",
+        on_synthesis_needed=lambda c, sa: calls.append((c, sa)),
+    )
 
     # Синтез ещё рано: должен прийти следующий под-вопрос.
     assert calls == []
@@ -71,8 +77,11 @@ def test_sub_question_chain_accumulates_exact_answers():
     assert pending["sub_question_index"] == 1
     assert pending["sub_answers"] == {"что такое жизнь?": "Жизнь — это процесс"}
 
-    ui.submit_answer(pending["id"], "Смысл — это цель",
-                     on_synthesis_needed=lambda c, sa: calls.append((c, sa)))
+    ui.submit_answer(
+        pending["id"],
+        "Смысл — это цель",
+        on_synthesis_needed=lambda c, sa: calls.append((c, sa)),
+    )
 
     assert len(calls) == 1
     complex_question, sub_answers = calls[0]
@@ -86,7 +95,7 @@ def test_sub_question_chain_accumulates_exact_answers():
 
 def test_synthesis_answers_not_polluted_by_unrelated_history():
     """Ответ на чужой вопрос с темой в контексте не попадает в синтез."""
-    ui = UserInteraction("Тэсс")
+    ui = UserInteraction("Нова")
     other = ui.ask_user(
         "Как тебя поддержать?",
         context="самостоятельный вопрос по теме: смысл",
@@ -98,47 +107,65 @@ def test_synthesis_answers_not_polluted_by_unrelated_history():
     r = ui.ask_user(
         "Я изучаю концепцию 'смысл'. ... Можете кратко объяснить: что такое смысл?",
         context="Концепция: смысл, под-запросы: что такое смысл?",
-        cycle=100, complex_question="смысл",
-        sub_questions=["что такое смысл?"], sub_question_index=0,
+        cycle=100,
+        complex_question="смысл",
+        sub_questions=["что такое смысл?"],
+        sub_question_index=0,
     )
-    ui.submit_answer(r["id"], "Смысл — это цель",
-                     on_synthesis_needed=lambda c, sa: calls.append((c, sa)))
+    ui.submit_answer(
+        r["id"],
+        "Смысл — это цель",
+        on_synthesis_needed=lambda c, sa: calls.append((c, sa)),
+    )
 
     assert calls == [("смысл", {"что такое смысл?": "Смысл — это цель"})]
 
 
 def test_legacy_chain_without_accumulator_falls_back_to_context():
     """Подвешенная из старого чекпоинта цепочка не теряет первые ответы."""
-    ui = UserInteraction("Тэсс")
+    ui = UserInteraction("Нова")
     r = ui.ask_user(
         "Также для понимания 'жизнь': что такое смысл?",
         context="Под-вопрос 2/2 для: жизнь",
-        cycle=100, complex_question="жизнь",
+        cycle=100,
+        complex_question="жизнь",
         sub_questions=["что такое жизнь?", "что такое смысл?"],
         sub_question_index=1,
     )
     # Имитируем старую запись: накопителя нет, первый ответ в истории.
     ui.pending_questions[0]["sub_answers"] = {}
-    ui.question_history.append({
-        "question": "Я изучаю концепцию 'жизнь'. ... что такое жизнь?",
-        "answer": "Жизнь — это процесс",
-        "context": "Концепция: жизнь, под-запросы: что такое жизнь?",
-        "cycle": 40, "priority": "medium",
-    })
+    ui.question_history.append(
+        {
+            "question": "Я изучаю концепцию 'жизнь'. ... что такое жизнь?",
+            "answer": "Жизнь — это процесс",
+            "context": "Концепция: жизнь, под-запросы: что такое жизнь?",
+            "cycle": 40,
+            "priority": "medium",
+        }
+    )
 
     calls = []
-    ui.submit_answer(r["id"], "Смысл — это цель",
-                     on_synthesis_needed=lambda c, sa: calls.append((c, sa)))
+    ui.submit_answer(
+        r["id"],
+        "Смысл — это цель",
+        on_synthesis_needed=lambda c, sa: calls.append((c, sa)),
+    )
 
-    assert calls == [("жизнь", {
-        "Я изучаю концепцию 'жизнь'. ... что такое жизнь?": "Жизнь — это процесс",
-        "что такое смысл?": "Смысл — это цель",
-    })]
+    assert calls == [
+        (
+            "жизнь",
+            {
+                "Я изучаю концепцию 'жизнь'. ... что такое жизнь?": "Жизнь — это процесс",
+                "что такое смысл?": "Смысл — это цель",
+            },
+        )
+    ]
 
 
 # ============================================================
 # Живая дверь ответа: колбэк синтеза доходит до Core
 # ============================================================
+
 
 def _runner(agent):
     runner = AgentRunner.__new__(AgentRunner)
@@ -153,7 +180,8 @@ def _chain_last_question(ui):
     return ui.ask_user(
         "Также для понимания 'жизнь': что такое смысл?",
         context="Под-вопрос 2/2 для: жизнь",
-        cycle=10, complex_question="жизнь",
+        cycle=10,
+        complex_question="жизнь",
         sub_questions=["что такое жизнь?", "что такое смысл?"],
         sub_question_index=1,
         sub_answers={"что такое жизнь?": "Жизнь — это процесс"},
@@ -162,21 +190,20 @@ def _chain_last_question(ui):
 
 @pytest.mark.asyncio
 async def test_runner_answer_triggers_synthesis_and_reports_it():
-    ui = UserInteraction("Тэсс")
+    ui = UserInteraction("Нова")
     bus = RecordingBus()
     ui.attach_bus(bus)
     _chain_last_question(ui)
     agent = SimpleNamespace(
-        name="Тэсс", cycle_count=20,
+        name="Нова",
+        cycle_count=20,
         naming_dialogue=SimpleNamespace(phase="completed"),
         user_interaction=ui,
         synthesize_complex_question=Mock(),
     )
     runner = _runner(agent)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Смысл — это цель"})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Смысл — это цель"}))
 
     agent.synthesize_complex_question.assert_called_once_with(
         "жизнь",
@@ -193,20 +220,19 @@ async def test_runner_answer_triggers_synthesis_and_reports_it():
 
 @pytest.mark.asyncio
 async def test_runner_without_synthesizer_still_answers():
-    ui = UserInteraction("Тэсс")
+    ui = UserInteraction("Нова")
     bus = RecordingBus()
     ui.attach_bus(bus)
     ui.ask_user("Как тебя поддержать?", context="самостоятельный вопрос", cycle=5)
     agent = SimpleNamespace(
-        name="Тэсс", cycle_count=6,
+        name="Нова",
+        cycle_count=6,
         naming_dialogue=SimpleNamespace(phase="completed"),
         user_interaction=ui,
     )
     runner = _runner(agent)
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Просто будь рядом."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": "Просто будь рядом."}))
 
     assert any("Ответ записан" in t for t in _reply_texts(bus))
     assert ui.get_pending_question() is None
@@ -215,6 +241,7 @@ async def test_runner_without_synthesizer_still_answers():
 # ============================================================
 # Фасад агента
 # ============================================================
+
 
 def test_agent_facade_delegates_to_thinking():
     stub = DigitalBeing.__new__(DigitalBeing)
@@ -233,6 +260,7 @@ def test_agent_facade_delegates_to_thinking():
 # ============================================================
 # Синтез: буквальные ответы вместо отсутствующих узлов
 # ============================================================
+
 
 def _pipeline(encounter):
     tp = ThinkingPipeline.__new__(ThinkingPipeline)

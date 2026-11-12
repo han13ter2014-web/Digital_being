@@ -12,6 +12,7 @@
 - record_exploration: эвристика «ответ найден».
 - Сериализация: to_dict/load_from (round-trip).
 """
+
 import sys
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def _make_mgr(cycle=0, log=None, max_size=10, default_max_explorations=5):
 
 
 # === Базовые операции ===
+
 
 def test_empty_manager_has_no_questions():
     mgr = _make_mgr()
@@ -107,6 +109,7 @@ def test_hint_unknown_question():
 
 # === Лимит очереди ===
 
+
 def test_queue_evicts_oldest_unanswered():
     mgr = _make_mgr(max_size=3)
 
@@ -123,6 +126,7 @@ def test_queue_evicts_oldest_unanswered():
 
 
 # === Стратегии размышления (round_robin) ===
+
 
 def test_answer_marks_latest_question_without_creating_learning_data():
     mgr = _make_mgr(cycle=12)
@@ -174,8 +178,9 @@ def test_consume_cycles_strategies_in_order():
         # Фиксируем размышление без маркера ответа.
         mgr.record_exploration(stimulus, thought="промежуточная мысль")
 
-    assert seen_strategies == EXPLORATION_STRATEGIES, \
-        f"Стратегии должны идти по списку, получили: {seen_strategies}"
+    assert (
+        seen_strategies == EXPLORATION_STRATEGIES
+    ), f"Стратегии должны идти по списку, получили: {seen_strategies}"
 
 
 def test_consume_returns_none_when_queue_empty():
@@ -184,6 +189,7 @@ def test_consume_returns_none_when_queue_empty():
 
 
 # === record_exploration и эвристика «ответ найден» ===
+
 
 def test_record_exploration_appends_to_history():
     mgr = _make_mgr(cycle=5)
@@ -252,6 +258,7 @@ def test_record_exploration_rejects_new_concept_as_answer():
 
 # === Исчерпание лимита попыток ===
 
+
 def test_consume_marks_unresolved_when_max_explorations_reached():
     """Если все max_explorations размышлений не дали ответа — вопрос
     помечается как answered (с текстом «не разрешён»), чтобы не
@@ -278,6 +285,7 @@ def test_consume_marks_unresolved_when_max_explorations_reached():
 
 
 # === Сериализация (чеклист) ===
+
 
 def test_to_dict_returns_copy_of_queue():
     mgr = _make_mgr()

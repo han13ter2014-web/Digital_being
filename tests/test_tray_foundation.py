@@ -29,6 +29,7 @@ from src.core.energy_policy import EnergyPolicy
 # EventBus
 # ============================================================
 
+
 async def test_eventbus_basic():
     """Базовый сценарий: publish → подписчик получает."""
     bus = EventBus()
@@ -176,6 +177,7 @@ async def test_eventbus_run_and_stop():
 # EnergyPolicy
 # ============================================================
 
+
 def test_energy_levels():
     """Уровни энергии определяются правильно."""
     energy = [50.0]  # обёртка в списке для имитации изменений
@@ -281,8 +283,10 @@ def test_energy_no_setter_safe():
 # Helpers
 # ============================================================
 
+
 def pytest_approx(value):
     """Минимальная замена pytest.approx — без импорта pytest."""
+
     class Approx:
         def __init__(self, v):
             self.v = v
@@ -293,12 +297,14 @@ def pytest_approx(value):
 
         def __repr__(self):
             return f"~{self.v}"
+
     return Approx(value)
 
 
 # ============================================================
 # Запуск
 # ============================================================
+
 
 async def run_async_tests():
     print("\n🧪 EventBus:")

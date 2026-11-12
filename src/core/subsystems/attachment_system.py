@@ -29,8 +29,12 @@ class Attachment:
         self.last_interaction = None
         self.history: List[Dict] = []
 
-    def update(self, valence_delta: float = 0.0, intimacy_delta: float = 0.0,
-               trust_delta: float = 0.0) -> None:
+    def update(
+        self,
+        valence_delta: float = 0.0,
+        intimacy_delta: float = 0.0,
+        trust_delta: float = 0.0,
+    ) -> None:
         """Обновляет метрики привязанности на основе взаимодействия."""
         self.interactions += 1
         self.last_interaction = datetime.now().isoformat()
@@ -52,13 +56,15 @@ class Attachment:
         # Intimacy требует взаимности — растёт медленно
         self.intimacy = min(1.0, self.intimacy + intimacy_delta * self.familiarity)
 
-        self.history.append({
-            "time": self.last_interaction,
-            "valence": round(self.valence, 3),
-            "trust": round(self.trust, 3),
-            "familiarity": round(self.familiarity, 3),
-            "intimacy": round(self.intimacy, 3),
-        })
+        self.history.append(
+            {
+                "time": self.last_interaction,
+                "valence": round(self.valence, 3),
+                "trust": round(self.trust, 3),
+                "familiarity": round(self.familiarity, 3),
+                "intimacy": round(self.intimacy, 3),
+            }
+        )
 
     def to_dict(self) -> Dict:
         return {
@@ -86,9 +92,13 @@ class AttachmentSystem:
             self._attachments[name] = Attachment(name, kind)
         return self._attachments[name]
 
-    def record_interaction(self, name: str, was_helpful: bool,
-                            was_substantial: bool = True,
-                            kind: str = "user") -> Dict:
+    def record_interaction(
+        self,
+        name: str,
+        was_helpful: bool,
+        was_substantial: bool = True,
+        kind: str = "user",
+    ) -> Dict:
         """Регистрирует взаимодействие и обновляет метрики привязанности.
 
         was_helpful: True если взаимодействие было полезным.

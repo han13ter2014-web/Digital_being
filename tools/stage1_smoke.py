@@ -28,8 +28,12 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cycles", type=int, default=200)
-    parser.add_argument("--tick-seconds", type=float, default=5.0,
-                        help="Сколько «реального времени» проходит между тиками")
+    parser.add_argument(
+        "--tick-seconds",
+        type=float,
+        default=5.0,
+        help="Сколько «реального времени» проходит между тиками",
+    )
     parser.add_argument("--json", default=None, help="Куда сохранить результат")
     parser.add_argument("--keep", action="store_true", help="Не удалять temp-папку")
     args = parser.parse_args()
@@ -48,6 +52,7 @@ def main() -> int:
 
     try:
         from src.core.stimulus_selector import select_novel_stimulus
+
         has_dedup = True
     except ImportError:
         select_novel_stimulus = None
@@ -132,7 +137,7 @@ def main() -> int:
                     else:
                         action_type, action = "unknown", payload
                     if action.startswith("Ответ: "):
-                        action = action[len("Ответ: "):]
+                        action = action[len("Ответ: ") :]
                     action = action[:80]
                     action_types[action_type] = action_types.get(action_type, 0) + 1
                     unique_actions.add(action)
@@ -156,9 +161,7 @@ def main() -> int:
         "actions": actions,
         "unique_actions": len(unique_actions),
         "max_same_action": max(action_counts.values()) if action_counts else 0,
-        "action_types": dict(
-            sorted(action_types.items(), key=lambda item: -item[1])
-        ),
+        "action_types": dict(sorted(action_types.items(), key=lambda item: -item[1])),
         "completed_goals": int(getattr(agent, "completed_goals", 0)),
         "active_goal": (
             agent.active_goal["title"] if getattr(agent, "active_goal", None) else None
@@ -187,6 +190,7 @@ def main() -> int:
 
     if not args.keep:
         import shutil
+
         shutil.rmtree(workdir, ignore_errors=True)
     return 0
 

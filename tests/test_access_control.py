@@ -150,5 +150,7 @@ def test_effector_requires_planning_layer(tmp_path):
 def test_saved_file_is_plain_json(tmp_path):
     agent = FakeAgent(delamain=FakeDelamain(True))
     set_access(agent, "effector", True, root=tmp_path)
-    payload = json.loads((tmp_path / "access_settings.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (tmp_path / "access_settings.json").read_text(encoding="utf-8")
+    )
     assert payload == {"effector": True}

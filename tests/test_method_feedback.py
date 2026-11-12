@@ -16,8 +16,10 @@ def stuck_agent():
 
 def test_failed_method_is_deferred_without_changing_desire_or_input():
     agent = stuck_agent()
-    candidates = [{"action": "exploration", "source": "motivation", "strength": 1.0},
-                  {"action": "communicate", "source": "social", "strength": 0.3}]
+    candidates = [
+        {"action": "exploration", "source": "motivation", "strength": 1.0},
+        {"action": "communicate", "source": "social", "strength": 0.3},
+    ]
     allowed, feedback = prepare_candidates(agent, candidates)
     assert allowed == [candidates[1]]
     assert len(candidates) == 2
@@ -45,13 +47,18 @@ def test_new_information_allows_retry_but_not_denied_action():
     allowed, feedback = prepare_candidates(agent, candidates)
     assert allowed == candidates
     assert feedback["released"] == ["explore"]
-    agent.loop_closer.observe("explore", WorldSignature(), WorldSignature(), reason="denied:budget")
+    agent.loop_closer.observe(
+        "explore", WorldSignature(), WorldSignature(), reason="denied:budget"
+    )
     agent.knowledge_base["ещё ответ"] = "Другой ответ"
     assert not prepare_candidates(agent, candidates)[0]
 
 
 def test_retry_context_survives_checkpoint():
-    from src.core.checkpoint_serializer import build_state_from_agent, apply_state_to_agent
+    from src.core.checkpoint_serializer import (
+        build_state_from_agent,
+        apply_state_to_agent,
+    )
 
     first = stuck_agent()
     prepare_candidates(first, [{"action": "explore"}])
@@ -70,10 +77,14 @@ def test_arbiter_receives_alternatives_not_stuck_winner():
         captured.extend(candidates)
         return {**candidates[0], "verdict": "proceed", "reasoning": "test"}
 
-    with patch.object(agent.motivation_system, "get_action_candidates", return_value=[
+    with patch.object(
+        agent.motivation_system,
+        "get_action_candidates",
+        return_value=[
             {"action": "explore", "source": "motivation", "strength": 0.8},
-            {"action": "rest", "source": "body", "strength": 0.4}]), \
-         patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose):
+            {"action": "rest", "source": "body", "strength": 0.4},
+        ],
+    ), patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose):
         result = agent.autonomous_tick()
     assert captured
     assert all(agent._normalize_action(c["action"]) != "explore" for c in captured)

@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Базовый класс VoiceEngine
 # ============================================================
 
+
 class VoiceEngine(ABC):
     """Базовый класс для голосовых движков."""
 
@@ -48,23 +49,32 @@ class VoiceEngine(ABC):
 
     def __init__(self, *, enabled: bool = True) -> None:
         self.enabled = enabled
+        self.capabilities = dict(type(self).capabilities)
         self._spoken_count = 0
         self._heard_count = 0
         self._error_count = 0
-        self._lock = threading.Lock()
+        # ConsoleVoiceEngine повторно входит в lock из _synthesize().
+        self._lock = threading.RLock()
 
     # ----------------------------------------------------------------
     # TTS — text-to-speech
     # ----------------------------------------------------------------
 
     @abstractmethod
-    def _synthesize(self, text: str, *, voice: Optional[str] = None,
-                    rate: Optional[float] = None) -> bool:
+    def _synthesize(
+        self, text: str, *, voice: Optional[str] = None, rate: Optional[float] = None
+    ) -> bool:
         """Реализация синтеза речи. Возвращает True при успехе."""
         ...
 
-    def speak(self, text: str, *, voice: Optional[str] = None,
-              rate: Optional[float] = None, blocking: bool = False) -> bool:
+    def speak(
+        self,
+        text: str,
+        *,
+        voice: Optional[str] = None,
+        rate: Optional[float] = None,
+        blocking: bool = False,
+    ) -> bool:
         """Озвучить текст. Не блокирует по умолчанию."""
         if not self.enabled or not self.capabilities.get("tts", False):
             return False
@@ -85,7 +95,9 @@ class VoiceEngine(ABC):
                 logger.warning(f"[voice:{self.name}] speak error: {e}")
                 return False
 
-    def _synthesize_safe(self, text: str, voice: Optional[str], rate: Optional[float]) -> None:
+    def _synthesize_safe(
+        self, text: str, voice: Optional[str], rate: Optional[float]
+    ) -> None:
         try:
             if self._synthesize(text, voice=voice, rate=rate):
                 self._spoken_count += 1
@@ -135,6 +147,7 @@ class VoiceEngine(ABC):
 # ConsoleVoiceEngine — fallback (только логирует)
 # ============================================================
 
+
 class ConsoleVoiceEngine(VoiceEngine):
     """Движок, который печатает текст в консоль.
 
@@ -149,8 +162,9 @@ class ConsoleVoiceEngine(VoiceEngine):
         self.prefix = prefix
         self._spoken_log: List[str] = []
 
-    def _synthesize(self, text: str, *, voice: Optional[str] = None,
-                    rate: Optional[float] = None) -> bool:
+    def _synthesize(
+        self, text: str, *, voice: Optional[str] = None, rate: Optional[float] = None
+    ) -> bool:
         with self._lock:
             self._spoken_log.append(text)
         # Печатаем если явно не под pytest (через env).
@@ -175,6 +189,7 @@ class ConsoleVoiceEngine(VoiceEngine):
 # Заглушки для будущих движков
 # ============================================================
 
+
 class PyttsxVoiceEngine(VoiceEngine):
     """Движок на базе pyttsx3 (офлайн TTS).
 
@@ -185,14 +200,16 @@ class PyttsxVoiceEngine(VoiceEngine):
     name = "pyttsx3"
     capabilities = {"tts": True, "stt": False}
 
-    def __init__(self, *, enabled: bool = True, rate: int = 175,
-                 voice_id: Optional[str] = None) -> None:
+    def __init__(
+        self, *, enabled: bool = True, rate: int = 175, voice_id: Optional[str] = None
+    ) -> None:
         super().__init__(enabled=enabled)
         self._engine = None
         self._rate = rate
         self._voice_id = voice_id
         try:
             import pyttsx3  # type: ignore
+
             self._engine = pyttsx3.init()
             self._engine.setProperty("rate", rate)
             if voice_id:
@@ -204,8 +221,9 @@ class PyttsxVoiceEngine(VoiceEngine):
             self.capabilities["tts"] = False
             logger.debug(f"[voice:pyttsx3] init failed: {e}")
 
-    def _synthesize(self, text: str, *, voice: Optional[str] = None,
-                    rate: Optional[float] = None) -> bool:
+    def _synthesize(
+        self, text: str, *, voice: Optional[str] = None, rate: Optional[float] = None
+    ) -> bool:
         if not self._engine:
             return False
         try:
@@ -229,8 +247,16 @@ class PyttsxVoiceEngine(VoiceEngine):
             return []
         try:
             voices = self._engine.getProperty("voices") or []
-            return [{"id": v.id, "name": v.name, "lang": getattr(v, "languages", ["?"])[0]
-                     if hasattr(v, "languages") else "?"} for v in voices]
+            return [
+                {
+                    "id": v.id,
+                    "name": v.name,
+                    "lang": getattr(v, "languages", ["?"])[0]
+                    if hasattr(v, "languages")
+                    else "?",
+                }
+                for v in voices
+            ]
         except Exception:
             return []
 
@@ -245,13 +271,13 @@ class WhisperSTTEngine(VoiceEngine):
     name = "whisper"
     capabilities = {"tts": False, "stt": True}
 
-    def __init__(self, *, enabled: bool = True,
-                 model_size: str = "base") -> None:
+    def __init__(self, *, enabled: bool = True, model_size: str = "base") -> None:
         super().__init__(enabled=enabled)
         self._model = None
         self._model_size = model_size
         try:
             from faster_whisper import WhisperModel  # type: ignore
+
             self._model = WhisperModel(model_size, device="cpu", compute_type="int8")
             logger.info(f"[voice:whisper] модель {model_size} загружена")
         except ImportError:
@@ -261,8 +287,9 @@ class WhisperSTTEngine(VoiceEngine):
             self.capabilities["stt"] = False
             logger.warning(f"[voice:whisper] init failed: {e}")
 
-    def _synthesize(self, text: str, *, voice: Optional[str] = None,
-                    rate: Optional[float] = None) -> bool:
+    def _synthesize(
+        self, text: str, *, voice: Optional[str] = None, rate: Optional[float] = None
+    ) -> bool:
         return False  # Whisper — только STT
 
     def _listen(self, timeout: float = 5.0) -> Optional[str]:
@@ -272,6 +299,7 @@ class WhisperSTTEngine(VoiceEngine):
             # Захватываем аудио с микрофона
             import sounddevice as sd  # type: ignore
             import numpy as np  # noqa: F401 — проверка наличия numpy для распознавания
+
             duration = min(timeout, 10.0)
             sample_rate = 16000
             audio = sd.rec(
@@ -310,20 +338,24 @@ class WhisperSTTEngine(VoiceEngine):
 # VoiceRouter — единая точка входа
 # ============================================================
 
+
 class VoiceRouter:
-    """Маршрутизатор голосовых движков.
+    """Маршрутизатор, выключенный до явного разрешения владельца."""
 
-    - speak(text) → использует первый TTS-движок.
-    - hear() → использует первый STT-движок.
-    - status() → сводка по всем движкам.
-    """
-
-    def __init__(self) -> None:
+    def __init__(self, *, enabled: bool = False) -> None:
         self._engines: List[VoiceEngine] = []
         self._lock = threading.RLock()
+        self.enabled = bool(enabled)
+
+    def set_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self.enabled = bool(enabled)
+            for engine in self._engines:
+                engine.enabled = self.enabled
 
     def add(self, engine: VoiceEngine) -> None:
         with self._lock:
+            engine.enabled = self.enabled
             self._engines.append(engine)
 
     def list_engines(self) -> List[str]:
@@ -331,30 +363,38 @@ class VoiceRouter:
             return [e.name for e in self._engines]
 
     def speak(self, text: str, **kwargs: Any) -> bool:
-        """Озвучить текст — первый доступный TTS-движок."""
+        if not self.enabled:
+            return False
         with self._lock:
             engines = list(self._engines)
-        for e in engines:
-            if e.capabilities.get("tts"):
-                return e.speak(text, **kwargs)
+        for engine in engines:
+            if engine.enabled and engine.capabilities.get("tts"):
+                return engine.speak(text, **kwargs)
         return False
 
     def hear(self, timeout: float = 5.0, **kwargs: Any) -> Optional[str]:
-        """Распознать речь — первый доступный STT-движок."""
+        if not self.enabled:
+            return None
         with self._lock:
             engines = list(self._engines)
-        for e in engines:
-            if e.capabilities.get("stt"):
-                return e.hear(timeout=timeout, **kwargs)
+        for engine in engines:
+            if engine.enabled and engine.capabilities.get("stt"):
+                return engine.hear(timeout=timeout, **kwargs)
         return None
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
             engines = list(self._engines)
+            enabled = self.enabled
         return {
+            "enabled": enabled,
             "engines": [e.status() for e in engines],
-            "available_tts": [e.name for e in engines if e.capabilities.get("tts")],
-            "available_stt": [e.name for e in engines if e.capabilities.get("stt")],
+            "available_tts": [
+                e.name for e in engines if enabled and e.capabilities.get("tts")
+            ],
+            "available_stt": [
+                e.name for e in engines if enabled and e.capabilities.get("stt")
+            ],
         }
 
 
@@ -362,26 +402,20 @@ class VoiceRouter:
 # Удобная фабрика
 # ============================================================
 
-def create_default_router(*, allow_pyttsx3: bool = False,
-                          allow_whisper: bool = False) -> VoiceRouter:
-    """Создаёт VoiceRouter с доступными движками.
 
-    По умолчанию — только ConsoleVoiceEngine (всегда работает).
-    pyttsx3 по умолчанию ОТКЛЮЧЁН — его init() может зависнуть на Windows
-    (SAPI5 инициализация через win32com). Включайте явно через:
-        create_default_router(allow_pyttsx3=True)
-
-    Опционально — whisper (если установлен и вы хотите STT).
-    """
-    router = VoiceRouter()
-    router.add(ConsoleVoiceEngine())
-    if allow_pyttsx3:
+def create_default_router(
+    *, allow_pyttsx3: bool = False, allow_whisper: bool = False, enabled: bool = False
+) -> VoiceRouter:
+    """Создать роутер с реальными движками в приоритете и console-fallback."""
+    router = VoiceRouter(enabled=enabled)
+    if enabled and allow_pyttsx3:
         try:
-            router.add(PyttsxVoiceEngine())
+            router.add(PyttsxVoiceEngine(enabled=True))
         except Exception:
             pass
-    if allow_whisper:
-        router.add(WhisperSTTEngine())
+    if enabled and allow_whisper:
+        router.add(WhisperSTTEngine(enabled=True))
+    router.add(ConsoleVoiceEngine(enabled=enabled))
     return router
 
 

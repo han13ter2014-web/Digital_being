@@ -326,7 +326,7 @@ def test_heuristic_does_not_guess_a_plan_for_natural_language_title(
         sub.teardown()
 
 
-def test_llm_like_plan_stays_a_proposal_until_accept(tmp_path: Path) -> None:
+def test_custom_plan_stays_a_proposal_until_accept(tmp_path: Path) -> None:
     sub, goals, agent, goal_id = make_authoring(
         tmp_path,
         title="напиши отчёт",
@@ -442,20 +442,13 @@ def test_runner_goals_propose_accept_reject(tmp_path: Path) -> None:
             assert "Proposal: pending" in shown
             assert "Опасные действия: write_file" in shown
 
-            rejected = await runner.handle_command(
-                f"/goals reject {goal_id} not now"
-            )
+            rejected = await runner.handle_command(f"/goals reject {goal_id} not now")
             assert "отклонён" in rejected
             assert "payload" not in rejected.lower()
             assert "будет исполнен" not in rejected
-            assert (
-                goals.get_goal(goal_id)["execution_proposal"]["reason"]
-                == "not now"
-            )
+            assert goals.get_goal(goal_id)["execution_proposal"]["reason"] == "not now"
 
-            proposed_again = await runner.handle_command(
-                f"/goals propose {goal_id}"
-            )
+            proposed_again = await runner.handle_command(f"/goals propose {goal_id}")
             assert "Proposal" in proposed_again
 
             accepted = await runner.handle_command(f"/goals accept {goal_id}")

@@ -17,12 +17,14 @@ from typing import Dict, List
 class SleepCycle:
     """Цикл сна — консолидация и очистка."""
 
-    def __init__(self,
-                 agent_name: str = "agent",
-                 long_term_memory=None,
-                 mental_models=None,
-                 knowledge_subsystem=None,
-                 cycle_interval: int = 100):
+    def __init__(
+        self,
+        agent_name: str = "agent",
+        long_term_memory=None,
+        mental_models=None,
+        knowledge_subsystem=None,
+        cycle_interval: int = 100,
+    ):
         self.agent_name = agent_name
         self.long_term_memory = long_term_memory
         self.mental_models = mental_models
@@ -108,6 +110,7 @@ class SleepCycle:
 
         # Группируем концепции по контекстам
         from collections import defaultdict
+
         context_groups: Dict[str, list] = defaultdict(list)
 
         for name, node in self.mental_models.concepts.items():
@@ -119,11 +122,13 @@ class SleepCycle:
         # Контексты с 3+ концепциями = сильный паттерн
         for ctx, concepts in context_groups.items():
             if len(concepts) >= 3:
-                patterns.append({
-                    "context": ctx[:50],
-                    "concepts": concepts[:5],
-                    "strength": min(1.0, len(concepts) / 5),
-                })
+                patterns.append(
+                    {
+                        "context": ctx[:50],
+                        "concepts": concepts[:5],
+                        "strength": min(1.0, len(concepts) / 5),
+                    }
+                )
 
         return patterns[:5]
 

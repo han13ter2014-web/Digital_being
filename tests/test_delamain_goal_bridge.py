@@ -343,10 +343,13 @@ def test_evaluate_success_predicate_is_explicit_and_fail_closed(tmp_path: Path) 
     sandbox.write_text("report.txt", "ready")
 
     assert evaluate_success_predicate("", sandbox=sandbox)[0] is True
-    assert evaluate_success_predicate("file_exists:report.txt", sandbox=sandbox)[0] is True
-    assert evaluate_success_predicate(
-        "file_contains:report.txt:ready", sandbox=sandbox
-    )[0] is True
+    assert (
+        evaluate_success_predicate("file_exists:report.txt", sandbox=sandbox)[0] is True
+    )
+    assert (
+        evaluate_success_predicate("file_contains:report.txt:ready", sandbox=sandbox)[0]
+        is True
+    )
     ok, reason = evaluate_success_predicate(
         "file_contains:report.txt:missing", sandbox=sandbox
     )

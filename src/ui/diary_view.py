@@ -54,8 +54,12 @@ def episode_title(episode: Dict[str, Any]) -> str:
     """Короткий заголовок события только из записанных полей эпизода."""
     metadata = episode.get("metadata") or {}
     output = episode.get("output") or {}
-    if (isinstance(metadata, dict) and metadata.get("kind") == "biography_seam"
-            and isinstance(output, dict) and output.get("text")):
+    if (
+        isinstance(metadata, dict)
+        and metadata.get("kind") == "biography_seam"
+        and isinstance(output, dict)
+        and output.get("text")
+    ):
         return str(output["text"])
     action = action_label(episode.get("action"))
     args = episode.get("args") or {}

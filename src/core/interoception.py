@@ -97,9 +97,14 @@ class InteroceptiveModel:
         self.predicted_fatigue_trajectory: List[float] = []
         logger.log("[INTEROCEPTION] Hierarchical model initialized")
 
-    def step(self, dt: float = 1.0, cognitive_load: float = 0.0,
-             stress: float = 0.0, food_intake: float = 0.0,
-             rest_depth: float = 0.0) -> Dict:
+    def step(
+        self,
+        dt: float = 1.0,
+        cognitive_load: float = 0.0,
+        stress: float = 0.0,
+        food_intake: float = 0.0,
+        rest_depth: float = 0.0,
+    ) -> Dict:
         """Один такт жизни тела.
 
         Args:
@@ -116,32 +121,46 @@ class InteroceptiveModel:
         load = float(np.clip(cognitive_load, 0.0, 1.0))
         rest = float(np.clip(rest_depth, 0.0, 1.0))
 
-        glucose_consumption = (s.atp_basal_consumption + load * s.glucose_work_cost) * dt
+        glucose_consumption = (
+            s.atp_basal_consumption + load * s.glucose_work_cost
+        ) * dt
         glucose_inflow = (
             s.glucose_basal_inflow
             + rest * s.glucose_rest_recovery
             + food_intake * s.glucose_absorption_rate
         ) * dt
-        s.glucose = np.clip(s.glucose - glucose_consumption + glucose_inflow, 0.0, s.glucose_max)
+        s.glucose = np.clip(
+            s.glucose - glucose_consumption + glucose_inflow, 0.0, s.glucose_max
+        )
 
-        atp_production = (s.glucose / s.glucose_max) * s.mitochondrial_health * \
-                         s.atp_production_rate * self.glucose_to_atp_efficiency * \
-                         (1.0 + rest * s.atp_rest_bonus) * dt
-        atp_consumption = (s.atp_basal_consumption + load * s.atp_work_cost + stress * 0.5) * dt
+        atp_production = (
+            (s.glucose / s.glucose_max)
+            * s.mitochondrial_health
+            * s.atp_production_rate
+            * self.glucose_to_atp_efficiency
+            * (1.0 + rest * s.atp_rest_bonus)
+            * dt
+        )
+        atp_consumption = (
+            s.atp_basal_consumption + load * s.atp_work_cost + stress * 0.5
+        ) * dt
         s.atp = np.clip(s.atp + atp_production - atp_consumption, 0.0, s.atp_max)
 
         mito_damage = atp_production * s.mitochondrial_damage_rate * dt
-        mito_growth = cognitive_load * s.mitochondrial_biogenesis * self.mito_stress_response * dt
+        mito_growth = (
+            cognitive_load * s.mitochondrial_biogenesis * self.mito_stress_response * dt
+        )
         if s.mitochondrial_health < s.mitophagy_threshold:
             mito_growth += 0.002 * dt
         if rest > 0 and s.mitochondrial_health < 1.0:
             # Репарация в покое: асимптотически к полному здоровью,
             # быстрее при глубоком отдыхе.
             mito_growth += (
-                rest * s.mitochondrial_rest_repair
-                * (1.0 - s.mitochondrial_health) * dt
+                rest * s.mitochondrial_rest_repair * (1.0 - s.mitochondrial_health) * dt
             )
-        s.mitochondrial_health = np.clip(s.mitochondrial_health - mito_damage + mito_growth, 0.05, 1.5)
+        s.mitochondrial_health = np.clip(
+            s.mitochondrial_health - mito_damage + mito_growth, 0.05, 1.5
+        )
 
         # Усталость — от нехватки АТФ ниже комфортного уровня, а не от
         # времени. Сытое тело в покое не устаёт, работающее — устаёт.
@@ -152,17 +171,22 @@ class InteroceptiveModel:
         tau = max(1e-6, s.fatigue_integration_tau)
         s.fatigue += (fatigue_drive - s.fatigue) * (dt / tau)
         if rest > 0:
-            s.fatigue *= (1.0 - rest * 0.05 * dt)
+            s.fatigue *= 1.0 - rest * 0.05 * dt
         s.fatigue = float(np.clip(s.fatigue, 0.0, 1.0))
 
         self._refresh_derived()
 
         self._predict_trajectory(cognitive_load, stress, food_intake, rest_depth)
 
-        s.history.append({
-            'glucose': s.glucose, 'atp': s.atp, 'mito': s.mitochondrial_health,
-            'fatigue': s.fatigue, 'cognitive_load': cognitive_load
-        })
+        s.history.append(
+            {
+                "glucose": s.glucose,
+                "atp": s.atp,
+                "mito": s.mitochondrial_health,
+                "fatigue": s.fatigue,
+                "cognitive_load": cognitive_load,
+            }
+        )
 
         return self.get_status()
 
@@ -177,8 +201,13 @@ class InteroceptiveModel:
         s.cognitive_throughput = 1.0 - s.fatigue * 0.7
         s.exploration_drive = (1.0 - s.fatigue) * (s.atp / max(1e-6, s.atp_max))
 
-    def _predict_trajectory(self, cognitive_load: float, stress: float,
-                           food_intake: float, rest_depth: float):
+    def _predict_trajectory(
+        self,
+        cognitive_load: float,
+        stress: float,
+        food_intake: float,
+        rest_depth: float,
+    ):
         """Прогноз на несколько тактов вперёд теми же уравнениями, что и step.
 
         Раньше прогноз считался по другим формулам (без прихода глюкозы,
@@ -200,22 +229,34 @@ class InteroceptiveModel:
         sim_glucose = s.glucose
 
         for _ in range(h):
-            glucose_in = s.glucose_basal_inflow + rest * s.glucose_rest_recovery + \
-                         food_intake * s.glucose_absorption_rate
+            glucose_in = (
+                s.glucose_basal_inflow
+                + rest * s.glucose_rest_recovery
+                + food_intake * s.glucose_absorption_rate
+            )
             glucose_out = s.atp_basal_consumption + load * s.glucose_work_cost
-            sim_glucose = float(np.clip(sim_glucose + glucose_in - glucose_out, 0.0, s.glucose_max))
+            sim_glucose = float(
+                np.clip(sim_glucose + glucose_in - glucose_out, 0.0, s.glucose_max)
+            )
 
-            prod = (sim_glucose / s.glucose_max) * sim_mito * s.atp_production_rate * \
-                   self.glucose_to_atp_efficiency * (1.0 + rest * s.atp_rest_bonus)
+            prod = (
+                (sim_glucose / s.glucose_max)
+                * sim_mito
+                * s.atp_production_rate
+                * self.glucose_to_atp_efficiency
+                * (1.0 + rest * s.atp_rest_bonus)
+            )
             cons = s.atp_basal_consumption + load * s.atp_work_cost + stress * 0.5
             sim_atp = float(np.clip(sim_atp + prod - cons, 0.0, s.atp_max))
 
             atp_ratio = sim_atp / max(1e-6, s.atp_max)
             deficit = max(0.0, comfort - atp_ratio) / comfort
             drive = min(1.0, deficit * self.atp_to_fatigue_sensitivity)
-            sim_fatigue += (drive - sim_fatigue) * (1.0 / max(1e-6, s.fatigue_integration_tau))
+            sim_fatigue += (drive - sim_fatigue) * (
+                1.0 / max(1e-6, s.fatigue_integration_tau)
+            )
             if rest > 0:
-                sim_fatigue *= (1.0 - rest * 0.05)
+                sim_fatigue *= 1.0 - rest * 0.05
             sim_fatigue = float(np.clip(sim_fatigue, 0.0, 1.0))
 
             atp_traj.append(sim_atp)
@@ -227,28 +268,33 @@ class InteroceptiveModel:
     def get_status(self) -> Dict:
         s = self.state
         return {
-            'glucose': s.glucose,
-            'glucose_ratio': s.glucose / s.glucose_max,
-            'atp': s.atp,
-            'atp_ratio': s.atp / s.atp_max,
-            'mitochondrial_health': s.mitochondrial_health,
-            'fatigue': s.fatigue,
-            'fatigue_level': self._fatigue_level(s.fatigue),
-            'action_cost_multiplier': s.action_cost_multiplier,
-            'cognitive_throughput': s.cognitive_throughput,
-            'exploration_drive': s.exploration_drive,
-            'needs_rest': s.fatigue > s.fatigue_threshold_rest,
-            'critical_fatigue': s.fatigue > s.fatigue_threshold_critical,
-            'predicted_atp': self.predicted_atp_trajectory[:5],
-            'predicted_fatigue': self.predicted_fatigue_trajectory[:5],
+            "glucose": s.glucose,
+            "glucose_ratio": s.glucose / s.glucose_max,
+            "atp": s.atp,
+            "atp_ratio": s.atp / s.atp_max,
+            "mitochondrial_health": s.mitochondrial_health,
+            "fatigue": s.fatigue,
+            "fatigue_level": self._fatigue_level(s.fatigue),
+            "action_cost_multiplier": s.action_cost_multiplier,
+            "cognitive_throughput": s.cognitive_throughput,
+            "exploration_drive": s.exploration_drive,
+            "needs_rest": s.fatigue > s.fatigue_threshold_rest,
+            "critical_fatigue": s.fatigue > s.fatigue_threshold_critical,
+            "predicted_atp": self.predicted_atp_trajectory[:5],
+            "predicted_fatigue": self.predicted_fatigue_trajectory[:5],
         }
 
     def _fatigue_level(self, fatigue: float) -> str:
-        if fatigue < 0.2: return "fresh"
-        elif fatigue < 0.4: return "normal"
-        elif fatigue < 0.6: return "tired"
-        elif fatigue < 0.8: return "exhausted"
-        else: return "critical"
+        if fatigue < 0.2:
+            return "fresh"
+        elif fatigue < 0.4:
+            return "normal"
+        elif fatigue < 0.6:
+            return "tired"
+        elif fatigue < 0.8:
+            return "exhausted"
+        else:
+            return "critical"
 
     def get_action_cost(self, base_cost: float) -> float:
         return base_cost * self.state.action_cost_multiplier
@@ -264,7 +310,9 @@ class InteroceptiveModel:
         self.state.mitochondrial_health *= 0.995
 
     def deep_rest(self, duration: float = 1.0):
-        self.step(dt=duration, cognitive_load=0.0, stress=0.0, food_intake=0.1, rest_depth=1.0)
+        self.step(
+            dt=duration, cognitive_load=0.0, stress=0.0, food_intake=0.1, rest_depth=1.0
+        )
 
 
 def create_interoceptive_model(agent) -> InteroceptiveModel:

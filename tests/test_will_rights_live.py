@@ -49,11 +49,12 @@ def _refusal_count(agent):
 # RightToRefuse: «stop» арбитра — собственный отказ агента
 # ============================================================
 
+
 def test_stop_verdict_becomes_own_refusal():
     agent = DigitalBeing(name="WillRefuse")
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict()), \
-         patch.object(agent, "act") as act:
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_stop_verdict()
+    ), patch.object(agent, "act") as act:
         result = agent.autonomous_tick()
 
     act.assert_not_called()
@@ -68,10 +69,13 @@ def test_stop_verdict_becomes_own_refusal():
 
 def test_refusal_cap_limits_will_journal():
     agent = DigitalBeing(name="WillRefuseCap")
-    agent.right_to_refuse._recent_refusals = [0] * WILL_CONFIG.MAX_REFUSALS_PER_100_CYCLES
+    agent.right_to_refuse._recent_refusals = [
+        0
+    ] * WILL_CONFIG.MAX_REFUSALS_PER_100_CYCLES
 
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict()):
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_stop_verdict()
+    ):
         result = agent.autonomous_tick()
 
     assert result["action_refused"]["action"] == "explore"
@@ -84,13 +88,16 @@ def test_legacy_stop_is_not_a_will_act():
     """«Нет арбитра» — состояние системы, а не воля: журнал не растёт."""
     agent = DigitalBeing(name="WillLegacyStop")
     before = _refusal_count(agent)
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value={
-                          "action": None,
-                          "source": "legacy_active_inference",
-                          "verdict": "stop",
-                          "reasoning": "нет арбитра",
-                      }):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        return_value={
+            "action": None,
+            "source": "legacy_active_inference",
+            "verdict": "stop",
+            "reasoning": "нет арбитра",
+        },
+    ):
         result = agent.autonomous_tick()
 
     assert result["action_refused"]["action"] is None
@@ -102,13 +109,14 @@ def test_legacy_stop_is_not_a_will_act():
 # WillToRisk: значимая цель и запас энергии вопреки «stop»
 # ============================================================
 
+
 def test_risk_overrides_stop_for_significant_goal():
     agent = DigitalBeing(name="WillRisk")
     agent.energy = 150  # 75% от 200 — тело в запасе
     agent.active_goal = {"title": "важная цель", "priority": "high"}
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict()), \
-         patch.object(agent, "act") as act:
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_stop_verdict()
+    ), patch.object(agent, "act") as act:
         result = agent.autonomous_tick()
 
     assert result["will_risk_taken"]["action"] == "explore"
@@ -117,9 +125,11 @@ def test_risk_overrides_stop_for_significant_goal():
     act.assert_called_once()
 
     # Кулдаун: следующий «stop» в тот же период — уже отказ, не риск.
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict(action="rest")), \
-         patch.object(agent, "act") as act2:
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        return_value=_stop_verdict(action="rest"),
+    ), patch.object(agent, "act") as act2:
         second = agent.autonomous_tick()
 
     act2.assert_not_called()
@@ -133,9 +143,9 @@ def test_risk_not_taken_without_significant_goal():
     agent.energy = 150
     agent.active_goal = {"title": "обычная цель", "priority": "normal"}
 
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict()), \
-         patch.object(agent, "act") as act:
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_stop_verdict()
+    ), patch.object(agent, "act") as act:
         result = agent.autonomous_tick()
 
     assert "will_risk_taken" not in result
@@ -148,9 +158,9 @@ def test_risk_not_taken_when_body_is_drained():
     agent.energy = 20  # 10% < 30%
     agent.active_goal = {"title": "важная цель", "priority": "high"}
 
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_stop_verdict()), \
-         patch.object(agent, "act") as act:
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_stop_verdict()
+    ), patch.object(agent, "act") as act:
         result = agent.autonomous_tick()
 
     assert "will_risk_taken" not in result
@@ -169,6 +179,7 @@ def test_risk_cooldown_survives_registry_roundtrip():
 # ============================================================
 # RightToFail: ошибка частично прощается как урок
 # ============================================================
+
 
 def test_failure_returns_part_of_paid_cost():
     agent = DigitalBeing(name="WillFail")
@@ -204,9 +215,9 @@ def test_failed_action_absorbed_in_live_cycle():
         agent._last_action_cost = 10.0  # как настоящий act() после списания
         raise RuntimeError("бум")
 
-    with patch.object(agent.decision_arbitrator, "choose_action",
-                      return_value=_proceed_verdict()), \
-         patch.object(agent, "act", side_effect=failing_act):
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=_proceed_verdict()
+    ), patch.object(agent, "act", side_effect=failing_act):
         result = agent.autonomous_tick()
 
     assert result["autonomous_action"]["error"] == "бум"
@@ -217,6 +228,7 @@ def test_failed_action_absorbed_in_live_cycle():
 # ============================================================
 # ValueEvolution: заработанный опыт становится ценностью
 # ============================================================
+
 
 def _pref_entry(attempts, effects):
     return {
@@ -279,6 +291,7 @@ def test_value_evolution_needs_earned_strength():
 # ============================================================
 # ActionBudget.refund: возврат «урока» через ту же энергию
 # ============================================================
+
 
 def test_budget_refund_clamps_to_max():
     state = {"energy": 99.0}

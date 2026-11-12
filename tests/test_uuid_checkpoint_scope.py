@@ -22,12 +22,17 @@ def test_rename_keeps_checkpoint_namespace(tmp_path, monkeypatch, backend):
     first.name = "Омелла"
     first.cycle_count = 8
     assert runner.save_now()
-    assert set(p.name for p in (tmp_path / "checkpoints").iterdir()) == {identity}
-    restored, report = create_agent(env, "outdated display name", expected_life_id=identity)
+    storage_root = tmp_path / ("lives" if backend == "sqlite" else "checkpoints")
+    assert set(p.name for p in storage_root.iterdir()) == {identity}
+    restored, report = create_agent(
+        env, "outdated display name", expected_life_id=identity
+    )
     assert restored.life_id == identity
     assert restored.name == "Омелла"
     assert restored.cycle_count == 8
     assert report["source"] == "checkpoint"
+    # Restore не должен создавать пустую БД временного UUID до rebind.
+    assert {p.name for p in (tmp_path / "lives").iterdir()} == {identity}
 
 
 def test_two_lives_with_same_name_require_uuid(tmp_path, monkeypatch):

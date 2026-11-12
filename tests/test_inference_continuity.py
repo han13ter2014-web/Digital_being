@@ -38,7 +38,9 @@ def test_learned_transitions_survive_normal_startup(tmp_path, monkeypatch, backe
         assert restored.agent is second
         assert restored.planner.model is restored.model
         restored.learn_from_experience()
-        assert not np.array_equal(restored.model.actions[action].transitions[key], learned)
+        assert not np.array_equal(
+            restored.model.actions[action].transitions[key], learned
+        )
     finally:
         PluginRegistry.reset_global()
 

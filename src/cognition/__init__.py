@@ -1,9 +1,9 @@
-"""Инициализация пакета cognition."""
+"""Когнитивные модули основного контура Digital Being.
 
-from src.cognition.adaptive_costs import DynamicCostReducer, EnergyState, LearningState
+Общие наблюдатели опыта экспортируются здесь; конкретные органы памяти,
+выбора и мышления по-прежнему импортируются из своих модулей напрямую.
+"""
 
-__all__ = [
-    'DynamicCostReducer',
-    'EnergyState',
-    'LearningState',
-]
+from src.cognition.integrated_experience import IntegratedExperience
+
+__all__ = ["IntegratedExperience"]

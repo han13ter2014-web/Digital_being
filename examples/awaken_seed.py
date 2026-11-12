@@ -73,6 +73,7 @@ def awaken_seed(seed_name: str, new_name: str = None):
 
     # Импортируем агента (ленивый импорт — обход проблем с __init__.py)
     import importlib.util
+
     agent_path = os.path.join(project_root, "src", "core", "agent.py")
     spec = importlib.util.spec_from_file_location("agent_module", agent_path)
     agent_module = importlib.util.module_from_spec(spec)
@@ -95,13 +96,13 @@ def awaken_seed(seed_name: str, new_name: str = None):
                 mm_data = json.load(f)
             # Восстанавливаем концепции
             from src.cognition.mental_models import ConceptNode
+
             for cname, cdata in mm_data.get("concepts", {}).items():
                 node = ConceptNode(cname)
                 node.definition_hypothesis = cdata.get("definition_hypothesis", "")
                 node.confidence = cdata.get("confidence", 0.1)
                 node.connections = {
-                    k: float(v)
-                    for k, v in cdata.get("connections", {}).items()
+                    k: float(v) for k, v in cdata.get("connections", {}).items()
                 }
                 node.contexts_encountered = set(cdata.get("contexts", []))
                 baby.mental_models.concepts[cname] = node
@@ -124,12 +125,8 @@ def awaken_seed(seed_name: str, new_name: str = None):
             if identity and hasattr(baby, "soul") and baby.soul.is_available("self"):
                 try:
                     core = baby.soul.get("self")
-                    core.core_identity = identity.get(
-                        "statement", core.core_identity
-                    )
-                    core.identity_stability_score = identity.get(
-                        "stability", 0.7
-                    )
+                    core.core_identity = identity.get("statement", core.core_identity)
+                    core.identity_stability_score = identity.get("stability", 0.7)
                 except Exception:
                     pass
         except Exception as e:
@@ -181,12 +178,10 @@ def main():
         description="Пробуждение нового агента из семени в Яслях"
     )
     parser.add_argument(
-        "--seed", required=True,
-        help="Имя папки семени в data/nursery/"
+        "--seed", required=True, help="Имя папки семени в data/nursery/"
     )
     parser.add_argument(
-        "--name", default=None,
-        help="Имя нового агента (по умолчанию Baby_<parent>)"
+        "--name", default=None, help="Имя нового агента (по умолчанию Baby_<parent>)"
     )
     args = parser.parse_args()
 

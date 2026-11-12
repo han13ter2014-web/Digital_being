@@ -35,6 +35,7 @@ long_run = pytest.mark.long_run
 # 1. Долгая жизнь агента без утечек
 # ============================================================
 
+
 @long_run
 def test_1000_cycles_no_significant_rss_growth():
     """1000 циклов не должны приводить к неконтролируемому росту RSS."""
@@ -50,6 +51,7 @@ def test_1000_cycles_no_significant_rss_growth():
 
     # Используем INFINITE_ENERGY, чтобы не умереть от энергии.
     from config.simulation_config import LR_CONFIG
+
     LR_CONFIG.INFINITE_ENERGY = True
 
     for cycle in range(1, 1001):
@@ -69,15 +71,17 @@ def test_1000_cycles_no_significant_rss_growth():
     rss_growth_mb = final_rss - initial_rss
     obj_growth = final_objects - initial_objects
 
-    print(f"\n  📊 1000 циклов: RSS {initial_rss:.1f}→{final_rss:.1f} МБ "
-          f"(+{rss_growth_mb:.1f}), объекты {initial_objects}→{final_objects} "
-          f"(+{obj_growth})")
+    print(
+        f"\n  📊 1000 циклов: RSS {initial_rss:.1f}→{final_rss:.1f} МБ "
+        f"(+{rss_growth_mb:.1f}), объекты {initial_objects}→{final_objects} "
+        f"(+{obj_growth})"
+    )
 
     # Допуск: рост не должен превышать 50 МБ (типичная утечка сразу видна).
     if initial_rss > 0:
-        assert rss_growth_mb < 50.0, (
-            f"Утечка памяти: RSS вырос на {rss_growth_mb:.1f} МБ за 1000 циклов"
-        )
+        assert (
+            rss_growth_mb < 50.0
+        ), f"Утечка памяти: RSS вырос на {rss_growth_mb:.1f} МБ за 1000 циклов"
 
 
 @long_run
@@ -110,8 +114,10 @@ def test_subsystem_tick_count_grows_monotonically():
 
     agent = DigitalBeing("TickCountTest")
     reg = agent.plugin_registry
-    initial = {n: (sub._tick_count if hasattr(sub, "_tick_count") else 0)
-               for n, sub in reg._items.items()}
+    initial = {
+        n: (sub._tick_count if hasattr(sub, "_tick_count") else 0)
+        for n, sub in reg._items.items()
+    }
 
     for i in range(100):
         agent.tick_subsystems(cycle=i)
@@ -121,14 +127,15 @@ def test_subsystem_tick_count_grows_monotonically():
             new_count = sub._tick_count
             old_count = initial[name]
             # Может быть меньше если подсистема disabled.
-            assert new_count >= old_count, (
-                f"{name}: _tick_count не растёт ({old_count} -> {new_count})"
-            )
+            assert (
+                new_count >= old_count
+            ), f"{name}: _tick_count не растёт ({old_count} -> {new_count})"
 
 
 # ============================================================
 # 2. SSE-лента не растёт бесконечно
 # ============================================================
+
 
 @long_run
 def test_shared_state_thoughts_capped_at_maxlen():
@@ -148,6 +155,7 @@ def test_shared_state_thoughts_capped_at_maxlen():
 # ============================================================
 # 3. Concurrency — потокобезопасность SharedState
 # ============================================================
+
 
 @long_run
 def test_shared_state_concurrent_push_no_corruption():
@@ -177,8 +185,10 @@ def test_shared_state_concurrent_push_no_corruption():
     # должны бы влезть.
     total = NUM_THREADS * PER_THREAD
     assert len(items) == min(total, 10000)
-    print(f"\n  🧵 {NUM_THREADS}×{PER_THREAD} push_thought за {elapsed:.3f}с, "
-          f"в ленте {len(items)} мыслей")
+    print(
+        f"\n  🧵 {NUM_THREADS}×{PER_THREAD} push_thought за {elapsed:.3f}с, "
+        f"в ленте {len(items)} мыслей"
+    )
 
 
 @long_run
@@ -192,8 +202,10 @@ def test_plugin_registry_concurrent_register():
 
     def worker(i):
         try:
+
             class S(Subsystem):
                 name = f"concurrent_{i}"
+
             reg.register(S())
         except Exception as e:
             errors.append(e)
@@ -213,10 +225,10 @@ def test_plugin_registry_concurrent_register():
 # 4. NurseryWatcher не утекает при множественных tick
 # ============================================================
 
+
 @long_run
 def test_nursery_watcher_no_leak_under_many_ticks():
     """1000 tick() на пустой директории не должны накапливать состояние."""
-    import tempfile
     import shutil
     from src.core.subsystems.nursery_watcher import NurseryWatcher
 
@@ -238,7 +250,6 @@ def test_nursery_watcher_no_leak_under_many_ticks():
 @long_run
 def test_nursery_watcher_history_capped_at_100():
     """История ограничена 100 записями даже при 200 новых seed-ах."""
-    import tempfile
     import shutil
     from src.core.subsystems.nursery_watcher import NurseryWatcher
 
@@ -256,9 +267,9 @@ def test_nursery_watcher_history_capped_at_100():
                     f.write("{}" if fname.endswith(".json") else "#")
             w.tick(cycle=i)
 
-        assert len(w._seed_history) == 100, (
-            f"История выросла до {len(w._seed_history)}, ожидалось 100"
-        )
+        assert (
+            len(w._seed_history) == 100
+        ), f"История выросла до {len(w._seed_history)}, ожидалось 100"
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -266,6 +277,7 @@ def test_nursery_watcher_history_capped_at_100():
 # ============================================================
 # 5. Evolve + tick_subsystems совместная работа
 # ============================================================
+
 
 @long_run
 def test_evolve_and_tick_subsystems_run_together():
@@ -308,6 +320,7 @@ def test_subsystems_teardown_clean():
 # 6. Конкурентный доступ к PluginRegistry
 # ============================================================
 
+
 @long_run
 def test_plugin_registry_status_all_thread_safe():
     """status_all() безопасен под конкурентными tick()."""
@@ -348,6 +361,7 @@ def test_plugin_registry_status_all_thread_safe():
 # 7. Симуляция «жизни» с WebDashboard (без настоящего HTTP)
 # ============================================================
 
+
 @long_run
 def test_dashboard_publish_no_leak_over_many_cycles():
     """500 циклов publish_* не должны накапливать состояние."""
@@ -358,14 +372,22 @@ def test_dashboard_publish_no_leak_over_many_cycles():
     class _StubAgent:
         def __init__(self):
             self.n = 0
+
         def get_full_state(self):
             self.n += 1
             return {
-                "agent": {"name": "S", "cycle_count": self.n, "energy": 100,
-                          "intelligence": 1, "completed_goals": 0, "is_alive": True},
+                "agent": {
+                    "name": "S",
+                    "cycle_count": self.n,
+                    "energy": 100,
+                    "intelligence": 1,
+                    "completed_goals": 0,
+                    "is_alive": True,
+                },
                 "mental_models": {"total_concepts": self.n % 10},
                 "system": {"current_rss_mb": 50 + self.n % 30},
             }
+
         def get_subsystems_status(self):
             return {"subsystem_count": 0, "subsystems": []}
 
@@ -387,13 +409,17 @@ def test_dashboard_publish_no_leak_over_many_cycles():
 # 8. tracemalloc-тест (если поддерживается)
 # ============================================================
 
+
 @long_run
-@pytest.mark.skipif(not hasattr(tracemalloc, "start"), reason="tracemalloc не поддерживается")
+@pytest.mark.skipif(
+    not hasattr(tracemalloc, "start"), reason="tracemalloc не поддерживается"
+)
 def test_no_significant_memory_leak_tracemalloc():
     """tracemalloc фиксирует top-5 аллокаций — проверяем что нет утечки."""
     tracemalloc.start()
     try:
         from src.core.agent import DigitalBeing
+
         agent = DigitalBeing("TraceTest")
 
         # Прогрев
@@ -420,9 +446,9 @@ def test_no_significant_memory_leak_tracemalloc():
             print(f"    {d.size_diff / 1024:+.1f} КБ  {d.traceback}")
 
         # Менее 5 МБ общего роста на 200 циклов — приемлемо.
-        assert total_growth < 5 * 1024 * 1024, (
-            f"Утечка: {total_growth / 1024 / 1024:.1f} МБ за 200 циклов"
-        )
+        assert (
+            total_growth < 5 * 1024 * 1024
+        ), f"Утечка: {total_growth / 1024 / 1024:.1f} МБ за 200 циклов"
     finally:
         tracemalloc.stop()
 
@@ -430,6 +456,7 @@ def test_no_significant_memory_leak_tracemalloc():
 # ============================================================
 # Helper для ручного прогона
 # ============================================================
+
 
 def main():
     """Ручной запуск без pytest — для дебага."""

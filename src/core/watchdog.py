@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 
 try:
     import psutil  # опциональная зависимость
+
     _HAS_PSUTIL = True
 except ImportError:
     _HAS_PSUTIL = False
@@ -26,10 +27,12 @@ except ImportError:
 class Watchdog:
     """Наблюдатель за здоровьем системы."""
 
-    def __init__(self,
-                 max_rss_mb: float = 500.0,
-                 max_cycle_seconds: float = 30.0,
-                 check_interval_cycles: int = 25):
+    def __init__(
+        self,
+        max_rss_mb: float = 500.0,
+        max_cycle_seconds: float = 30.0,
+        check_interval_cycles: int = 25,
+    ):
         """
         Args:
             max_rss_mb: Мягкий предел RSS в МБ. При превышении — забывание.
@@ -168,11 +171,13 @@ class Watchdog:
     def _emit_alert(self, kind: str, message: str) -> None:
         """Регистрирует событие для последующего просмотра."""
         with self._lock:
-            self._alerts.append({
-                "cycle": self._cycle_count,
-                "kind": kind,
-                "message": message,
-            })
+            self._alerts.append(
+                {
+                    "cycle": self._cycle_count,
+                    "kind": kind,
+                    "message": message,
+                }
+            )
             # Храним только последние 100 алертов
             if len(self._alerts) > 100:
                 self._alerts = self._alerts[-100:]
@@ -200,9 +205,11 @@ class Watchdog:
 _watchdog: Optional[Watchdog] = None
 
 
-def get_watchdog(max_rss_mb: float = 500.0,
-                 max_cycle_seconds: float = 30.0,
-                 check_interval_cycles: int = 25) -> Watchdog:
+def get_watchdog(
+    max_rss_mb: float = 500.0,
+    max_cycle_seconds: float = 30.0,
+    check_interval_cycles: int = 25,
+) -> Watchdog:
     """Получает или создаёт глобальный watchdog."""
     global _watchdog
     if _watchdog is None:

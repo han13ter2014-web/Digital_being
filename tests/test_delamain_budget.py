@@ -78,9 +78,9 @@ def test_disabled_budget_does_not_gate_or_charge_delamain(tmp_path: Path) -> Non
         assert result is not None
         assert result.status is EffectorStatus.SUCCEEDED
         assert agent.energy == 10.0
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "hello"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "hello"
     finally:
         sub.teardown()
 
@@ -111,9 +111,9 @@ def test_core_driven_step_waits_for_energy_then_executes(
         assert allowed is not None
         assert allowed.status is EffectorStatus.SUCCEEDED
         assert agent.energy == 16.0
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "hello"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "hello"
         assert sub.get_goal(allowed.goal_id)["status"] == "done"
     finally:
         sub.teardown()
@@ -155,9 +155,9 @@ def test_standalone_tick_stops_on_budget_and_goal_stays_pending(
         assert summary["ok"] is True
         assert sub.get_goal(goal["id"])["status"] == "done"
         assert agent.energy == 16.0
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "hello"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "hello"
     finally:
         sub.teardown()
 
@@ -199,9 +199,9 @@ def test_approve_uses_budget_without_consuming_approval_on_denial(
         assert result is not None
         assert result.status is EffectorStatus.SUCCEEDED
         assert agent.energy == 16.0
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "hello"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "hello"
     finally:
         sub.teardown()
 
@@ -231,8 +231,8 @@ def test_run_now_uses_the_same_budget_gate(tmp_path: Path) -> None:
         assert allowed["ok"] is True
         assert allowed.get("budget_denied") is None
         assert agent.energy == 16.0
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "hello"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "hello"
     finally:
         sub.teardown()

@@ -74,6 +74,10 @@ class Sandbox:
         self.max_file_bytes = int(max_file_bytes)
         self.max_results = int(max_results)
 
+    def child(self, path, **kwargs):
+        """Create a nested sandbox; managed subclasses preserve their binding."""
+        return Sandbox(self.root / path, **kwargs)
+
     # ------------------------------------------------------------------
     # Path policy
     # ------------------------------------------------------------------
@@ -160,10 +164,12 @@ class Sandbox:
 
         raw = target.read_bytes()
         if len(raw) > limit:
-            raise SandboxError(f"file grew beyond the limit: {len(raw)} bytes > {limit}")
+            raise SandboxError(
+                f"file grew beyond the limit: {len(raw)} bytes > {limit}"
+            )
         if b"\x00" in raw[:4096]:
             raise SandboxError(f"binary files are not supported: {path}")
-        # TICKET-7: чтение BOM-независимое — файл с UTF-8 BOM (экспорты
+        # Чтение BOM-независимое: файл с UTF-8 BOM (экспорты
         # из Windows-инструментов) читается так же чисто, как без BOM.
         return raw.decode("utf-8-sig", errors="replace")
 
@@ -309,7 +315,9 @@ class Sandbox:
         if cap <= 0:
             return []
 
-        paths = sorted(self._iter_files(pattern), key=lambda p: self.relative(p).lower())
+        paths = sorted(
+            self._iter_files(pattern), key=lambda p: self.relative(p).lower()
+        )
         result: List[Dict[str, object]] = []
         for path in paths[:cap]:
             try:
@@ -348,7 +356,9 @@ class Sandbox:
         context_lines = max(0, int(context_lines))
         matches: List[Dict[str, object]] = []
 
-        for path in sorted(self._iter_files(pattern), key=lambda p: self.relative(p).lower()):
+        for path in sorted(
+            self._iter_files(pattern), key=lambda p: self.relative(p).lower()
+        ):
             try:
                 text = self.read_text(self.relative(path))
             except (OSError, SandboxError):

@@ -35,11 +35,15 @@ def record(index):
 def inventory(directory):
     files = {
         str(path.relative_to(directory)): path.stat().st_size
-        for path in sorted(directory.rglob("*")) if path.is_file()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
     }
-    return {"total_bytes": sum(files.values()), "files_bytes": files,
-            "wal_bytes": sum(size for name, size in files.items() if name.endswith("-wal")),
-            "shm_bytes": sum(size for name, size in files.items() if name.endswith("-shm"))}
+    return {
+        "total_bytes": sum(files.values()),
+        "files_bytes": files,
+        "wal_bytes": sum(size for name, size in files.items() if name.endswith("-wal")),
+        "shm_bytes": sum(size for name, size in files.items() if name.endswith("-shm")),
+    }
 
 
 def measure(root, records, snapshots):
@@ -48,16 +52,24 @@ def measure(root, records, snapshots):
 
     serializers = {
         backend: CheckpointSerializer(
-            checkpoint_dir=str(root / backend), backend=backend,
-            max_checkpoints=snapshots, compress=False,
-        ) for backend in ("json", "sqlite")
+            checkpoint_dir=str(root / backend),
+            backend=backend,
+            max_checkpoints=snapshots,
+            compress=False,
+        )
+        for backend in ("json", "sqlite")
     }
-    results = {backend: {"save_seconds": 0.0, "load_seconds": 0.0}
-               for backend in serializers}
+    results = {
+        backend: {"save_seconds": 0.0, "load_seconds": 0.0} for backend in serializers
+    }
     paths = {backend: [] for backend in serializers}
-    state = {"schema_version": SCHEMA_VERSION, "name": "StorageMeasure",
-             "energy": 100.0, "cycle_count": 0,
-             "experiences": [record(index) for index in range(records)]}
+    state = {
+        "schema_version": SCHEMA_VERSION,
+        "name": "StorageMeasure",
+        "energy": 100.0,
+        "cycle_count": 0,
+        "experiences": [record(index) for index in range(records)],
+    }
     oldest = None
     for cycle in range(snapshots):
         if cycle:
@@ -83,7 +95,9 @@ def measure(root, records, snapshots):
                 loaded_edges[backend][cycle] = loaded
         results[backend]["storage_after_loads"] = inventory(root / backend)
         results[backend]["oldest_equal_input"] = loaded_edges[backend][0] == oldest
-        results[backend]["final_equal_input"] = loaded_edges[backend][snapshots - 1] == state
+        results[backend]["final_equal_input"] = (
+            loaded_edges[backend][snapshots - 1] == state
+        )
 
     for label, cycle in (("oldest", 0), ("final", snapshots - 1)):
         equality[f"{label}_backends_equal"] = (
@@ -99,30 +113,40 @@ def measure(root, records, snapshots):
             value = node.get("value")
             if node["kind"] == "leaf" and isinstance(value, dict) and "source" in value:
                 record_rows += 1
-        snapshot_rows = connection.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+        snapshot_rows = connection.execute("SELECT COUNT(*) FROM snapshots").fetchone()[
+            0
+        ]
     results["sqlite"]["counts"] = {
-        "snapshots": snapshot_rows, "blobs": sum(kinds.values()),
-        "experience_rows": record_rows, "blob_kinds": dict(kinds),
+        "snapshots": snapshot_rows,
+        "blobs": sum(kinds.values()),
+        "experience_rows": record_rows,
+        "blob_kinds": dict(kinds),
         "total_table_rows": snapshot_rows + sum(kinds.values()),
     }
     results["json"]["counts"] = {
-        "snapshots": len(paths["json"]), "blobs": 0,
-        "experience_records_across_files": sum(records + cycle for cycle in range(snapshots)),
+        "snapshots": len(paths["json"]),
+        "blobs": 0,
+        "experience_records_across_files": sum(
+            records + cycle for cycle in range(snapshots)
+        ),
         "final_experience_records": len(state["experiences"]),
     }
     json_bytes = results["json"]["storage_after_saves"]["total_bytes"]
     sqlite_bytes = results["sqlite"]["storage_after_saves"]["total_bytes"]
     return {
-        "records": records, "snapshots": snapshots,
+        "records": records,
+        "snapshots": snapshots,
         "method": "Identical deterministic flat experience records; 100-200 characters per "
-                  "unique source/context/outcome field. First snapshot has N records; "
-                  "append one before each subsequent snapshot. Timings cover serializer "
-                  "calls only; load_seconds sums all snapshot loads. File sizes include "
-                  "all backend files, including any WAL/SHM present after closed connections. "
-                  "No forced WAL checkpoint, GC, or VACUUM; JSON is uncompressed.",
-        "backends": results, "equality": equality,
+        "unique source/context/outcome field. First snapshot has N records; "
+        "append one before each subsequent snapshot. Timings cover serializer "
+        "calls only; load_seconds sums all snapshot loads. File sizes include "
+        "all backend files, including any WAL/SHM present after closed connections. "
+        "No forced WAL checkpoint, GC, or VACUUM; JSON is uncompressed.",
+        "backends": results,
+        "equality": equality,
         "json_to_sqlite_bytes_ratio": json_bytes / sqlite_bytes,
-        "all_equal": all(equality.values()) and all(
+        "all_equal": all(equality.values())
+        and all(
             result["oldest_equal_input"] and result["final_equal_input"]
             for result in results.values()
         ),
@@ -143,10 +167,18 @@ def main():
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     sys.path.insert(0, str(PROJECT_ROOT))
-    approved_temp = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "Temp" / "opencode"
-    temp_parent = approved_temp if approved_temp.is_dir() else Path(tempfile.gettempdir())
+    approved_temp = (
+        Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+        / "Temp"
+        / "opencode"
+    )
+    temp_parent = (
+        approved_temp if approved_temp.is_dir() else Path(tempfile.gettempdir())
+    )
     previous_data = os.environ.get("DIGITAL_BEING_DATA_DIR")
-    with tempfile.TemporaryDirectory(prefix="checkpoint_measure_", dir=temp_parent) as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="checkpoint_measure_", dir=temp_parent
+    ) as temporary:
         os.environ["DIGITAL_BEING_DATA_DIR"] = str(Path(temporary) / "data")
         try:
             report = measure(Path(temporary), args.records, args.snapshots)

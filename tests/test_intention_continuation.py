@@ -9,8 +9,14 @@ from src.core.world_delta import WorldSignature
 
 
 def pending(agent):
-    entry = begin_intention(agent, {"action": "explore", "source": "test",
-                                   "params": {"topic": "память", "reason": "интерес"}})
+    entry = begin_intention(
+        agent,
+        {
+            "action": "explore",
+            "source": "test",
+            "params": {"topic": "память", "reason": "интерес"},
+        },
+    )
     finish_intention(entry)
     agent.cycle_count += 1
     return entry
@@ -29,7 +35,10 @@ def test_unfinished_topic_remains_after_rest_and_has_reason():
 
 
 def test_continuation_survives_state_restore():
-    from src.core.checkpoint_serializer import build_state_from_agent, apply_state_to_agent
+    from src.core.checkpoint_serializer import (
+        build_state_from_agent,
+        apply_state_to_agent,
+    )
 
     first = DigitalBeing(name="ContinueRestore")
     entry = pending(first)
@@ -51,7 +60,11 @@ def test_stuck_method_is_not_retried_by_continuation():
 def test_continuation_can_lose_and_later_execute_same_topic():
     agent = DigitalBeing(name="ContinueChoice")
     original = pending(agent)
-    with patch.object(agent.decision_arbitrator, "choose_action", return_value={"action": "rest", "source": "body"}):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        return_value={"action": "rest", "source": "body"},
+    ):
         report = agent.autonomous_tick()
     assert report["continuation_proposal"]["params"]["topic"] == "память"
     assert agent._intention_history[-1]["action"] == "rest"
@@ -60,8 +73,9 @@ def test_continuation_can_lose_and_later_execute_same_topic():
     def choose(candidates, context):
         return next(c for c in candidates if c["source"] == "intention_continuation")
 
-    with patch.object(agent.decision_arbitrator, "choose_action", side_effect=choose), \
-         patch.object(agent, "think", return_value="Не знаю") as think:
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", side_effect=choose
+    ), patch.object(agent, "think", return_value="Не знаю") as think:
         agent.autonomous_tick()
     think.assert_called_once_with("вопрос: память")
     assert agent._intention_history[-1]["continuation_of"] == original["id"]

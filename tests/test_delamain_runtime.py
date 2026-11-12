@@ -10,9 +10,16 @@ def test_runtime_executes_plan_and_records_episodes(tmp_path: Path) -> None:
         result = runtime.run_task(
             "write, verify and remember",
             plan=[
-                ActionRequest("write_file", {"path": "notes/a.txt", "content": "привет"}),
-                ActionRequest("verify_file", {"path": "notes/a.txt", "contains": "привет"}),
-                ActionRequest("remember_fact", {"key": "note", "value": "привет", "source": "test"}),
+                ActionRequest(
+                    "write_file", {"path": "notes/a.txt", "content": "привет"}
+                ),
+                ActionRequest(
+                    "verify_file", {"path": "notes/a.txt", "contains": "привет"}
+                ),
+                ActionRequest(
+                    "remember_fact",
+                    {"key": "note", "value": "привет", "source": "test"},
+                ),
                 ActionRequest("recall_facts", {"query": "note"}),
             ],
         )
@@ -58,7 +65,9 @@ def test_runtime_stops_on_first_failure(tmp_path: Path) -> None:
             "stop on failure",
             plan=[
                 ActionRequest("read_file", {"path": "missing.txt"}),
-                ActionRequest("write_file", {"path": "should-not-exist.txt", "content": "x"}),
+                ActionRequest(
+                    "write_file", {"path": "should-not-exist.txt", "content": "x"}
+                ),
             ],
         )
 
@@ -81,7 +90,9 @@ def test_runtime_rejects_sandbox_escape(tmp_path: Path) -> None:
     with DelamainRuntime(root, tmp_path / "memory.sqlite3") as runtime:
         result = runtime.run_task(
             "escape attempt",
-            plan=[ActionRequest("write_file", {"path": "../outside.txt", "content": "x"})],
+            plan=[
+                ActionRequest("write_file", {"path": "../outside.txt", "content": "x"})
+            ],
         )
 
         assert result.ok is False
@@ -98,7 +109,9 @@ def test_runtime_can_use_heuristic_planner(tmp_path: Path) -> None:
 
 
 def test_runtime_reports_planner_and_unknown_action_errors(tmp_path: Path) -> None:
-    with DelamainRuntime(tmp_path / "workspace", tmp_path / "memory.sqlite3") as runtime:
+    with DelamainRuntime(
+        tmp_path / "workspace", tmp_path / "memory.sqlite3"
+    ) as runtime:
         result = runtime.run_task("неизвестная команда")
         assert result.ok is False
         assert "cannot parse" in (result.error or "")
@@ -112,7 +125,9 @@ def test_runtime_reports_planner_and_unknown_action_errors(tmp_path: Path) -> No
 
 
 def test_describe_actions(tmp_path: Path) -> None:
-    with DelamainRuntime(tmp_path / "workspace", tmp_path / "memory.sqlite3") as runtime:
+    with DelamainRuntime(
+        tmp_path / "workspace", tmp_path / "memory.sqlite3"
+    ) as runtime:
         names = {spec["name"] for spec in runtime.describe_actions()}
         assert {"write_file", "read_file", "search_files", "verify_file"} <= names
         assert "remember_fact" in names

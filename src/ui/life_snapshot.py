@@ -160,13 +160,17 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     history: List[Dict] = list(_own(agent, "_intention_history", []) or [])
     waiting_all: Dict[str, Dict] = _own(agent, "_waiting_intentions", None) or {}
     # Ожидание без решения — то, что ещё «висит»; решённые не считаются активными.
-    waiting_entries = [deepcopy(entry) for entry in waiting_all.values()
-                       if isinstance(entry, dict) and not entry.get("resolution")]
+    waiting_entries = [
+        deepcopy(entry)
+        for entry in waiting_all.values()
+        if isinstance(entry, dict) and not entry.get("resolution")
+    ]
     waiting_entries = waiting_entries[-RECENT_INTENTIONS:]
     # Забытое не удаляется из опыта: показываем отдельным списком, чтобы
     # карта могла приглушить узел, а не сделать вид, что его не было.
     forgotten_entries = [
-        deepcopy(entry) for entry in waiting_all.values()
+        deepcopy(entry)
+        for entry in waiting_all.values()
         if isinstance(entry, dict)
         and isinstance(entry.get("resolution"), dict)
         and entry["resolution"].get("kind") == "forgotten"
@@ -237,8 +241,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
             "last_finished": _last_finished(history),
         },
         "activities": _activity_section(agent),
-        "diary": {"episodes": diary_episodes,
-                   "count": len(diary_episodes)},
+        "diary": {"episodes": diary_episodes, "count": len(diary_episodes)},
         "preferences": preferences,
         "goals": goals_view,
         "access": _access_section(agent),
@@ -254,62 +257,84 @@ def build_diary_snapshot(agent: Any, limit: int = 500) -> Dict[str, Any]:
     """
     history: List[Dict] = list(_own(agent, "_intention_history", []) or [])
     episodes = _combined_diary(agent, history, limit)
-    return {"episodes": episodes, "count": len(episodes), "cache_limit": max(0, int(limit))}
+    return {
+        "episodes": episodes,
+        "count": len(episodes),
+        "cache_limit": max(0, int(limit)),
+    }
 
 
-def _combined_diary(agent: Any, history: List[Dict], limit: int) -> List[Dict[str, Any]]:
+def _combined_diary(
+    agent: Any, history: List[Dict], limit: int
+) -> List[Dict[str, Any]]:
     diary_episodes = recent_life_episodes(agent, limit)
     recorded_ids = {
-        str(item.get("task_id")) for item in diary_episodes
+        str(item.get("task_id"))
+        for item in diary_episodes
         if isinstance(item, dict) and item.get("task_id")
     }
     # Автономные занятия принадлежат Core даже без подключённого Delamain.
     # Незавершённое намерение не выдаётся за событие дневника.
     for entry in reversed(history):
-        if (not isinstance(entry, dict)
-                or entry.get("status") == "started"
-                or str(entry.get("id")) in recorded_ids):
+        if (
+            not isinstance(entry, dict)
+            or entry.get("status") == "started"
+            or str(entry.get("id")) in recorded_ids
+        ):
             continue
         outcome = entry.get("outcome")
-        diary_episodes.append({
-            "id": f"core:{entry.get('id')}",
-            "ts": entry.get("cycle"),
-            "task_id": entry.get("id"),
-            "task": "digital_life",
-            "action": entry.get("action"),
-            "args": {"target": entry.get("target")},
-            "ok": entry.get("status") == "performed",
-            "output": deepcopy(outcome),
-            "error": (outcome or {}).get("error") if isinstance(outcome, dict) else None,
-            "metadata": {"status": entry.get("status"), "source": "core_history"},
-        })
-    return diary_episodes[:max(0, int(limit))]
+        diary_episodes.append(
+            {
+                "id": f"core:{entry.get('id')}",
+                "ts": entry.get("cycle"),
+                "task_id": entry.get("id"),
+                "task": "digital_life",
+                "action": entry.get("action"),
+                "args": {"target": entry.get("target")},
+                "ok": entry.get("status") == "performed",
+                "output": deepcopy(outcome),
+                "error": (outcome or {}).get("error")
+                if isinstance(outcome, dict)
+                else None,
+                "metadata": {"status": entry.get("status"), "source": "core_history"},
+            }
+        )
+    return diary_episodes[: max(0, int(limit))]
 
 
-def recent_life_episodes(agent: Any, limit: int = RECENT_EPISODES) -> List[Dict[str, Any]]:
+def recent_life_episodes(
+    agent: Any, limit: int = RECENT_EPISODES
+) -> List[Dict[str, Any]]:
     """Прочитать автобиографические эпизоды Core из SQLite Delamain.
 
     Только чтение. Если Delamain не подключён, возвращаем пустой список:
     у UI нет собственного хранилища истории.
     """
-    memory = getattr(getattr(_own(agent, "delamain", None), "runtime", None), "memory", None)
+    memory = getattr(
+        getattr(_own(agent, "delamain", None), "runtime", None), "memory", None
+    )
     reader = getattr(memory, "recent_life_episodes", None)
     if not callable(reader):
         return []
     try:
         bounded_limit = max(0, min(int(limit), 500))
-        episodes = [deepcopy(dict(row)) for row in reader(
-            life_id=str(getattr(agent, "life_id", getattr(agent, "name", "?"))),
-            limit=bounded_limit,
-        )]
+        episodes = [
+            deepcopy(dict(row))
+            for row in reader(
+                life_id=str(getattr(agent, "life_id", getattr(agent, "name", "?"))),
+                limit=bounded_limit,
+            )
+        ]
         legacy_reader = getattr(memory, "legacy_life_episodes", None)
         if callable(legacy_reader):
-            identifiers = [entry["id"] for entry in
-                           (_own(agent, "_intention_history", []) or [])
-                           if isinstance(entry, dict) and isinstance(entry.get("id"), str)]
-            episodes.extend(deepcopy(legacy_reader(
-                intention_ids=identifiers, limit=bounded_limit
-            )))
+            identifiers = [
+                entry["id"]
+                for entry in (_own(agent, "_intention_history", []) or [])
+                if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+            ]
+            episodes.extend(
+                deepcopy(legacy_reader(intention_ids=identifiers, limit=bounded_limit))
+            )
         episodes.sort(key=lambda item: int(item.get("id", 0)), reverse=True)
         return episodes[:bounded_limit]
     except Exception:  # pragma: no cover - защита UI

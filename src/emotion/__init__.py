@@ -1,8 +1,5 @@
-# -*- coding: utf-8 -*-
-# Эмоциональный слой Цифровой Жизни
-#
-# Экспорт основных компонентов эмоционального ядра:
-# - HeartCore - эмоциональное ядро
-# - HormonalSystem - гормональная система
-# - ImmuneSystem - иммунная система
-# - Metaphysics - метафизика сознания
+"""Эмоциональные и интероцептивные модели Digital Being."""
+
+from src.emotion.hormonal_system import HormonalSystem
+
+__all__ = ["HormonalSystem"]

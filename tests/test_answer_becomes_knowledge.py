@@ -53,9 +53,7 @@ def _make_runner():
 
 def _thoughts(bus):
     return [
-        dict(data or {})
-        for name, data in bus.published
-        if name == Events.AGENT_THOUGHT
+        dict(data or {}) for name, data in bus.published if name == Events.AGENT_THOUGHT
     ]
 
 
@@ -71,6 +69,7 @@ def _reply_texts(bus):
 # ============================================================
 # Извлечение темы из вопроса
 # ============================================================
+
 
 def test_topic_from_question_what_is_pattern():
     assert _topic_from_question("что такое любовь?") == "любовь"
@@ -94,6 +93,7 @@ def test_topic_from_question_unrecognized():
 # ============================================================
 # Колбэк очереди открытых вопросов
 # ============================================================
+
 
 def test_open_question_answer_fires_callback():
     calls = []
@@ -123,6 +123,7 @@ def test_open_question_unknown_answer_does_not_fire_callback():
 # ============================================================
 # record_user_answer: свидетельство + штамп
 # ============================================================
+
 
 def test_record_user_answer_creates_testimony_knowledge():
     agent = DigitalBeing(name="KN")
@@ -168,6 +169,7 @@ def test_stamps_capped_at_fifty():
 # Объяснённая тема не переспрашивается
 # ============================================================
 
+
 def test_recently_explained_by_user_boundary():
     agent = DigitalBeing(name="KN")
     agent._user_explained_topics["тема"] = 100
@@ -202,7 +204,7 @@ def test_explained_topic_is_not_exploration_target(monkeypatch):
 def test_ask_user_action_respects_stamp_even_with_explicit_target():
     """Продолжение намерения передаёт target напрямую, минуя селекторы.
 
-    Живой прогон 2026-11-01 (ребёнок Тэсс): «спросил человека про
+    Живой прогон 2026-11-01 (изолированный тестовый профиль): «спросил человека про
     'вопрос'» повторно на ~23-м цикле после объяснения — цель пришла
     параметром намерения, а не из _pick_exploration_target. Guard
     обязан стоять в самом действии.
@@ -226,14 +228,13 @@ def test_ask_user_action_still_asks_fresh_topic():
     assert "спросила человека про 'новая тема'" in result.get("text", "")
     pending = agent.user_interaction.pending_questions
     assert len(pending) == 1
-    assert pending[0]["context"] == (
-        "самостоятельный вопрос по теме: новая тема"
-    )
+    assert pending[0]["context"] == ("самостоятельный вопрос по теме: новая тема")
 
 
 # ============================================================
 # Прямой вопрос сущности через runner
 # ============================================================
+
 
 @pytest.mark.asyncio
 async def test_direct_answer_becomes_knowledge_with_citation():
@@ -276,6 +277,7 @@ async def test_unknown_answer_is_not_recorded_as_knowledge():
 # Открытый вопрос через runner (колбэк моста)
 # ============================================================
 
+
 @pytest.mark.asyncio
 async def test_open_question_answer_becomes_knowledge_via_callback():
     agent, runner, bus = _make_runner()
@@ -298,6 +300,7 @@ async def test_open_question_answer_becomes_knowledge_via_callback():
 # Цитата
 # ============================================================
 
+
 def test_short_quote_normalizes_and_truncates():
     assert AgentRunner._short_quote("  Привет   мир  ") == "Привет мир"
     quote = AgentRunner._short_quote("а" * 200)
@@ -308,6 +311,7 @@ def test_short_quote_normalizes_and_truncates():
 # ============================================================
 # Чекпоинт
 # ============================================================
+
 
 def test_explained_topics_survive_checkpoint():
     original = DigitalBeing(name="KN")

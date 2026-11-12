@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 # Базовые структуры
 # =====================================================================
 
+
 @dataclass
 class MiddlewareResult:
     """Результат работы одного middleware.
@@ -85,6 +86,7 @@ class PipelineResult:
 # Класс пайплайна
 # =====================================================================
 
+
 class EvolvePipeline:
     """Middleware-пайплайн для `DigitalBeing.evolve()`.
 
@@ -111,7 +113,9 @@ class EvolvePipeline:
         self._middlewares.append((name, fn))
         return self
 
-    def run(self, agent: Any, cycle: int, context: Optional[Dict[str, Any]] = None) -> PipelineResult:
+    def run(
+        self, agent: Any, cycle: int, context: Optional[Dict[str, Any]] = None
+    ) -> PipelineResult:
         """Запускает все middleware по порядку.
 
         Args:
@@ -138,7 +142,10 @@ class EvolvePipeline:
                 # Изоляция ошибок: один сломанный middleware не должен
                 # ломать всю эволюцию. Логируем и идём дальше.
                 logger.exception(
-                    "[%s] Ошибка в middleware '%s': %s", self.name, name, exc,
+                    "[%s] Ошибка в middleware '%s': %s",
+                    self.name,
+                    name,
+                    exc,
                 )
                 result.errors.append(f"{name}: {exc}")
                 continue
@@ -167,11 +174,14 @@ class EvolvePipeline:
 # Базовые middleware (вынесены из DigitalBeing.evolve())
 # =====================================================================
 
+
 def make_mental_models_tick() -> MiddlewareFn:
     """Middleware: такт кеша ментальных моделей (Шаг 4 оптимизации)."""
 
     def middleware(agent, cycle, context):
-        if hasattr(agent, "mental_models") and hasattr(agent.mental_models, "tick_cycle"):
+        if hasattr(agent, "mental_models") and hasattr(
+            agent.mental_models, "tick_cycle"
+        ):
             agent.mental_models.tick_cycle()
         return MiddlewareResult()
 
@@ -184,8 +194,12 @@ def make_motivation_tick() -> MiddlewareFn:
     def middleware(agent, cycle, context):
         # Single source of truth: UnifiedMotivationSystem (P0.6-P0.10).
         # Legacy MotivationController kept only as fallback.
-        motivation = getattr(agent, "motivation_system", None) or getattr(agent, "motivation", None)
-        if motivation is None or (hasattr(motivation, "available") and not motivation.available):
+        motivation = getattr(agent, "motivation_system", None) or getattr(
+            agent, "motivation", None
+        )
+        if motivation is None or (
+            hasattr(motivation, "available") and not motivation.available
+        ):
             return MiddlewareResult()
 
         # Потребности уже тикнули в autonomous_tick этого же цикла.
@@ -194,14 +208,17 @@ def make_motivation_tick() -> MiddlewareFn:
         if getattr(motivation, "last_tick_cycle", None) == cycle:
             return MiddlewareResult()
 
-        motivation_state = motivation.tick({
-            "unknown_concepts": [
-                name for name, node in agent.mental_models.concepts.items()
-                if node.confidence < 0.4
-            ],
-            "novel_areas": list(agent.mental_models.concepts.keys())[:5],
-            "weak_areas": ["reasoning", "metacognition"],
-        })
+        motivation_state = motivation.tick(
+            {
+                "unknown_concepts": [
+                    name
+                    for name, node in agent.mental_models.concepts.items()
+                    if node.confidence < 0.4
+                ],
+                "novel_areas": list(agent.mental_models.concepts.keys())[:5],
+                "weak_areas": ["reasoning", "metacognition"],
+            }
+        )
         if motivation_state.get("new_goals"):
             logger.info(
                 "🎯 Мотивация добавила %d новых целей",
@@ -221,6 +238,7 @@ def make_soul_tick(interval_attr: str = "SOUL_TICK_INTERVAL") -> MiddlewareFn:
 
     def middleware(agent, cycle, context):
         from src.core.watchdog import get_watchdog
+
         wd = context.get("watchdog") or get_watchdog()
         run_heavy = wd.should_run_heavy_tick()
 
@@ -232,7 +250,12 @@ def make_soul_tick(interval_attr: str = "SOUL_TICK_INTERVAL") -> MiddlewareFn:
         ):
             soul_report = agent.tick_soul(cycle)
             # Логируем квесты и сигналы
-            if soul_report["soul"].get("systems", {}).get("meaning", {}).get("new_quest"):
+            if (
+                soul_report["soul"]
+                .get("systems", {})
+                .get("meaning", {})
+                .get("new_quest")
+            ):
                 quest = soul_report["soul"]["systems"]["meaning"]["new_quest"]
                 logger.info("🌌 Новый экзистенциальный квест: %s", quest[:60])
             if soul_report["embodiment"].get("state") in ("exhausted", "tired"):
@@ -277,7 +300,9 @@ def make_concept_limit(interval: int = 50) -> MiddlewareFn:
         try:
             forgotten = agent.mental_models.apply_concept_limit()
             if forgotten > 0:
-                logger.info("🧹 Лимит ментальных моделей: -%d слабых концепций", forgotten)
+                logger.info(
+                    "🧹 Лимит ментальных моделей: -%d слабых концепций", forgotten
+                )
             return MiddlewareResult(data={"concepts_forgotten": forgotten})
         except Exception as exc:
             logger.debug("concept_limit: %s", exc)
@@ -291,6 +316,7 @@ def make_force_forget_under_pressure() -> MiddlewareFn:
 
     def middleware(agent, cycle, context):
         from src.core.watchdog import get_watchdog
+
         wd = context.get("watchdog") or get_watchdog()
         if wd.should_force_forget():
             forgotten = agent.mental_models.apply_concept_limit()
@@ -321,9 +347,13 @@ def make_intelligence_growth() -> MiddlewareFn:
             agent.success_streak = 0
             agent.energy += 20
             logger.info(
-                "ЭВОЛЮЦИЯ! Интеллект %d -> %d", old_intelligence, agent.intelligence,
+                "ЭВОЛЮЦИЯ! Интеллект %d -> %d",
+                old_intelligence,
+                agent.intelligence,
             )
-            logger.info("[%s] ИНТЕЛЛЕКТ ПОВЫШЕН! Уровень: %d", agent.name, agent.intelligence)
+            logger.info(
+                "[%s] ИНТЕЛЛЕКТ ПОВЫШЕН! Уровень: %d", agent.name, agent.intelligence
+            )
             agent._save_knowledge_base()
             evolved = True
 
@@ -348,7 +378,9 @@ def make_intelligence_growth() -> MiddlewareFn:
                 except Exception:
                     pass
 
-        return MiddlewareResult(data={"evolved": evolved, "intelligence": agent.intelligence})
+        return MiddlewareResult(
+            data={"evolved": evolved, "intelligence": agent.intelligence}
+        )
 
     return middleware
 

@@ -33,7 +33,9 @@ async def measure():
     observed = first.action_expectations.last_trial
     claim = observed["claim"]
     before = first.mental_models.concepts[claim].to_storage_dict()
-    pending = first.action_expectations.begin(first.mental_models, "rest", first.energy, 200)
+    pending = first.action_expectations.begin(
+        first.mental_models, "rest", first.energy, 200
+    )
     runner = AgentRunner(first, EventBus(), name="ContinuityMeasureRunner")
     saved = runner.save_now()
     second, report = create_agent(env, "ContinuityMeasure")
@@ -43,13 +45,16 @@ async def measure():
     next_observation = second.action_expectations.last_trial
     fresh, fresh_report = create_agent(env, "ContinuityMeasure", new=True)
     return {
-        "saved": saved, "startup_source": report["source"],
-        "cycle_before": first.cycle_count, "cycle_after": second.cycle_count,
+        "saved": saved,
+        "startup_source": report["source"],
+        "cycle_before": first.cycle_count,
+        "cycle_after": second.cycle_count,
         "energy_before_restart": first.energy,
         "energy_after_restart": next_observation["energy_before"],
         "experiences_before": len(before["experiences"]),
         "experiences_restored": len(after["experiences"]) if after else 0,
-        "lost_experiences": len(before["experiences"]) - (len(after["experiences"]) if after else 0),
+        "lost_experiences": len(before["experiences"])
+        - (len(after["experiences"]) if after else 0),
         "evidence_before": before["experiences"][-1],
         "memory_identical": before == after,
         "next_expected_direction": next_observation["expected_direction"],
@@ -71,7 +76,9 @@ if __name__ == "__main__":
 
         with patch.object(LR_CONFIG, "WEB_SEARCH_ENABLED", False):
             result = asyncio.run(measure())
-        args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        args.report.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         print(json.dumps(result, ensure_ascii=True, indent=2))
         import logging
 

@@ -28,7 +28,9 @@ def model_snapshot(agent):
     return {
         "concept_count": len(concepts),
         "total_experiences": sum(len(item.experiences) for item in concepts.values()),
-        "claim": None if node is None else {
+        "claim": None
+        if node is None
+        else {
             "name": CLAIM,
             "confidence": node.confidence,
             "evidence_strength": node.evidence()[0],
@@ -45,23 +47,27 @@ def model_snapshot(agent):
 
 def measure_agent(enabled, agent_class, expectations_class, config):
     def run():
-        agent = agent_class(name="ActionExpectationEnabled" if enabled else "ActionExpectationBaseline")
+        agent = agent_class(
+            name="ActionExpectationEnabled" if enabled else "ActionExpectationBaseline"
+        )
         initial = model_snapshot(agent)
         rows = []
 
         def rest(phase):
             agent.energy = 20
             outcome = agent.act("rest")
-            rows.append({
-                "trial_number": len(rows) + 1,
-                "phase": phase,
-                "energy_before": 20,
-                "energy_after": float(agent.energy),
-                "actual_delta": float(agent.energy) - 20,
-                "action_result": outcome,
-                "last_trial": deepcopy(agent.action_expectations.last_trial),
-                "model": model_snapshot(agent),
-            })
+            rows.append(
+                {
+                    "trial_number": len(rows) + 1,
+                    "phase": phase,
+                    "energy_before": 20,
+                    "energy_after": float(agent.energy),
+                    "actual_delta": float(agent.energy) - 20,
+                    "action_result": outcome,
+                    "last_trial": deepcopy(agent.action_expectations.last_trial),
+                    "model": model_snapshot(agent),
+                }
+            )
 
         for _ in range(2):
             rest("normal_recovery")
@@ -82,8 +88,11 @@ def measure_agent(enabled, agent_class, expectations_class, config):
             "last_trial_after": deepcopy(agent.action_expectations.last_trial),
             "no_new_trial": (
                 agent.action_expectations.last_trial is None
-                or (previous_trial is not None and
-                    agent.action_expectations.last_trial["trial_id"] == previous_trial["trial_id"])
+                or (
+                    previous_trial is not None
+                    and agent.action_expectations.last_trial["trial_id"]
+                    == previous_trial["trial_id"]
+                )
             ),
             "no_new_model_experience": before_ceiling == after_ceiling,
         }
@@ -94,7 +103,8 @@ def measure_agent(enabled, agent_class, expectations_class, config):
             "trials": rows,
             "ceiling": ceiling,
             "final_model": after_ceiling,
-            "experience_growth": after_ceiling["total_experiences"] - initial["total_experiences"],
+            "experience_growth": after_ceiling["total_experiences"]
+            - initial["total_experiences"],
         }
 
     if enabled:
@@ -105,22 +115,37 @@ def measure_agent(enabled, agent_class, expectations_class, config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, required=True, help="UTF-8 JSON output path")
+    parser.add_argument(
+        "--report", type=Path, required=True, help="UTF-8 JSON output path"
+    )
     args = parser.parse_args()
     sys.path.insert(0, str(PROJECT_ROOT))
-    preferred_temp = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "Temp" / "opencode"
+    preferred_temp = (
+        Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+        / "Temp"
+        / "opencode"
+    )
     temp_parent = str(preferred_temp) if preferred_temp.is_dir() else None
-    with tempfile.TemporaryDirectory(prefix="db_action_expectation_", dir=temp_parent) as data_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="db_action_expectation_", dir=temp_parent
+    ) as data_dir:
         # Set isolation before importing any agent/path module.
-        with patch.dict(os.environ, {"DIGITAL_BEING_DATA_DIR": data_dir, "DIGITAL_BEING_TEST_MODE": "1"}):
+        with patch.dict(
+            os.environ,
+            {"DIGITAL_BEING_DATA_DIR": data_dir, "DIGITAL_BEING_TEST_MODE": "1"},
+        ):
             from config.simulation_config import LR_CONFIG
             from src.cognition.action_expectations import ActionExpectations
             from src.core.agent import DigitalBeing
 
             original_begin = ActionExpectations.begin
             with patch.object(LR_CONFIG, "WEB_SEARCH_ENABLED", False):
-                baseline = measure_agent(False, DigitalBeing, ActionExpectations, LR_CONFIG)
-                enabled = measure_agent(True, DigitalBeing, ActionExpectations, LR_CONFIG)
+                baseline = measure_agent(
+                    False, DigitalBeing, ActionExpectations, LR_CONFIG
+                )
+                enabled = measure_agent(
+                    True, DigitalBeing, ActionExpectations, LR_CONFIG
+                )
             baseline_deltas = [row["actual_delta"] for row in baseline["trials"]]
             enabled_deltas = [row["actual_delta"] for row in enabled["trials"]]
             report = {
@@ -134,28 +159,56 @@ def main():
                     "same_physical_outcomes": baseline_deltas == enabled_deltas,
                     "baseline_experience_growth": baseline["experience_growth"],
                     "enabled_experience_growth": enabled["experience_growth"],
-                    "expected_directions": [row["last_trial"]["expected_direction"] for row in enabled["trials"]],
-                    "prediction_matches": [row["last_trial"]["prediction_matched"] for row in enabled["trials"]],
-                    "confidences": [row["model"]["claim"]["confidence"] for row in enabled["trials"]],
-                    "evidence_strengths": [row["model"]["claim"]["evidence_strength"] for row in enabled["trials"]],
+                    "expected_directions": [
+                        row["last_trial"]["expected_direction"]
+                        for row in enabled["trials"]
+                    ],
+                    "prediction_matches": [
+                        row["last_trial"]["prediction_matched"]
+                        for row in enabled["trials"]
+                    ],
+                    "confidences": [
+                        row["model"]["claim"]["confidence"] for row in enabled["trials"]
+                    ],
+                    "evidence_strengths": [
+                        row["model"]["claim"]["evidence_strength"]
+                        for row in enabled["trials"]
+                    ],
                     "begin_restored": ActionExpectations.begin is original_begin,
                 },
             }
             checks = {
                 "web_disabled": baseline["web_disabled"] and enabled["web_disabled"],
-                "baseline_has_no_trials": all(row["last_trial"] is None for row in baseline["trials"]),
+                "baseline_has_no_trials": all(
+                    row["last_trial"] is None for row in baseline["trials"]
+                ),
                 "same_physical_outcomes": baseline_deltas == enabled_deltas,
-                "six_enabled_trials": len({row["last_trial"]["trial_id"] for row in enabled["trials"]}) == 6,
-                "prediction_revised": enabled["trials"][-1]["last_trial"]["expected_direction"] == -1,
-                "normal_recovery_positive": all(delta > 0 for delta in enabled_deltas[:2]),
+                "six_enabled_trials": len(
+                    {row["last_trial"]["trial_id"] for row in enabled["trials"]}
+                )
+                == 6,
+                "prediction_revised": enabled["trials"][-1]["last_trial"][
+                    "expected_direction"
+                ]
+                == -1,
+                "normal_recovery_positive": all(
+                    delta > 0 for delta in enabled_deltas[:2]
+                ),
                 "patched_recovery_zero": enabled_deltas[2:] == [0.0, 0.0, 0.0, 0.0],
-                "ceiling_no_new_trial": baseline["ceiling"]["no_new_trial"] and enabled["ceiling"]["no_new_trial"],
-                "ceiling_no_new_experience": baseline["ceiling"]["no_new_model_experience"] and enabled["ceiling"]["no_new_model_experience"],
+                "ceiling_no_new_trial": baseline["ceiling"]["no_new_trial"]
+                and enabled["ceiling"]["no_new_trial"],
+                "ceiling_no_new_experience": baseline["ceiling"][
+                    "no_new_model_experience"
+                ]
+                and enabled["ceiling"]["no_new_model_experience"],
                 "begin_restored": ActionExpectations.begin is original_begin,
             }
             report["checks"] = checks
             args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            args.report.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             print(json.dumps(report["comparison"], ensure_ascii=True, indent=2))
             print(f"Report: {args.report}")
             if not all(checks.values()):

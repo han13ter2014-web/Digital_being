@@ -299,9 +299,7 @@ def test_repair_replaces_only_the_failed_tail(tmp_path: Path) -> None:
     ]
     workspace = Path(result.work_root) / "00-recovery-replace" / "workspace"
     assert (workspace / "recovery" / "tail.txt").exists() is False
-    assert (workspace / "recovery" / "fixed.txt").read_text(
-        encoding="utf-8"
-    ) == "fixed"
+    assert (workspace / "recovery" / "fixed.txt").read_text(encoding="utf-8") == "fixed"
 
 
 def test_dangerous_repair_waits_for_approval(tmp_path: Path) -> None:
@@ -318,9 +316,7 @@ def test_dangerous_repair_waits_for_approval(tmp_path: Path) -> None:
     assert run["approval_status"] == "consumed"
     assert run["goal_status"] == "done"
     workspace = Path(result.work_root) / "00-recovery-approval" / "workspace"
-    assert (workspace / "approval" / "fixed.txt").read_text(
-        encoding="utf-8"
-    ) == "fixed"
+    assert (workspace / "approval" / "fixed.txt").read_text(encoding="utf-8") == "fixed"
 
 
 def test_rejected_repair_does_not_execute_and_keeps_completed_work(
@@ -338,9 +334,7 @@ def test_rejected_repair_does_not_execute_and_keeps_completed_work(
     assert run["resolution"] == "rejected"
     assert run["approval_status"] == "rejected"
     assert run["goal_status"] == "failed"
-    assert [item["action"] for item in run["effective_actions"]] == [
-        "verify_file"
-    ]
+    assert [item["action"] for item in run["effective_actions"]] == ["verify_file"]
     workspace = Path(result.work_root) / "00-repair-reject" / "workspace"
     assert (workspace / "approval" / "rejected.txt").exists() is False
 

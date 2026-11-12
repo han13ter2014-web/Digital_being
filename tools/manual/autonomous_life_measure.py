@@ -37,7 +37,11 @@ async def measure(cycles, seed):
     initial_sources, transitions = Counter(), Counter()
     deferred_methods, released_methods = Counter(), Counter()
     energies, fatigues = [], []
-    continuation_offers, continuation_choices, continuation_losses = Counter(), Counter(), Counter()
+    continuation_offers, continuation_choices, continuation_losses = (
+        Counter(),
+        Counter(),
+        Counter(),
+    )
     continuation_traces = []
     restart = None
     play_turns = 0
@@ -59,25 +63,49 @@ async def measure(cycles, seed):
                 continuation_offers[target] += 1
                 if arbiter.get("source") == "intention_continuation":
                     continuation_choices[target] += 1
-                    entry = next((item for item in reversed(getattr(current, "_intention_history", []))
-                                  if item["id"] == report.get("intention_id")), None)
-                    continuation_traces.append({"cycle": current.cycle_count, "target": target,
-                                                "entry": entry.copy() if entry else None})
+                    entry = next(
+                        (
+                            item
+                            for item in reversed(
+                                getattr(current, "_intention_history", [])
+                            )
+                            if item["id"] == report.get("intention_id")
+                        ),
+                        None,
+                    )
+                    continuation_traces.append(
+                        {
+                            "cycle": current.cycle_count,
+                            "target": target,
+                            "entry": entry.copy() if entry else None,
+                        }
+                    )
                 else:
                     continuation_losses[arbiter.get("source", "none")] += 1
             feedback = report.get("method_feedback") or {}
-            deferred_methods.update(item["normalized_action"] for item in feedback.get("deferred", []))
+            deferred_methods.update(
+                item["normalized_action"] for item in feedback.get("deferred", [])
+            )
             released_methods.update(feedback.get("released", []))
-            initial_sources[(report.get("initial_arbitration") or {}).get("source", "none")] += 1
+            initial_sources[
+                (report.get("initial_arbitration") or {}).get("source", "none")
+            ] += 1
             escape = report.get("loop_escape")
             if escape:
                 transitions[f"{escape['from']} -> {escape['to']}"] += 1
                 outcome = current.loop_closer.last_outcome
-                escape_traces.append({"cycle": current.cycle_count, **escape,
-                    "initial_source": (report.get("initial_arbitration") or {}).get("source"),
-                    "energy": current.energy,
-                    "fatigue": current.interoception.state.fatigue,
-                    "outcome": outcome.as_dict() if outcome else None})
+                escape_traces.append(
+                    {
+                        "cycle": current.cycle_count,
+                        **escape,
+                        "initial_source": (report.get("initial_arbitration") or {}).get(
+                            "source"
+                        ),
+                        "energy": current.energy,
+                        "fatigue": current.interoception.state.fatigue,
+                        "outcome": outcome.as_dict() if outcome else None,
+                    }
+                )
             proposal = report.get("experiment_proposal")
             if proposal:
                 claim_id = proposal["params"]["claim_id"]
@@ -90,7 +118,11 @@ async def measure(cycles, seed):
                 observation = result.get("observation")
                 metric = proposal["params"]["metric"] if proposal else None
                 if observation and metric in observation.get("claims", {}):
-                    field = "fatigue_prediction_matched" if metric == "fatigue" else "prediction_matched"
+                    field = (
+                        "fatigue_prediction_matched"
+                        if metric == "fatigue"
+                        else "prediction_matched"
+                    )
                     matches[str(observation.get(field))] += 1
                 else:
                     matches["target_not_observed"] += 1
@@ -118,45 +150,75 @@ async def measure(cycles, seed):
                 last_check = getattr(agent, "_last_experiment_cycle", None)
                 history_before = list(getattr(agent, "_intention_history", []))
                 from copy import deepcopy
+
                 game_before = deepcopy(getattr(agent, "_local_play", None))
                 await runner.stop()
                 from src.core.subsystem_base import PluginRegistry
 
                 PluginRegistry.reset_global()
                 agent, report = create_agent(env, "AutonomousMeasure")
-                restart = {"source": report["source"],
-                           "memory_identical": before == agent.mental_models.to_storage_dict(),
-                           "energy_identical": energy_before == agent.energy,
-                           "fatigue_identical": fatigue_before == agent.interoception.state.fatigue,
-                           "cooldown_identical": last_check == getattr(agent, "_last_experiment_cycle", None)}
-                restart["intention_history_equal"] = history_before == getattr(agent, "_intention_history", [])
-                restart["game_equal"] = game_before == getattr(agent, "_local_play", None)
+                restart = {
+                    "source": report["source"],
+                    "memory_identical": before == agent.mental_models.to_storage_dict(),
+                    "energy_identical": energy_before == agent.energy,
+                    "fatigue_identical": fatigue_before
+                    == agent.interoception.state.fatigue,
+                    "cooldown_identical": last_check
+                    == getattr(agent, "_last_experiment_cycle", None),
+                }
+                restart["intention_history_equal"] = history_before == getattr(
+                    agent, "_intention_history", []
+                )
+                restart["game_equal"] = game_before == getattr(
+                    agent, "_local_play", None
+                )
                 runner = attach(agent)
                 await runner.start()
     finally:
         await runner.stop()
-    claims = {key: {**claim.conclusion(), "observations": len(claim.evidence_node.experiences)}
-              for key, claim in agent.mental_models.claims.items()}
-    return {"seed": seed, "cycles": cycles, "arbitrated_actions": dict(actions),
-            "play_turns": play_turns, "final_game": getattr(agent, "_local_play", None),
-            "continuation_offers": dict(continuation_offers),
-            "continuation_choices": dict(continuation_choices),
-            "continuation_losses": dict(continuation_losses),
-            "continuation_traces": continuation_traces,
-            "final_intention_history": list(getattr(agent, "_intention_history", [])),
-            "winning_sources": dict(sources), "initial_sources": dict(initial_sources),
-            "escape_transitions": dict(transitions), "escape_traces": escape_traces,
-            "deferred_methods": dict(deferred_methods), "released_methods": dict(released_methods),
-            "productive_actions": agent.loop_closer.productive_total,
-            "productive_effects": agent.loop_closer.productive_effect_total,
-            "proposals": dict(offers),
-            "selected_checks": dict(selected), "checks_lost_to": dict(rivals),
-            "prediction_matches": dict(matches), "experiment_traces": traces,
-            "energy_range": [min(energies), max(energies)],
-            "fatigue_range": [min(fatigues), max(fatigues)], "restart": restart,
-            "claims": claims,
-            "concept_experiences": sum(len(node.experiences) for node in agent.mental_models.concepts.values()),
-            "claim_observations": sum(len(claim.evidence_node.experiences) for claim in agent.mental_models.claims.values())}
+    claims = {
+        key: {
+            **claim.conclusion(),
+            "observations": len(claim.evidence_node.experiences),
+        }
+        for key, claim in agent.mental_models.claims.items()
+    }
+    return {
+        "seed": seed,
+        "cycles": cycles,
+        "arbitrated_actions": dict(actions),
+        "play_turns": play_turns,
+        "final_game": getattr(agent, "_local_play", None),
+        "continuation_offers": dict(continuation_offers),
+        "continuation_choices": dict(continuation_choices),
+        "continuation_losses": dict(continuation_losses),
+        "continuation_traces": continuation_traces,
+        "final_intention_history": list(getattr(agent, "_intention_history", [])),
+        "winning_sources": dict(sources),
+        "initial_sources": dict(initial_sources),
+        "escape_transitions": dict(transitions),
+        "escape_traces": escape_traces,
+        "deferred_methods": dict(deferred_methods),
+        "released_methods": dict(released_methods),
+        "productive_actions": agent.loop_closer.productive_total,
+        "productive_effects": agent.loop_closer.productive_effect_total,
+        "proposals": dict(offers),
+        "selected_checks": dict(selected),
+        "checks_lost_to": dict(rivals),
+        "prediction_matches": dict(matches),
+        "experiment_traces": traces,
+        "energy_range": [min(energies), max(energies)],
+        "fatigue_range": [min(fatigues), max(fatigues)],
+        "restart": restart,
+        "claims": claims,
+        "concept_experiences": sum(
+            len(node.experiences) for node in agent.mental_models.concepts.values()
+        ),
+        "claim_observations": sum(
+            len(claim.evidence_node.experiences)
+            for claim in agent.mental_models.claims.values()
+        ),
+    }
 
 
 if __name__ == "__main__":
@@ -180,11 +242,23 @@ if __name__ == "__main__":
 
         with ExitStack() as stack:
             if args.no_method_feedback:
-                stack.enter_context(patch("src.cognition.method_feedback.prepare_candidates", side_effect=lambda agent, candidates: (candidates, {})))
+                stack.enter_context(
+                    patch(
+                        "src.cognition.method_feedback.prepare_candidates",
+                        side_effect=lambda agent, candidates: (candidates, {}),
+                    )
+                )
             if args.no_continuation:
-                stack.enter_context(patch("src.cognition.intention_continuation.continuation_candidate", return_value=None))
+                stack.enter_context(
+                    patch(
+                        "src.cognition.intention_continuation.continuation_candidate",
+                        return_value=None,
+                    )
+                )
             result = asyncio.run(measure(args.cycles, args.seed))
         result["continuation_enabled"] = not args.no_continuation
         result["method_feedback_enabled"] = not args.no_method_feedback
-        args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        args.report.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         logging.shutdown()

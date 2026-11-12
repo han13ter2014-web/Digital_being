@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 from typing import Any, Dict, Optional, Tuple
 
 from src.app.paths import AppEnv
@@ -28,23 +27,64 @@ class RecoveryRequiredError(RuntimeError):
     """История существует, но безопасное восстановление не завершено."""
 
 
-def checkpoint_candidates(agent_name: str, checkpoint_dir: Optional[str] = None):
-    """Снимки от новых к старым; существующий приоритет SQLite сохранён."""
-    import re
+def _sqlite_checkpoint_candidates(database, agent_name):
+    """Снимки конкретной жизни из базы, от новых к старым."""
     import sqlite3
+    from contextlib import closing
+    from pathlib import Path
 
-    directory = checkpoint_dir or data_path("checkpoints")
-    if not os.path.isdir(directory):
-        return []
-    candidates = []
+    try:
+        with closing(
+            sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            from src.memory.life_database import LifeDatabase
+
+            if version not in (1, LifeDatabase.SCHEMA_VERSION):
+                raise ValueError(f"Неподдерживаемая версия SQLite: {version}")
+            ids = connection.execute(
+                "SELECT id FROM snapshots WHERE agent_name = ? ORDER BY id DESC",
+                (agent_name,),
+            ).fetchall()
+        return [f"{os.path.abspath(database)}#snapshot={row[0]}" for row in ids]
+    except (sqlite3.Error, ValueError) as exc:
+        raise RecoveryRequiredError(
+            f"Не удалось прочитать историю {database}: {exc}"
+        ) from exc
+
+
+def checkpoint_candidates(agent_name: str, checkpoint_dir: Optional[str] = None):
+    """Снимки от новых к старым; primary SQLite предшествует аварийному JSON."""
+    import re
     from pathlib import Path
     from src.core.life_identity import validate_life_id
 
+    directory = checkpoint_dir or data_path("checkpoints")
+    candidates = []
+    matched_identities = set()
     try:
         requested_id = validate_life_id(agent_name)
     except ValueError:
         requested_id = None
-    for child in Path(directory).iterdir():
+    primary_database = None
+    if requested_id is not None:
+        primary_database = data_path("lives", requested_id, "life.sqlite3")
+        if os.path.isfile(primary_database):
+            candidates.extend(
+                _sqlite_checkpoint_candidates(primary_database, requested_id)
+            )
+
+    def extend_named(scoped, identity):
+        if matched_identities and identity not in matched_identities:
+            raise RecoveryRequiredError(
+                "Найдено несколько жизней с одинаковым именем; выберите UUID"
+            )
+        if not matched_identities:
+            candidates.extend(scoped)
+        matched_identities.add(identity)
+
+    children = Path(directory).iterdir() if os.path.isdir(directory) else ()
+    for child in children:
         if not child.is_dir():
             continue
         try:
@@ -62,35 +102,48 @@ def checkpoint_candidates(agent_name: str, checkpoint_dir: Optional[str] = None)
             try:
                 latest = CheckpointSerializer().load(scoped[0])
             except Exception as exc:
-                raise RecoveryRequiredError(f"Не удалось прочитать профиль {identity}: {exc}") from exc
+                raise RecoveryRequiredError(
+                    f"Не удалось прочитать профиль {identity}: {exc}"
+                ) from exc
             if latest.get("name") == agent_name:
-                if candidates:
-                    raise RecoveryRequiredError("Найдено несколько жизней с одинаковым именем; выберите UUID")
-                candidates.extend(scoped)
-    database = os.path.join(directory, "life.sqlite3")
-    if os.path.isfile(database):
-        from pathlib import Path
-        from contextlib import closing
+                extend_named(scoped, identity)
+    if requested_id is None:
+        lives = Path(data_path("lives"))
+        for child in lives.iterdir() if lives.is_dir() else ():
+            try:
+                identity = validate_life_id(child.name)
+            except ValueError:
+                continue
+            database = child / "life.sqlite3"
+            if not database.is_file():
+                continue
+            scoped = _sqlite_checkpoint_candidates(database, identity)
+            if scoped:
+                from src.core.checkpoint_serializer import CheckpointSerializer
 
-        try:
-            with closing(sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)) as connection:
-                version = connection.execute("PRAGMA user_version").fetchone()[0]
-                if version != 1:
-                    raise ValueError(f"Неподдерживаемая версия SQLite: {version}")
-                ids = connection.execute(
-                    "SELECT id FROM snapshots WHERE agent_name = ? ORDER BY id DESC", (agent_name,)
-                ).fetchall()
-                candidates.extend(f"{os.path.abspath(database)}#snapshot={row[0]}" for row in ids)
-        except (sqlite3.Error, ValueError) as exc:
-            raise RecoveryRequiredError(f"Не удалось прочитать историю {database}: {exc}") from exc
+                try:
+                    latest = CheckpointSerializer().load(scoped[0])
+                except Exception as exc:
+                    raise RecoveryRequiredError(
+                        f"Не удалось прочитать профиль {identity}: {exc}"
+                    ) from exc
+                if latest.get("name") == agent_name:
+                    extend_named(scoped, identity)
+    database = os.path.join(directory, "life.sqlite3")
+    if os.path.isfile(database) and os.path.abspath(database) != os.path.abspath(
+        primary_database or ""
+    ):
+        candidates.extend(_sqlite_checkpoint_candidates(database, agent_name))
     pattern = re.compile(re.escape(agent_name) + r"_cycle_([0-9]+)[.]json(?:[.]gz)?$")
     files = []
-    for name in os.listdir(directory):
+    for name in os.listdir(directory) if os.path.isdir(directory) else ():
         match = pattern.fullmatch(name)
         if match and os.path.isfile(os.path.join(directory, name)):
             files.append((int(match.group(1)), name))
-    candidates.extend(os.path.join(directory, name) for _, name in sorted(files, reverse=True))
-    return candidates
+    candidates.extend(
+        os.path.join(directory, name) for _, name in sorted(files, reverse=True)
+    )
+    return list(dict.fromkeys(candidates))
 
 
 def latest_checkpoint(
@@ -123,14 +176,12 @@ def awaken_from_seed(
     seed_path = os.path.join(root, seed_name)
     if not os.path.isdir(seed_path):
         available = sorted(os.listdir(root)) if os.path.isdir(root) else []
-        raise FileNotFoundError(
-            f"Семя не найдено: {seed_path}. Доступные: {available}"
-        )
+        raise FileNotFoundError(f"Семя не найдено: {seed_path}. Доступные: {available}")
 
     report: Dict[str, Any] = {
         "seed": seed_name,
         "seed_path": seed_path,
-        "concepts": 0,          # всего концепций у ребёнка после прорастания
+        "concepts": 0,  # всего концепций у ребёнка после прорастания
         "inherited_concepts": 0,  # сколько пришло именно из семени
         "values": [],
         "attachments": 0,
@@ -168,10 +219,12 @@ def awaken_from_seed(
                 inherited += 1
             from src.cognition.empirical_claims import EmpiricalClaim
 
-            agent.mental_models.claims.update({
-                key: EmpiricalClaim.from_dict(raw)
-                for key, raw in (models.get("claims") or {}).items()
-            })
+            agent.mental_models.claims.update(
+                {
+                    key: EmpiricalClaim.from_dict(raw)
+                    for key, raw in (models.get("claims") or {}).items()
+                }
+            )
             report["concepts"] = len(agent.mental_models.concepts)
             report["inherited_concepts"] = inherited
         except Exception as exc:
@@ -196,9 +249,7 @@ def awaken_from_seed(
                 if core_identity.get("statement"):
                     core.core_identity = core_identity["statement"]
                 if core_identity.get("stability") is not None:
-                    core.identity_stability_score = float(
-                        core_identity["stability"]
-                    )
+                    core.identity_stability_score = float(core_identity["stability"])
         except Exception as exc:
             logger.warning("Семя %s: identity: %s", seed_name, exc)
 
@@ -264,22 +315,30 @@ def create_agent(
 
     logger.info("Создаю агента '%s'...", name)
     os.environ["DIGITAL_BEING_DATA_DIR"] = os.path.abspath(env.data_root)
-    agent = DigitalBeing(name, profile_managed=True)
+    # Выбранная жизнь должна владеть managed-хранилищами с самого
+    # конструктора: поздний rebind оставляет пустую БД временного UUID.
+    agent = DigitalBeing(
+        name, life_id=expected_life_id, profile_managed=True
+    )
 
-    # Пути к пользовательским данным: рядом с .exe их писать нельзя.
+    # Упакованный сид загружается только в память. Живой knowledge_base.json
+    # не создаётся и не читается: источник истины — следующий Core snapshot.
     knowledge_file = os.path.join(env.data_root, "knowledge_base.json")
-    os.makedirs(os.path.dirname(knowledge_file), exist_ok=True)
-    if not os.path.isfile(knowledge_file):
-        bundled = os.path.join(env.base_dir, "data_bootstrap", "knowledge_base.json")
-        if not os.path.isfile(bundled):
-            # PyInstaller раскладывает стартовый сид в data/ внутри _MEIPASS.
-            bundled = os.path.join(env.base_dir, "data", "knowledge_base.json")
-        if os.path.isfile(bundled):
-            try:
-                shutil.copy2(bundled, knowledge_file)
-                logger.info("Скопирована базовая БЗ → %s", knowledge_file)
-            except OSError as exc:
-                logger.warning("Не удалось скопировать БЗ: %s", exc)
+    bundled = os.path.join(env.base_dir, "data_bootstrap", "knowledge_base.json")
+    if not os.path.isfile(bundled):
+        # PyInstaller раскладывает стартовый сид в data/ внутри _MEIPASS.
+        bundled = os.path.join(env.base_dir, "data", "knowledge_base.json")
+    if os.path.isfile(bundled):
+        try:
+            with open(bundled, "r", encoding="utf-8") as handle:
+                seed_knowledge = json.load(handle)
+            from src.memory.knowledge_quality import clean_knowledge_base
+
+            cleaned, _removed = clean_knowledge_base(seed_knowledge)
+            agent.knowledge_base.clear()
+            agent.knowledge_base.update(cleaned)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("Не удалось загрузить базовую БЗ: %s", exc)
 
     agent.knowledge_file = knowledge_file
     agent.checkpoint_dir = os.path.join(env.data_root, "checkpoints")
@@ -306,7 +365,10 @@ def create_agent(
 
     if restore and not new:
         from src.core.checkpoint_serializer import CheckpointSerializer
-        from src.core.checkpoint_migrations import SCHEMA_VERSION, CheckpointMigrationError
+        from src.core.checkpoint_migrations import (
+            SCHEMA_VERSION,
+            CheckpointMigrationError,
+        )
 
         checkpoint_scope = expected_life_id or name
         checkpoint_directory = agent.checkpoint_dir
@@ -322,18 +384,29 @@ def create_agent(
                 if not isinstance(state, dict):
                     raise ValueError("Некорректный снимок жизни")
                 if expected_life_id is None and state.get("name") != name:
-                    raise ValueError("Имя в старом снимке не соответствует выбранной жизни")
-                if expected_life_id is not None and state.get("life_id") != expected_life_id:
-                    raise RecoveryRequiredError("Идентификатор снимка не соответствует выбранной жизни")
+                    raise ValueError(
+                        "Имя в старом снимке не соответствует выбранной жизни"
+                    )
+                if (
+                    expected_life_id is not None
+                    and state.get("life_id") != expected_life_id
+                ):
+                    raise RecoveryRequiredError(
+                        "Идентификатор снимка не соответствует выбранной жизни"
+                    )
                 if state.get("schema_version", 0) > SCHEMA_VERSION:
-                    raise RecoveryRequiredError("Снимок создан более новой версией программы")
+                    raise RecoveryRequiredError(
+                        "Снимок создан более новой версией программы"
+                    )
                 from src.core.checkpoint_validation import validate_checkpoint_state
 
                 validate_checkpoint_state(state)
             except RecoveryRequiredError:
                 raise
             except CheckpointMigrationError as exc:
-                raise RecoveryRequiredError(f"Нельзя преобразовать формат {checkpoint}: {exc}") from exc
+                raise RecoveryRequiredError(
+                    f"Нельзя преобразовать формат {checkpoint}: {exc}"
+                ) from exc
             except Exception as exc:
                 failures.append({"checkpoint": checkpoint, "error": str(exc)})
                 logger.warning("Снимок не читается %s: %s", checkpoint, exc)
@@ -341,7 +414,9 @@ def create_agent(
             # Применение пока не полностью транзакционно: после его ошибки
             # не пытаемся продолжить на частично изменённом объекте.
             if not agent.load_state(checkpoint):
-                raise RecoveryRequiredError(f"Не удалось применить снимок {checkpoint}; запуск остановлен")
+                raise RecoveryRequiredError(
+                    f"Не удалось применить снимок {checkpoint}; запуск остановлен"
+                )
             if "life_id" not in state:
                 memory = getattr(agent, "long_term_memory", None)
                 if memory is None:
@@ -354,15 +429,23 @@ def create_agent(
                     raise RecoveryRequiredError(
                         "Не удалось перенести старую долговременную память; оригинал сохранён"
                     ) from exc
-            report.update(source="checkpoint", checkpoint=os.path.basename(checkpoint),
-                          cycle=agent.cycle_count, recovery_failures=failures,
-                          recovered_from_older=bool(failures))
+            report.update(
+                source="checkpoint",
+                checkpoint=os.path.basename(checkpoint),
+                cycle=agent.cycle_count,
+                recovery_failures=failures,
+                recovered_from_older=bool(failures),
+            )
             break
         else:
             if candidates:
-                raise RecoveryRequiredError(f"Ни один из {len(candidates)} снимков не читается; данные сохранены")
+                raise RecoveryRequiredError(
+                    f"Ни один из {len(candidates)} снимков не читается; данные сохранены"
+                )
             if expected_life_id is not None:
-                raise RecoveryRequiredError("Снимки выбранной жизни не найдены; новая жизнь не создана")
+                raise RecoveryRequiredError(
+                    "Снимки выбранной жизни не найдены; новая жизнь не создана"
+                )
             logger.info("Чекпоинтов не найдено — стартуем новую жизнь")
 
     # Разрешения, выбранные человеком, переживают перезапуск. Ошибка чтения

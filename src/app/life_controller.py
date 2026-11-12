@@ -67,9 +67,7 @@ class LifeController:
             )
             return
 
-        logger.info(
-            f"[LifeController] Запрос {kind}: {result.get('request_id')}"
-        )
+        logger.info(f"[LifeController] Запрос {kind}: {result.get('request_id')}")
         await self.bus.publish(
             Events.LIFE_PROMPT,
             {
@@ -93,9 +91,7 @@ class LifeController:
 
         request = self._get_request(request_id)
         if request is None:
-            await self._publish_result(
-                False, "Запрос не найден или истёк.", state=None
-            )
+            await self._publish_result(False, "Запрос не найден или истёк.", state=None)
             return
 
         if request.kind == "dream":
@@ -112,21 +108,17 @@ class LifeController:
 
         if status == "dreaming":
             message = (
-                "Агент уснул. Семя сохранено в Яслях: "
-                f"{result.get('seed_folder')}"
+                "Агент уснул. Семя сохранено в Яслях: " f"{result.get('seed_folder')}"
             )
         elif status == "terminated":
             message = (
-                "Агент прекратил существование. "
-                "Снимок данных создан перед уходом."
+                "Агент прекратил существование. " "Снимок данных создан перед уходом."
             )
         else:
             message = "Готово."
 
         logger.info(f"[LifeController] Подтверждено: {status}")
-        await self._publish_result(
-            True, message, state=result.get("state")
-        )
+        await self._publish_result(True, message, state=result.get("state"))
 
     async def _on_cancel(self, event) -> None:
         """Отмена работает всегда и ничего не требует."""
@@ -147,7 +139,8 @@ class LifeController:
         result = self.agent.wake_from_sleep()
         if result.get("status") == "denied":
             await self._publish_result(
-                False, str(result.get("reason", "Не удалось разбудить")),
+                False,
+                str(result.get("reason", "Не удалось разбудить")),
                 state=None,
             )
             return

@@ -4,6 +4,7 @@
 с привязанными настоящими методами DigitalBeing (как в
 tests/test_emotional_state.py).
 """
+
 import unittest
 from types import SimpleNamespace
 
@@ -18,12 +19,14 @@ class _FakeMentalModels:
         self.encounters = []
 
     def encounter_concept(self, concept_name, context, outcome, valence=0.0):
-        self.encounters.append({
-            "concept_name": concept_name,
-            "context": context,
-            "outcome": outcome,
-            "valence": valence,
-        })
+        self.encounters.append(
+            {
+                "concept_name": concept_name,
+                "context": context,
+                "outcome": outcome,
+                "valence": valence,
+            }
+        )
         node = SimpleNamespace(confidence=0.1)
         self.concepts[concept_name] = node
         return node
@@ -66,7 +69,7 @@ _FOUND_SOUL = {
     "found": True,
     "title": "Душа",
     "extract": "Душа — нематериальная сущность живого существа, "
-               "описываемая в философии и религии.",
+    "описываемая в философии и религии.",
     "url": "https://ru.wikipedia.org/wiki/Душа",
     "lang": "ru",
     "source": "wikipedia:search",

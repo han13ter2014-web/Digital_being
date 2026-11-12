@@ -34,6 +34,7 @@ VALID_DEF = "Жизнь — это процесс самовоспроизвед
 # 1. Фильтр записей
 # ============================================================
 
+
 @pytest.mark.parametrize(
     "key,definition,expected",
     [
@@ -107,6 +108,7 @@ def test_normalize_concept_name_still_available():
 # 2. Запросы в интернет
 # ============================================================
 
+
 @pytest.mark.parametrize("query", ["?", "s_1", "42", "что такое?", "", "   "])
 def test_junk_query_is_not_worth_searching(query):
     assert is_worth_searching(query) is False
@@ -128,6 +130,7 @@ def test_relevance_requires_query_token():
 # ============================================================
 # 3. WebSearcher
 # ============================================================
+
 
 class _FakeResponse:
     status = 200
@@ -200,9 +203,7 @@ def test_web_searcher_rejects_disambiguation(monkeypatch):
 
 
 def test_web_searcher_rejects_irrelevant_article(monkeypatch):
-    _install_wikipedia(
-        monkeypatch, "Бета", "Бета — вторая буква греческого алфавита."
-    )
+    _install_wikipedia(monkeypatch, "Бета", "Бета — вторая буква греческого алфавита.")
     searcher = WebSearcher(lang="ru", fallback_to_en=False, rate_limit_sec=0)
 
     result = searcher.search("альфа")
@@ -246,6 +247,7 @@ def test_web_search_pipeline_normalizes_query():
 # ============================================================
 # 4. Запись в KB через ThinkingPipeline
 # ============================================================
+
 
 class _FakeMentalModels:
     def __init__(self):
@@ -305,7 +307,8 @@ def test_apply_web_result_saves_valid_entry():
     agent = _FakeAgent()
     pipe = ThinkingPipeline(agent)
     web = _web_result(
-        "Счастье", "Счастье — состояние человека, которое соответствует наибольшей внутренней удовлетворённости."
+        "Счастье",
+        "Счастье — состояние человека, которое соответствует наибольшей внутренней удовлетворённости.",
     )
 
     thought = pipe._apply_web_result("что такое счастье", web, "fallback")
@@ -319,6 +322,7 @@ def test_apply_web_result_saves_valid_entry():
 # ============================================================
 # 5. KnowledgeSubsystem
 # ============================================================
+
 
 def _subsystem(tmp_path):
     return KnowledgeSubsystem(

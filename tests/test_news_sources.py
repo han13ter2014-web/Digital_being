@@ -5,6 +5,7 @@
 не идут в базу знаний, не кэшируются, считаются отдельно; у read_news
 честный кулдаун (прочитал и «не нашлось» — одинаково закрывают тему).
 """
+
 import json
 import unittest
 import urllib.error
@@ -64,8 +65,12 @@ class _FakeResponse:
 
 def _make_searcher() -> WebSearcher:
     return WebSearcher(
-        lang="ru", timeout=2.0, max_chars=500,
-        rate_limit_sec=0.0, cache_size=3, fallback_to_en=True,
+        lang="ru",
+        timeout=2.0,
+        max_chars=500,
+        rate_limit_sec=0.0,
+        cache_size=3,
+        fallback_to_en=True,
     )
 
 
@@ -75,15 +80,17 @@ class WikibooksChainTests(unittest.TestCase):
     def test_wikibooks_fallback_found(self):
         """Всё молчало — учебник кормит, источник помечен честно."""
         responses = [
-            _FakeResponse(_make_empty_response()),     # RU заголовок
+            _FakeResponse(_make_empty_response()),  # RU заголовок
             _FakeResponse(_make_search_response([])),  # полнотекст пуст
-            _FakeResponse(_make_empty_response()),     # Викисловарь пуст
-            _FakeResponse(_make_wiki_response(          # Викибуки
-                "Садоводство",
-                "Садоводство — отрасль растениеводства, занимающаяся "
-                "выращиванием плодовых, ягодных и декоративных растений.",
-                "https://ru.wikibooks.org/wiki/Садоводство",
-            )),
+            _FakeResponse(_make_empty_response()),  # Викисловарь пуст
+            _FakeResponse(
+                _make_wiki_response(  # Викибуки
+                    "Садоводство",
+                    "Садоводство — отрасль растениеводства, занимающаяся "
+                    "выращиванием плодовых, ягодных и декоративных растений.",
+                    "https://ru.wikibooks.org/wiki/Садоводство",
+                )
+            ),
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
@@ -101,12 +108,14 @@ class WikibooksChainTests(unittest.TestCase):
             _FakeResponse(_make_empty_response()),
             _FakeResponse(_make_search_response([])),
             _FakeResponse(_make_empty_response()),
-            _FakeResponse(_make_wiki_response(
-                "Луна",
-                "Луна — может означать: спутник, богиня и прочее.",
-                "https://ru.wikibooks.org/wiki/Луна",
-            )),
-            _FakeResponse(_make_empty_response()),     # EN тоже пуст
+            _FakeResponse(
+                _make_wiki_response(
+                    "Луна",
+                    "Луна — может означать: спутник, богиня и прочее.",
+                    "https://ru.wikibooks.org/wiki/Луна",
+                )
+            ),
+            _FakeResponse(_make_empty_response()),  # EN тоже пуст
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
@@ -120,11 +129,13 @@ class WikibooksChainTests(unittest.TestCase):
         responses = [
             _FakeResponse(_make_empty_response()),
             _FakeResponse(_make_search_response([])),
-            _FakeResponse(_make_wiki_response(
-                "прозрачность",
-                "Прозрачность — свойство среды пропускать свет.",
-                "https://ru.wiktionary.org/wiki/прозрачность",
-            )),
+            _FakeResponse(
+                _make_wiki_response(
+                    "прозрачность",
+                    "Прозрачность — свойство среды пропускать свет.",
+                    "https://ru.wiktionary.org/wiki/прозрачность",
+                )
+            ),
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
@@ -150,11 +161,13 @@ class NewsSearchTests(unittest.TestCase):
         """Новость найдена, но это не еда: счётчики находок не растут."""
         responses = [
             _FakeResponse(_make_search_response(["Садоводство в городе"])),
-            _FakeResponse(_make_wiki_response(
-                "Садоводство в городе",
-                self._NEWS_EXTRACT,
-                "https://ru.wikinews.org/wiki/Садоводство_в_городе",
-            )),
+            _FakeResponse(
+                _make_wiki_response(
+                    "Садоводство в городе",
+                    self._NEWS_EXTRACT,
+                    "https://ru.wikinews.org/wiki/Садоводство_в_городе",
+                )
+            ),
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
@@ -183,11 +196,13 @@ class NewsSearchTests(unittest.TestCase):
         """Анонс вместо новости впечатлением не является."""
         responses = [
             _FakeResponse(_make_search_response(["Короткая"])),
-            _FakeResponse(_make_wiki_response(
-                "Короткая",
-                "Садоводство: анонс.",
-                "https://ru.wikinews.org/wiki/Короткая",
-            )),
+            _FakeResponse(
+                _make_wiki_response(
+                    "Короткая",
+                    "Садоводство: анонс.",
+                    "https://ru.wikinews.org/wiki/Короткая",
+                )
+            ),
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses):
@@ -200,13 +215,15 @@ class NewsSearchTests(unittest.TestCase):
         """Новость не о теме — не впечатление о теме."""
         responses = [
             _FakeResponse(_make_search_response(["Постороннее"])),
-            _FakeResponse(_make_wiki_response(
-                "Постороннее",
-                "Футбольный матч завершился вничью; команды разошлись "
-                "миром, болельщики долго обсуждали судейство встречи "
-                "и погоду на стадионе, но к теме это не относится.",
-                "https://ru.wikinews.org/wiki/Постороннее",
-            )),
+            _FakeResponse(
+                _make_wiki_response(
+                    "Постороннее",
+                    "Футбольный матч завершился вничью; команды разошлись "
+                    "миром, болельщики долго обсуждали судейство встречи "
+                    "и погоду на стадионе, но к теме это не относится.",
+                    "https://ru.wikinews.org/wiki/Постороннее",
+                )
+            ),
         ]
         ws = _make_searcher()
         with patch("urllib.request.urlopen", side_effect=responses):
@@ -255,8 +272,7 @@ class _FakeWillRegistry:
         self.records = []
 
     def record(self, will_type, topic, reason, **kwargs):
-        self.records.append({"type": will_type, "topic": topic,
-                             "reason": reason})
+        self.records.append({"type": will_type, "topic": topic, "reason": reason})
 
 
 def _make_news_searcher(result):
@@ -275,8 +291,15 @@ _NEWS_FOUND = {
     "error": None,
 }
 
-_NEWS_MISS = {"found": False, "title": "", "extract": "", "url": "",
-              "lang": "ru", "source": None, "error": "no_search_results"}
+_NEWS_MISS = {
+    "found": False,
+    "title": "",
+    "extract": "",
+    "url": "",
+    "lang": "ru",
+    "source": None,
+    "error": "no_search_results",
+}
 
 
 def _make_agent(searcher, cycle=10, goal_title="выучить садоводство"):
@@ -306,9 +329,7 @@ class ReadNewsActionTests(unittest.TestCase):
         self.assertEqual(agent.knowledge_base, {"старая тема": "старое знание"})
         # Но впечатление — волевой акт, записан.
         self.assertEqual(agent.will_registry.records[0]["type"], "news_reads")
-        self.assertEqual(
-            agent._news_reads["выучить садоводство"], agent.cycle_count
-        )
+        self.assertEqual(agent._news_reads["выучить садоводство"], agent.cycle_count)
 
     def test_cooldown_blocks_repeat_without_network(self):
         searcher = _make_news_searcher(_NEWS_FOUND)
@@ -346,8 +367,9 @@ class ReadNewsActionTests(unittest.TestCase):
         self.assertEqual(len(searcher.calls), 0)
 
     def test_news_topic_prefers_active_goal(self):
-        agent = _make_agent(_make_news_searcher(_NEWS_MISS),
-                            goal_title="выучить садоводство")
+        agent = _make_agent(
+            _make_news_searcher(_NEWS_MISS), goal_title="выучить садоводство"
+        )
         self.assertEqual(agent._pick_news_topic(), "выучить садоводство")
 
     def test_news_topic_falls_back_to_known_concept(self):

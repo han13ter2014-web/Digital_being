@@ -13,10 +13,12 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 
 from typing import Dict
 
+
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
 def _get_events_class():
     try:
         from src.core.event_bus import Events
+
         return Events
     except Exception:
         return None
@@ -26,14 +28,22 @@ def _get_events_class():
 # (src/core/agent.py). Дублировано локально: perception не импортирует
 # core. При изменении множества в agent.py синхронизировать здесь —
 # на него опирается миграция чекпоинтов.
-_META_TOPIC_WORDS = frozenset({
-    "вопрос", "вопросы",
-    "тема", "темы",
-    "ответ", "ответы",
-    "сообщение", "сообщения",
-    "диалог", "диалоги",
-    "разговор", "разговоры",
-})
+_META_TOPIC_WORDS = frozenset(
+    {
+        "вопрос",
+        "вопросы",
+        "тема",
+        "темы",
+        "ответ",
+        "ответы",
+        "сообщение",
+        "сообщения",
+        "диалог",
+        "диалоги",
+        "разговор",
+        "разговоры",
+    }
+)
 
 _SELF_QUESTION_TOPIC_PREFIX = "самостоятельный вопрос по теме: "
 
@@ -67,9 +77,18 @@ class UserInteraction:
 
     # Стандартные приложения, в которых не нужно беспокоить
     DEFAULT_QUIET_APPS = [
-        "VSCode", "PyCharm", "IntelliJ IDEA", "Terminal",
-        "WindowsTerminal", "Photoshop", "Premiere", "AfterEffects",
-        "vim", "emacs", "Sublime Text", "Atom",
+        "VSCode",
+        "PyCharm",
+        "IntelliJ IDEA",
+        "Terminal",
+        "WindowsTerminal",
+        "Photoshop",
+        "Premiere",
+        "AfterEffects",
+        "vim",
+        "emacs",
+        "Sublime Text",
+        "Atom",
     ]
 
     def __init__(self, agent_name="Agent", bus=None):
@@ -97,9 +116,7 @@ class UserInteraction:
         self.last_question_cycle = -self.cooldown_cycles
 
         # === НОВОЕ: настройки quiet hours (приложения, где не беспокоить) ===
-        self.user_quiet_hours = {
-            app: True for app in self.DEFAULT_QUIET_APPS
-        }
+        self.user_quiet_hours = {app: True for app in self.DEFAULT_QUIET_APPS}
 
     def attach_bus(self, bus) -> None:
         """Привязать EventBus (вызывается после создания агента и шины).
@@ -118,7 +135,10 @@ class UserInteraction:
             return
         try:
             self._bus.publish_sync(
-                event_name, data, source="user_interaction", priority=priority,
+                event_name,
+                data,
+                source="user_interaction",
+                priority=priority,
             )
         except Exception:
             # Не критично — событие просто не дойдёт до GUI,
@@ -133,17 +153,24 @@ class UserInteraction:
         if cycle_count - self.last_question_cycle < self.cooldown_cycles:
             return False
 
-        recent_questions = [q for q in self.question_history
-                          if q.get('cycle', 0) > cycle_count - 100]
+        recent_questions = [
+            q for q in self.question_history if q.get("cycle", 0) > cycle_count - 100
+        ]
         if len(recent_questions) > 5:
             return False
 
         return True
 
-    def ask_user(self, question: str, context: str = "", cycle: int = 0,
-                   complex_question: str = None, sub_questions: list = None,
-                   sub_question_index: int = 0,
-                   sub_answers: dict = None) -> dict:
+    def ask_user(
+        self,
+        question: str,
+        context: str = "",
+        cycle: int = 0,
+        complex_question: str = None,
+        sub_questions: list = None,
+        sub_question_index: int = 0,
+        sub_answers: dict = None,
+    ) -> dict:
         """Добавляет вопрос в очередь ожидающих.
 
         Args:
@@ -167,15 +194,16 @@ class UserInteraction:
                 return {"status": "duplicate", "id": existing["id"]}
 
         if not self.can_ask_question(cycle):
-            return {"status": "failed", "reason": "Не могу задать вопрос сейчас (перезагрузка)"}
+            return {
+                "status": "failed",
+                "reason": "Не могу задать вопрос сейчас (перезагрузка)",
+            }
 
         # id = максимум среди живых вопросов + 1, а не len(pending)+1:
         # после восстановления из чекпоинта в очереди могут быть
         # вопросы с большими id, и len-схема выдавала дубликаты — ответ
         # попадал в чужой вопрос.
-        question_id = max(
-            (q["id"] for q in self.pending_questions), default=0
-        ) + 1
+        question_id = max((q["id"] for q in self.pending_questions), default=0) + 1
         question_entry = {
             "id": question_id,
             "question": question,
@@ -198,14 +226,18 @@ class UserInteraction:
         # cp1251-консоль (например, из подпроцесса) не ронял публикацию
         # события в шину. Этап 2.5: главное — чтобы событие ушло в GUI.
         try:
-            print(f"\n  ❓ [{self.agent_name}] ЗАПРОС К ПОЛЬЗОВАТЕЛЮ (#{question_entry['id']}):")
+            print(
+                f"\n  ❓ [{self.agent_name}] ЗАПРОС К ПОЛЬЗОВАТЕЛЮ (#{question_entry['id']}):"
+            )
             print(f"     Вопрос: {question}")
             if context:
                 print(f"     Контекст: {context}")
         except Exception:
             # В крайнем случае пишем ASCII-фолбэк
             try:
-                print(f"\n  [?] [{self.agent_name}] ZAPROS K POLZOVATELYU (#{question_entry['id']}):")
+                print(
+                    f"\n  [?] [{self.agent_name}] ZAPROS K POLZOVATELYU (#{question_entry['id']}):"
+                )
                 print(f"     Q: {question}")
                 if context:
                     print(f"     Context: {context}")
@@ -246,9 +278,13 @@ class UserInteraction:
 
         return pending[0]
 
-    def submit_answer(self, question_id: int, answer: str,
-                       on_synthesis_needed: callable = None,
-                       cycle: int = None) -> dict:
+    def submit_answer(
+        self,
+        question_id: int,
+        answer: str,
+        on_synthesis_needed: callable = None,
+        cycle: int = None,
+    ) -> dict:
         """Отправляет ответ на вопрос.
 
         Args:
@@ -267,28 +303,38 @@ class UserInteraction:
                 q["answer"] = answer
                 normalized_answer = " ".join(str(answer).lower().strip().split())
                 unknown_answers = {
-                    "не знаю", "не уверен", "не уверена", "не могу сказать",
-                    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+                    "не знаю",
+                    "не уверен",
+                    "не уверена",
+                    "не могу сказать",
+                    "без понятия",
+                    "затрудняюсь ответить",
+                    "не знаю ответа",
                 }
                 q["answer_kind"] = (
-                    "unknown" if normalized_answer.rstrip(".!?") in unknown_answers
+                    "unknown"
+                    if normalized_answer.rstrip(".!?") in unknown_answers
                     else "user_answer"
                 )
 
-                self.question_history.append({
-                    "question": q["question"],
-                    "answer": answer,
-                    "context": q.get("context", ""),
-                    "cycle": q["cycle"],
-                    "priority": q["priority"]
-                })
+                self.question_history.append(
+                    {
+                        "question": q["question"],
+                        "answer": answer,
+                        "context": q.get("context", ""),
+                        "cycle": q["cycle"],
+                        "priority": q["priority"],
+                    }
+                )
 
                 # Сохраняем данные о сложном вопросе перед удалением
                 complex_question = q.get("complex_question")
                 sub_questions = q.get("sub_questions", [])
                 sub_question_index = q.get("sub_question_index", 0)
 
-                self.pending_questions = [qq for qq in self.pending_questions if qq["id"] != question_id]
+                self.pending_questions = [
+                    qq for qq in self.pending_questions if qq["id"] != question_id
+                ]
 
                 # === НОВОЕ: отмечаем, что пользователь ответил ===
                 self._last_user_message_cycle = (
@@ -327,20 +373,29 @@ class UserInteraction:
                             sub_question_index=next_index,
                             sub_answers=accumulated,
                         )
-                        return {"status": "answered", "question_id": question_id,
-                                "next_sub_question": True}
+                        return {
+                            "status": "answered",
+                            "question_id": question_id,
+                            "next_sub_question": True,
+                        }
                     else:
                         # Все под-вопросы отвечены — нужен синтез!
                         if on_synthesis_needed:
                             on_synthesis_needed(complex_question, accumulated)
 
-                        return {"status": "answered", "question_id": question_id,
-                                "synthesis_needed": True,
-                                "complex_question": complex_question}
+                        return {
+                            "status": "answered",
+                            "question_id": question_id,
+                            "synthesis_needed": True,
+                            "complex_question": complex_question,
+                        }
 
                 return {"status": "answered", "question_id": question_id}
 
-        return {"status": "not_found", "reason": f"Вопрос #{question_id} не найден или уже отвечен"}
+        return {
+            "status": "not_found",
+            "reason": f"Вопрос #{question_id} не найден или уже отвечен",
+        }
 
     def decline_question(self, question_id: int, cycle: int = None) -> dict:
         """Снять вопрос без ответа: человек попросил не повторяться.
@@ -357,18 +412,22 @@ class UserInteraction:
                 q["answered"] = True
                 q["answer_kind"] = "declined"
                 self.pending_questions = [
-                    qq for qq in self.pending_questions
-                    if qq["id"] != question_id
+                    qq for qq in self.pending_questions if qq["id"] != question_id
                 ]
                 if cycle is not None:
                     self._last_user_message_cycle = cycle
                 return {"status": "declined", "question_id": question_id}
-        return {"status": "not_found", "reason": f"Вопрос #{question_id} не найден или уже отвечен"}
+        return {
+            "status": "not_found",
+            "reason": f"Вопрос #{question_id} не найден или уже отвечен",
+        }
 
     def get_user_prompts(self) -> str:
         """Получает ввод от пользователя (неблокирующий)."""
         try:
-            user_input = input(f"\n[{self.agent_name}] Введите сообщение или 'PROCEED' для продолжения: ")
+            user_input = input(
+                f"\n[{self.agent_name}] Введите сообщение или 'PROCEED' для продолжения: "
+            )
             return user_input.strip()
         except EOFError:
             return ""
@@ -376,12 +435,22 @@ class UserInteraction:
     def _calculate_priority(self, question: str, context: str) -> str:
         """Рассчитывает приоритет вопроса."""
         high_priority_keywords = [
-            "критический", "необходимо", "важно", "python", "алгоритм",
-            "функция", "класс", "структура", "база данных"
+            "критический",
+            "необходимо",
+            "важно",
+            "python",
+            "алгоритм",
+            "функция",
+            "класс",
+            "структура",
+            "база данных",
         ]
 
         low_priority_keywords = [
-            "абстрактный", "философский", "гипотетический", "теоретический"
+            "абстрактный",
+            "философский",
+            "гипотетический",
+            "теоретический",
         ]
 
         text = (question + " " + context).lower()
@@ -403,15 +472,21 @@ class UserInteraction:
     def generate_suggested_answers(self, question: str) -> list:
         """Генерирует варианты ответов для удобства пользователя."""
         base_responses = {
-            "что": ["Я думаю что это связано с пониманием концепции.",
-                     "Нужно больше информации для ответа.",
-                     "Это зависит от контекста использования."],
-            "как": ["Обычно это делается через реализацию.",
-                    "Зависит от конкретной задачи.",
-                    "Можно попробовать несколько подходов."],
-            "почему": ["Вероятно из-за ограничений системы.",
-                       "Это связано с фундаментальными принципами.",
-                       "Возможно для достижения определенной цели."],
+            "что": [
+                "Я думаю что это связано с пониманием концепции.",
+                "Нужно больше информации для ответа.",
+                "Это зависит от контекста использования.",
+            ],
+            "как": [
+                "Обычно это делается через реализацию.",
+                "Зависит от конкретной задачи.",
+                "Можно попробовать несколько подходов.",
+            ],
+            "почему": [
+                "Вероятно из-за ограничений системы.",
+                "Это связано с фундаментальными принципами.",
+                "Возможно для достижения определенной цели.",
+            ],
         }
 
         suggestions = []
@@ -420,8 +495,11 @@ class UserInteraction:
                 suggestions.extend(responses)
 
         if not suggestions:
-            suggestions = ["Да, согласен.", "Интересный вопрос. Нужно подумать.",
-                          "Предполагаю что ответ положительный."]
+            suggestions = [
+                "Да, согласен.",
+                "Интересный вопрос. Нужно подумать.",
+                "Предполагаю что ответ положительный.",
+            ]
 
         return suggestions[:3]
 
@@ -429,12 +507,15 @@ class UserInteraction:
     # НОВОЕ: ДИАЛОГ — сообщения разных типов (не только вопросы)
     # ============================================================
 
-    def send_message(self, content: str,
-                     msg_type: str = "statement",
-                     tone: str = "casual",
-                     urgency: float = 0.5,
-                     context: str = None,
-                     cycle: int = 0) -> str:
+    def send_message(
+        self,
+        content: str,
+        msg_type: str = "statement",
+        tone: str = "casual",
+        urgency: float = 0.5,
+        context: str = None,
+        cycle: int = 0,
+    ) -> str:
         """Отправляет сообщение пользователю.
 
         В отличие от ask_user, НЕ ожидает немедленного ответа.
@@ -511,8 +592,7 @@ class UserInteraction:
 
         return msg_id
 
-    def send_reply(self, text: str, context: str = "reply",
-                   cycle: int = 0) -> str:
+    def send_reply(self, text: str, context: str = "reply", cycle: int = 0) -> str:
         """Прямая реплика агенту в ответ на сообщение пользователя.
 
         Участок «Собеседник-6»: раньше прямые ответы публиковались как
@@ -522,8 +602,12 @@ class UserInteraction:
         рестарт и отличима от автономных мыслей.
         """
         return self.send_message(
-            text, msg_type="statement", tone="casual",
-            urgency=0.3, context=context, cycle=cycle,
+            text,
+            msg_type="statement",
+            tone="casual",
+            urgency=0.3,
+            context=context,
+            cycle=cycle,
         )
 
     def get_pending_messages(self, include_acknowledged: bool = False) -> list:
@@ -547,13 +631,15 @@ class UserInteraction:
 
         # Добавляем ответы пользователя из question_history
         for q in self.question_history[-n:]:
-            all_messages.append({
-                "sender": "user",
-                "content": q.get("answer", ""),
-                "cycle": q.get("cycle", 0),
-                "msg_type": "answer",
-                "tone": "user",
-            })
+            all_messages.append(
+                {
+                    "sender": "user",
+                    "content": q.get("answer", ""),
+                    "cycle": q.get("cycle", 0),
+                    "msg_type": "answer",
+                    "tone": "user",
+                }
+            )
 
         # Сортируем по циклу и берём последние N
         all_messages.sort(key=lambda x: x.get("cycle", 0))
@@ -570,16 +656,18 @@ class UserInteraction:
         чтобы агент мог отслеживать диалог.
         """
         self._last_user_message_cycle = cycle
-        self.message_history.append({
-            "id": f"user_{cycle}_{len(self.message_history)}",
-            "sender": "user",
-            "content": content,
-            "msg_type": "user_message",
-            "tone": "user",
-            "urgency": 0.0,
-            "cycle": cycle,
-            "acknowledged": True,
-        })
+        self.message_history.append(
+            {
+                "id": f"user_{cycle}_{len(self.message_history)}",
+                "sender": "user",
+                "content": content,
+                "msg_type": "user_message",
+                "tone": "user",
+                "urgency": 0.0,
+                "cycle": cycle,
+                "acknowledged": True,
+            }
+        )
         return {"status": "received", "cycle": cycle}
 
     # ============================================================
@@ -593,19 +681,18 @@ class UserInteraction:
         полями цепочек сложных вопросов (complex/sub) — иначе после
         рестарта сущность забывала разговор, а синтез цепочки ломался
         на середине. Плюс оба маркера цикла: кулдаун вопросов и «когда
-        пользователь писал последний раз» (детектор тишины). К5: последние
+        пользователь писал последний раз» (детектор тишины). Последние
         OUTGOING_TRACE_MAX исходящих реплик сохраняются как след публикаций;
         одинаковые тексты и id не дедуплицируются.
         """
         outgoing = [
-            dict(entry) for entry in self.message_history
+            dict(entry)
+            for entry in self.message_history
             if isinstance(entry, dict) and entry.get("sender") == "agent"
         ]
         return {
-            "question_history": [
-                dict(entry) for entry in self.question_history[-50:]
-            ],
-            "outgoing_messages": outgoing[-self.OUTGOING_TRACE_MAX:],
+            "question_history": [dict(entry) for entry in self.question_history[-50:]],
+            "outgoing_messages": outgoing[-self.OUTGOING_TRACE_MAX :],
             "pending_questions": [
                 {
                     "id": q["id"],
@@ -623,7 +710,8 @@ class UserInteraction:
             "last_question_cycle": int(self.last_question_cycle),
             "last_user_message_cycle": (
                 int(self._last_user_message_cycle)
-                if self._last_user_message_cycle is not None else None
+                if self._last_user_message_cycle is not None
+                else None
             ),
         }
 
@@ -649,13 +737,18 @@ class UserInteraction:
                 if not question:
                     continue
                 cycle = entry.get("cycle", 0)
-                restored.append({
-                    "question": question,
-                    "answer": entry.get("answer"),
-                    "context": str(entry.get("context") or ""),
-                    "cycle": int(cycle) if isinstance(cycle, (int, float)) and not isinstance(cycle, bool) else 0,
-                    "priority": str(entry.get("priority") or "medium"),
-                })
+                restored.append(
+                    {
+                        "question": question,
+                        "answer": entry.get("answer"),
+                        "context": str(entry.get("context") or ""),
+                        "cycle": int(cycle)
+                        if isinstance(cycle, (int, float))
+                        and not isinstance(cycle, bool)
+                        else 0,
+                        "priority": str(entry.get("priority") or "medium"),
+                    }
+                )
             self.question_history = restored
 
         saved_pending = data.get("pending_questions")
@@ -675,32 +768,34 @@ class UserInteraction:
                 if _is_meta_topic_context(context):
                     continue
                 if any(
-                    str(q["question"]).strip() == question
-                    for q in restored_pending
+                    str(q["question"]).strip() == question for q in restored_pending
                 ):
                     continue
                 raw_id = entry.get("id")
                 cycle = entry.get("cycle", 0)
-                restored_pending.append({
-                    "id": (
-                        int(raw_id)
-                        if isinstance(raw_id, (int, float))
-                        and not isinstance(raw_id, bool)
-                        else max(
-                            (q["id"] for q in restored_pending), default=0
-                        ) + 1
-                    ),
-                    "question": question,
-                    "context": context,
-                    "answered": False,
-                    "answer": None,
-                    "cycle": int(cycle) if isinstance(cycle, (int, float)) and not isinstance(cycle, bool) else 0,
-                    "priority": str(entry.get("priority") or "medium"),
-                    "complex_question": entry.get("complex_question"),
-                    "sub_questions": list(entry.get("sub_questions") or []),
-                    "sub_question_index": int(entry.get("sub_question_index") or 0),
-                    "sub_answers": dict(entry.get("sub_answers") or {}),
-                })
+                restored_pending.append(
+                    {
+                        "id": (
+                            int(raw_id)
+                            if isinstance(raw_id, (int, float))
+                            and not isinstance(raw_id, bool)
+                            else max((q["id"] for q in restored_pending), default=0) + 1
+                        ),
+                        "question": question,
+                        "context": context,
+                        "answered": False,
+                        "answer": None,
+                        "cycle": int(cycle)
+                        if isinstance(cycle, (int, float))
+                        and not isinstance(cycle, bool)
+                        else 0,
+                        "priority": str(entry.get("priority") or "medium"),
+                        "complex_question": entry.get("complex_question"),
+                        "sub_questions": list(entry.get("sub_questions") or []),
+                        "sub_question_index": int(entry.get("sub_question_index") or 0),
+                        "sub_answers": dict(entry.get("sub_answers") or {}),
+                    }
+                )
             if restored_pending:
                 self.pending_questions = restored_pending
 
@@ -722,17 +817,21 @@ class UserInteraction:
                 restored_entry = dict(entry)
                 restored_entry["cycle"] = int(cycle)
                 restored_outgoing.append(restored_entry)
-            self.message_history = restored_outgoing[-self.OUTGOING_TRACE_MAX:]
+            self.message_history = restored_outgoing[-self.OUTGOING_TRACE_MAX :]
             # След публикаций — не непрочитанные сообщения. Старые реплики
             # нельзя возвращать в очередь: иначе UI покажет их повторно.
             self.message_queue = []
 
         last_question = data.get("last_question_cycle")
-        if isinstance(last_question, (int, float)) and not isinstance(last_question, bool):
+        if isinstance(last_question, (int, float)) and not isinstance(
+            last_question, bool
+        ):
             self.last_question_cycle = int(last_question)
 
         last_message = data.get("last_user_message_cycle")
-        if isinstance(last_message, (int, float)) and not isinstance(last_message, bool):
+        if isinstance(last_message, (int, float)) and not isinstance(
+            last_message, bool
+        ):
             self._last_user_message_cycle = int(last_message)
 
     # ============================================================
@@ -811,9 +910,11 @@ class UserPromptHandler:
             # Любой другой ввод = сообщение пользователя агенту
             if hasattr(agent, "user_interaction"):
                 agent.user_interaction.receive_user_message(cmd)
-            return f"[Система] Ваше сообщение будет обработано агентом в следующем цикле."
+            return (
+                "[Система] Ваше сообщение будет обработано агентом в следующем цикле."
+            )
 
-        return f"[Система] Непонятная команда. Введите 'help' для справки."
+        return "[Система] Непонятная команда. Введите 'help' для справки."
 
     def _cmd_help(self, agent=None) -> str:
         return """
@@ -851,7 +952,8 @@ class UserPromptHandler:
 
     def _cmd_clear(self, agent=None) -> str:
         import os
-        os.system('cls' if os.name == 'nt' else 'clear')
+
+        os.system("cls" if os.name == "nt" else "clear")
         return ""
 
     def _cmd_exit(self, agent=None) -> str:

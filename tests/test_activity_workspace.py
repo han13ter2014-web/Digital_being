@@ -1,7 +1,5 @@
 """Рабочая область занятия имеет фиксированную границу и свойства Sandbox."""
 
-from pathlib import Path
-
 import pytest
 
 from src.core.activity_workspace import ActivityWorkspace
@@ -9,7 +7,9 @@ from src.delamain.sandbox import SandboxError
 
 
 def test_workspace_root_is_profile_creative_and_roundtrip(tmp_path):
-    workspace = ActivityWorkspace(tmp_path / "profile" / "delamain" / "workspace" / "creative")
+    workspace = ActivityWorkspace(
+        tmp_path / "profile" / "delamain" / "workspace" / "creative"
+    )
     result = workspace.write("draft.txt", "текст")
     assert result["path"] == "draft.txt"
     assert workspace.read("draft.txt") == "текст"

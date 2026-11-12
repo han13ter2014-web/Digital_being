@@ -16,16 +16,18 @@ from src.memory.knowledge_quality import STOP_WORDS, normalize_concept_name
 def _act_explore_impl(self, target=None) -> Dict:
     """Исследование как работа, а не как счётчик.
 
-        Раньше ``act("explore")`` попадал в тип «default»: энергия
-        списывалась, строка возвращалась, мир не менялся. Отсюда бралось
-        зацикливание — агенту не за что было зацепиться, чтобы сменить
-        действие.
+    Раньше ``act("explore")`` попадал в тип «default»: энергия
+    списывалась, строка возвращалась, мир не менялся. Отсюда бралось
+    зацикливание — агенту не за что было зацепиться, чтобы сменить
+    действие.
 
-        Теперь исследование выбирает конкретную тему и прогоняет её через
-        мышление: появляется гипотеза, запись в ментальных моделях или
-        ответ из сети. Это наблюдаемый результат.
-        """
-    target = str(target).strip() if target is not None else self._pick_exploration_target()
+    Теперь исследование выбирает конкретную тему и прогоняет её через
+    мышление: появляется гипотеза, запись в ментальных моделях или
+    ответ из сети. Это наблюдаемый результат.
+    """
+    target = (
+        str(target).strip() if target is not None else self._pick_exploration_target()
+    )
     if not target or not self._is_learnable(target):
         return {
             "target": "",
@@ -52,15 +54,17 @@ def _act_explore_impl(self, target=None) -> Dict:
 def _act_decompose_impl(self, target=None) -> Dict:
     """Разбирает слабую концепцию на под-вопросы и сохраняет их.
 
-        Декомпозиция — работа: она создаёт новые темы, с которыми агент
-        столкнётся в следующих циклах. Раньше под-вопросы вычислялись,
-        попадали в текст ответа и терялись: мир не менялся, действие
-        считалось бесплодным, попадало в тупики — и при этом служило
-        запасным вариантом выхода из тупика. Агент тратил циклы на
-        действие, которое по построению ничего не делало (в замере —
-        115–162 выбора за 500 циклов).
-        """
-    target = str(target).strip() if target is not None else self._pick_decomposable_target()
+    Декомпозиция — работа: она создаёт новые темы, с которыми агент
+    столкнётся в следующих циклах. Раньше под-вопросы вычислялись,
+    попадали в текст ответа и терялись: мир не менялся, действие
+    считалось бесплодным, попадало в тупики — и при этом служило
+    запасным вариантом выхода из тупика. Агент тратил циклы на
+    действие, которое по построению ничего не делало (в замере —
+    115–162 выбора за 500 циклов).
+    """
+    target = (
+        str(target).strip() if target is not None else self._pick_decomposable_target()
+    )
     if not target or not self._is_learnable(target):
         return {"target": "", "text": "Ответ: разбирать нечего"}
 
@@ -77,9 +81,7 @@ def _act_decompose_impl(self, target=None) -> Dict:
         }
 
     queued = self._queue_sub_questions(parts)
-    suffix = (
-        f"; в очередь вопросов +{queued}" if queued else ""
-    )
+    suffix = f"; в очередь вопросов +{queued}" if queued else ""
     return {
         "target": target,
         "parts": list(parts)[:5],
@@ -95,14 +97,14 @@ def _act_decompose_impl(self, target=None) -> Dict:
 def _queue_sub_questions_impl(self, parts) -> int:
     """Ставит под-вопросы в очередь открытых вопросов.
 
-        Ограничения те же, что в ``thinking_pipeline``: не больше
-        ``OPEN_QUESTIONS_MAX_UNANSWERED`` неотвеченных, по одной попытке
-        размышления на под-вопрос и без дублей. Иначе декомпозиция
-        вытеснила бы всё остальное из очереди.
+    Ограничения те же, что в ``thinking_pipeline``: не больше
+    ``OPEN_QUESTIONS_MAX_UNANSWERED`` неотвеченных, по одной попытке
+    размышления на под-вопрос и без дублей. Иначе декомпозиция
+    вытеснила бы всё остальное из очереди.
 
-        Returns:
-            Сколько вопросов реально добавлено.
-        """
+    Returns:
+        Сколько вопросов реально добавлено.
+    """
     ask = getattr(self, "ask_user", None)
     if not callable(ask):
         return 0
@@ -112,9 +114,7 @@ def _queue_sub_questions_impl(self, parts) -> int:
     except Exception:
         existing = []
     unanswered = sum(1 for q in existing if not q.get("answered"))
-    known = {
-        str(q.get("text", "")).strip().lower() for q in existing
-    }
+    known = {str(q.get("text", "")).strip().lower() for q in existing}
 
     added = 0
     for part in parts:
@@ -125,13 +125,9 @@ def _queue_sub_questions_impl(self, parts) -> int:
         if not text or key in known or "стратегия=" in key:
             continue
         try:
-            result = ask(
-                text, source="decomposition", max_explorations=1
-            )
+            result = ask(text, source="decomposition", max_explorations=1)
         except Exception as exc:
-            get_logger().log(
-                f"[DECOMPOSE] не удалось поставить '{text[:40]}': {exc}"
-            )
+            get_logger().log(f"[DECOMPOSE] не удалось поставить '{text[:40]}': {exc}")
             continue
         if result.get("status") == "queued":
             added += 1
@@ -142,9 +138,9 @@ def _queue_sub_questions_impl(self, parts) -> int:
 def _act_synthesize_impl(self, target=None) -> Dict:
     """Синтез: попытка собрать определение из уже известных связей.
 
-        Использует ментальные модели. Если определение уже есть —
-        усиливает уверенность через новый опыт.
-        """
+    Использует ментальные модели. Если определение уже есть —
+    усиливает уверенность через новый опыт.
+    """
     target = target if target is not None else self._pick_exploration_target()
     if not target or not self._is_learnable(target):
         return {"target": "", "text": "Ответ: синтезировать нечего"}
@@ -172,9 +168,7 @@ def _act_synthesize_impl(self, target=None) -> Dict:
 
     if not names:
         try:
-            related = self.mental_models.find_related_concepts(
-                target, max_distance=2
-            )
+            related = self.mental_models.find_related_concepts(target, max_distance=2)
         except Exception:
             related = []
         # find_related_concepts возвращает ConceptNode, а не словари:
@@ -194,15 +188,14 @@ def _act_synthesize_impl(self, target=None) -> Dict:
             "text": f"Ответ: для '{target}' нет связанных концепций",
         }
 
-    hypothesis = (
-        f"'{target}' можно понять через: " + ", ".join(str(n) for n in names)
-    )
+    hypothesis = f"'{target}' можно понять через: " + ", ".join(str(n) for n in names)
     try:
         self.mental_models.encounter_concept(
             target,
             f"синтез_цикл_{self.cycle_count}",
             hypothesis,
-            evidence_kind="hypothesis", source="self:synthesis",
+            evidence_kind="hypothesis",
+            source="self:synthesis",
         )
     except Exception as exc:
         get_logger().log(f"[SYNTHESIS] не удалось записать: {exc}")
@@ -237,13 +230,13 @@ def _act_reflect_impl(self) -> Dict:
 def _defer_ask_intention_impl(self, target: str) -> None:
     """Пауза повторного выбора вопроса по теме (backoff 5..50).
 
-        «Нетерпеливый вопрос» (TICKET-2) и верификация 2026-11-06
-        (V-1): отказ — «отложен» или «не переспрашиваю» — не должен
-        выбираться заново каждый цикл. Без записи здесь намерение
-        крутилось вхолостую: 214 из 309 циклов живого прогона ушли на
-        выбор-отказ ask_user по одной теме, сжигая АТФ тела и загоняя
-        существо обратно в глубокий отдых.
-        """
+    «Нетерпеливый вопрос» (backoff) и верификация 2026-11-06
+    (проверки отказа): отказ — «отложен» или «не переспрашиваю» — не должен
+    выбираться заново каждый цикл. Без записи здесь намерение
+    крутилось вхолостую: 214 из 309 циклов живого прогона ушли на
+    выбор-отказ ask_user по одной теме, сжигая АТФ тела и загоняя
+    существо обратно в глубокий отдых.
+    """
     deferrals: Dict[tuple, tuple] = {}
     saved_deferrals = getattr(self, "_deferred_intentions", None)
     if isinstance(saved_deferrals, dict):
@@ -259,15 +252,15 @@ def _defer_ask_intention_impl(self, target: str) -> None:
 def _act_ask_user_impl(self, target=None, *, DigitalBeing) -> Dict:
     """Спросить человека о том, что агенту непонятно.
 
-        До этой проводки действие ``ask_user`` (его предлагала мотивация
-        как «ask_question») доходило до ``act()`` и молча заканчивалось:
-        подсистема ``UserInteraction`` умеет задавать вопросы, публикует
-        события, окно их показывает — но никто не вызывал её из петли.
-        Агент «хотела спросить» и не спрашивал.
+    До этой проводки действие ``ask_user`` (его предлагала мотивация
+    как «ask_question») доходило до ``act()`` и молча заканчивалось:
+    подсистема ``UserInteraction`` умеет задавать вопросы, публикует
+    события, окно их показывает — но никто не вызывал её из петли.
+    Агент «хотела спросить» и не спрашивал.
 
-        Вопрос задаётся только по реальной нужде: берётся тема, в которой
-        агент не уверена. Спрашивать о том, что уже знает, — шум.
-        """
+    Вопрос задаётся только по реальной нужде: берётся тема, в которой
+    агент не уверена. Спрашивать о том, что уже знает, — шум.
+    """
     interaction = getattr(self, "user_interaction", None)
     if interaction is None:
         return {"text": "Ответ: спросить некого — нет связи с человеком"}
@@ -284,14 +277,13 @@ def _act_ask_user_impl(self, target=None, *, DigitalBeing) -> Dict:
         return {"text": "Ответ: не о чем спрашивать — всё понятно"}
 
     if self._recently_explained_by_user(target):
-        # V-1 (верификация 2026-11-06): отказ «не переспрашиваю»
+        # проверки отказа (верификация 2026-11-06): отказ «не переспрашиваю»
         # тоже гасит намерение — иначе тема выбиралась каждый цикл.
         # через класс: act() работает и на лёгких тестовых объектах
         DigitalBeing._defer_ask_intention(self, target)
         return {
             "text": (
-                f"Ответ: человек недавно объяснил '{target}' — "
-                f"не переспрашиваю"
+                f"Ответ: человек недавно объяснил '{target}' — " f"не переспрашиваю"
             )
         }
 
@@ -312,7 +304,7 @@ def _act_ask_user_impl(self, target=None, *, DigitalBeing) -> Dict:
     if result.get("status") != "queued":
         # Лимит вопросов или пауза — это нормально, не ошибка.
         reason = result.get("reason", "не сейчас")
-        # «Нетерпеливый вопрос» (TICKET-2): отложенное намерение не
+        # «Нетерпеливый вопрос» (backoff): отложенное намерение не
         # должно выбираться заново каждый цикл. Экспоненциальный
         # backoff: 5, 10, 20, 40, максимум 50 циклов тишины — тема
         # жива, но не крутится вхолостую.
@@ -337,9 +329,9 @@ def _act_ask_user_impl(self, target=None, *, DigitalBeing) -> Dict:
 def _act_communicate_impl(self) -> Dict:
     """Рассказать человеку что-то, что агент счёл важным.
 
-        Действие ``communicate`` (мотивация: «поделиться знанием»,
-        «ответить пользователю») раньше тоже ничего не делало.
-        """
+    Действие ``communicate`` (мотивация: «поделиться знанием»,
+    «ответить пользователю») раньше тоже ничего не делало.
+    """
     interaction = getattr(self, "user_interaction", None)
     if interaction is None:
         return {"text": "Ответ: рассказать некому — нет связи с человеком"}
@@ -369,13 +361,13 @@ def _act_communicate_impl(self) -> Dict:
 def _compose_share_message_impl(self, record: bool = False) -> str:
     """Текст сообщения: о самом свежем или самом слабом знании.
 
-        Берём то, что агент недавно узнал и в чём уже уверен: делиться
-        догадкой, которую сам не проверил, — нечестно.
+    Берём то, что агент недавно узнал и в чём уже уверен: делиться
+    догадкой, которую сам не проверил, — нечестно.
 
-        «Собеседник-4»: уже рассказанное не повторяется (_shared_topics).
-        При ``record=True`` выбранная тема помечается рассказанной; проверка
-        без записи (гейт кандидатов в social_scan) не сжигает тему.
-        """
+    «Собеседник-4»: уже рассказанное не повторяется (_shared_topics).
+    При ``record=True`` выбранная тема помечается рассказанной; проверка
+    без записи (гейт кандидатов в social_scan) не сжигает тему.
+    """
     concepts = getattr(self.mental_models, "concepts", None)
     if not isinstance(concepts, dict) or not concepts:
         return ""
@@ -417,33 +409,33 @@ def _remember_shared_topic_impl(self, topic: str) -> None:
         self._shared_topics = shared
     shared[str(topic)] = int(self.cycle_count)
     if len(shared) > 50:
-        for old_topic, _stamp in sorted(
-            shared.items(), key=lambda item: item[1]
-        )[: len(shared) - 50]:
+        for old_topic, _stamp in sorted(shared.items(), key=lambda item: item[1])[
+            : len(shared) - 50
+        ]:
             shared.pop(old_topic, None)
 
 
 def _act_web_search_impl(self, target: Optional[str] = None) -> Dict:
     """Найти в сети тему намерения, а при его отсутствии — новую тему.
 
-        Действие ``web_search`` предлагалось мотивацией, но не
-        исполнялось. При этом ``WebSearcher`` уже был подключён к
-        мышлению — не хватало только вызова из петли.
+    Действие ``web_search`` предлагалось мотивацией, но не
+    исполнялось. При этом ``WebSearcher`` уже был подключён к
+    мышлению — не хватало только вызова из петли.
 
-        «Охота-1»: промах по теме оставляет след (кулдаун повторной
-        охоты, не сериализуется — сон стирает след), а удачный заход на
-        соседнюю статью — след добычи: новая неуверенная концепция в
-        ментальных моделях.
-        """
+    «Охота-1»: промах по теме оставляет след (кулдаун повторной
+    охоты, не сериализуется — сон стирает след), а удачный заход на
+    соседнюю статью — след добычи: новая неуверенная концепция в
+    ментальных моделях.
+    """
     searcher = getattr(self, "web_searcher", None)
     if searcher is None or not getattr(searcher, "is_enabled", False):
-        return {
-            "text": "Ответ: поиск в сети недоступен или выключен"
-        }
+        return {"text": "Ответ: поиск в сети недоступен или выключен"}
 
-    # K13: выбранное намерение имеет приоритет над селектором новизны.
+    # Выбранное намерение имеет приоритет над селектором новизны.
     # Случайная/слабая тема допустима только для поиска без намерения.
-    target = str(target).strip() if target is not None else self._pick_exploration_target()
+    target = (
+        str(target).strip() if target is not None else self._pick_exploration_target()
+    )
     if not target:
         return {"text": "Ответ: искать нечего — нет темы"}
 
@@ -556,10 +548,10 @@ def _act_web_search_impl(self, target: Optional[str] = None) -> Dict:
 def _pick_news_topic_impl(self) -> Optional[str]:
     """Тема новостей — то, что существо сейчас занимает.
 
-        Активная цель; если её нет — случайная известная концепция:
-        читают и о знакомом, не только о насущном. Поиск идёт по фразе
-        целиком — Викиновости сами разберут слова.
-        """
+    Активная цель; если её нет — случайная известная концепция:
+    читают и о знакомом, не только о насущном. Поиск идёт по фразе
+    целиком — Викиновости сами разберут слова.
+    """
     goal = getattr(self, "active_goal", None)
     if isinstance(goal, dict):
         title = str(goal.get("title") or "").strip()
@@ -576,12 +568,12 @@ def _pick_news_topic_impl(self) -> Optional[str]:
 def _act_read_news_impl(self) -> Dict:
     """Прочитать новости по тому, что занимает.
 
-        «Источники-2»: окно в «сегодня». Новость — впечатление, а не
-        знание: в knowledge_base она не идёт (определение вечно, новость
-        — про сейчас); её след — эпизод дневника и запись в реестре
-        воли. Кулдаун по теме (читал или не нашлось — одинаково) живёт
-        только в памяти: сон стирает его.
-        """
+    «Источники-2»: окно в «сегодня». Новость — впечатление, а не
+    знание: в knowledge_base она не идёт (определение вечно, новость
+    — про сейчас); её след — эпизод дневника и запись в реестре
+    воли. Кулдаун по теме (читал или не нашлось — одинаково) живёт
+    только в памяти: сон стирает его.
+    """
     searcher = getattr(self, "web_searcher", None)
     if searcher is None or not getattr(searcher, "is_enabled", False):
         return {"text": "Ответ: новости недоступны — поиск выключен"}
@@ -603,8 +595,7 @@ def _act_read_news_impl(self) -> Dict:
         return {
             "target": topic,
             "text": (
-                f"Ответ: новости про '{topic}' недавно проверяла — "
-                f"вернусь позже"
+                f"Ответ: новости про '{topic}' недавно проверяла — " f"вернусь позже"
             ),
         }
 
@@ -633,23 +624,20 @@ def _act_read_news_impl(self) -> Dict:
     self._record_will("news_reads", topic, f"прочитала новость: {title}")
     return {
         "target": topic,
-        "text": (
-            f"Ответ: прочитала новость про '{topic}': «{title}». "
-            f"{snippet}"
-        ),
+        "text": (f"Ответ: прочитала новость про '{topic}': «{title}». " f"{snippet}"),
     }
 
 
 def _act_browse_web_impl(self) -> Dict:
     """Погулять по открытому интернету по тому, что занимает.
 
-        «Интернет-1»: компас (search_web) даёт краткий ответ и ссылки,
-        затем существо читает одну страницу сама (open_page). Страница —
-        впечатление, не знание: в knowledge_base она не идёт (веб шумный,
-        определениям там не место); её след — эпизод дневника и волевой
-        акт ``web_browses``. Кулдаун по теме живёт только в памяти:
-        сон стирает его.
-        """
+    «Интернет-1»: компас (search_web) даёт краткий ответ и ссылки,
+    затем существо читает одну страницу сама (open_page). Страница —
+    впечатление, не знание: в knowledge_base она не идёт (веб шумный,
+    определениям там не место); её след — эпизод дневника и волевой
+    акт ``web_browses``. Кулдаун по теме живёт только в памяти:
+    сон стирает его.
+    """
     searcher = getattr(self, "web_searcher", None)
     if searcher is None or not getattr(searcher, "is_enabled", False):
         return {"text": "Ответ: интернет недоступен — поиск выключен"}
@@ -671,8 +659,7 @@ def _act_browse_web_impl(self) -> Dict:
         return {
             "target": topic,
             "text": (
-                f"Ответ: интернет про '{topic}' недавно обошла — "
-                f"вернусь позже"
+                f"Ответ: интернет про '{topic}' недавно обошла — " f"вернусь позже"
             ),
         }
 
@@ -732,14 +719,11 @@ def _act_browse_web_impl(self) -> Dict:
     snippet = extract[:200]
     if len(extract) > 200:
         snippet = snippet.rsplit(" ", 1)[0] + "…"
-    self._record_will(
-        "web_browses", topic, f"погуляла по интернету: {title}"
-    )
+    self._record_will("web_browses", topic, f"погуляла по интернету: {title}")
     return {
         "target": topic,
         "text": (
-            f"Ответ: погуляла по интернету про '{topic}': «{title}». "
-            f"{snippet}"
+            f"Ответ: погуляла по интернету про '{topic}': «{title}». " f"{snippet}"
         ),
     }
 
@@ -747,11 +731,11 @@ def _act_browse_web_impl(self) -> Dict:
 def _act_hypothesis_impl(self) -> Dict:
     """Выдвинуть гипотезу о теме, в которой агент не уверена.
 
-        Мотивация предлагает это действие («Понять: {concept}»), но
-        раньше оно уходило в «default»: агент «выдвигал гипотезу» и
-        ничего не происходило. Гипотеза — это запись в ментальной модели,
-        то есть наблюдаемое изменение.
-        """
+    Мотивация предлагает это действие («Понять: {concept}»), но
+    раньше оно уходило в «default»: агент «выдвигал гипотезу» и
+    ничего не происходило. Гипотеза — это запись в ментальной модели,
+    то есть наблюдаемое изменение.
+    """
     target = self._pick_exploration_target()
     if not target:
         return {"text": "Ответ: гипотезу выдвигать не о чем"}
@@ -775,7 +759,8 @@ def _act_hypothesis_impl(self) -> Dict:
             target,
             f"гипотеза_цикл_{self.cycle_count}",
             text[:80],
-            evidence_kind="hypothesis", source="self:hypothesis",
+            evidence_kind="hypothesis",
+            source="self:hypothesis",
         )
     except Exception as exc:
         get_logger().log(f"[HYPOTHESIS] не удалось записать: {exc}")
@@ -792,24 +777,31 @@ def _act_hypothesis_impl(self) -> Dict:
 def _act_set_own_goal_impl(self) -> Dict:
     """Поставить себе цель по своей воле.
 
-        Мотивация предлагает «Поставить свою цель» (autonomy). Раньше
-        действие ничего не делало. Цель — наблюдаемое изменение: она
-        появляется в списке и начинает влиять на жизнь.
-        """
+    Мотивация предлагает «Поставить свою цель» (autonomy). Раньше
+    действие ничего не делало. Цель — наблюдаемое изменение: она
+    появляется в списке и начинает влиять на жизнь.
+    """
     motivation = getattr(self, "motivation_system", None)
     play_need = motivation.needs.get("play") if motivation is not None else None
     if play_need is not None and play_need.is_pressing():
         activity = random.choice(["play", "creative_act", "draw", "compose_music"])
-        title = {"play": "Сыграть партию",
-                 "creative_act": "Создать текстовую композицию",
-                 "draw": "Нарисовать картину",
-                 "compose_music": "Сочинить мелодию"}[activity]
-        if any(g.get("title") == title and g.get("status") != "completed" for g in self.goals):
+        title = {
+            "play": "Сыграть партию",
+            "creative_act": "Создать текстовую композицию",
+            "draw": "Нарисовать картину",
+            "compose_music": "Сочинить мелодию",
+        }[activity]
+        if any(
+            g.get("title") == title and g.get("status") != "completed"
+            for g in self.goals
+        ):
             return {"text": f"Ответ: дело '{title}' уже есть"}
         goal_id = self.set_goal(title, difficulty=1)
         from src.cognition.activity_goals import attach_activity
 
-        attach_activity(self, goal_id, {"source": "self", "need": "play", "action_hint": activity})
+        attach_activity(
+            self, goal_id, {"source": "self", "need": "play", "action_hint": activity}
+        )
         self._record_will("goals_set", title, f"своё дело #{goal_id}")
         return {"text": f"Ответ: выбрала дело '{title}' (#{goal_id})"}
     target = self._pick_exploration_target()
@@ -817,7 +809,7 @@ def _act_set_own_goal_impl(self) -> Dict:
         return {"text": "Ответ: свою цель ставить не из чего"}
 
     title = f"Понять: {target}"
-    # Не дублируем уже существующую цель. TICKET-8: сравнение по
+    # Не дублируем уже существующую цель: сравнение по
     # нормализованному тексту (нижний регистр, сжатые пробелы) —
     # «Понять:  истина» и «Понять: истина» — одна цель.
     normalized_title = " ".join(title.lower().split())
@@ -848,17 +840,20 @@ def _act_set_own_goal_impl(self) -> Dict:
 def _record_will_impl(self, will_type: str, topic: str, reason: str) -> None:
     """Записывает действие в журнал воли, если он есть.
 
-        Журнал переживает перезапуск и служит доказательством эффекта:
-        без записи дельта мира не увидела бы, что сообщение отправлено
-        или вопрос задан.
-        """
+    Журнал переживает перезапуск и служит доказательством эффекта:
+    без записи дельта мира не увидела бы, что сообщение отправлено
+    или вопрос задан.
+    """
     registry = getattr(self, "will_registry", None)
     if registry is None:
         return
     try:
         registry.record(
-            will_type, topic, reason,
-            outcome="executed", cycle=self.cycle_count,
+            will_type,
+            topic,
+            reason,
+            outcome="executed",
+            cycle=self.cycle_count,
         )
     except Exception:
         pass

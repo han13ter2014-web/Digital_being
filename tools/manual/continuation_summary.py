@@ -17,15 +17,22 @@ def summarize(data):
         goal = entry.get("evidence_goal") or {}
         statuses[goal.get("status", "missing")] += 1
         if goal.get("status") == "pending":
-            contexts[(trace["target"], entry.get("action"), goal.get("information_context"))] += 1
-    return {"seed": data["seed"], "cycles": data["cycles"],
-            "offers": sum(data["continuation_offers"].values()),
-            "choices": sum(data["continuation_choices"].values()),
-            "goal_statuses": dict(statuses),
-            "pending_repeats_same_context": sum(max(0, count - 1) for count in contexts.values()),
-            "productive_actions": data["productive_actions"],
-            "productive_effects": data["productive_effects"],
-            "restart": data["restart"]}
+            contexts[
+                (trace["target"], entry.get("action"), goal.get("information_context"))
+            ] += 1
+    return {
+        "seed": data["seed"],
+        "cycles": data["cycles"],
+        "offers": sum(data["continuation_offers"].values()),
+        "choices": sum(data["continuation_choices"].values()),
+        "goal_statuses": dict(statuses),
+        "pending_repeats_same_context": sum(
+            max(0, count - 1) for count in contexts.values()
+        ),
+        "productive_actions": data["productive_actions"],
+        "productive_effects": data["productive_effects"],
+        "restart": data["restart"],
+    }
 
 
 if __name__ == "__main__":

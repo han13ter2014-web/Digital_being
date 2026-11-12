@@ -1,6 +1,6 @@
 """Творческий EffectorRequest отправляется только явно и идемпотентно."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -25,10 +25,22 @@ def test_enabled_adapter_submits_same_explicit_request_once():
     subsystem.list_goals.return_value = []
     subsystem.queue_goal.return_value = {"id": 4}
     subsystem.get_goal.return_value = goal
+
     def goals():
-        return ([{"id": 4, "metadata": {"effector_request_id": "creative-fixed",
-                 "effector_fingerprint": adapter._request_fingerprint(request)}}]
-                if subsystem.queue_goal.call_count else [])
+        return (
+            [
+                {
+                    "id": 4,
+                    "metadata": {
+                        "effector_request_id": "creative-fixed",
+                        "effector_fingerprint": adapter._request_fingerprint(request),
+                    },
+                }
+            ]
+            if subsystem.queue_goal.call_count
+            else []
+        )
+
     subsystem.list_goals.side_effect = goals
     adapter = DelamainEffectorAdapter(subsystem, enabled=True)
     request = creative_write_request("draft.txt", "text", request_id="creative-fixed")

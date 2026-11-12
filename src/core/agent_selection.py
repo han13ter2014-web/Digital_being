@@ -9,18 +9,36 @@ from typing import Dict, List, Optional
 from config.simulation_config import LR_CONFIG
 
 
-_META_TOPIC_WORDS = frozenset({
-    "вопрос", "вопросы",
-    "тема", "темы",
-    "ответ", "ответы",
-    "сообщение", "сообщения",
-    "диалог", "диалоги",
-    "разговор", "разговоры",
-})
+_META_TOPIC_WORDS = frozenset(
+    {
+        "вопрос",
+        "вопросы",
+        "тема",
+        "темы",
+        "ответ",
+        "ответы",
+        "сообщение",
+        "сообщения",
+        "диалог",
+        "диалоги",
+        "разговор",
+        "разговоры",
+    }
+)
 
-_NOISE_TOPIC_WORDS = frozenset({
-    "я", "ты", "мы", "вы", "он", "она", "оно", "они", "это",
-})
+_NOISE_TOPIC_WORDS = frozenset(
+    {
+        "я",
+        "ты",
+        "мы",
+        "вы",
+        "он",
+        "она",
+        "оно",
+        "они",
+        "это",
+    }
+)
 
 _METHOD_VALUE_MAP = {
     "explore": "Исследование",
@@ -40,18 +58,18 @@ _METHOD_VALUE_MAP = {
 def _social_candidates_impl(self, cycle: int) -> List[Dict]:
     """Кандидаты на общение: спросить, рассказать, поискать.
 
-        Почему это отдельный источник, а не только мотивация: у общения
-        есть собственные наблюдаемые признаки, не сводимые к уровню
-        потребности. Потребность «связь» может быть удовлетворена
-        недавним разговором, но незакрытый вопрос всё равно стоит того,
-        чтобы попросить помощи. Здесь общение встроено в выбор напрямую —
-        по реальным признакам, а не по декларации.
+    Почему это отдельный источник, а не только мотивация: у общения
+    есть собственные наблюдаемые признаки, не сводимые к уровню
+    потребности. Потребность «связь» может быть удовлетворена
+    недавним разговором, но незакрытый вопрос всё равно стоит того,
+    чтобы попросить помощи. Здесь общение встроено в выбор напрямую —
+    по реальным признакам, а не по декларации.
 
-        Признаки честные и проверяемые:
-        * есть открытый вопрос, который агент давно не может закрыть сам;
-        * агент давно ничего не говорил человеку;
-        * есть тема без собственной формулировки, а поиск доступен.
-        """
+    Признаки честные и проверяемые:
+    * есть открытый вопрос, который агент давно не может закрыть сам;
+    * агент давно ничего не говорил человеку;
+    * есть тема без собственной формулировки, а поиск доступен.
+    """
     candidates: List[Dict] = []
     interaction = getattr(self, "user_interaction", None)
 
@@ -71,29 +89,31 @@ def _social_candidates_impl(self, cycle: int) -> List[Dict]:
             limit = int(item.get("max_explorations") or 5)
             # Агент уже пробовала сама и не смогла — время спросить.
             if explored >= max(1, limit - 1):
-                candidates.append({
-                    "source": "social",
-                    "action": "ask_user",
-                    "strength": self._dampen("ask_user", 0.78),
-                    "params": {"topic": item.get("text", "")},
-                })
+                candidates.append(
+                    {
+                        "source": "social",
+                        "action": "ask_user",
+                        "strength": self._dampen("ask_user", 0.78),
+                        "params": {"topic": item.get("text", "")},
+                    }
+                )
                 break
 
     # 2. Давно молчал — рассказать, что узнал.
     if interaction is not None:
-        silence = int(
-            getattr(LR_CONFIG, "SOCIAL_SILENCE_CYCLES", 40) or 40
-        )
+        silence = int(getattr(LR_CONFIG, "SOCIAL_SILENCE_CYCLES", 40) or 40)
         last = getattr(self, "_last_share_cycle", None)
         if last is None:
             last = 0
         if cycle - int(last) >= silence and self._compose_share_message():
-            candidates.append({
-                "source": "social",
-                "action": "communicate",
-                "strength": self._dampen("communicate", 0.72),
-                "params": {},
-            })
+            candidates.append(
+                {
+                    "source": "social",
+                    "action": "communicate",
+                    "strength": self._dampen("communicate", 0.72),
+                    "params": {},
+                }
+            )
 
     # 3. Тема без своей формулировки — поискать в сети.
     searcher = getattr(self, "web_searcher", None)
@@ -107,12 +127,14 @@ def _social_candidates_impl(self, cycle: int) -> List[Dict]:
                     continue
                 if len(getattr(node, "experiences", []) or []) < 1:
                     continue
-                candidates.append({
-                    "source": "social",
-                    "action": "web_search",
-                    "strength": self._dampen("web_search", 0.6),
-                    "params": {"topic": name},
-                })
+                candidates.append(
+                    {
+                        "source": "social",
+                        "action": "web_search",
+                        "strength": self._dampen("web_search", 0.6),
+                        "params": {"topic": name},
+                    }
+                )
                 break
 
     return candidates
@@ -121,30 +143,36 @@ def _social_candidates_impl(self, cycle: int) -> List[Dict]:
 def _is_action_available_impl(self, action: Optional[str]) -> bool:
     """Можно ли выполнить действие прямо сейчас.
 
-        Проверяются только те ограничения, которые заведомо откажут:
-        кулдаун вопроса, выключенный поиск и нехватка энергии. Остальное
-        решается в ``act()`` и записывается как исход.
+    Проверяются только те ограничения, которые заведомо откажут:
+    кулдаун вопроса, выключенный поиск и нехватка энергии. Остальное
+    решается в ``act()`` и записывается как исход.
 
-        Нехватка энергии добавлена потому, что отказ — это не выбор, а
-        пустой цикл. Замер до правки: 243 отказа «too_tired» на 400
-        попыток, при этом арбитр каждый раз выбирал действие, которое
-        тело выполнить не могло. Дешевле не предлагать невозможное.
-        """
+    Нехватка энергии добавлена потому, что отказ — это не выбор, а
+    пустой цикл. Замер до правки: 243 отказа «too_tired» на 400
+    попыток, при этом арбитр каждый раз выбирал действие, которое
+    тело выполнить не могло. Дешевле не предлагать невозможное.
+    """
     normalized = self._normalize_action(action)
     if normalized == "let_go":
         return True
     if normalized == "create_draft":
         from src.cognition.creative_draft import draft_available
 
-        return self._is_action_affordable(normalized) and draft_available(getattr(self, "_creative_draft", None))
+        return self._is_action_affordable(normalized) and draft_available(
+            getattr(self, "_creative_draft", None)
+        )
     if normalized == "draw":
         from src.cognition.local_art import art_available
 
-        return self._is_action_affordable(normalized) and art_available(getattr(self, "_art_work", None))
+        return self._is_action_affordable(normalized) and art_available(
+            getattr(self, "_art_work", None)
+        )
     if normalized == "compose_music":
         from src.cognition.local_music import music_available
 
-        return self._is_action_affordable(normalized) and music_available(getattr(self, "_music_work", None))
+        return self._is_action_affordable(normalized) and music_available(
+            getattr(self, "_music_work", None)
+        )
     if normalized == "ask_user":
         return self._can_ask_now(self.cycle_count) and self._has_question_target()
     if normalized == "web_search":
@@ -191,15 +219,29 @@ def _is_candidate_available_impl(self, candidate) -> bool:
             if identifier is not None and identifier not in catalog:
                 return False
             if mode == "leave":
-                selected = catalog.get(identifier) if identifier else getattr(self, "_creative_draft", None)
-                return bool(selected and selected.get("status", "active") == "active"
-                            and self._is_action_affordable("create_draft"))
+                selected = (
+                    catalog.get(identifier)
+                    if identifier
+                    else getattr(self, "_creative_draft", None)
+                )
+                return bool(
+                    selected
+                    and selected.get("status", "active") == "active"
+                    and self._is_action_affordable("create_draft")
+                )
             if mode == "new":
-                return len(catalog) < MAX_DRAFTS and draft_available(None) and self._is_action_affordable("create_draft")
+                return (
+                    len(catalog) < MAX_DRAFTS
+                    and draft_available(None)
+                    and self._is_action_affordable("create_draft")
+                )
             if identifier is not None and mode == "continue":
                 selected = catalog[identifier]
-                return (selected.get("status", "active") == "active" and selected["revision"] < LIMIT
-                        and self._is_action_affordable("create_draft"))
+                return (
+                    selected.get("status", "active") == "active"
+                    and selected["revision"] < LIMIT
+                    and self._is_action_affordable("create_draft")
+                )
     except ValueError:
         return False
     action = self._normalize_action(candidate.get("action"))
@@ -214,15 +256,15 @@ def _is_candidate_available_impl(self, candidate) -> bool:
                 return False
             return self._is_action_affordable(action)
         if action == "ask_user":
-            return self._can_ask_now(self.cycle_count) and self._is_action_affordable(action)
+            return self._can_ask_now(self.cycle_count) and self._is_action_affordable(
+                action
+            )
     return self._is_action_available(candidate.get("action"))
 
 
 def _decomposition_has_room_impl(self) -> bool:
     """Есть ли место в очереди открытых вопросов для под-вопросов."""
-    limit = int(
-        getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0
-    )
+    limit = int(getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0)
     if limit <= 0:
         return False
     try:
@@ -236,15 +278,15 @@ def _decomposition_has_room_impl(self) -> bool:
 def _stuck_fallback_impl(self) -> str:
     """Что делать, когда все кандидаты оказались тупиковыми.
 
-        Раньше здесь всегда был ``think_decompose`` — причём это же
-        действие чаще всего и было тупиковым. То есть запасной выход вёл
-        обратно в тот же тупик.
+    Раньше здесь всегда был ``think_decompose`` — причём это же
+    действие чаще всего и было тупиковым. То есть запасной выход вёл
+    обратно в тот же тупик.
 
-        Порядок: отдых, если тело требует; иначе продуктивное действие с
-        доказанной историей эффекта, которое сейчас выполнимо и не в
-        тупике. Если такого нет — отдых: он хотя бы восстанавливает тело,
-        вместо того чтобы делать вид, что агент работает.
-        """
+    Порядок: отдых, если тело требует; иначе продуктивное действие с
+    доказанной историей эффекта, которое сейчас выполнимо и не в
+    тупике. Если такого нет — отдых: он хотя бы восстанавливает тело,
+    вместо того чтобы делать вид, что агент работает.
+    """
     if self._body_needs_rest() or self._is_resting():
         return "deep_rest"
 
@@ -268,10 +310,10 @@ def _stuck_fallback_impl(self) -> str:
 def _release_recovered_denials_impl(self) -> None:
     """Снимает пометку «тупик» с действий, которые снова по карману.
 
-        Отказ по усталости — факт о теле, а не о действии. Пока энергия не
-        вернулась, повторять бессмысленно; когда вернулась — запрет должен
-        исчезнуть сам, иначе отдых не возвращает агента к работе.
-        """
+    Отказ по усталости — факт о теле, а не о действии. Пока энергия не
+    вернулась, повторять бессмысленно; когда вернулась — запрет должен
+    исчезнуть сам, иначе отдых не возвращает агента к работе.
+    """
     closer = getattr(self, "loop_closer", None)
     if closer is None:
         return
@@ -285,13 +327,13 @@ def _release_recovered_denials_impl(self) -> None:
 def _has_question_target_impl(self) -> bool:
     """Есть ли о чём спросить человека прямо сейчас.
 
-        Проверка без побочных эффектов (в отличие от
-        ``_pick_exploration_target``, который запоминает тему). Нужна,
-        чтобы не предлагать арбитру вопрос, который заведомо закончится
-        «не о чем спрашивать»: иначе действие выбирается каждый цикл,
-        ничего не меняет и не запускает кулдаун, потому что вопрос так и
-        не был задан.
-        """
+    Проверка без побочных эффектов (в отличие от
+    ``_pick_exploration_target``, который запоминает тему). Нужна,
+    чтобы не предлагать арбитру вопрос, который заведомо закончится
+    «не о чем спрашивать»: иначе действие выбирается каждый цикл,
+    ничего не меняет и не запускает кулдаун, потому что вопрос так и
+    не был задан.
+    """
     questions = getattr(self, "_open_questions", None)
     if isinstance(questions, list):
         for item in questions:
@@ -335,10 +377,10 @@ def _can_ask_now_impl(self, cycle: int) -> bool:
 def _dampen_impl(self, action: str, strength: float) -> float:
     """Снижает силу кандидата, если действие подряд не давало эффекта.
 
-        Иначе действие, которое сейчас невозможно (кулдаун, нет сети),
-        выигрывает арбитраж каждый цикл и сжигает жизнь впустую. Каждая
-        неудача вдвое снижает шанс: 0.78 → 0.39 → 0.20 → …
-        """
+    Иначе действие, которое сейчас невозможно (кулдаун, нет сети),
+    выигрывает арбитраж каждый цикл и сжигает жизнь впустую. Каждая
+    неудача вдвое снижает шанс: 0.78 → 0.39 → 0.20 → …
+    """
     closer = getattr(self, "loop_closer", None)
     if closer is None:
         return strength
@@ -349,8 +391,9 @@ def _dampen_impl(self, action: str, strength: float) -> float:
     return strength * (0.5 ** max(0, streak))
 
 
-def _record_denied_impl(self, action_type: str, world_before, reason: str, *,
-                        record_denied_outcome) -> None:
+def _record_denied_impl(
+    self, action_type: str, world_before, reason: str, *, record_denied_outcome
+) -> None:
     """Совместимость: см. модульную ``record_denied_outcome``."""
     record_denied_outcome(self, action_type, world_before, reason)
 
@@ -358,11 +401,11 @@ def _record_denied_impl(self, action_type: str, world_before, reason: str, *,
 def _normalize_action_impl(self, action: Optional[str]) -> str:
     """Приводит имя действия к типу (как в ``act()``).
 
-        Мотивация и Active Inference называют одно и то же действие
-        по-разному: «exploration» / «explore», «reflection» / «reflect».
-        Счётчики петель должны видеть один тип, иначе проверка тупика
-        смотрит не на то имя.
-        """
+    Мотивация и Active Inference называют одно и то же действие
+    по-разному: «exploration» / «explore», «reflection» / «reflect».
+    Счётчики петель должны видеть один тип, иначе проверка тупика
+    смотрит не на то имя.
+    """
     key = str(action or "").strip().lower()
     if not key:
         return ""

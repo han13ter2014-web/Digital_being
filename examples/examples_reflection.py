@@ -1,18 +1,18 @@
 """Примеры использования системы рефлексии агента"""
+
 from src.core.agent import DigitalBeing
-import time
 import sys
 import io
 
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 
 def example_reflection_analysis():
     """Пример 1: Базовый анализ производительности"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("ПРИМЕР 1: Базовый анализ рефлексии")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     agent = DigitalBeing("ReflectionTest")
 
@@ -35,22 +35,22 @@ def example_reflection_analysis():
         print(f"Статус: Интеллект {agent.intelligence} | Энергия {agent.energy}")
 
     # Выполнить рефлексию после всех циклов
-    print("\n" + "-"*60)
+    print("\n" + "-" * 60)
     print("🔍 АНАЛИЗ ПРОИЗВОДИТЕЛЬНОСТИ")
-    print("-"*60)
+    print("-" * 60)
 
     reflection = agent.reflect()
     print(f"\n✓ Паттерны обнаружены: {len(reflection['patterns'])}")
-    for pattern in reflection['patterns']:
+    for pattern in reflection["patterns"]:
         print(f"  • {pattern['description']}")
 
     print(f"\n✓ Выводы: {len(reflection['insights'])}")
-    for insight in reflection['insights']:
+    for insight in reflection["insights"]:
         print(f"  • {insight}")
 
-    metrics = reflection['metrics']
+    metrics = reflection["metrics"]
     if metrics:
-        print(f"\n✓ Метрики:")
+        print("\n✓ Метрики:")
         print(f"  - Рост интеллекта: {metrics['avg_intelligence_growth']:.2f}")
         print(f"  - Средняя энергия: {metrics['avg_energy']:.1f}")
         print(f"  - Прогресс целей: {metrics['goal_progress']}")
@@ -58,9 +58,9 @@ def example_reflection_analysis():
 
 def example_strategy_recommendations():
     """Пример 2: Рекомендации стратегии"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("ПРИМЕР 2: Стратегические рекомендации")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     agent = DigitalBeing("StrategyTest")
 
@@ -83,9 +83,9 @@ def example_strategy_recommendations():
 
 def example_long_term_reflection():
     """Пример 3: Долгосрочная рефлексия"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("ПРИМЕР 3: Долгосрочная рефлексия")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     agent = DigitalBeing("LongTermTest")
 

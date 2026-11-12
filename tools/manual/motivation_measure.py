@@ -171,7 +171,10 @@ class Measurement:
             len(getattr(node, "experiences", []) or []) for node in concepts.values()
         )
         confidence = (
-            sum(float(getattr(node, "confidence", 0.0) or 0.0) for node in concepts.values())
+            sum(
+                float(getattr(node, "confidence", 0.0) or 0.0)
+                for node in concepts.values()
+            )
             / total
             if total
             else 0.0
@@ -198,6 +201,7 @@ class Measurement:
         ][:3]
         for example in refined_examples:
             print(f"  {example[:160]}")
+
     def report(self, agent, candidate_samples) -> None:
         from src.core.motivation import unified_motivation as um
 
@@ -208,9 +212,15 @@ class Measurement:
         print(f"Циклов: {self.cycles}")
         print(f"Типы действий (act): {dict(agent._action_type_counts)}")
         print(f"Выбрано арбитром: {dict(self.chosen.most_common())}")
-        print(f"Выбрано при нажатой потребности: {dict(self.chosen_when_pressing.most_common())}")
-        print(f"Выбрано при голодном любопытстве: {dict(self.chosen_when_curiosity_hungry.most_common())}")
-        print(f"Выбрано, когда вопрос ВОЗМОЖЕН: {dict(self.chosen_when_can_ask.most_common())}")
+        print(
+            f"Выбрано при нажатой потребности: {dict(self.chosen_when_pressing.most_common())}"
+        )
+        print(
+            f"Выбрано при голодном любопытстве: {dict(self.chosen_when_curiosity_hungry.most_common())}"
+        )
+        print(
+            f"Выбрано, когда вопрос ВОЗМОЖЕН: {dict(self.chosen_when_can_ask.most_common())}"
+        )
         print(f"Исходы действий: {dict(self.effects)}")
         print(f"Нажатых потребностей за цикл: {dict(sorted(self.pressing.items()))}")
         print(f"Активных драйвов за цикл: {dict(sorted(self.active_drives.items()))}")
@@ -224,7 +234,9 @@ class Measurement:
             f"не удалось {self.asks_failed}"
         )
         print(f"Результаты вопросов: {dict(self.ask_texts.most_common(5))}")
-        print(f"Отказы до выполнения: {dict(self.denials)} по действиям {dict(self.denied_actions.most_common(6))}")
+        print(
+            f"Отказы до выполнения: {dict(self.denials)} по действиям {dict(self.denied_actions.most_common(6))}"
+        )
         print(f"Первые выборы: {self.first_choices}")
         print(f"Энергия по циклам: {self.energy_curve}")
         print(f"Усталость по циклам: {self.fatigue_curve}")
@@ -319,8 +331,11 @@ async def main(
             measurement.no_candidates += 1
         samples.append(
             [
-                (c.get("action"), round(float(c.get("strength", 0)), 2),
-                 c.get("type") or c.get("source"))
+                (
+                    c.get("action"),
+                    round(float(c.get("strength", 0)), 2),
+                    c.get("type") or c.get("source"),
+                )
                 for c in result
             ]
         )
@@ -332,6 +347,7 @@ async def main(
     # «ask_question» и задан вопрос — разные вещи.
     original_ask_handler = getattr(agent, "_act_ask_user", None)
     if original_ask_handler is not None:
+
         def observed_ask():
             result = original_ask_handler() or {}
             text = str(result.get("text") or "")
@@ -397,12 +413,12 @@ if __name__ == "__main__":
     if "--report" in args:
         index = args.index("--report")
         report = args[index + 1]
-        del args[index:index + 2]
+        del args[index : index + 2]
     seconds = 5.0
     if "--seconds-per-cycle" in args:
         index = args.index("--seconds-per-cycle")
         seconds = float(args[index + 1])
-        del args[index:index + 2]
+        del args[index : index + 2]
     args = [a for a in args if not a.startswith("--")]
     count = int(args[0]) if args else 200
     raise SystemExit(

@@ -12,9 +12,9 @@ from src.core.buffered_logger import get_logger
 def tick_communication_impl(self, cycle_count: int) -> Dict:
     """Единый цикл коммуникации — проверяет инициативу агента.
 
-        Вызывается каждый цикл (можно из main.py или из tick_will).
-        Возвращает отчёт о проактивных сообщениях.
-        """
+    Вызывается каждый цикл (можно из main.py или из tick_will).
+    Возвращает отчёт о проактивных сообщениях.
+    """
     if getattr(self, "_last_communication_tick_cycle", None) == cycle_count:
         return {"cycle": cycle_count, "skipped": "duplicate_cycle"}
     self._last_communication_tick_cycle = cycle_count
@@ -51,9 +51,7 @@ def tick_communication_impl(self, cycle_count: int) -> Dict:
 
     # 2. ProactiveCommunication — проверить инициативу
     if hasattr(self, "proactive_communication"):
-        msg = self.proactive_communication.maybe_initiate(
-            agent=self, cycle=cycle_count
-        )
+        msg = self.proactive_communication.maybe_initiate(agent=self, cycle=cycle_count)
         if msg is not None:
             # Отправляем через UserInteraction (новый метод send_message)
             if hasattr(self, "user_interaction"):
@@ -75,12 +73,14 @@ def start_naming_dialogue_impl(self, cycle: int = 0) -> Dict:
     if not hasattr(self, "naming_dialogue"):
         return {"status": "no_naming_dialogue"}
     return self.naming_dialogue.initiate_naming_dialogue(
-        agent=self, cycle=cycle,
+        agent=self,
+        cycle=cycle,
     )
 
 
-def ask_user_impl(self, text: str, source: str = "user",
-                  max_explorations: Optional[int] = None) -> Dict:
+def ask_user_impl(
+    self, text: str, source: str = "user", max_explorations: Optional[int] = None
+) -> Dict:
     """Фасад: поставить открытый вопрос в очередь (логика в OpenQuestionsManager)."""
     if not hasattr(self, "_open_questions_manager"):
         return {"status": "rejected", "reason": "manager не инициализирован"}
@@ -129,9 +129,9 @@ def _on_user_answered_open_question_impl(
 ) -> None:
     """Мост «Собеседник-3»: ответ на открытый вопрос → знание о теме.
 
-        Ошибки моста не должны ломать приём ответа: свидетельство —
-        обогащение, а не условие работы очереди.
-        """
+    Ошибки моста не должны ломать приём ответа: свидетельство —
+    обогащение, а не условие работы очереди.
+    """
     from src.core.open_questions import _topic_from_question
 
     topic = _topic_from_question(question_text)
@@ -148,17 +148,17 @@ def record_user_answer_impl(
 ) -> Optional[str]:
     """Записать объяснение пользователя как знание-свидетельство.
 
-        Ответ человека на вопрос сущности становится опытом концепта
-        (kind=testimony, source="user", сила 0.4: доверие взрослому
-        собеседнику, но не собственное наблюдение) — и штампом цикла,
-        чтобы тема не переспрашивалась (USER_EXPLAINED_COOLDOWN_CYCLES).
+    Ответ человека на вопрос сущности становится опытом концепта
+    (kind=testimony, source="user", сила 0.4: доверие взрослому
+    собеседнику, но не собственное наблюдение) — и штампом цикла,
+    чтобы тема не переспрашивалась (USER_EXPLAINED_COOLDOWN_CYCLES).
 
-        Граница субъектности: слова человека не становятся ценностями
-        или мотивацией — только факт «человек так это объяснил».
+    Граница субъектности: слова человека не становятся ценностями
+    или мотивацией — только факт «человек так это объяснил».
 
-        Returns:
-            Нормализованная тема или None, если записывать нечего.
-        """
+    Returns:
+        Нормализованная тема или None, если записывать нечего.
+    """
     normalized = " ".join(str(topic or "").split())
     if not normalized or not self._is_learnable(normalized):
         return None
@@ -169,9 +169,9 @@ def record_user_answer_impl(
     stamps = self._user_explained_topics
     stamps[normalized] = int(cycle)
     if len(stamps) > 50:
-        for old_topic, _stamp in sorted(
-            stamps.items(), key=lambda item: item[1]
-        )[: len(stamps) - 50]:
+        for old_topic, _stamp in sorted(stamps.items(), key=lambda item: item[1])[
+            : len(stamps) - 50
+        ]:
             stamps.pop(old_topic, None)
 
     if hasattr(self, "mental_models"):
@@ -193,15 +193,15 @@ def record_user_answer_impl(
 def mute_topic_impl(self, topic: str, cycle: int = 0) -> Optional[str]:
     """Человек попросил не возвращаться к теме («ты повторяешься»).
 
-        «Собеседник-5»: только штамп цикла в ``_user_explained_topics`` —
-        БЕЗ записи концепта и без свидетельства: объяснения не было,
-        было требование тишины. Граница: замолкает лишь тема, которую
-        сущность действительно спрашивала (в истории вопросов или
-        сейчас в ожидании); случайная строка из протеста не мьютится.
+    «Собеседник-5»: только штамп цикла в ``_user_explained_topics`` —
+    БЕЗ записи концепта и без свидетельства: объяснения не было,
+    было требование тишины. Граница: замолкает лишь тема, которую
+    сущность действительно спрашивала (в истории вопросов или
+    сейчас в ожидании); случайная строка из протеста не мьютится.
 
-        Returns:
-            Нормализованная тема или None, если мьютить нечего.
-        """
+    Returns:
+        Нормализованная тема или None, если мьютить нечего.
+    """
     normalized = " ".join(str(topic or "").split())
     if not normalized or not self._is_learnable(normalized):
         return None
@@ -210,28 +210,20 @@ def mute_topic_impl(self, topic: str, cycle: int = 0) -> Optional[str]:
     asked_before = False
     if interaction is not None:
         for entry in getattr(interaction, "question_history", []) or []:
-            question = " ".join(
-                str(entry.get("question") or "").lower().split()
-            )
+            question = " ".join(str(entry.get("question") or "").lower().split())
             if lower in question:
                 asked_before = True
                 break
         if not asked_before:
-            for pending in getattr(
-                interaction, "pending_questions", []
-            ) or []:
-                question = " ".join(
-                    str(pending.get("question") or "").lower().split()
-                )
+            for pending in getattr(interaction, "pending_questions", []) or []:
+                question = " ".join(str(pending.get("question") or "").lower().split())
                 if lower in question:
                     asked_before = True
                     break
     if not asked_before:
         return None
     self._user_explained_topics[normalized] = int(cycle)
-    get_logger().log(
-        f"[MUTE] человек попросил не возвращаться к «{normalized}»"
-    )
+    get_logger().log(f"[MUTE] человек попросил не возвращаться к «{normalized}»")
     return normalized
 
 
@@ -242,8 +234,9 @@ def _consume_open_question_impl(self) -> Optional[str]:
     return self._open_questions_manager.consume()
 
 
-def _record_open_question_exploration_impl(self, stimulus: str, thought: str,
-                                           strategy: Optional[str] = None) -> None:
+def _record_open_question_exploration_impl(
+    self, stimulus: str, thought: str, strategy: Optional[str] = None
+) -> None:
     """Фасад: записать результат размышления."""
     if not hasattr(self, "_open_questions_manager"):
         return
@@ -255,17 +248,22 @@ def propose_name_impl(self, name: str, cycle: int = 0) -> Dict:
     if not hasattr(self, "naming_dialogue"):
         return {"status": "no_naming_dialogue"}
     return self.naming_dialogue.process_name_proposal(
-        name, agent=self, cycle=cycle,
+        name,
+        agent=self,
+        cycle=cycle,
     )
 
 
-def request_renaming_impl(self, reason: str = "вырос из старого имени",
-                          cycle: int = 0) -> Dict:
+def request_renaming_impl(
+    self, reason: str = "вырос из старого имени", cycle: int = 0
+) -> Dict:
     """Агент сам просит переименовать."""
     if not hasattr(self, "naming_dialogue"):
         return {"status": "no_naming_dialogue"}
     return self.naming_dialogue.request_renaming(
-        reason, agent=self, cycle=cycle,
+        reason,
+        agent=self,
+        cycle=cycle,
     )
 
 

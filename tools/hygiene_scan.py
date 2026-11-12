@@ -112,13 +112,27 @@ def _mutable_defaults(tree: ast.AST, path: str) -> List[Issue]:
     def check_args(args: ast.arguments, path: str):
         for default in list(args.defaults) + [d for d in args.kw_defaults if d]:
             if isinstance(default, mutable_literals):
-                issues.append(Issue(path, default.lineno, "mutable-default",
-                                    "Изменяемое значение по умолчанию"))
-            elif (isinstance(default, ast.Call)
-                  and isinstance(default.func, ast.Name)
-                  and default.func.id in mutable_calls):
-                issues.append(Issue(path, default.lineno, "mutable-default",
-                                    f"Изменяемое значение по умолчанию: {default.func.id}()"))
+                issues.append(
+                    Issue(
+                        path,
+                        default.lineno,
+                        "mutable-default",
+                        "Изменяемое значение по умолчанию",
+                    )
+                )
+            elif (
+                isinstance(default, ast.Call)
+                and isinstance(default.func, ast.Name)
+                and default.func.id in mutable_calls
+            ):
+                issues.append(
+                    Issue(
+                        path,
+                        default.lineno,
+                        "mutable-default",
+                        f"Изменяемое значение по умолчанию: {default.func.id}()",
+                    )
+                )
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -133,7 +147,9 @@ def _duplicate_defs(tree: ast.AST, path: str) -> List[Issue]:
         for decorator in getattr(node, "decorator_list", []):
             # @property / @x.setter / @x.getter / @x.deleter
             if isinstance(decorator, ast.Attribute) and decorator.attr in {
-                "setter", "getter", "deleter",
+                "setter",
+                "getter",
+                "deleter",
             }:
                 return True
             if isinstance(decorator, ast.Name) and decorator.id == "overload":
@@ -149,14 +165,20 @@ def _duplicate_defs(tree: ast.AST, path: str) -> List[Issue]:
                     isinstance(decorator, ast.Name) and decorator.id == "overload"
                     for decorator in getattr(node, "decorator_list", [])
                 )
-                if (node.name in seen
-                        and not is_overload_or_accessor(node)
-                        and node.name not in overloaded):
-                    issues.append(Issue(
-                        path, node.lineno, "duplicate-def",
-                        f"Повторное определение {scope}{node.name} "
-                        f"(первое — строка {seen[node.name]})",
-                    ))
+                if (
+                    node.name in seen
+                    and not is_overload_or_accessor(node)
+                    and node.name not in overloaded
+                ):
+                    issues.append(
+                        Issue(
+                            path,
+                            node.lineno,
+                            "duplicate-def",
+                            f"Повторное определение {scope}{node.name} "
+                            f"(первое — строка {seen[node.name]})",
+                        )
+                    )
                 seen[node.name] = node.lineno
                 if is_overload:
                     overloaded.add(node.name)
@@ -173,12 +195,24 @@ def _error_handling(tree: ast.AST, path: str) -> List[Issue]:
         if not isinstance(node, ast.ExceptHandler):
             continue
         if node.type is None:
-            issues.append(Issue(path, node.lineno, "bare-except",
-                                "except без типа перехватывает всё, включая SystemExit"))
+            issues.append(
+                Issue(
+                    path,
+                    node.lineno,
+                    "bare-except",
+                    "except без типа перехватывает всё, включая SystemExit",
+                )
+            )
         body = node.body
         if len(body) == 1 and isinstance(body[0], ast.Pass):
-            issues.append(Issue(path, node.lineno, "silent-except",
-                                "except ...: pass — ошибка исчезает бесследно"))
+            issues.append(
+                Issue(
+                    path,
+                    node.lineno,
+                    "silent-except",
+                    "except ...: pass — ошибка исчезает бесследно",
+                )
+            )
     return issues
 
 
@@ -216,8 +250,11 @@ def scan_file(path: Path) -> FileReport:
             text = source_lines[line - 1] if 0 < line <= len(source_lines) else ""
             if "# noqa" in text:
                 continue
-            report.issues.append(Issue(str(path), line, "unused-import",
-                                      f"Импорт '{name}' не используется"))
+            report.issues.append(
+                Issue(
+                    str(path), line, "unused-import", f"Импорт '{name}' не используется"
+                )
+            )
 
     report.issues.extend(_mutable_defaults(tree, str(path)))
     report.issues.extend(_duplicate_defs(tree, str(path)))
@@ -228,17 +265,28 @@ def scan_file(path: Path) -> FileReport:
 
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--path", action="append", default=None,
-                        help="Файл или каталог (можно несколько раз)")
+    parser.add_argument(
+        "--path",
+        action="append",
+        default=None,
+        help="Файл или каталог (можно несколько раз)",
+    )
     parser.add_argument("--json", default=None, help="Сохранить отчёт в JSON")
-    parser.add_argument("--kind", action="append", default=None,
-                        help="Показывать только эти типы проблем")
+    parser.add_argument(
+        "--kind",
+        action="append",
+        default=None,
+        help="Показывать только эти типы проблем",
+    )
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parent.parent
-    paths = [Path(p) if Path(p).is_absolute() else root / p
-             for p in (args.path or ["src", "config", "tools", "main.py",
-                                     "main_tray.py", "tests"])]
+    paths = [
+        Path(p) if Path(p).is_absolute() else root / p
+        for p in (
+            args.path or ["src", "config", "tools", "main.py", "main_tray.py", "tests"]
+        )
+    ]
 
     reports = [scan_file(path) for path in _iter_py_files(paths)]
     issues = [issue for report in reports for issue in report.issues]

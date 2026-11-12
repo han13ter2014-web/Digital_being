@@ -152,9 +152,7 @@ async def main(
 
             tally.drain(agent.loop_closer)
             unanswered = sum(
-                1
-                for q in agent.get_open_questions()
-                if not q.get("answered")
+                1 for q in agent.get_open_questions() if not q.get("answered")
             )
             max_unanswered = max(max_unanswered, unanswered)
     finally:
@@ -169,9 +167,7 @@ async def main(
     old_ratio = (total_effect / total_actions) if total_actions else 0.0
 
     maintenance = sum(
-        count
-        for action, count, _ in tally.rows()
-        if action in MAINTENANCE_ACTIONS
+        count for action, count, _ in tally.rows() if action in MAINTENANCE_ACTIONS
     )
     chosen_total = sum(tally.chosen.values())
 
@@ -185,8 +181,11 @@ async def main(
     lines.append("=" * 72)
     lines.append(
         "Режим: "
-        + ("энергия удерживается (измеряется работа)" if hold_energy
-           else "энергия как в жизни (включая отдых)")
+        + (
+            "энергия удерживается (измеряется работа)"
+            if hold_energy
+            else "энергия как в жизни (включая отдых)"
+        )
     )
     lines.append(f"Циклов: {cycles}")
     if seed is not None:
@@ -199,9 +198,7 @@ async def main(
     for action, count, effects in tally.rows():
         share = effects / count if count else 0.0
         mark = "обслуживание" if action in MAINTENANCE_ACTIONS else ""
-        lines.append(
-            f"  {action:<24} {count:4d}  {effects:4d}  ({share:.0%}) {mark}"
-        )
+        lines.append(f"  {action:<24} {count:4d}  {effects:4d}  ({share:.0%}) {mark}")
     lines.append("")
     lines.append("Доля результативности:")
     lines.append(
@@ -217,9 +214,7 @@ async def main(
         f"({(maintenance / chosen_total if chosen_total else 0.0):.0%})"
     )
     lines.append("")
-    lines.append(
-        f"Тупики: {len(stuck)} — {stuck if stuck else 'нет'}"
-    )
+    lines.append(f"Тупики: {len(stuck)} — {stuck if stuck else 'нет'}")
     if stuck:
         lines.append(f"  по отказу тела: {stuck_by_denial or 'нет'}")
         lines.append(f"  по «нет эффекта»: {stuck_by_emptiness or 'нет'}")
@@ -246,16 +241,14 @@ if __name__ == "__main__":
     if "--report" in args:
         index = args.index("--report")
         report = args[index + 1]
-        del args[index:index + 2]
+        del args[index : index + 2]
     seed = None
     if "--seed" in args:
         index = args.index("--seed")
         seed = int(args[index + 1])
-        del args[index:index + 2]
+        del args[index : index + 2]
     args = [a for a in args if not a.startswith("--")]
     count = int(args[0]) if args else 300
     raise SystemExit(
-        asyncio.run(
-            main(count, hold_energy=hold, seed=seed, report_path=report)
-        )
+        asyncio.run(main(count, hold_energy=hold, seed=seed, report_path=report))
     )

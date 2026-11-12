@@ -37,8 +37,14 @@ def test_repeated_pending_attempts_recommend_explicit_forgotten():
 def test_new_evidence_blocks_fading_recommendation():
     agent = DigitalBeing(name="FadeEvidence")
     entries = [attempt(agent) for _ in range(3)]
-    agent.mental_models.encounter_concept("память", "source", "Память сохраняет опыт",
-                                         evidence_strength=0.8, evidence_kind="testimony", source="new:1")
+    agent.mental_models.encounter_concept(
+        "память",
+        "source",
+        "Память сохраняет опыт",
+        evidence_strength=0.8,
+        evidence_kind="testimony",
+        source="new:1",
+    )
     finish_evidence_goal(agent, entries[-1])
     assert fading_assessment(agent, entries[-1])["reason"] == "satisfied"
 
@@ -46,5 +52,9 @@ def test_new_evidence_blocks_fading_recommendation():
 def test_resolved_intention_is_not_fade_candidate():
     agent = DigitalBeing(name="FadeResolved")
     entry = attempt(agent)
-    entry["resolution"] = {"kind": "cancelled", "reason": "оставил", "cycle": agent.cycle_count}
+    entry["resolution"] = {
+        "kind": "cancelled",
+        "reason": "оставил",
+        "cycle": agent.cycle_count,
+    }
     assert fading_assessment(agent, entry)["reason"] == "resolved"

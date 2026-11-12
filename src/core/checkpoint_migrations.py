@@ -17,7 +17,9 @@ def get_schema_version(state: dict) -> int:
         raise CheckpointMigrationError("Состояние чекпоинта должно быть словарём")
     value = state.get("schema_version", 0)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise CheckpointMigrationError("schema_version должен быть неотрицательным целым")
+        raise CheckpointMigrationError(
+            "schema_version должен быть неотрицательным целым"
+        )
     return value
 
 

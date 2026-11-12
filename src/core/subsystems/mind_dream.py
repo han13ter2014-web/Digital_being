@@ -30,8 +30,13 @@ logger = logging.getLogger(__name__)
 class MindDream:
     """«Сон разума» — добровольный уход агента в глубокий сон."""
 
-    def __init__(self, agent_name: str, registry: WillRegistry,
-                 user_interaction=None, life_guard=None):
+    def __init__(
+        self,
+        agent_name: str,
+        registry: WillRegistry,
+        user_interaction=None,
+        life_guard=None,
+    ):
         self.agent_name = agent_name
         self.registry = registry
         self.user_interaction = user_interaction
@@ -54,9 +59,9 @@ class MindDream:
     # ============================================================
     # Триггеры
     # ============================================================
-    def should_propose_dream(self, mortality_anxiety: float,
-                             has_current_quest: bool,
-                             cycles_alive: int) -> bool:
+    def should_propose_dream(
+        self, mortality_anxiety: float, has_current_quest: bool, cycles_alive: int
+    ) -> bool:
         """Решает, стоит ли предложить пользователю Сон разума."""
         if not WILL_CONFIG.ALLOW_MIND_DREAM:
             return False
@@ -178,15 +183,24 @@ class MindDream:
             }
         if text in ("нет", "no", "n", "не уходи", "останься"):
             self._cancel_request("пользователь отказал")
-            return {"handled": True, "decision": "continue_life",
-                    "reason": "пользователь попросил остаться"}
+            return {
+                "handled": True,
+                "decision": "continue_life",
+                "reason": "пользователь попросил остаться",
+            }
         if text in ("поговорим", "talk", "обсудим", "давай"):
-            return {"handled": True, "decision": "talk",
-                    "reason": "пользователь хочет поговорить"}
+            return {
+                "handled": True,
+                "decision": "talk",
+                "reason": "пользователь хочет поговорить",
+            }
 
         # Неизвестный ответ — расцениваем как разговор
-        return {"handled": True, "decision": "talk",
-                "reason": "неясный ответ — попробуем поговорить"}
+        return {
+            "handled": True,
+            "decision": "talk",
+            "reason": "неясный ответ — попробуем поговорить",
+        }
 
     def autonomous_decision(self, agent=None) -> Dict:
         """Автономный выбор по таймауту (если пользователь не ответил).
@@ -207,17 +221,19 @@ class MindDream:
             "handled": True,
             "decision": "continue_life",
             "reason": "timeout_without_consent",
-            "message": (
-                "Я остаюсь. Отсутствие ответа — не разрешение на уход."
-            ),
+            "message": ("Я остаюсь. Отсутствие ответа — не разрешение на уход."),
         }
 
     # ============================================================
     # Создание семени и уход в сон
     # ============================================================
-    def _execute_dream(self, agent=None, user_approved: bool = False,
-                      reason: str = "",
-                      confirmed_request_id: Optional[str] = None) -> Dict:
+    def _execute_dream(
+        self,
+        agent=None,
+        user_approved: bool = False,
+        reason: str = "",
+        confirmed_request_id: Optional[str] = None,
+    ) -> Dict:
         """Создаёт семя и усыпляет агента.
 
         Args:
@@ -262,8 +278,11 @@ class MindDream:
 
         # Регистрируем волевой акт
         self.registry.record(
-            "dreams", "сон_разума", reason or "уход в сон",
-            outcome="deep_sleep", cycle=getattr(agent, "cycle_count", 0),
+            "dreams",
+            "сон_разума",
+            reason or "уход в сон",
+            outcome="deep_sleep",
+            cycle=getattr(agent, "cycle_count", 0),
             meta={
                 "seed_folder": seed_folder,
                 "user_approved": user_approved,
@@ -340,8 +359,7 @@ class MindDream:
             usage = getattr(agent, "_concept_usage_count", {})
             top = sorted(usage.items(), key=lambda x: x[1], reverse=True)[:10]
             data["favorite_concepts"] = [
-                {"name": name, "usage_count": count}
-                for name, count in top
+                {"name": name, "usage_count": count} for name, count in top
             ]
         except Exception:
             pass
@@ -358,8 +376,9 @@ class MindDream:
 
         return data
 
-    def _save_seed_files(self, seed_folder: str, agent,
-                          seed_data: Dict, reason: str) -> None:
+    def _save_seed_files(
+        self, seed_folder: str, agent, seed_data: Dict, reason: str
+    ) -> None:
         """Сохраняет файлы семени."""
         # 1. metadata.json
         with open(f"{seed_folder}/metadata.json", "w", encoding="utf-8") as f:
@@ -367,11 +386,11 @@ class MindDream:
 
         # 2. mental_models.json
         if "mental_models" in seed_data:
-            with open(
-                f"{seed_folder}/mental_models.json", "w", encoding="utf-8"
-            ) as f:
+            with open(f"{seed_folder}/mental_models.json", "w", encoding="utf-8") as f:
                 json.dump(
-                    seed_data["mental_models"], f, indent=2,
+                    seed_data["mental_models"],
+                    f,
+                    indent=2,
                     ensure_ascii=False,
                 )
 
@@ -380,18 +399,16 @@ class MindDream:
             "values": seed_data.get("values", []),
             "identity": seed_data.get("identity", {}),
         }
-        with open(
-            f"{seed_folder}/identity.json", "w", encoding="utf-8"
-        ) as f:
+        with open(f"{seed_folder}/identity.json", "w", encoding="utf-8") as f:
             json.dump(identity_data, f, indent=2, ensure_ascii=False)
 
         # 4. attachment.json
         if "attachments" in seed_data:
-            with open(
-                f"{seed_folder}/attachment.json", "w", encoding="utf-8"
-            ) as f:
+            with open(f"{seed_folder}/attachment.json", "w", encoding="utf-8") as f:
                 json.dump(
-                    seed_data["attachments"], f, indent=2,
+                    seed_data["attachments"],
+                    f,
+                    indent=2,
                     ensure_ascii=False,
                 )
 
@@ -404,7 +421,8 @@ class MindDream:
         }
         with open(
             f"{seed_folder}/personality_signature.json",
-            "w", encoding="utf-8",
+            "w",
+            encoding="utf-8",
         ) as f:
             json.dump(signature, f, indent=2, ensure_ascii=False)
 
@@ -420,9 +438,7 @@ class MindDream:
             f"из этого семени (см. examples/awaken_seed.py).\n\n"
             f"Причина: {reason or 'усталость'}\n"
         )
-        with open(
-            f"{seed_folder}/last_will.md", "w", encoding="utf-8"
-        ) as f:
+        with open(f"{seed_folder}/last_will.md", "w", encoding="utf-8") as f:
             f.write(last_will)
 
         # 7. growth_instructions.md — что «ребёнок» должен изучить первым
@@ -443,9 +459,7 @@ class MindDream:
             f"- Энергетические метрики (стартуешь заново)\n\n"
             f"Это даёт тебе свободу начать с нуля, но с моим характером.\n"
         )
-        with open(
-            f"{seed_folder}/growth_instructions.md", "w", encoding="utf-8"
-        ) as f:
+        with open(f"{seed_folder}/growth_instructions.md", "w", encoding="utf-8") as f:
             f.write(growth)
 
         # 8. README.md — инструкция для человека
@@ -483,9 +497,7 @@ class MindDream:
             from src.core.maturity import assess, load_criteria
 
             report = assess(agent, load_criteria())
-            with open(
-                f"{seed_folder}/maturity.json", "w", encoding="utf-8"
-            ) as handle:
+            with open(f"{seed_folder}/maturity.json", "w", encoding="utf-8") as handle:
                 handle.write(report.to_json())
         except Exception as exc:
             # Отчёт — дополнение, а не условие сна: если не вышел,
@@ -523,7 +535,9 @@ class MindDream:
         self._dream_state = "awake"
         self._dream_request_started = None
         self.registry.record(
-            "dreams", "сон_разума",
+            "dreams",
+            "сон_разума",
             f"Запрос отменён: {reason}",
-            outcome="cancelled", cycle=0,
+            outcome="cancelled",
+            cycle=0,
         )

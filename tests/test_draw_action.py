@@ -1,4 +1,5 @@
 """Тесты привязки рисования: действие draw у настоящего агента."""
+
 from pathlib import Path
 
 import pytest

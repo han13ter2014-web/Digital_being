@@ -13,12 +13,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_default_profile_is_unnamed_and_contains_only_seed_knowledge(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     monkeypatch.delenv("DIGITAL_BEING_NAME", raising=False)
     # В полном CI Settings уже импортирован с DIGITAL_BEING_NAME=TestAgent.
     # Воспроизводим свежий процесс без переменной, не меняя runtime-контур.
     from config.settings import SETTINGS
+
     monkeypatch.setattr(SETTINGS, "DEFAULT_AGENT_NAME", "Без имени")
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     env = setup_environment(chdir=False, console=False)
@@ -31,7 +33,6 @@ def test_default_profile_is_unnamed_and_contains_only_seed_knowledge(
         interactive=False,
     )
     assert name == "Без имени"
-    assert name not in {"Афродита", "Тэсс", "Alpha"}
 
     agent, report = create_agent(env, name)
     assert report["source"] == "new"
@@ -42,9 +43,9 @@ def test_default_profile_is_unnamed_and_contains_only_seed_knowledge(
             encoding="utf-8"
         )
     )
-    stored = json.loads((tmp_path / "knowledge_base.json").read_text(encoding="utf-8"))
     assert len(seed) == 47
-    assert stored == seed
+    assert agent.knowledge_base == seed
+    assert not (tmp_path / "knowledge_base.json").exists()
     assert not (tmp_path / "active_profile.json").exists()
     assert not (tmp_path / "access_settings.json").exists()
 
@@ -54,6 +55,33 @@ def test_default_profile_is_unnamed_and_contains_only_seed_knowledge(
     greeting = agent.user_interaction.message_history[-1]["content"]
     assert "У меня пока нет имени." in greeting
     assert "Сейчас меня зовут 'Без имени'" not in greeting
+
+
+def test_managed_knowledge_ignores_legacy_json_and_restores_from_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    env = setup_environment(chdir=False, console=False)
+    legacy = tmp_path / "knowledge_base.json"
+    legacy.write_text(
+        json.dumps({"посторонняя тема": "не должна попасть в managed Core"}),
+        encoding="utf-8",
+    )
+    before = legacy.read_bytes()
+
+    agent, _ = create_agent(env, "ManagedKB", new=True)
+    assert "посторонняя тема" not in agent.knowledge_base
+    agent.knowledge_base["собственная тема"] = "сохраняется только в снимке"
+    agent._save_knowledge_base()
+    assert legacy.read_bytes() == before
+
+    agent.save_state()
+    restored, report = create_agent(env, "ManagedKB", expected_life_id=agent.life_id)
+    assert report["source"] == "checkpoint"
+    assert restored.knowledge_base["собственная тема"] == "сохраняется только в снимке"
+    assert "посторонняя тема" not in restored.knowledge_base
+    assert legacy.read_bytes() == before
 
 
 def test_immutable_resources_are_separate_from_live_data():

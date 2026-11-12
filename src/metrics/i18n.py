@@ -47,8 +47,9 @@ class I18n:
     DEFAULT_LANGUAGE = "ru"
     SUPPORTED_LANGUAGES = ("ru", "en")
 
-    def __init__(self, locale_dir: Optional[str] = None,
-                 default_language: str = DEFAULT_LANGUAGE) -> None:
+    def __init__(
+        self, locale_dir: Optional[str] = None, default_language: str = DEFAULT_LANGUAGE
+    ) -> None:
         self._locale_dir = locale_dir or _DEFAULT_LOCALE_DIR
         self._default_language = default_language
         self._current_language = default_language
@@ -135,9 +136,7 @@ class I18n:
             if not isinstance(data, dict):
                 logger.warning(f"[i18n] {path} не dict, пропускаем")
                 return False
-            self._translations[language] = {
-                str(k): str(v) for k, v in data.items()
-            }
+            self._translations[language] = {str(k): str(v) for k, v in data.items()}
             logger.info(f"[i18n] загружен {language}: {len(data)} ключей")
             return True
         except Exception as e:
@@ -154,8 +153,7 @@ class I18n:
                     loaded += 1
         return loaded
 
-    def save_translations(self, language: str,
-                           translations: Dict[str, str]) -> bool:
+    def save_translations(self, language: str, translations: Dict[str, str]) -> bool:
         """Сохранить переводы в JSON-файл."""
         try:
             os.makedirs(self._locale_dir, exist_ok=True)

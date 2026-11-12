@@ -88,9 +88,7 @@ class EffectorRequest:
     def __post_init__(self) -> None:
         request_id = str(self.request_id).strip()
         goal = str(self.goal).strip()
-        command = (
-            str(self.command).strip() if self.command is not None else None
-        )
+        command = str(self.command).strip() if self.command is not None else None
         command = command or None
 
         if not request_id:
@@ -98,9 +96,7 @@ class EffectorRequest:
         if not goal:
             raise ValueError("goal must not be empty")
         if bool(command) == bool(self.plan):
-            raise ValueError(
-                "request needs exactly one of command or explicit plan"
-            )
+            raise ValueError("request needs exactly one of command or explicit plan")
 
         normalized_plan = []
         for index, step in enumerate(self.plan or ()):
@@ -195,17 +191,13 @@ class EffectorPort(Protocol):
     scheduler, budget or history.
     """
 
-    def submit(self, request: EffectorRequest) -> EffectorResult:
-        ...
+    def submit(self, request: EffectorRequest) -> EffectorResult: ...
 
-    def poll(self, request_id: str) -> EffectorResult:
-        ...
+    def poll(self, request_id: str) -> EffectorResult: ...
 
-    def step(self, cycle: int) -> Optional[EffectorResult]:
-        ...
+    def step(self, cycle: int) -> Optional[EffectorResult]: ...
 
-    def status(self) -> Mapping[str, Any]:
-        ...
+    def status(self) -> Mapping[str, Any]: ...
 
 
 __all__ = [

@@ -206,9 +206,7 @@ class LoopCloser:
             # восстановления тела действие оставалось тупиковым по
             # причине, которой уже нет.
             if not denied:
-                self._no_effect_streak[key] = (
-                    self._no_effect_streak.get(key, 0) + 1
-                )
+                self._no_effect_streak[key] = self._no_effect_streak.get(key, 0) + 1
         else:
             self._no_effect_streak[key] = 0
             self._effect_count[key] = self._effect_count.get(key, 0) + 1

@@ -1,4 +1,5 @@
 """Тесты для WebSearcher — все с моком urllib, сеть не нужна."""
+
 import json
 import unittest
 from unittest.mock import patch
@@ -65,6 +66,7 @@ def _make_search_response(titles) -> bytes:
 
 class _FakeResponse:
     """Подделка HTTPResponse для urllib."""
+
     def __init__(self, body: bytes, status: int = 200):
         self._body = body
         self.status = status
@@ -85,8 +87,12 @@ class WebSearcherTests(unittest.TestCase):
     def setUp(self):
         # rate_limit=0 → тесты не спят.
         self.ws = WebSearcher(
-            lang="ru", timeout=2.0, max_chars=500,
-            rate_limit_sec=0.0, cache_size=3, fallback_to_en=True,
+            lang="ru",
+            timeout=2.0,
+            max_chars=500,
+            rate_limit_sec=0.0,
+            cache_size=3,
+            fallback_to_en=True,
         )
 
     # ---------- Базовые сценарии ----------
@@ -111,7 +117,9 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_search_empty_pages(self):
         """Wikipedia не нашла страниц."""
-        with patch("urllib.request.urlopen", return_value=_FakeResponse(_make_empty_response())):
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(_make_empty_response())
+        ):
             result = self.ws.search("xyzzzzzz no such concept")
 
         # Основной язык RU не нашёл, fallback на EN тоже не нашёл →
@@ -122,7 +130,10 @@ class WebSearcherTests(unittest.TestCase):
 
     def test_search_no_extract(self):
         """Страница без extract (disambig)."""
-        with patch("urllib.request.urlopen", return_value=_FakeResponse(_make_missing_extract_response())):
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_FakeResponse(_make_missing_extract_response()),
+        ):
             result = self.ws.search("Луна")
 
         # RU вернул no_extract → пробуем EN (тоже пустой) → not_found.
@@ -135,7 +146,9 @@ class WebSearcherTests(unittest.TestCase):
             "Сознание — состояние психической жизни человека.",
             "https://ru.wikipedia.org/wiki/Сознание",
         )
-        with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)) as mock_urlopen:
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(fake_body)
+        ) as mock_urlopen:
             self.ws.search("сознание")
             call_args = mock_urlopen.call_args
             request_obj = call_args[0][0]
@@ -146,7 +159,9 @@ class WebSearcherTests(unittest.TestCase):
                 if key.lower() == "user-agent":
                     ua_value = val
                     break
-            self.assertIsNotNone(ua_value, f"User-Agent не найден в {dict(request_obj.headers)}")
+            self.assertIsNotNone(
+                ua_value, f"User-Agent не найден в {dict(request_obj.headers)}"
+            )
             self.assertEqual(ua_value, "DigitalBeing/2.5")
 
     # ---------- Кэш ----------
@@ -158,7 +173,9 @@ class WebSearcherTests(unittest.TestCase):
             "Сознание — состояние психической жизни человека.",
             "https://ru.wikipedia.org/wiki/Сознание",
         )
-        with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)) as mock_urlopen:
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(fake_body)
+        ) as mock_urlopen:
             r1 = self.ws.search("сознание")  # HTTP-вызов
             r2 = self.ws.search("Сознание")  # cache_hit
             r3 = self.ws.search("СОЗНАНИЕ")  # тоже cache_hit (lower в ключе)
@@ -224,10 +241,15 @@ class WebSearcherTests(unittest.TestCase):
     def test_fallback_disabled(self):
         """Если fallback_to_en выключен — вся цепочка остаётся на RU."""
         ws_no_fb = WebSearcher(
-            lang="ru", timeout=2.0, rate_limit_sec=0.0,
-            cache_size=0, fallback_to_en=False,
+            lang="ru",
+            timeout=2.0,
+            rate_limit_sec=0.0,
+            cache_size=0,
+            fallback_to_en=False,
         )
-        with patch("urllib.request.urlopen", return_value=_FakeResponse(_make_empty_response())) as mock_urlopen:
+        with patch(
+            "urllib.request.urlopen", return_value=_FakeResponse(_make_empty_response())
+        ) as mock_urlopen:
             result = ws_no_fb.search("xyzzz")
 
         self.assertFalse(result["found"])
@@ -244,9 +266,13 @@ class WebSearcherTests(unittest.TestCase):
     def test_http_error(self):
         """HTTP 404 / 5xx → graceful fail."""
         import urllib.error
+
         err = urllib.error.HTTPError(
             url="https://ru.wikipedia.org/w/api.php",
-            code=503, msg="Service Unavailable", hdrs=None, fp=None,
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,
+            fp=None,
         )
         with patch("urllib.request.urlopen", side_effect=err):
             result = self.ws.search("сознание")
@@ -261,6 +287,7 @@ class WebSearcherTests(unittest.TestCase):
     def test_network_error(self):
         """URLError → graceful fail без fallback."""
         import urllib.error
+
         err = urllib.error.URLError("DNS failure")
         with patch("urllib.request.urlopen", side_effect=err):
             result = self.ws.search("сознание")
@@ -303,10 +330,14 @@ class WebSearcherTests(unittest.TestCase):
     def test_max_chars_truncation(self):
         """Длинный extract обрезается до max_chars с многоточием."""
         long_extract = "Слово " * 200  # ~1200 символов
-        fake_body = _make_wiki_response("Long", long_extract, "https://ru.wikipedia.org/wiki/Long")
+        fake_body = _make_wiki_response(
+            "Long", long_extract, "https://ru.wikipedia.org/wiki/Long"
+        )
         with patch("urllib.request.urlopen", return_value=_FakeResponse(fake_body)):
             # max_chars=500
-            ws2 = WebSearcher(lang="ru", max_chars=500, rate_limit_sec=0.0, cache_size=0)
+            ws2 = WebSearcher(
+                lang="ru", max_chars=500, rate_limit_sec=0.0, cache_size=0
+            )
             result = ws2.search("Long")
 
         self.assertTrue(result["found"])
@@ -357,21 +388,27 @@ class OmnivoreChainTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = WebSearcher(
-            lang="ru", timeout=2.0, max_chars=500,
-            rate_limit_sec=0.0, cache_size=3, fallback_to_en=True,
+            lang="ru",
+            timeout=2.0,
+            max_chars=500,
+            rate_limit_sec=0.0,
+            cache_size=3,
+            fallback_to_en=True,
         )
 
     def test_fulltext_fallback_found(self):
         """Точного заголовка нет — полнотекстовый поиск находит статью."""
         responses = [
-            _FakeResponse(_make_empty_response()),                # RU заголовок
-            _FakeResponse(_make_search_response(["Мышление"])),   # кандидаты
-            _FakeResponse(_make_wiki_response(
-                "Мышление",
-                "Мышление — психический процесс абстрактного отражения "
-                "действительности, высшая форма познания.",
-                "https://ru.wikipedia.org/wiki/Мышление",
-            )),
+            _FakeResponse(_make_empty_response()),  # RU заголовок
+            _FakeResponse(_make_search_response(["Мышление"])),  # кандидаты
+            _FakeResponse(
+                _make_wiki_response(
+                    "Мышление",
+                    "Мышление — психический процесс абстрактного отражения "
+                    "действительности, высшая форма познания.",
+                    "https://ru.wikipedia.org/wiki/Мышление",
+                )
+            ),
         ]
         with patch("urllib.request.urlopen", side_effect=responses):
             result = self.ws.search("абстрактное мышление")
@@ -387,17 +424,21 @@ class OmnivoreChainTests(unittest.TestCase):
         responses = [
             _FakeResponse(_make_empty_response()),
             _FakeResponse(_make_search_response(["Постороннее", "Мышление"])),
-            _FakeResponse(_make_wiki_response(
-                "Постороннее",
-                "Постороннее — страница про что-то совсем иное, без связи.",
-                "https://ru.wikipedia.org/wiki/Постороннее",
-            )),
-            _FakeResponse(_make_wiki_response(
-                "Мышление",
-                "Мышление — психический процесс абстрактного отражения "
-                "действительности.",
-                "https://ru.wikipedia.org/wiki/Мышление",
-            )),
+            _FakeResponse(
+                _make_wiki_response(
+                    "Постороннее",
+                    "Постороннее — страница про что-то совсем иное, без связи.",
+                    "https://ru.wikipedia.org/wiki/Постороннее",
+                )
+            ),
+            _FakeResponse(
+                _make_wiki_response(
+                    "Мышление",
+                    "Мышление — психический процесс абстрактного отражения "
+                    "действительности.",
+                    "https://ru.wikipedia.org/wiki/Мышление",
+                )
+            ),
         ]
         with patch("urllib.request.urlopen", side_effect=responses):
             result = self.ws.search("абстрактное мышление")
@@ -408,14 +449,16 @@ class OmnivoreChainTests(unittest.TestCase):
     def test_wiktionary_fallback_found(self):
         """Википедия пуста и поиск ничего не дал — Викисловарь кормит."""
         responses = [
-            _FakeResponse(_make_empty_response()),      # RU заголовок
-            _FakeResponse(_make_search_response([])),   # полнотекст пуст
-            _FakeResponse(_make_wiki_response(
-                "прозрачность",
-                "Прозрачность — свойство среды пропускать свет; "
-                "переносно — открытость процессов.",
-                "https://ru.wiktionary.org/wiki/прозрачность",
-            )),
+            _FakeResponse(_make_empty_response()),  # RU заголовок
+            _FakeResponse(_make_search_response([])),  # полнотекст пуст
+            _FakeResponse(
+                _make_wiki_response(
+                    "прозрачность",
+                    "Прозрачность — свойство среды пропускать свет; "
+                    "переносно — открытость процессов.",
+                    "https://ru.wiktionary.org/wiki/прозрачность",
+                )
+            ),
         ]
         with patch("urllib.request.urlopen", side_effect=responses) as mock_urlopen:
             result = self.ws.search("прозрачность")
@@ -432,13 +475,15 @@ class OmnivoreChainTests(unittest.TestCase):
         responses = [
             _FakeResponse(_make_empty_response()),
             _FakeResponse(_make_search_response([])),
-            _FakeResponse(_make_wiki_response(
-                "Луна",
-                "Луна — может означать: спутник, богиня и прочее.",
-                "https://ru.wiktionary.org/wiki/Луна",
-            )),
-            _FakeResponse(_make_empty_response()),      # Викибуки пусты
-            _FakeResponse(_make_empty_response()),      # EN тоже пуст
+            _FakeResponse(
+                _make_wiki_response(
+                    "Луна",
+                    "Луна — может означать: спутник, богиня и прочее.",
+                    "https://ru.wiktionary.org/wiki/Луна",
+                )
+            ),
+            _FakeResponse(_make_empty_response()),  # Викибуки пусты
+            _FakeResponse(_make_empty_response()),  # EN тоже пуст
         ]
         with patch("urllib.request.urlopen", side_effect=responses):
             result = self.ws.search("луна")
@@ -465,6 +510,7 @@ class OmnivoreChainTests(unittest.TestCase):
     def test_network_error_stops_chain(self):
         """Ошибка сети обрывает цепочку на первом звене — без лишних запросов."""
         import urllib.error
+
         with patch(
             "urllib.request.urlopen",
             side_effect=urllib.error.URLError("DNS failure"),

@@ -1,6 +1,5 @@
 """Каталог сохраняет разные работы и причины через настоящий старт."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +7,7 @@ import pytest
 from config.simulation_config import SIM_CONFIG
 from src.app.bootstrap import create_agent
 from src.app.paths import setup_environment
+from src.core.activity_workspace import workspace_for
 from src.core.agent import DigitalBeing
 from src.core.subsystem_base import PluginRegistry
 
@@ -26,7 +26,7 @@ def test_catalog_restart_and_addressed_continuation(tmp_path, monkeypatch, backe
         first.act("create_draft", intention={"params": {"draft_mode": "new"}})
         active_id = first._creative_draft["id"]
         catalog = first.list_creative_drafts()
-        root = Path(env.data_root) / "delamain" / "workspace" / "creative"
+        root = workspace_for(first).root
         original_text = (root / f"{left_id}.txt").read_bytes()
         first.save_state(force=True)
         PluginRegistry.reset_global()
@@ -37,7 +37,12 @@ def test_catalog_restart_and_addressed_continuation(tmp_path, monkeypatch, backe
         assert second._creative_draft["revision"] == 2
         assert second._creative_draft["id"] == active_id
         assert (root / f"{left_id}.txt").read_bytes() == original_text
-        assert next(d for d in second.list_creative_drafts() if d["id"] == left_id)["leave_reason"] == "оставить эту композицию как есть"
+        assert (
+            next(d for d in second.list_creative_drafts() if d["id"] == left_id)[
+                "leave_reason"
+            ]
+            == "оставить эту композицию как есть"
+        )
     finally:
         PluginRegistry.reset_global()
 
@@ -45,10 +50,19 @@ def test_catalog_restart_and_addressed_continuation(tmp_path, monkeypatch, backe
 def test_autonomous_leave_has_neutral_inference_feedback():
     agent = DigitalBeing(name="LeaveFeedback")
     agent.act("create_draft")
-    selected = {"action": "create_draft", "source": "test", "verdict": "proceed",
-                "params": {"draft_mode": "leave", "draft_id": agent._creative_draft["id"], "reason": "достаточно"}}
-    with patch.object(agent.decision_arbitrator, "choose_action", return_value=selected), \
-         patch.object(agent, "_record_active_inference_experience") as record:
+    selected = {
+        "action": "create_draft",
+        "source": "test",
+        "verdict": "proceed",
+        "params": {
+            "draft_mode": "leave",
+            "draft_id": agent._creative_draft["id"],
+            "reason": "достаточно",
+        },
+    }
+    with patch.object(
+        agent.decision_arbitrator, "choose_action", return_value=selected
+    ), patch.object(agent, "_record_active_inference_experience") as record:
         report = agent.autonomous_tick()
     assert report["actual_valence"] == 0
     record.assert_called_once()

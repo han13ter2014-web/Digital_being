@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     import tkinter as tk
     from tkinter import scrolledtext, font
+
     _HAS_TK = True
 except ImportError:
     _HAS_TK = False
@@ -38,6 +39,7 @@ except ImportError:
 # ============================================================
 # Команды чата (синтаксис /command)
 # ============================================================
+
 
 class ChatCommands:
     """Простой список команд для автодополнения / справки."""
@@ -61,6 +63,7 @@ class ChatCommands:
 # ============================================================
 # ChatWindow
 # ============================================================
+
 
 class ChatWindow:
     """Tk-окно чата с агентом.
@@ -184,10 +187,12 @@ class ChatWindow:
             )
 
         self._incoming_queue.put(("agent", f"👋 {msg_text}"))
-        self._incoming_queue.put((
-            "system",
-            f"Введите имя: >>> name <ваше_имя> (или просто имя в строке ввода)",
-        ))
+        self._incoming_queue.put(
+            (
+                "system",
+                "Введите имя: >>> name <ваше_имя> (или просто имя в строке ввода)",
+            )
+        )
 
     async def _on_agent_name_changed(self, event) -> None:
         """Синхронизировать отображаемое имя после изменения Core."""
@@ -409,8 +414,14 @@ class ChatWindow:
         root = self._root
 
         # Шрифты
-        mono_font = font.Font(family="Consolas" if self._is_windows() else "Menlo", size=10)
-        bold_font = font.Font(family="Segoe UI" if self._is_windows() else "Helvetica", size=10, weight="bold")
+        mono_font = font.Font(
+            family="Consolas" if self._is_windows() else "Menlo", size=10
+        )
+        bold_font = font.Font(
+            family="Segoe UI" if self._is_windows() else "Helvetica",
+            size=10,
+            weight="bold",
+        )
 
         # === Лента сообщений ===
         self._text = scrolledtext.ScrolledText(
@@ -480,6 +491,7 @@ class ChatWindow:
 
     def _is_windows(self) -> bool:
         import os
+
         return os.name == "nt"
 
     def _position_bottom_right(self) -> None:
@@ -705,14 +717,20 @@ class ChatWindow:
                     source="chat",
                 )
             else:
-                self._append_system(
-                    "Использование: /name <имя_которое_ты_хочешь_дать>"
-                )
+                self._append_system("Использование: /name <имя_которое_ты_хочешь_дать>")
             return
 
         # Status / goals / concepts — публикуем USER_COMMAND, обработает AgentRunner
-        if cmd in ("/status", "/goals", "/concepts", "/energy",
-                   "/pause", "/resume", "/save", "/quit"):
+        if cmd in (
+            "/status",
+            "/goals",
+            "/concepts",
+            "/energy",
+            "/pause",
+            "/resume",
+            "/save",
+            "/quit",
+        ):
             self.bus.publish_sync(
                 Events.USER_COMMAND,
                 {"command": cmd.lstrip("/")},
@@ -757,6 +775,7 @@ class ChatWindow:
 # ============================================================
 # Headless-режим (заглушка)
 # ============================================================
+
 
 class ChatWindowStub:
     """Заглушка для CI/серверов без GUI."""

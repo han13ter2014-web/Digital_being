@@ -25,6 +25,7 @@ def __getattr__(name):
         )
         # Проксируем к актуальному классу
         from src.core.agent import DigitalBeing as _ActualDigitalBeing
+
         return _ActualDigitalBeing
 
     raise AttributeError(

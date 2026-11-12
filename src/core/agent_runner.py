@@ -104,16 +104,18 @@ MAX_STIMULUS_RETRIES = 3
 # Загрузка/сохранение состояния (вынесено из main.py для переиспользования)
 # ============================================================
 
+
 def get_latest_checkpoint(agent_name: str) -> Optional[str]:
     """Найти путь к последнему чекпоинту агента. None если нет."""
-    checkpoint_dir = data_path('checkpoints')
+    checkpoint_dir = data_path("checkpoints")
     if not os.path.exists(checkpoint_dir):
         return None
-    checkpoints = [f for f in os.listdir(checkpoint_dir)
-                   if f.startswith(f"{agent_name}_cycle_")]
+    checkpoints = [
+        f for f in os.listdir(checkpoint_dir) if f.startswith(f"{agent_name}_cycle_")
+    ]
     if not checkpoints:
         return None
-    checkpoints.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    checkpoints.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
     return os.path.join(checkpoint_dir, checkpoints[-1])
 
 
@@ -126,7 +128,9 @@ def load_agent_from_checkpoint(agent, checkpoint_path: Optional[str]) -> bool:
         return False
     try:
         agent.load_state(checkpoint_path)
-        logger.info(f"[{agent.name}] Состояние восстановлено из {os.path.basename(checkpoint_path)}")
+        logger.info(
+            f"[{agent.name}] Состояние восстановлено из {os.path.basename(checkpoint_path)}"
+        )
         return True
     except Exception as e:
         logger.exception(f"Ошибка загрузки чекпоинта {checkpoint_path}: {e}")
@@ -139,6 +143,7 @@ def load_agent_from_checkpoint(agent, checkpoint_path: Optional[str]) -> bool:
 # обратной совместимости (использует p=0.7 для трей-режима).
 # ============================================================
 
+
 def generate_prioritized_stimulus(agent) -> str:
     """Обратная совместимость: старая обёртка над ``stimulus_selector``.
 
@@ -148,12 +153,14 @@ def generate_prioritized_stimulus(agent) -> str:
     from src.core.stimulus_selector import (
         generate_prioritized_stimulus as _impl,
     )
+
     return _impl(agent)
 
 
 # ============================================================
 # AgentRunner
 # ============================================================
+
 
 class PersistentMessageQueue(asyncio.Queue):
     """Зеркало ожидающих сообщений для согласованного checkpoint раннера."""
@@ -212,6 +219,8 @@ class AgentRunner:
         self._last_auto_save_ts = time.time()
         self._last_save_ok: Optional[bool] = None
         self._last_save_at: Optional[float] = None
+        self._dialogue_journal_backend: Optional[str] = None
+        self._dialogue_journal_error: Optional[str] = None
         self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
 
@@ -234,9 +243,7 @@ class AgentRunner:
             getattr(LR_CONFIG, "RUNNER_SPEED_INTERVALS", None)
             or {"live": 5.0, "fast": 0.5, "max": 0.0}
         )
-        self._speed_mode: str = str(
-            getattr(LR_CONFIG, "RUNNER_DEFAULT_SPEED", "live")
-        )
+        self._speed_mode: str = str(getattr(LR_CONFIG, "RUNNER_DEFAULT_SPEED", "live"))
         if self._speed_mode not in self._speed_intervals:
             self._speed_mode = "live"
         # Сколько циклов прошло в режиме «лаборатория». Такие циклы
@@ -294,21 +301,12 @@ class AgentRunner:
         # Неважно, что сказано: сам факт, что человек рядом.
         emotional_state = getattr(self.agent, "emotional_state", None)
         if emotional_state is not None:
-            emotional_state.handle_event(
-                "user_contact", cycle=self.agent.cycle_count
-            )
-
-        # Имя — отдельный Core-owned диалог, а не обычная тема для обучения.
-        # После приветствия NamingDialogue ждёт естественный ответ пользователя
-        # без требования команды /name. Это должно происходить до помещения
-        # текста в очередь стимулов, иначе «Малютка» станет концептом, а имя
-        # агента останется прежним.
-        naming = getattr(self.agent, "naming_dialogue", None)
-        if naming is not None and await self._handle_naming_phase(naming, text):
-            return
+            emotional_state.handle_event("user_contact", cycle=self.agent.cycle_count)
 
         interaction = getattr(self.agent, "user_interaction", None)
-        pending = interaction.get_pending_question() if interaction is not None else None
+        pending = (
+            interaction.get_pending_question() if interaction is not None else None
+        )
 
         # === «Собеседник-1/5»: акт распознаётся один раз до дверей ===
         # Живой прогон 2026-11-01: «Я же уже отвечал тебе» уходило в
@@ -318,6 +316,31 @@ class AgentRunner:
         # «Собеседник-7»: обученные маркеры участвуют в классификации
         # (после статических таблиц).
         act = classify_user_text(text, learned=self._learned_markers())
+
+        # Один вход — одно социальное наблюдение, включая ранние двери и
+        # диалог имени. Это модель наблюдаемого акта, а не оценка личности.
+        from src.core.life_systems_bridge import observe_user_message
+
+        observe_user_message(
+            self.agent,
+            text,
+            act,
+            self.agent.cycle_count,
+            reaction_to_us=(
+                "confusion"
+                if pending is not None and act.matched_marker in _REPEAT_PROTEST_MARKERS
+                else ""
+            ),
+        )
+
+        # Имя — отдельный Core-owned диалог, а не обычная тема для обучения.
+        # После приветствия NamingDialogue ждёт естественный ответ пользователя
+        # без требования команды /name. Это должно происходить до помещения
+        # текста в очередь стимулов, иначе «Малютка» станет концептом, а имя
+        # агента останется прежним.
+        naming = getattr(self.agent, "naming_dialogue", None)
+        if naming is not None and await self._handle_naming_phase(naming, text):
+            return
 
         # === «Собеседник-7»: обучающий ответ — до всех дверей ===
         # Ответ на вопрос-уточнение («1», «вопрос», «не учи») не должен
@@ -373,7 +396,8 @@ class AgentRunner:
                             f"решено ({outcome.get('reason', '?')})."
                         )
                     await self._reply_to_user(
-                        reply, context="evolution_decision",
+                        reply,
+                        context="evolution_decision",
                         source="architecture_proposal",
                     )
                     return
@@ -386,9 +410,7 @@ class AgentRunner:
             forget_phrase = DialogueLearning.parse_forget_command(text)
             if forget_phrase is not None:
                 if interaction is not None:
-                    interaction.receive_user_message(
-                        text, cycle=self.agent.cycle_count
-                    )
+                    interaction.receive_user_message(text, cycle=self.agent.cycle_count)
                 if learning.forget(forget_phrase):
                     reply = f"Забыла фразу «{forget_phrase}» — больше не использую."
                 else:
@@ -398,13 +420,14 @@ class AgentRunner:
                 )
                 return
 
-        # K13: сначала читаем уже сохранённые факты и знания. Эти мосты
+        # сначала читаем уже сохранённые факты и знания. Эти мосты
         # стоят после naming/обучающего протокола, но до общего about_self
         # и unknown fallback: записанное не должно становиться «незнакомым».
         persistent_reply = build_persistent_fact_reply(self.agent, text)
         known_topic_reply = (
             build_known_topic_reply(self.agent, text)
-            if persistent_reply is None else None
+            if persistent_reply is None
+            else None
         )
         if persistent_reply is not None or known_topic_reply is not None:
             if interaction is not None:
@@ -484,10 +507,7 @@ class AgentRunner:
             user_model = getattr(self.agent, "user_model", None)
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
-            if (
-                pending is not None
-                and act.matched_marker in _REPEAT_PROTEST_MARKERS
-            ):
+            if pending is not None and act.matched_marker in _REPEAT_PROTEST_MARKERS:
                 response = self._handle_repeat_protest(pending, interaction)
                 reply_context = "repeat_protest"
             else:
@@ -501,7 +521,7 @@ class AgentRunner:
 
         # Если Core задал пользователю прямой вопрос, обычный ответ должен
         # закрыть именно его, а не стать новой темой обучения.
-        # TICKET-5/6 (наблюдатели 2026-11-05): вопрос человека — не ответ.
+        # очереди диалога (наблюдатели 2026-11-05): вопрос человека — не ответ.
         # «Что тебе сейчас важно?» при открытом вопросе про «обучение»
         # записывалось как «Записала про "обучение"», а висящий вопрос
         # закрывался чужими словами. Вопрос пропускаем мимо двери: он
@@ -516,11 +536,8 @@ class AgentRunner:
             # про «понимать» записалась как знание о «понимать». Определение
             # чужой темы уходит в дверь объяснений; вопрос остаётся открытым.
             definition = extract_definition(text)
-            if (
-                definition is not None
-                and not AgentRunner._definition_answers_pending(
-                    definition[0], pending
-                )
+            if definition is not None and not AgentRunner._definition_answers_pending(
+                definition[0], pending
             ):
                 await self._handle_user_definition(definition)
                 return
@@ -529,30 +546,30 @@ class AgentRunner:
             # него — синтез существовал только во внутреннем контуре.
             synthesizer = getattr(self.agent, "synthesize_complex_question", None)
             result = interaction.submit_answer(
-                pending["id"], text,
-                on_synthesis_needed=(
-                    synthesizer if callable(synthesizer) else None
-                ),
+                pending["id"],
+                text,
+                on_synthesis_needed=(synthesizer if callable(synthesizer) else None),
                 cycle=self.agent.cycle_count,
             )
             if isinstance(result, dict):
                 normalized_answer = " ".join(text.lower().strip().split())
                 unknown = normalized_answer.rstrip(".!?") in {
-                    "не знаю", "не уверен", "не уверена", "не могу сказать",
-                    "без понятия", "затрудняюсь ответить", "не знаю ответа",
+                    "не знаю",
+                    "не уверен",
+                    "не уверена",
+                    "не могу сказать",
+                    "без понятия",
+                    "затрудняюсь ответить",
+                    "не знаю ответа",
                 }
                 if unknown:
                     result["answer_kind"] = "unknown"
             topic = AgentRunner._topic_from_pending(pending)
-            answered = (
-                isinstance(result, dict)
-                and result.get("status") in {"answered", "next_question"}
-            )
-            if (
-                answered
-                and result.get("answer_kind") != "unknown"
-                and topic
-            ):
+            answered = isinstance(result, dict) and result.get("status") in {
+                "answered",
+                "next_question",
+            }
+            if answered and result.get("answer_kind") != "unknown" and topic:
                 recorder = getattr(self.agent, "record_user_answer", None)
                 if callable(recorder):
                     recorder(topic, text, self.agent.cycle_count)
@@ -567,7 +584,7 @@ class AgentRunner:
 
         # Если Core задал пользователю открытый вопрос, обычный ответ должен
         # закрыть этот вопрос, а не стать новой темой обучения.
-        # Вопрос человека ответом не является (TICKET-5/6, как выше).
+        # Вопрос человека ответом не является (очереди диалога, как выше).
         answerer = getattr(self.agent, "answer_open_question", None)
         if (
             callable(answerer)
@@ -575,9 +592,8 @@ class AgentRunner:
             and not is_question_text(text)
         ):
             definition = extract_definition(text)
-            if (
-                definition is not None
-                and not self._definition_matches_open_questions(definition[0])
+            if definition is not None and not self._definition_matches_open_questions(
+                definition[0]
             ):
                 await self._handle_user_definition(definition)
                 return
@@ -585,7 +601,8 @@ class AgentRunner:
             if result.get("status") == "answered":
                 response = f"Ответ записан к вопросу «{result['question']}»."
                 await self._reply_to_user(
-                    response, context="open_question_answer",
+                    response,
+                    context="open_question_answer",
                     source="open_question",
                 )
                 return
@@ -609,7 +626,8 @@ class AgentRunner:
             await self._reply_to_user(
                 "Сейчас у меня нет вопроса, к которому это ответ. "
                 "Спроси меня о чём-нибудь — или расскажи по-другому.",
-                context="orphan_answer", source="dialogue_acts",
+                context="orphan_answer",
+                source="dialogue_acts",
             )
             return
 
@@ -652,9 +670,9 @@ class AgentRunner:
                     return
 
         await self._reply_to_user(
-            "Я тебя слышу, но пока не понимаю, о чём это. "
-            "Расскажешь подробнее?",
-            context="unknown_reply", source="dialogue_acts",
+            "Я тебя слышу, но пока не понимаю, о чём это. " "Расскажешь подробнее?",
+            context="unknown_reply",
+            source="dialogue_acts",
         )
 
     def _learned_markers(self):
@@ -674,14 +692,13 @@ class AgentRunner:
         """
         phrase = DialogueLearning.phrase_from_context(pending.get("context"))
         if interaction is not None:
-            interaction.submit_answer(
-                pending["id"], text, cycle=self.agent.cycle_count
-            )
+            interaction.submit_answer(pending["id"], text, cycle=self.agent.cycle_count)
         learning = getattr(self.agent, "dialogue_learning", None)
         if learning is None or not phrase:
             await self._reply_to_user(
                 "Ответ записан.",
-                context="dialogue_learning", source="dialogue_learning",
+                context="dialogue_learning",
+                source="dialogue_learning",
             )
             return
         outcome = learning.resolve(phrase, text, cycle=self.agent.cycle_count)
@@ -691,7 +708,8 @@ class AgentRunner:
             emotional_state = getattr(self.agent, "emotional_state", None)
             if emotional_state is not None:
                 emotional_state.handle_event(
-                    "learned_phrase", cycle=self.agent.cycle_count,
+                    "learned_phrase",
+                    cycle=self.agent.cycle_count,
                     cause=phrase,
                 )
             label = {
@@ -700,8 +718,7 @@ class AgentRunner:
                 ACT_REQUEST: "просьбу, которой я не умею",
             }[outcome["act"]]
             reply = (
-                f"Поняла: «{phrase}» — теперь буду воспринимать это как "
-                f"{label}."
+                f"Поняла: «{phrase}» — теперь буду воспринимать это как " f"{label}."
             )
         elif outcome["status"] == "suppressed":
             reply = f"Хорошо: «{phrase}» учить не буду."
@@ -714,8 +731,7 @@ class AgentRunner:
             reply, context="dialogue_learning", source="dialogue_learning"
         )
 
-    async def _reply_to_user(self, text: str, context: str,
-                             source: str) -> None:
+    async def _reply_to_user(self, text: str, context: str, source: str) -> None:
         """Доставить прямую реплику пользователю через канал диалога.
 
         «Собеседник-6»: ответ на реплику человека — это AGENT_MESSAGE
@@ -725,22 +741,46 @@ class AgentRunner:
         без user_interaction — прежняя публикация мысли (совместимость
         с фейками в тестах).
         """
+        voice = getattr(self.agent, "voice_router", None)
+        if voice is not None:
+            try:
+                voice.speak(text)
+            except Exception as exc:
+                logging.getLogger(__name__).warning("voice delivery failed: %s", exc)
+        webhooks = getattr(self.agent, "webhooks", None)
+        if webhooks is not None:
+            try:
+                webhooks.send(
+                    text,
+                    title=self.agent.name,
+                    meta={"context": context, "cycle": self.agent.cycle_count},
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning("webhook delivery failed: %s", exc)
+
         interaction = getattr(self.agent, "user_interaction", None)
         if interaction is not None and hasattr(interaction, "send_reply"):
             interaction.send_reply(
-                text, context=context, cycle=self.agent.cycle_count,
+                text,
+                context=context,
+                cycle=self.agent.cycle_count,
             )
             return
         if interaction is not None and hasattr(interaction, "send_message"):
             interaction.send_message(
-                text, msg_type="statement", tone="casual",
-                urgency=0.3, context=context, cycle=self.agent.cycle_count,
+                text,
+                msg_type="statement",
+                tone="casual",
+                urgency=0.3,
+                context=context,
+                cycle=self.agent.cycle_count,
             )
             return
         await self.bus.publish(
             Events.AGENT_THOUGHT,
             {"text": text, "cycle": self.agent.cycle_count},
-            source=source, priority=1,
+            source=source,
+            priority=1,
         )
 
     async def _handle_user_definition(self, definition) -> None:
@@ -760,12 +800,14 @@ class AgentRunner:
             await self._reply_to_user(
                 f"Записала: «{saved} — это {body}». "
                 "Теперь я знаю это от тебя — переспрашивать не буду.",
-                context="user_definition", source="dialogue_acts",
+                context="user_definition",
+                source="dialogue_acts",
             )
             return
         await self._reply_to_user(
             "Это я записывать не буду — тема не подходит для моих знаний.",
-            context="user_definition_refused", source="dialogue_acts",
+            context="user_definition_refused",
+            source="dialogue_acts",
         )
 
     @staticmethod
@@ -794,15 +836,14 @@ class AgentRunner:
             return False
         questions = getattr(self.agent, "_open_questions", None) or []
         for question in questions:
-            question_text = " ".join(
-                str(question.get("text", "")).lower().split()
-            )
+            question_text = " ".join(str(question.get("text", "")).lower().split())
             if normalized_topic in question_text:
                 return True
         return False
 
-    async def _publish_naming_result(self, result: Dict[str, Any],
-                                     proposed: str) -> None:
+    async def _publish_naming_result(
+        self, result: Dict[str, Any], proposed: str
+    ) -> None:
         """Опубликовать ответ диалога об имени; при смене имени — событие Core."""
         if result.get("status") in {"accepted", "alternative_accepted"}:
             self._publish_name_changed(result)
@@ -823,7 +864,10 @@ class AgentRunner:
         """
         from src.core.name_proposal import extract_name_proposal
 
-        if classify_user_text(text, learned=self._learned_markers()).kind == ACT_REQUEST:
+        if (
+            classify_user_text(text, learned=self._learned_markers()).kind
+            == ACT_REQUEST
+        ):
             return None
         return extract_name_proposal(text)
 
@@ -902,9 +946,7 @@ class AgentRunner:
                 "«Пусть тебя зовут Омелла». "
                 "Остальную речь я пока не умею разбирать свободно."
             )
-        await self._reply_to_user(
-            hint, context="naming_hint", source="naming_dialogue"
-        )
+        await self._reply_to_user(hint, context="naming_hint", source="naming_dialogue")
         return True
 
     def _publish_name_changed(self, result: Dict[str, Any]) -> None:
@@ -934,7 +976,7 @@ class AgentRunner:
         context = str(pending.get("context") or "")
         prefix = "самостоятельный вопрос по теме: "
         if context.startswith(prefix):
-            topic = context[len(prefix):].strip()
+            topic = context[len(prefix) :].strip()
             return topic or None
         return None
 
@@ -966,7 +1008,7 @@ class AgentRunner:
         """«Уже отвечал» — вопрос снимается, тема замолкает.
 
         «Собеседник-5»: повторять вопрос после протеста человека — то,
-        что живой прогон показал на сущности Тэсс. Вопрос закрывается
+        что живой прогон показал в тестовом профиле. Вопрос закрывается
         как отклонённый (не как ответ: в историю ответов не попадает),
         а тема получает mute-штамп — сам к ней сущность не вернётся.
         """
@@ -977,9 +1019,7 @@ class AgentRunner:
         mute = getattr(self.agent, "mute_topic", None)
         if callable(mute) and topic:
             muted = mute(topic, self.agent.cycle_count)
-        interaction.decline_question(
-            pending["id"], cycle=self.agent.cycle_count
-        )
+        interaction.decline_question(pending["id"], cycle=self.agent.cycle_count)
         if muted:
             return (
                 f"Ты прав — я спрашивала об этом, вопрос снимаю. "
@@ -1010,9 +1050,7 @@ class AgentRunner:
         о человеке. Ничего из этого не придумывается и не улучшается.
         """
         agent = self.agent
-        concepts = getattr(
-            getattr(agent, "mental_models", None), "concepts", None
-        )
+        concepts = getattr(getattr(agent, "mental_models", None), "concepts", None)
         known = 0
         if isinstance(concepts, dict):
             known = sum(1 for name in concepts if agent._is_learnable(name))
@@ -1034,23 +1072,20 @@ class AgentRunner:
             ]
         if known:
             parts.append(
-                f"О {known} темах у меня уже есть хоть какой-то "
-                "собственный опыт."
+                f"О {known} темах у меня уже есть хоть какой-то " "собственный опыт."
             )
         user_model = getattr(agent, "user_model", None)
         if user_model is not None:
             promise = user_model.silence_promise()
             if promise:
                 parts.append(
-                    "И я помню: ты говорил, что можешь отлучаться — "
-                    "не тревожу."
+                    "И я помню: ты говорил, что можешь отлучаться — " "не тревожу."
                 )
             traits = getattr(user_model, "traits", None)
             if isinstance(traits, dict) and traits:
                 first_trait = next(iter(traits.values()))
                 parts.append(
-                    "Про тебя я записала: "
-                    f"«{self._short_quote(first_trait, 100)}»."
+                    "Про тебя я записала: " f"«{self._short_quote(first_trait, 100)}»."
                 )
         return " ".join(parts)
 
@@ -1092,7 +1127,9 @@ class AgentRunner:
         status = result.get("status")
         if status == "answered":
             if result.get("answer_kind") == "unknown":
-                return "Поняла: «не знаю» — я запомню это как твой ответ, а не как факт."
+                return (
+                    "Поняла: «не знаю» — я запомню это как твой ответ, а не как факт."
+                )
             if topic and answer_text:
                 quote = AgentRunner._short_quote(answer_text)
                 if quote:
@@ -1117,14 +1154,22 @@ class AgentRunner:
         """Сформировать ответ naming dialogue без генеративной модели."""
         status = result.get("status", "ok")
         if status == "accepted":
-            return f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            return (
+                f"✨ Принято! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            )
         if status == "rejected":
             return f"🤔 Не подошло: {result.get('reason', 'неизвестная причина')}."
         if status == "alternative_proposed":
-            alternative = result.get("agent_alternative") or result.get("alternative") or "другое имя"
+            alternative = (
+                result.get("agent_alternative")
+                or result.get("alternative")
+                or "другое имя"
+            )
             return f"💭 Я бы предпочёл(ла) другое имя: «{alternative}». Согласен?"
         if status == "alternative_accepted":
-            return f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            return (
+                f"✨ Согласен! Теперь меня зовут «{result.get('new_name', proposed)}»."
+            )
         if status == "rename_confirmation":
             return (
                 f"💭 Сейчас я «{result.get('current_name', '')}». "
@@ -1145,7 +1190,9 @@ class AgentRunner:
         if status == "no_naming_dialogue":
             return "⚠️ Диалог об имени сейчас недоступен."
         if status == "no_op":
-            return f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
+            return (
+                f"ℹ️ Сейчас не время для смены имени: {result.get('reason', '')}".strip()
+            )
         return f"ℹ️ Результат диалога об имени: {result}"
 
     async def _on_user_command(self, event) -> None:
@@ -1168,7 +1215,8 @@ class AgentRunner:
         status = self._format_status()
         await self._reply_to_user(
             f"👋 Привет! Вот мой статус:\n\n{status}",
-            context="chat_opened", source="runner",
+            context="chat_opened",
+            source="runner",
         )
 
     async def _on_pause(self, event) -> None:
@@ -1277,9 +1325,7 @@ class AgentRunner:
         if self._speed_mode == "fast":
             interval = base
         else:  # live
-            energy_interval = float(
-                self.energy_policy.current_tick_interval_sec()
-            )
+            energy_interval = float(self.energy_policy.current_tick_interval_sec())
             interval = max(base, energy_interval, 1.0)
 
         ethical_throttle = float(
@@ -1309,9 +1355,7 @@ class AgentRunner:
             return False
         started = time.time()
         await self._tick_once(wait_for_user=False)
-        logger.debug(
-            f"[{self.name}] step_once: {time.time() - started:.3f}с"
-        )
+        logger.debug(f"[{self.name}] step_once: {time.time() - started:.3f}с")
         return True
 
     # ============================================================
@@ -1329,7 +1373,9 @@ class AgentRunner:
             from src.app.active_profile import remember_active_name
             from src.core.paths import data_dir
 
-            remember_active_name(data_dir(), self.agent.name, getattr(self.agent, "life_id", None))
+            remember_active_name(
+                data_dir(), self.agent.name, getattr(self.agent, "life_id", None)
+            )
             flush_logs()
             self._last_save_ok = True
             self._last_save_at = time.time()
@@ -1380,7 +1426,10 @@ class AgentRunner:
 
         # Очередь создаётся лениво в _on_user_message — НЕ пересоздаём,
         # иначе потеряем все сообщения, пришедшие до start().
-        if not hasattr(self, "_pending_user_messages") or self._pending_user_messages is None:
+        if (
+            not hasattr(self, "_pending_user_messages")
+            or self._pending_user_messages is None
+        ):
             self._pending_user_messages = PersistentMessageQueue(self.agent)
 
         logger.info(f"[{self.name}] Старт. Циклов до: ∞ (без смерти от энергии)")
@@ -1391,7 +1440,14 @@ class AgentRunner:
         )
 
     async def stop(self) -> None:
-        """Остановить фоновый цикл. Сохранить состояние."""
+        """Остановить фоновый цикл, внешние адаптеры и сохранить состояние."""
+        webhooks = getattr(self.agent, "webhooks", None)
+        stop_webhooks = getattr(webhooks, "stop", None)
+        if callable(stop_webhooks):
+            try:
+                stop_webhooks()
+            except Exception as exc:
+                logger.warning(f"[{self.name}] Ошибка остановки webhooks: {exc}")
         if not self._running:
             return
         logger.info(f"[{self.name}] Остановка...")
@@ -1420,9 +1476,7 @@ class AgentRunner:
                     if guard is not None and guard.load_state() == "dormant":
                         await asyncio.sleep(self._pause_poll_sec())
                         continue
-                    logger.info(
-                        f"[{self.name}] Агент не жив — цикл остановлен"
-                    )
+                    logger.info(f"[{self.name}] Агент не жив — цикл остановлен")
                     self._stop_requested = True
                     break
                 await self._one_iteration()
@@ -1483,7 +1537,8 @@ class AgentRunner:
         self._recent_thoughts[key] = cycle
         # Старые записи не нужны: окно повтора ограничено по циклам.
         self._recent_thoughts = {
-            item: seen for item, seen in self._recent_thoughts.items()
+            item: seen
+            for item, seen in self._recent_thoughts.items()
             if cycle - seen < repeat_window
         }
         return True
@@ -1576,7 +1631,7 @@ class AgentRunner:
             if self._speed_mode == "max":
                 self._accelerated_cycles += 1
         finally:
-            # K13: диалог фиксируется после каждого цикла, даже если цикл
+            # диалог фиксируется после каждого цикла, даже если цикл
             # завершился ошибкой или отменой. Журнал отделён от checkpoint.
             self._save_dialogue_cycle_snapshot()
             # === Watchdog: конец цикла — в любой развилке ===
@@ -1587,17 +1642,18 @@ class AgentRunner:
         await self._check_watchdog_pressure()
 
         # === Автосохранение по таймеру ===
-        if (time.time() - self._last_auto_save_ts) >= LR_CONFIG.TRAY_AUTO_SAVE_INTERVAL_SEC:
+        if (
+            time.time() - self._last_auto_save_ts
+        ) >= LR_CONFIG.TRAY_AUTO_SAVE_INTERVAL_SEC:
             self._save_state_safe()
             self._last_auto_save_ts = time.time()
 
     def _save_dialogue_cycle_snapshot(self) -> None:
-        """Добавить снапшот диалога в JSONL и сразу сбросить его на диск.
+        """Сохранить полный след цикла в managed SQLite или standalone JSONL.
 
-        Файл журнала пополняется после рестарта, а Core-checkpoint не
-        раздувается. Последние 100 реплик включают обе стороны диалога;
-        ``to_checkpoint_dict`` сохраняет вопросы и исходящий след K5.
-        Ошибка журнала не останавливает жизненный цикл.
+        Журнал пополняется после рестарта, а Core-checkpoint не раздувается.
+        Последние 100 реплик включают обе стороны диалога. Ошибка журнала не
+        останавливает жизненный цикл и остаётся видимой в ``get_status()``.
         """
         try:
             interaction = getattr(self.agent, "user_interaction", None)
@@ -1607,7 +1663,8 @@ class AgentRunner:
             history = getattr(interaction, "message_history", []) or []
             history_limit = int(getattr(interaction, "OUTGOING_TRACE_MAX", 100))
             dialogue["messages"] = [
-                dict(entry) for entry in history[-history_limit:]
+                dict(entry)
+                for entry in history[-history_limit:]
                 if isinstance(entry, dict)
             ]
             record = {
@@ -1619,12 +1676,25 @@ class AgentRunner:
                 "ledger": dict(getattr(self, "_last_tick_ledger", {}) or {}),
                 "dialogue": dialogue,
             }
-            path = data_path("logs", "dialogue_cycles.jsonl")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "a", encoding="utf-8") as stream:
-                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
-                stream.flush()
+            database = getattr(
+                getattr(self.agent, "life_guard", None), "database", None
+            )
+            if database is not None:
+                self._dialogue_journal_backend = "sqlite"
+                database.append_dialogue_cycle(
+                    record,
+                    max_entries=getattr(LR_CONFIG, "DIALOGUE_CYCLES_MAX_ENTRIES", 5000),
+                )
+            else:
+                self._dialogue_journal_backend = "jsonl"
+                path = data_path("logs", "dialogue_cycles.jsonl")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    stream.flush()
+            self._dialogue_journal_error = None
         except Exception as exc:
+            self._dialogue_journal_error = f"{type(exc).__name__}: {exc}"
             logger.warning(f"[{self.name}] dialogue snapshot failed: {exc}")
 
     def set_stimulus_mode(self, mode: str) -> None:
@@ -1640,7 +1710,10 @@ class AgentRunner:
         """
         if self._stimulus_mode == "quiet":
             self._loop_tick += 1
-            if getattr(self.agent, "_open_questions", None) and self.agent.has_open_questions():
+            if (
+                getattr(self.agent, "_open_questions", None)
+                and self.agent.has_open_questions()
+            ):
                 return self.agent._consume_open_question() or None
             return None
         cooldown = int(getattr(LR_CONFIG, "STIMULUS_COOLDOWN_TICKS", 0) or 0)
@@ -1678,17 +1751,31 @@ class AgentRunner:
         self._idle_ticks += 1
         cycle_before = self.agent.cycle_count
         energy_before = self.agent.energy
-        self._last_tick_ledger = {"kind": "idle", "cycle_before": cycle_before,
-                                  "energy_before": energy_before, "completed": False}
+        self._last_tick_ledger = {
+            "kind": "idle",
+            "cycle_before": cycle_before,
+            "energy_before": energy_before,
+            "completed": False,
+        }
         try:
             report = self.agent.autonomous_tick()
             self._log_autonomous_events(report)
             self.agent.evolve()
             self._tick_count += 1
             self.agent.cycle_count += 1
-            self._last_tick_ledger.update(completed=True, autonomous_action=report.get("autonomous_action"))
-            self.bus.publish_sync(Events.TICK, {"phase": "idle", "cycle": self.agent.cycle_count,
-                                  "tick": self._tick_count, "energy": self.agent.energy}, source="runner")
+            self._last_tick_ledger.update(
+                completed=True, autonomous_action=report.get("autonomous_action")
+            )
+            self.bus.publish_sync(
+                Events.TICK,
+                {
+                    "phase": "idle",
+                    "cycle": self.agent.cycle_count,
+                    "tick": self._tick_count,
+                    "energy": self.agent.energy,
+                },
+                source="runner",
+            )
         except AgentDeadSignal:
             self._stop_requested = True
             self._running = False
@@ -1697,10 +1784,13 @@ class AgentRunner:
             self._last_tick_ledger["error"] = str(e)
             logger.exception(f"[{self.name}] idle autonomous_tick failed: {e}")
         finally:
-            self._last_tick_ledger.update(cycle_after=self.agent.cycle_count, energy_after=self.agent.energy)
+            self._last_tick_ledger.update(
+                cycle_after=self.agent.cycle_count, energy_after=self.agent.energy
+            )
 
-    def _register_deferred_failure(self, stimulus: str, stage: str,
-                                   error: Exception) -> None:
+    def _register_deferred_failure(
+        self, stimulus: str, stage: str, error: Exception
+    ) -> None:
         """Учесть неудачную попытку обработать отложенный стимул.
 
         После ``MAX_STIMULUS_RETRIES`` неудач стимул отпускается честно:
@@ -1729,7 +1819,8 @@ class AgentRunner:
         interaction = getattr(self.agent, "user_interaction", None)
         if interaction is not None and hasattr(interaction, "send_reply"):
             interaction.send_reply(
-                confession, context="deferred_stimulus_released",
+                confession,
+                context="deferred_stimulus_released",
                 cycle=self.agent.cycle_count,
             )
             return
@@ -1747,8 +1838,14 @@ class AgentRunner:
         Не использует input()/print() — общение через EventBus.
         """
         autonomous_report = {}
-        self.agent._deferred_stimulus = {"text": stimulus, "user_initiated": user_initiated}
-        self.agent._attention_stimulus = {"text": stimulus, "user_initiated": user_initiated}
+        self.agent._deferred_stimulus = {
+            "text": stimulus,
+            "user_initiated": user_initiated,
+        }
+        self.agent._attention_stimulus = {
+            "text": stimulus,
+            "user_initiated": user_initiated,
+        }
         # === АВТОНОМНЫЙ ТИК ЖИЗНИ ===
         # Вызываем КАЖДЫЙ цикл, независимо от того, был ли стимул от пользователя.
         # Это делает агента по-настоящему живым: он думает, чувствует, мечтает,
@@ -1759,7 +1856,9 @@ class AgentRunner:
             self._log_autonomous_events(autonomous_report)
         except AgentDeadSignal as e:
             # Agent died — graceful shutdown
-            logger.info(f"[{self.name}] Agent died: {e.cause}. Initiating graceful shutdown...")
+            logger.info(
+                f"[{self.name}] Agent died: {e.cause}. Initiating graceful shutdown..."
+            )
             # Publish death event
             self.bus.publish_sync(
                 Events.TICK,
@@ -1783,15 +1882,31 @@ class AgentRunner:
             self.agent._attention_stimulus = None
         selected = (autonomous_report.get("arbitrator") or {}).get("action", "")
         if not autonomous_report.get("attention_selected"):
-            self.agent._deferred_stimulus = {"text": stimulus, "user_initiated": user_initiated}
+            self.agent._deferred_stimulus = {
+                "text": stimulus,
+                "user_initiated": user_initiated,
+            }
             self.agent.evolve()
             self._tick_count += 1
             self.agent.cycle_count += 1
-            self._last_tick_ledger = {"kind": "stimulus_deferred", "cycle_after": self.agent.cycle_count,
-                                      "reason": "another_intention_selected", "autonomous_action": selected,
-                                      "user_initiated": user_initiated, "completed": True}
-            self.bus.publish_sync(Events.TICK, {"phase": "stimulus_deferred", "cycle": self.agent.cycle_count,
-                                  "energy": self.agent.energy, "user_initiated": user_initiated}, source="runner")
+            self._last_tick_ledger = {
+                "kind": "stimulus_deferred",
+                "cycle_after": self.agent.cycle_count,
+                "reason": "another_intention_selected",
+                "autonomous_action": selected,
+                "user_initiated": user_initiated,
+                "completed": True,
+            }
+            self.bus.publish_sync(
+                Events.TICK,
+                {
+                    "phase": "stimulus_deferred",
+                    "cycle": self.agent.cycle_count,
+                    "energy": self.agent.energy,
+                    "user_initiated": user_initiated,
+                },
+                source="runner",
+            )
             return
 
         try:
@@ -1824,9 +1939,13 @@ class AgentRunner:
 
         self.agent._deferred_stimulus = None
         self._deferred_fail_count = 0
-        self._last_tick_ledger = {"kind": "stimulus_processed", "completed": True,
-                                  "autonomous_action": selected, "stimulus_action": str(action),
-                                  "user_initiated": user_initiated}
+        self._last_tick_ledger = {
+            "kind": "stimulus_processed",
+            "completed": True,
+            "autonomous_action": selected,
+            "stimulus_action": str(action),
+            "user_initiated": user_initiated,
+        }
         self._tick_count += 1
         # Используем существующее поле cycle_count в агенте
         self.agent.cycle_count += 1
@@ -1855,10 +1974,9 @@ class AgentRunner:
         # Если текущий стимул — это exploration открытого вопроса,
         # фиксируем результат мышления в агенте (как делает main.py).
         # Без этого вопрос «крутится» бесконечно без прогресса.
-        is_open_question_stimulus = (
-            getattr(self.agent, "_open_questions", None)
-            and stimulus.startswith("вопрос: ")
-        )
+        is_open_question_stimulus = getattr(
+            self.agent, "_open_questions", None
+        ) and stimulus.startswith("вопрос: ")
         if is_open_question_stimulus:
             self.agent._record_open_question_exploration(stimulus, thought)
 
@@ -1883,8 +2001,10 @@ class AgentRunner:
         # в чат не попадали — пользователь видел только в терминале (main.py).
         if is_open_question_stimulus:
             recently_answered = [
-                q for q in self.agent._open_questions
-                if q.get("answered") and q.get("answer")
+                q
+                for q in self.agent._open_questions
+                if q.get("answered")
+                and q.get("answer")
                 and q["last_explored_at"] == self.agent.cycle_count
             ]
             if recently_answered:
@@ -2088,16 +2208,12 @@ class AgentRunner:
         #   "propose_name <X>" — публикуется из chat_window.py через EventBus.
         #   "name <X>" / "name" — короткий алиас (на случай прямого вызова
         #                        handle_command("/name X"), а также на будущее).
-        if (
-            cmd.startswith("propose_name ")
-            or cmd.startswith("name ")
-            or cmd == "name"
-        ):
+        if cmd.startswith("propose_name ") or cmd.startswith("name ") or cmd == "name":
             stripped = cmd_raw.lstrip("/")
             if cmd.startswith("propose_name "):
-                proposed = stripped[len("propose_name "):].strip()
+                proposed = stripped[len("propose_name ") :].strip()
             elif cmd.startswith("name "):
-                proposed = stripped[len("name "):].strip()
+                proposed = stripped[len("name ") :].strip()
             else:
                 proposed = ""
             if not proposed:
@@ -2122,9 +2238,7 @@ class AgentRunner:
         if len(parts) != 3 or parts[2] not in ("on", "off"):
             return "Использование: /access network|delamain|effector on|off"
         key, value = parts[1], parts[2]
-        result = set_access(
-            self.agent, key, value == "on", root=data_dir()
-        )
+        result = set_access(self.agent, key, value == "on", root=data_dir())
         if not result.get("ok"):
             return "⚠️ " + describe_error(result)
         label = str(result.get("label") or "Разрешение")
@@ -2198,10 +2312,7 @@ class AgentRunner:
                     else ""
                 )
                 retry_note = ""
-                if (
-                    goal.get("status") == "pending"
-                    and metadata.get("next_retry_at")
-                ):
+                if goal.get("status") == "pending" and metadata.get("next_retry_at"):
                     retry_note = f", retry_at={metadata.get('next_retry_at')}"
                 replan_note = ""
                 if metadata.get("replan_on_next_attempt"):
@@ -2330,13 +2441,9 @@ class AgentRunner:
             lines.append(f"  Ошибка моста целей: {bridge['last_error']}")
         if approval.get("error"):
             lines.append(f"  Approval-ошибка: {approval['error']}")
-        if planner.get("enabled"):
-            lines.append(
-                f"  LLM: {planner.get('model')} @ {planner.get('base_url')}"
-            )
         planner_error = planner.get("error") or planner.get("last_error")
         if planner_error:
-            lines.append(f"  LLM-ошибка: {planner_error}")
+            lines.append(f"  Ошибка планировщика: {planner_error}")
         last = status.get("last_result")
         if last:
             if last.get("pending_approval"):
@@ -2418,8 +2525,7 @@ class AgentRunner:
         metadata = approval.get("metadata") or {}
         repair_note = (
             "; repair-план"
-            if isinstance(metadata, dict)
-            and metadata.get("kind") == "step_repair"
+            if isinstance(metadata, dict) and metadata.get("kind") == "step_repair"
             else ""
         )
         return (
@@ -2470,8 +2576,7 @@ class AgentRunner:
             status = "✅" if q["answered"] else "🔄"
             hint = f" (💡 {q['hint'][:30]})" if q.get("hint") else ""
             lines.append(
-                f"  {status} [{q['explored']}/{q['max']}] "
-                f"«{q['text'][:50]}»{hint}"
+                f"  {status} [{q['explored']}/{q['max']}] " f"«{q['text'][:50]}»{hint}"
             )
         return "\n".join(lines)
 
@@ -2667,13 +2772,9 @@ class AgentRunner:
             if execution.get("command"):
                 lines.append(f"    Команда: {execution['command']}")
             if execution.get("plan"):
-                lines.append(
-                    f"    План: {self._format_goal_plan(execution['plan'])}"
-                )
+                lines.append(f"    План: {self._format_goal_plan(execution['plan'])}")
             if execution.get("success_predicate"):
-                lines.append(
-                    f"    Predicate: {execution['success_predicate']}"
-                )
+                lines.append(f"    Predicate: {execution['success_predicate']}")
         else:
             lines.append("  Executable: нет")
 
@@ -2733,9 +2834,7 @@ class AgentRunner:
     def _format_goals_authoring_result(self, result: dict, *, action: str) -> str:
         goal = result.get("goal") if isinstance(result.get("goal"), dict) else {}
         proposal = (
-            result.get("proposal")
-            if isinstance(result.get("proposal"), dict)
-            else {}
+            result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
         )
         if not result.get("ok"):
             lines = [f"⚠️ /goals {action}: {result.get('error') or 'ошибка'}"]
@@ -2800,15 +2899,13 @@ class AgentRunner:
                         "(DELAMAIN_BRIDGE_ENABLED=1)."
                     )
             if goal.get("status") == "pending":
-                lines.append(
-                    "  ℹ️ Цель станет активной после завершения текущей."
-                )
+                lines.append("  ℹ️ Цель станет активной после завершения текущей.")
         return "\n".join(lines)
 
     def _format_goals(self) -> str:
         a = self.agent
         goals_status = a.get_goals_status()
-        active = goals_status.get('active', '')
+        active = goals_status.get("active", "")
         lines = [
             f"📋 Цели: {goals_status['completed']}/{goals_status['total']}",
             f"  Активная: {active or '—'}",
@@ -2839,8 +2936,7 @@ class AgentRunner:
         total = len(mm.concepts)
         high_conf = sum(1 for n in mm.concepts.values() if n.confidence > 0.7)
         return (
-            f"📚 Концепций: {total}\n"
-            f"  С высокой уверенностью (>70%): {high_conf}"
+            f"📚 Концепций: {total}\n" f"  С высокой уверенностью (>70%): {high_conf}"
         )
 
     def _format_help(self) -> str:
@@ -2891,18 +2987,24 @@ class AgentRunner:
             spontaneous = will["spontaneous"]
             if spontaneous:
                 prompt = spontaneous.get("meta", {}).get("prompt", "неизвестно")
-                logger.info(f"[{self.name}] 💭 Спонтанный порыв (цикл {cycle}): {prompt}")
+                logger.info(
+                    f"[{self.name}] 💭 Спонтанный порыв (цикл {cycle}): {prompt}"
+                )
 
         # Проактивные сообщения
         comm = report.get("communication")
         if comm and comm.get("proactive_message"):
             msg = comm["proactive_message"]
             content = msg.get("content", "")[:80]
-            logger.info(f"[{self.name}] 💬 Проактивное сообщение (цикл {cycle}): {content}")
+            logger.info(
+                f"[{self.name}] 💬 Проактивное сообщение (цикл {cycle}): {content}"
+            )
 
         # Новые квесты от души
         soul = report.get("soul")
-        if soul and soul.get("soul", {}).get("systems", {}).get("meaning", {}).get("new_quest"):
+        if soul and soul.get("soul", {}).get("systems", {}).get("meaning", {}).get(
+            "new_quest"
+        ):
             quest = soul["soul"]["systems"]["meaning"]["new_quest"]
             logger.info(f"[{self.name}] 🌌 Новый квест (цикл {cycle}): {quest}")
 
@@ -2913,7 +3015,9 @@ class AgentRunner:
         # Самоуничтожение (экстремально редко)
         will_abuse = will and will.get("abuse_check")
         if will_abuse and will_abuse.get("recommended_action") == "self_terminate":
-            logger.warning(f"[{self.name}] ☠️ Рекомендация самоуничтожения (цикл {cycle})")
+            logger.warning(
+                f"[{self.name}] ☠️ Рекомендация самоуничтожения (цикл {cycle})"
+            )
 
         # Delamain-local: результат исполнения цели
         subsystems = report.get("subsystems") or {}
@@ -2971,6 +3075,10 @@ class AgentRunner:
             "agent_cycle": self.agent.cycle_count,
             "energy": self.energy_policy.get_status(),
             "watchdog": self.watchdog.get_status(),
+            "dialogue_journal": {
+                "backend": self._dialogue_journal_backend,
+                "last_error": self._dialogue_journal_error,
+            },
         }
 
 

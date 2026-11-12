@@ -36,16 +36,27 @@ def validate_personal_state(data):
         fail("root")
     if "identity" in data:
         identity = data["identity"]
-        if not isinstance(identity, dict) or not isinstance(identity.get("core_identity"), str):
+        if not isinstance(identity, dict) or not isinstance(
+            identity.get("core_identity"), str
+        ):
             fail("identity.core_identity")
         for field in ("core_values", "history"):
-            if not isinstance(identity.get(field), list) or any(not isinstance(item, str) for item in identity[field]):
+            if not isinstance(identity.get(field), list) or any(
+                not isinstance(item, str) for item in identity[field]
+            ):
                 fail(f"identity.{field}")
         stability = identity.get("identity_stability_score")
-        if isinstance(stability, bool) or not isinstance(stability, (int, float)) or not math.isfinite(stability) or not 0 <= stability <= 1:
+        if (
+            isinstance(stability, bool)
+            or not isinstance(stability, (int, float))
+            or not math.isfinite(stability)
+            or not 0 <= stability <= 1
+        ):
             fail("identity.identity_stability_score")
-    if "values" in data and (not isinstance(data["values"], list)
-                             or any(not isinstance(value, str) for value in data["values"])):
+    if "values" in data and (
+        not isinstance(data["values"], list)
+        or any(not isinstance(value, str) for value in data["values"])
+    ):
         fail("values")
     if "recent_refusals" in data:
         if not isinstance(data["recent_refusals"], list):
@@ -60,8 +71,17 @@ def validate_personal_state(data):
         entries, counters = registry.get("entries", []), registry.get("counters", {})
         if not isinstance(entries, list) or not isinstance(counters, dict):
             fail("will_registry")
+        if not isinstance(registry.get("agent_name", "agent"), str):
+            fail("will_registry.agent_name")
+        last_risk = registry.get("last_risk_cycle", -1)
+        if last_risk is not None and (type(last_risk) is not int or last_risk < -1):
+            fail("will_registry.last_risk_cycle")
         for entry in entries:
-            if not isinstance(entry, dict) or type(entry.get("cycle")) is not int or entry["cycle"] < 0:
+            if (
+                not isinstance(entry, dict)
+                or type(entry.get("cycle")) is not int
+                or entry["cycle"] < 0
+            ):
                 fail("will_registry.entries")
             for field in ("type", "topic", "reason", "outcome", "timestamp"):
                 if not isinstance(entry.get(field), str):
@@ -78,20 +98,34 @@ def validate_personal_state(data):
         if not isinstance(data["attachments"], dict):
             fail("attachments")
         for name, record in data["attachments"].items():
-            if not isinstance(name, str) or not isinstance(record, dict) or record.get("name") != name:
+            if (
+                not isinstance(name, str)
+                or not isinstance(record, dict)
+                or record.get("name") != name
+            ):
                 fail("attachments.name")
             if record.get("kind") not in {"user", "source"}:
                 fail("attachments.kind")
             for field in ("trust", "familiarity", "intimacy", "valence"):
                 value = record.get(field)
                 lower = -1 if field == "valence" else 0
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lower <= value <= 1:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or not lower <= value <= 1
+                ):
                     fail(f"attachments.{field}")
-            if type(record.get("interactions")) is not int or record["interactions"] < 0:
+            if (
+                type(record.get("interactions")) is not int
+                or record["interactions"] < 0
+            ):
                 fail("attachments.interactions")
             if not isinstance(record.get("history", []), list):
                 fail("attachments.history")
-            if record.get("last_interaction") is not None and not isinstance(record["last_interaction"], str):
+            if record.get("last_interaction") is not None and not isinstance(
+                record["last_interaction"], str
+            ):
                 fail("attachments.last_interaction")
 
 
@@ -113,12 +147,20 @@ def restore_personal_state(agent, data):
     registry = getattr(agent, "will_registry", None)
     if "will_registry" in data and registry is not None:
         saved = data["will_registry"]
+        registry.agent_name = saved.get("agent_name", registry.agent_name)
         registry.entries = deepcopy(saved.get("entries", []))
-        registry._counters = {key: 0 for key in registry._counters} | dict(saved.get("counters", {}))
+        registry._counters = {key: 0 for key in registry._counters} | dict(
+            saved.get("counters", {})
+        )
         registry._last_value_change_cycle = saved.get("last_value_change_cycle", 0)
+        last_risk = saved.get("last_risk_cycle", -1)
+        registry._last_risk_cycle = -1 if last_risk is None else last_risk
     if "values" in data and getattr(agent, "value_evolution", None) is not None:
         agent.value_evolution.current_values = list(data["values"])
-    if "recent_refusals" in data and getattr(agent, "right_to_refuse", None) is not None:
+    if (
+        "recent_refusals" in data
+        and getattr(agent, "right_to_refuse", None) is not None
+    ):
         agent.right_to_refuse._recent_refusals = list(data["recent_refusals"])
     attachment = getattr(agent, "attachment", None)
     if "attachments" in data and attachment is not None:

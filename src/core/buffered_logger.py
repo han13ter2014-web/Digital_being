@@ -17,7 +17,7 @@ from datetime import datetime
 from src.core.paths import data_path
 
 
-# «Харднинг-1» (k16-21): защита создания глобального логгера — race в
+# «Харднинг-1» (защиты логирования): защита создания глобального логгера — race в
 # get_logger() при первом вызове из двух потоков давал бы два инстанса
 # и два независимых буфера (потери и дубли записи).
 _GET_LOGGER_LOCK = threading.Lock()
@@ -31,20 +31,21 @@ class BufferedLogger:
     Без этого лог за 4 месяца вырос до 420 МБ (см. docs/BASELINE.md).
     """
 
-    def __init__(self, log_file=None, buffer_size=10,
-                 max_bytes=10 * 1024 * 1024, backup_count=3):
+    def __init__(
+        self, log_file=None, buffer_size=10, max_bytes=10 * 1024 * 1024, backup_count=3
+    ):
         self.log_file = log_file or data_path("logs", "agent_log.txt")
         self.buffer_size = buffer_size
         self.buffer = []
         self.max_bytes = max_bytes
         self.backup_count = backup_count
 
-        # k16-23: счётчик тихих потерь — сколько строк журнала потеряно
+        # учёта потерь: счётчик тихих потерь — сколько строк журнала потеряно
         # при ошибках записи в flush(). Увеличивается под локом, читается
         # без лока (чтение int атомарно). Автоматически не сбрасывается.
         self.silent_losses = 0
 
-        # «Харднинг-1» (k16-21): один RLock на инстанс. RLock, а не Lock:
+        # «Харднинг-1» (защиты логирования): один RLock на инстанс. RLock, а не Lock:
         # log() держит лок при append и вызывает flush() из-под него
         # (авто-flush по переполнении) — на обычном Lock это взаимная
         # блокировка. Раньше append в log() и check-then-act в flush()
@@ -64,7 +65,7 @@ class BufferedLogger:
             atexit.register(self.flush)
         except Exception:
             pass
-    
+
     def log(self, message: str):
         """Добавляет запись в буфер. Когда буфер полон - пишет на диск."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -91,7 +92,7 @@ class BufferedLogger:
 
             if self.backup_count <= 0:
                 # Ротация отключена — просто начинаем файл заново.
-                open(self.log_file, 'w', encoding='utf-8').close()
+                open(self.log_file, "w", encoding="utf-8").close()
                 return
 
             oldest = f"{self.log_file}.{self.backup_count}"
@@ -118,7 +119,7 @@ class BufferedLogger:
         байты друг друга — строки теряются молча. Reentrant-вызов из
         log() безопасен: RLock, не Lock.
 
-        k16-23: при ошибке записи чанк теряется осознанно (как и раньше),
+        учёта потерь: при ошибке записи чанк теряется осознанно (как и раньше),
         но потеря наблюдаема — счётчик ``silent_losses`` на инстансе и
         одна строка в stderr. Сам логгер в себя не пишет: рекурсия и
         повторная ошибка ни к чему.
@@ -129,12 +130,12 @@ class BufferedLogger:
             chunk, self.buffer = self.buffer, []
             try:
                 self._rotate_if_needed()
-                with open(self.log_file, 'a', encoding='utf-8') as f:
+                with open(self.log_file, "a", encoding="utf-8") as f:
                     f.writelines(chunk)
             except Exception as e:
                 # Если не удалось записать - теряем чанк осознанно
                 # (чтобы agent не зависал на ошибках диска), как и раньше.
-                # k16-23: но теперь потеря наблюдаема (см. docstring).
+                # учёта потерь: но теперь потеря наблюдаема (см. docstring).
                 self.silent_losses += len(chunk)
                 detail = " ".join(str(e).split())
                 suffix = f": {detail}" if detail else ""
@@ -149,24 +150,24 @@ class BufferedLogger:
                     # teardown) — печать не должна уронить flush, чтобы
                     # swallow-семантика сохранялась целиком.
                     pass
-    
+
     def flush_immediate(self, message: str):
         """Мгновенная запись (для важных событий).
 
-        k16-27: ошибка записи не молчит — счётчик ``silent_losses``
-        и одна строка в stderr (семантика и формат общие с k16-23
-        для flush()); единица потерь здесь — одна строка, не чанк.
+        Ошибка записи не молчит: счётчик ``silent_losses`` и одна строка
+        в stderr используют семантику и формат flush(); единица потерь
+        здесь — одна строка, не чанк.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
 
-        # «Харднинг-1» (k16-21): под тем же локом, что буфер — иначе
+        # «Харднинг-1» (защиты логирования): под тем же локом, что буфер — иначе
         # немедленная строка может вклиниться МЕЖДУ чанком буфера и
         # записью, ломая порядок событий в автобиографии.
         with self._lock:
             try:
                 self._rotate_if_needed()
-                with open(self.log_file, 'a', encoding='utf-8') as f:
+                with open(self.log_file, "a", encoding="utf-8") as f:
                     f.write(log_entry)
             except Exception as e:
                 # Если не удалось записать - теряем строку осознанно,
@@ -186,7 +187,7 @@ class BufferedLogger:
                     # flush_immediate, чтобы swallow-семантика
                     # сохранялась целиком.
                     pass
-    
+
     def __del__(self):
         """Гарантирует что буфер будет записан при удалении."""
         self.flush()
@@ -195,10 +196,11 @@ class BufferedLogger:
 # Глобальный логгер (используется везде)
 _logger = None
 
+
 def get_logger(buffer_size=10) -> BufferedLogger:
     """Получает или создает глобальный логгер.
 
-    «Харднинг-1» (k16-21): создание под глобальным локом — race при
+    «Харднинг-1» (защиты логирования): создание под глобальным локом — race при
     первом одновременном вызове давал бы два инстанса и два буфера.
     """
     global _logger

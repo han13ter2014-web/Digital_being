@@ -12,7 +12,9 @@ from src.core.subsystem_base import PluginRegistry
 
 
 @pytest.mark.parametrize("backend", ["json", "sqlite"])
-def test_personal_life_continues_after_one_complete_snapshot(tmp_path, monkeypatch, backend):
+def test_personal_life_continues_after_one_complete_snapshot(
+    tmp_path, monkeypatch, backend
+):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "life"))
     monkeypatch.setattr(SIM_CONFIG, "CHECKPOINT_BACKEND", backend)
     PluginRegistry.reset_global()
@@ -28,7 +30,9 @@ def test_personal_life_continues_after_one_complete_snapshot(tmp_path, monkeypat
         identity.history = ["изменённое самоописание"]
         first.ask_user("как работает память", source="self", max_explorations=4)
         stimulus = first._consume_open_question()
-        first._record_open_question_exploration(stimulus, "Не знаю, буду проверять дальше")
+        first._record_open_question_exploration(
+            stimulus, "Не знаю, буду проверять дальше"
+        )
         next_question = first._consume_open_question()
         engine = first.active_inference
         action = next(iter(engine.model.actions))
@@ -39,7 +43,10 @@ def test_personal_life_continues_after_one_complete_snapshot(tmp_path, monkeypat
         original_person = capture_personal_state(first)
         original_inference = capture_inference(engine)
         original_memory = first.mental_models.to_storage_dict()
-        questions = [dict(q, explorations=[dict(e) for e in q["explorations"]]) for q in first._open_questions]
+        questions = [
+            dict(q, explorations=[dict(e) for e in q["explorations"]])
+            for q in first._open_questions
+        ]
         first.save_state(force=True)
         PluginRegistry.reset_global()
         second, report = create_agent(env, "WholePersonalLife")
@@ -56,8 +63,12 @@ def test_personal_life_continues_after_one_complete_snapshot(tmp_path, monkeypat
         # Продолжение не повторяет первую попытку и не начинает обучение с нуля.
         learned = second.active_inference.model.actions[action].transitions[key].copy()
         second.active_inference.learn_from_experience()
-        assert not np.array_equal(learned, second.active_inference.model.actions[action].transitions[key])
-        second._record_open_question_exploration(next_question, "Не знаю, другая проверка")
+        assert not np.array_equal(
+            learned, second.active_inference.model.actions[action].transitions[key]
+        )
+        second._record_open_question_exploration(
+            next_question, "Не знаю, другая проверка"
+        )
         assert "попытка 3/4" in second._consume_open_question()
         second.cycle_count = 150
         second.add_value("Терпение", "продолжение опыта")

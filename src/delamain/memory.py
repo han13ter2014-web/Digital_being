@@ -51,7 +51,7 @@ class _ThreadSafeConnection:
     Эффекторы и UI записывают эпизоды из своих потоков, а соединение
     sqlite3 по умолчанию привязано к создавшему его потоку — каждая такая
     запись падала с «SQLite objects created in a thread can only be used
-    in that same thread» (тикет V-3: эпизоды жизни терялись). Каждый вызов
+    in that same thread», поэтому эпизоды жизни терялись. Каждый вызов
     сериализуется ``RLock``; совместное соединение разрешено через
     ``check_same_thread=False`` (модуль sqlite3 собран с threadsafety=3).
     """
@@ -115,13 +115,25 @@ def _atomic(method: F) -> F:
 class MemoryStore:
     """A small SQLite memory with explicit, typed operations."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, life_id: Optional[str] = None) -> None:
         self.db_path = Path(db_path).expanduser()
+        self.life_id: Optional[str] = None
+        self._goals_table = "goals"
+        if life_id is not None:
+            from src.core.life_identity import validate_life_id
+            from src.memory.life_database import LifeDatabase
+
+            self.life_id = validate_life_id(life_id)
+            # Инициализируем общую схему и проверяем владельца до открытия
+            # долгоживущего соединения Delamain.
+            LifeDatabase(self.db_path, self.life_id)
+            self._goals_table = "execution_goals"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = _ThreadSafeConnection(
-            sqlite3.connect(str(self.db_path), check_same_thread=False)
+            sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30)
         )
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._fts_enabled = False
@@ -171,7 +183,7 @@ class MemoryStore:
                 updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS goals (
+            CREATE TABLE IF NOT EXISTS __GOALS_TABLE__ (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -181,8 +193,8 @@ class MemoryStore:
                 priority REAL NOT NULL DEFAULT 0.5,
                 meta_json TEXT NOT NULL DEFAULT '{}'
             );
-            CREATE INDEX IF NOT EXISTS idx_goals_status
-                ON goals(status, priority DESC);
+            CREATE INDEX IF NOT EXISTS idx___GOALS_TABLE___status
+                ON __GOALS_TABLE__(status, priority DESC);
 
             CREATE TABLE IF NOT EXISTS skills (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,13 +225,12 @@ class MemoryStore:
                 ON approvals(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_approvals_goal
                 ON approvals(goal_id, status);
-            """
+            """.replace("__GOALS_TABLE__", self._goals_table)
         )
 
         try:
             self._conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts "
-                "USING fts5(key, value)"
+                "CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts " "USING fts5(key, value)"
             )
             self._fts_enabled = True
         except sqlite3.OperationalError:
@@ -230,9 +241,7 @@ class MemoryStore:
                 "SELECT COUNT(*) AS n FROM facts_fts"
             ).fetchone()["n"]
             if count == 0:
-                rows = self._conn.execute(
-                    "SELECT id, key, value FROM facts"
-                ).fetchall()
+                rows = self._conn.execute("SELECT id, key, value FROM facts").fetchall()
                 self._conn.executemany(
                     "INSERT INTO facts_fts(rowid, key, value) VALUES (?, ?, ?)",
                     [(row["id"], row["key"], row["value"]) for row in rows],
@@ -278,23 +287,51 @@ class MemoryStore:
         return int(cursor.lastrowid)
 
     def record_life_episode(
-        self, *, life_id: str, intention_id: str, action: str,
-        target: str = "", status: str = "performed", outcome: Optional[Dict[str, Any]] = None,
+        self,
+        *,
+        life_id: str,
+        intention_id: str,
+        action: str,
+        target: str = "",
+        status: str = "performed",
+        outcome: Optional[Dict[str, Any]] = None,
     ) -> int:
         """Append one Core-owned autobiographical event; never upsert it."""
-        if not all(isinstance(value, str) and value.strip() for value in (life_id, intention_id, action)):
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (life_id, intention_id, action)
+        ):
             raise ValueError("life episode requires life_id, intention_id and action")
-        if status not in {"started", "performed", "denied", "error", "interrupted", "unobserved"}:
+        if status not in {
+            "started",
+            "performed",
+            "denied",
+            "error",
+            "interrupted",
+            "unobserved",
+        }:
             raise ValueError("unknown life episode status")
         return self.record_episode(
-            task_id=intention_id, task="digital_life", action=action,
-            args={"target": target}, ok=status == "performed", output=outcome,
-            metadata={"life_id": life_id, "intention_id": intention_id, "status": status},
+            task_id=intention_id,
+            task="digital_life",
+            action=action,
+            args={"target": target},
+            ok=status == "performed",
+            output=outcome,
+            metadata={
+                "life_id": life_id,
+                "intention_id": intention_id,
+                "status": status,
+            },
         )
 
     @_atomic
     def begin_biography_run(
-        self, *, life_id: str, run_id: str, started_at: Optional[str] = None,
+        self,
+        *,
+        life_id: str,
+        run_id: str,
+        started_at: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Зафиксировать запуск и добавить разрыв предыдущего запуска в биографию.
 
@@ -324,14 +361,19 @@ class MemoryStore:
                 (life_id,),
             ).fetchone()
             gap_started_at = (
-                str(last["ts"]) if last is not None
+                str(last["ts"])
+                if last is not None
                 else str(previous.get("started_at") or started_at)
             )
             shutdown = previous.get("shutdown")
-            graceful = isinstance(shutdown, dict) and shutdown.get("kind") == "graceful_shutdown"
+            graceful = (
+                isinstance(shutdown, dict)
+                and shutdown.get("kind") == "graceful_shutdown"
+            )
             reason = "graceful_shutdown" if graceful else "external_interruption"
             reason_text = (
-                "штатное завершение предыдущего процесса" if graceful
+                "штатное завершение предыдущего процесса"
+                if graceful
                 else "внешнее прерывание предыдущего процесса"
             )
             text = (
@@ -362,7 +404,13 @@ class MemoryStore:
                     (ts, task_id, task, action, args_json, ok, output_json, error, meta_json)
                 VALUES (?, ?, 'digital_life', 'biography_seam', ?, 1, ?, NULL, ?)
                 """,
-                (started_at, intention_id, _json({"target": text}), _json(output), _json(metadata)),
+                (
+                    started_at,
+                    intention_id,
+                    _json({"target": text}),
+                    _json(output),
+                    _json(metadata),
+                ),
             )
             lastrowid = cursor.lastrowid
             if lastrowid is None:
@@ -391,7 +439,11 @@ class MemoryStore:
 
     @_atomic
     def record_graceful_shutdown(
-        self, *, life_id: str, run_id: str, ended_at: Optional[str] = None,
+        self,
+        *,
+        life_id: str,
+        run_id: str,
+        ended_at: Optional[str] = None,
     ) -> bool:
         """Сохранить доказанный факт штатного завершения текущего запуска."""
         key = f"biography.process_run:{life_id}"
@@ -399,7 +451,9 @@ class MemoryStore:
             "SELECT value_json FROM self_model WHERE key = ?", (key,)
         ).fetchone()
         current = _loads(row["value_json"], {}) if row is not None else {}
-        if current.get("run_id") != str(run_id) or current.get("life_id") != str(life_id):
+        if current.get("run_id") != str(run_id) or current.get("life_id") != str(
+            life_id
+        ):
             return False
         shutdown = current.get("shutdown")
         if isinstance(shutdown, dict) and shutdown.get("kind") == "graceful_shutdown":
@@ -414,7 +468,9 @@ class MemoryStore:
         return True
 
     @_atomic
-    def recent_life_episodes(self, *, life_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    def recent_life_episodes(
+        self, *, life_id: str, limit: int = 20, offset: int = 0
+    ) -> List[Dict[str, Any]]:
         limit = max(0, min(int(limit), 200))
         offset = max(0, int(offset))
         if not limit:
@@ -456,10 +512,15 @@ class MemoryStore:
 
     def _episode_dict(self, row) -> Dict[str, Any]:
         return {
-            "id": row["id"], "ts": row["ts"], "task_id": row["task_id"],
-            "task": row["task"], "action": row["action"],
-            "args": _loads(row["args_json"], {}), "ok": bool(row["ok"]),
-            "output": _loads(row["output_json"]), "error": row["error"],
+            "id": row["id"],
+            "ts": row["ts"],
+            "task_id": row["task_id"],
+            "task": row["task"],
+            "action": row["action"],
+            "args": _loads(row["args_json"], {}),
+            "ok": bool(row["ok"]),
+            "output": _loads(row["output_json"]),
+            "error": row["error"],
             "metadata": _loads(row["meta_json"], {}),
         }
 
@@ -687,8 +748,8 @@ class MemoryStore:
             raise ValueError("goal title must not be empty")
         now = _utc_now_iso()
         cursor = self._conn.execute(
-            """
-            INSERT INTO goals
+            f"""
+            INSERT INTO {self._goals_table}
                 (created_at, updated_at, title, status, success_predicate, priority, meta_json)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -708,7 +769,7 @@ class MemoryStore:
     @_atomic
     def update_goal_status(self, goal_id: int, status: str) -> bool:
         cursor = self._conn.execute(
-            "UPDATE goals SET status = ?, updated_at = ? WHERE id = ?",
+            f"UPDATE {self._goals_table} SET status = ?, updated_at = ? WHERE id = ?",
             (str(status), _utc_now_iso(), int(goal_id)),
         )
         self._conn.commit()
@@ -733,7 +794,7 @@ class MemoryStore:
 
         goal_id = int(goal_id)
         row = self._conn.execute(
-            "SELECT * FROM goals WHERE id = ?", (goal_id,)
+            f"SELECT * FROM {self._goals_table} WHERE id = ?", (goal_id,)
         ).fetchone()
         if row is None:
             return False
@@ -751,14 +812,12 @@ class MemoryStore:
             else str(success_predicate)
         )
         new_priority = (
-            row["priority"]
-            if priority is None
-            else max(0.0, min(1.0, float(priority)))
+            row["priority"] if priority is None else max(0.0, min(1.0, float(priority)))
         )
 
         cursor = self._conn.execute(
-            """
-            UPDATE goals
+            f"""
+            UPDATE {self._goals_table}
             SET updated_at = ?, status = ?, success_predicate = ?,
                 priority = ?, meta_json = ?
             WHERE id = ?
@@ -779,11 +838,12 @@ class MemoryStore:
     def list_goals(self, *, status: Optional[str] = None) -> List[Dict[str, Any]]:
         if status is None:
             rows = self._conn.execute(
-                "SELECT * FROM goals ORDER BY priority DESC, id DESC"
+                f"SELECT * FROM {self._goals_table} ORDER BY priority DESC, id DESC"
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT * FROM goals WHERE status = ? ORDER BY priority DESC, id DESC",
+                f"SELECT * FROM {self._goals_table} WHERE status = ? "
+                "ORDER BY priority DESC, id DESC",
                 (str(status),),
             ).fetchall()
         return [
@@ -803,7 +863,7 @@ class MemoryStore:
     @_atomic
     def get_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
         row = self._conn.execute(
-            "SELECT * FROM goals WHERE id = ?", (int(goal_id),)
+            f"SELECT * FROM {self._goals_table} WHERE id = ?", (int(goal_id),)
         ).fetchone()
         if row is None:
             return None
@@ -1021,9 +1081,7 @@ class MemoryStore:
     @_atomic
     def count_approvals(self, *, status: Optional[str] = None) -> int:
         if status is None:
-            row = self._conn.execute(
-                "SELECT COUNT(*) AS n FROM approvals"
-            ).fetchone()
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM approvals").fetchone()
         else:
             row = self._conn.execute(
                 "SELECT COUNT(*) AS n FROM approvals WHERE status = ?",

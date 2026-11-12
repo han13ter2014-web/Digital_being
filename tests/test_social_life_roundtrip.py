@@ -24,14 +24,19 @@ def test_real_question_answer_contact_and_restart(tmp_path, monkeypatch, backend
         for cycle in range(20):
             make_attachment_tick()(first, cycle, {})
         assert not first.attachment._attachments
-        result = first.thinking._process_user_answer("Память — способность сохранять и использовать опыт.")
+        result = first.thinking._process_user_answer(
+            "Память — способность сохранять и использовать опыт."
+        )
         assert "Получен ответ" in result
         assert first.user_interaction.get_pending_question() is None
         relationship = first.attachment.get_or_create("user")
         assert relationship.interactions == 1
         assert len(relationship.history) == 1
-        assert any(exp.get("source") == f"user:answer:{queued['id']}"
-                   for node in first.mental_models.concepts.values() for exp in node.experiences)
+        assert any(
+            exp.get("source") == f"user:answer:{queued['id']}"
+            for node in first.mental_models.concepts.values()
+            for exp in node.experiences
+        )
         first.thinking._process_user_answer("Повтор ответа")
         assert relationship.interactions == 1
         personal = capture_personal_state(first)

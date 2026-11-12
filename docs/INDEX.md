@@ -3,13 +3,12 @@
 Документация разделена на три уровня. Начинайте с нужного вам документа,
 а не с полного архива.
 
-## Три канонических документа
+## Канонические документы
 
 | Документ | Для кого | Что отвечает |
 |---|---|---|
 | [README.md](../README.md) | внешний человек | что это, как запустить, что уже есть |
 | [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) | разработчик | в какой версии и на каком этапе что добавлено |
-| [AI_HANDOFF.md](AI_HANDOFF.md) | AI-разработчик | быстрое восстановление контекста и правила продолжения |
 | [LIFE_LETTER.md](LIFE_LETTER.md) | сама Digital Being | кто ты, твои границы, права и правила |
 | [DECISION_NO_LLM_LIFE.md](DECISION_NO_LLM_LIFE.md) | архитектурное решение | почему жизнь работает без LLM |
 | [FUNDING.md](FUNDING.md) | поддержка проекта | зачем нужны донаты и на что они идут |
@@ -29,7 +28,6 @@
 | [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md) | локальная память и исполнение Delamain |
 | [WILL.md](WILL.md) | права, отказ, этические ограничения |
 | [EVOLUTION.md](EVOLUTION.md) | изменение агента и его состояния |
-| [verifier_selfcheck_matrix.md](verifier_selfcheck_matrix.md) | матрица verify_*.py: historical/eternal, что ловит каждый |
 | [LIFE_V1_PLAN.md](LIFE_V1_PLAN.md) | исходные границы целостной v1 |
 
 ## Контракты и отдельные подсистемы

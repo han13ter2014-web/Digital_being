@@ -18,11 +18,13 @@ from src.core.paths import data_path
 class CheckpointSubsystem:
     """Подсистема управления чекпоинтами."""
 
-    def __init__(self,
-                 checkpoint_dir: str = None,
-                 interval: int = 10,
-                 save_on_evolution: bool = True,
-                 max_checkpoints: int = 20):
+    def __init__(
+        self,
+        checkpoint_dir: str = None,
+        interval: int = 10,
+        save_on_evolution: bool = True,
+        max_checkpoints: int = 20,
+    ):
         self.checkpoint_dir = checkpoint_dir or data_path("checkpoints")
         self.interval = interval
         self.save_on_evolution = save_on_evolution
@@ -44,16 +46,22 @@ class CheckpointSubsystem:
             "saved_at": datetime.now().isoformat(),
             # Подсистемы (если они присутствуют у агента)
             "energy": agent.energy_subsystem.to_checkpoint_dict()
-            if hasattr(agent, "energy_subsystem") else {"energy": agent.energy},
+            if hasattr(agent, "energy_subsystem")
+            else {"energy": agent.energy},
             "goals": agent.goal_subsystem.to_checkpoint_dict()
-            if hasattr(agent, "goal_subsystem") else {},
+            if hasattr(agent, "goal_subsystem")
+            else {},
             "knowledge": agent.knowledge_subsystem.to_checkpoint_dict()
-            if hasattr(agent, "knowledge_subsystem") else {},
+            if hasattr(agent, "knowledge_subsystem")
+            else {},
         }
 
     def should_save(self, agent) -> bool:
         """Решает, нужен ли чекпоинт в этом цикле."""
-        if self.save_on_evolution and agent.intelligence > self._last_saved_intelligence:
+        if (
+            self.save_on_evolution
+            and agent.intelligence > self._last_saved_intelligence
+        ):
             return True
         if agent.cycle_count > 0 and agent.cycle_count % self.interval == 0:
             return True
@@ -73,8 +81,7 @@ class CheckpointSubsystem:
         self._rotate(agent.name)
 
         filename = os.path.join(
-            self.checkpoint_dir,
-            f"{agent.name}_cycle_{agent.cycle_count}.json"
+            self.checkpoint_dir, f"{agent.name}_cycle_{agent.cycle_count}.json"
         )
         try:
             with open(filename, "w", encoding="utf-8") as f:
@@ -104,14 +111,12 @@ class CheckpointSubsystem:
                 agent.goal_subsystem.restore_from_checkpoint(state["goals"])
 
             if hasattr(agent, "knowledge_subsystem") and "knowledge" in state:
-                agent.knowledge_subsystem.restore_from_checkpoint(
-                    state["knowledge"]
-                )
+                agent.knowledge_subsystem.restore_from_checkpoint(state["knowledge"])
 
             # Обновляем обратную совместимость (поля в agent)
             agent.cycle_count = state.get("cycle_count", agent.cycle_count)
-            agent.completed_goals = (
-                state.get("goals", {}).get("completed_goals", agent.completed_goals)
+            agent.completed_goals = state.get("goals", {}).get(
+                "completed_goals", agent.completed_goals
             )
             return True
         except Exception:
@@ -127,17 +132,16 @@ class CheckpointSubsystem:
 
         prefix = f"{agent_name}_cycle_"
         checkpoints = [
-            f for f in os.listdir(self.checkpoint_dir)
+            f
+            for f in os.listdir(self.checkpoint_dir)
             if f.startswith(prefix) and f.endswith(".json")
         ]
 
         if len(checkpoints) <= self.max_checkpoints:
             return 0
 
-        checkpoints.sort(
-            key=lambda x: int(x.split("_")[-1].split(".")[0])
-        )
-        to_remove = checkpoints[:len(checkpoints) - self.max_checkpoints]
+        checkpoints.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+        to_remove = checkpoints[: len(checkpoints) - self.max_checkpoints]
         removed = 0
         for old in to_remove:
             try:
@@ -153,12 +157,11 @@ class CheckpointSubsystem:
             return None
         prefix = f"{agent_name}_cycle_"
         checkpoints = [
-            f for f in os.listdir(self.checkpoint_dir)
+            f
+            for f in os.listdir(self.checkpoint_dir)
             if f.startswith(prefix) and f.endswith(".json")
         ]
         if not checkpoints:
             return None
-        checkpoints.sort(
-            key=lambda x: int(x.split("_")[-1].split(".")[0])
-        )
+        checkpoints.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
         return os.path.join(self.checkpoint_dir, checkpoints[-1])

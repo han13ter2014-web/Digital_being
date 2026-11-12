@@ -26,6 +26,7 @@ from src.core.evolve_pipeline import (
 # Базовые контракты
 # =====================================================================
 
+
 class TestPipelineBasics:
     def test_empty_pipeline_runs(self):
         pipeline = EvolvePipeline(name="test")
@@ -38,10 +39,8 @@ class TestPipelineBasics:
     def test_use_returns_self_for_chaining(self):
         pipeline = EvolvePipeline()
         # fluent API: use(...) → use(...) → use(...)
-        result = (
-            pipeline
-            .use("a", lambda a, c, ctx: MiddlewareResult())
-            .use("b", lambda a, c, ctx: MiddlewareResult())
+        result = pipeline.use("a", lambda a, c, ctx: MiddlewareResult()).use(
+            "b", lambda a, c, ctx: MiddlewareResult()
         )
         assert result is pipeline
 
@@ -82,6 +81,7 @@ class TestPipelineBasics:
 # Middleware-изоляция ошибок
 # =====================================================================
 
+
 class TestErrorIsolation:
     def test_one_broken_middleware_does_not_stop_others(self):
         executed = []
@@ -90,6 +90,7 @@ class TestErrorIsolation:
             def fn(a, c, ctx):
                 executed.append(name)
                 return MiddlewareResult()
+
             return fn
 
         def phase_broken(a, c, ctx):
@@ -110,6 +111,7 @@ class TestErrorIsolation:
 
     def test_error_does_not_prevent_subsequent_phases_from_recording(self):
         """Фазы после сломанной должны быть в phases[] (если не skip)."""
+
         def broken(a, c, ctx):
             raise ValueError("boom")
 
@@ -127,6 +129,7 @@ class TestErrorIsolation:
 # Skip-механизм
 # =====================================================================
 
+
 class TestSkipMechanism:
     def test_skip_stops_subsequent_phases(self):
         executed = []
@@ -135,6 +138,7 @@ class TestSkipMechanism:
             def fn(a, c, ctx):
                 executed.append(name)
                 return MiddlewareResult(skip=skip)
+
             return fn
 
         pipeline = (
@@ -181,6 +185,7 @@ class TestSkipMechanism:
 # Совместимость со старым evolve() — через реального DigitalBeing
 # =====================================================================
 
+
 class TestDigitalBeingIntegration:
     """Проверяем, что новый evolve() через пайплайн даёт тот же результат,
     что и _evolve_legacy(). Это основной регрессионный тест."""
@@ -190,6 +195,7 @@ class TestDigitalBeingIntegration:
         """Создаёт DigitalBeing в изолированной директории (не мусорит в data/)."""
         from src.core.agent import DigitalBeing
         import os
+
         # Подменяем data-пути, чтобы DigitalBeing не писал в общую data/.
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -235,6 +241,7 @@ class TestDigitalBeingIntegration:
         """Если success_streak выше порога, интеллект должен вырасти через
         пайплайн (это тестирует фазу intelligence_growth, а не весь evolve)."""
         from src.core.evolve_pipeline import make_intelligence_growth
+
         agent.success_streak = 1000  # Заведомо больше threshold
         old_intelligence = agent.intelligence
         result = make_intelligence_growth()(agent, cycle=0, context={})
@@ -253,6 +260,7 @@ class TestDigitalBeingIntegration:
 # =====================================================================
 # Кастомные middleware (расширяемость)
 # =====================================================================
+
 
 class TestCustomMiddleware:
     """Плагины должны мочь добавлять свои фазы."""
@@ -275,6 +283,7 @@ class TestCustomMiddleware:
             from src.core.agent import DigitalBeing
             import os
             import tempfile
+
             with tempfile.TemporaryDirectory() as tmp:
                 old = os.getcwd()
                 os.chdir(tmp)
@@ -293,6 +302,7 @@ class TestCustomMiddleware:
 # =====================================================================
 # Singleton-семантика
 # =====================================================================
+
 
 class TestSingleton:
     def test_get_default_pipeline_returns_same_instance(self):

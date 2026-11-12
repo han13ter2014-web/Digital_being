@@ -100,7 +100,9 @@ def test_runner_executes_and_captures_utf8(tmp_path: Path) -> None:
 
 def test_runner_reports_nonzero_exit(tmp_path: Path) -> None:
     sandbox = Sandbox(tmp_path / "workspace")
-    _write_script(sandbox, "fail.py", "import sys; sys.stderr.write('boom'); sys.exit(3)\n")
+    _write_script(
+        sandbox, "fail.py", "import sys; sys.stderr.write('boom'); sys.exit(3)\n"
+    )
     runner = CodeRunner(sandbox, timeout_sec=20.0)
     outcome = runner.run("fail.py")
     assert outcome.exit_code == 3
@@ -116,10 +118,14 @@ def test_runner_kills_on_timeout(tmp_path: Path) -> None:
     assert outcome.exit_code == -1
 
 
-def test_runner_cleans_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_cleans_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("DELAMAIN_TEST_SECRET", "s3cret")
     sandbox = Sandbox(tmp_path / "workspace")
-    _write_script(sandbox, "env.py", "import os; print(os.environ.get('DELAMAIN_TEST_SECRET'))\n")
+    _write_script(
+        sandbox, "env.py", "import os; print(os.environ.get('DELAMAIN_TEST_SECRET'))\n"
+    )
     runner = CodeRunner(sandbox, timeout_sec=20.0)
     outcome = runner.run("env.py")
     assert outcome.exit_code == 0

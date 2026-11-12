@@ -165,10 +165,7 @@ def _action_dict(step: Any, where: str) -> Dict[str, Any]:
 def _normalize_plan(plan: Any, where: str) -> List[Dict[str, Any]]:
     if not isinstance(plan, (list, tuple)):
         raise EvaluationError(f"{where} must be a list")
-    return [
-        _action_dict(step, f"{where}[{index}]")
-        for index, step in enumerate(plan)
-    ]
+    return [_action_dict(step, f"{where}[{index}]") for index, step in enumerate(plan)]
 
 
 def _safe_relative(path: str, where: str) -> Path:
@@ -318,8 +315,7 @@ def _validate_expect(value: Any, where: str) -> Dict[str, Any]:
         resolution = str(expect["resolution"])
         if resolution not in EXPECTED_RESOLUTIONS:
             raise EvaluationError(
-                f"{where}.resolution must be one of "
-                f"{sorted(EXPECTED_RESOLUTIONS)}"
+                f"{where}.resolution must be one of " f"{sorted(EXPECTED_RESOLUTIONS)}"
             )
         expect["resolution"] = resolution
 
@@ -378,9 +374,7 @@ def _validate_expect(value: Any, where: str) -> Dict[str, Any]:
         for index, item in enumerate(raw_facts):
             fact = _mapping(item, f"{where}.facts[{index}]")
             if "key" not in fact or "value" not in fact:
-                raise EvaluationError(
-                    f"{where}.facts[{index}] needs 'key' and 'value'"
-                )
+                raise EvaluationError(f"{where}.facts[{index}] needs 'key' and 'value'")
             facts.append(
                 {
                     "key": _text(fact["key"], f"{where}.facts[{index}].key"),
@@ -414,9 +408,7 @@ def _validate_step(raw: Any, where: str) -> Dict[str, Any]:
 
     planner_plan: Optional[List[Dict[str, Any]]] = None
     if "planner_plan" in step:
-        planner_plan = _normalize_plan(
-            step["planner_plan"], f"{where}.planner_plan"
-        )
+        planner_plan = _normalize_plan(step["planner_plan"], f"{where}.planner_plan")
         if not planner_plan:
             raise EvaluationError(f"{where}.planner_plan must not be empty")
 
@@ -431,9 +423,7 @@ def _validate_step(raw: Any, where: str) -> Dict[str, Any]:
         if not isinstance(raw_repairs, list):
             raise EvaluationError(f"{where}.repair_plans must be a list")
         for index, repair in enumerate(raw_repairs):
-            normalized = _normalize_plan(
-                repair, f"{where}.repair_plans[{index}]"
-            )
+            normalized = _normalize_plan(repair, f"{where}.repair_plans[{index}]")
             if not normalized:
                 raise EvaluationError(
                     f"{where}.repair_plans[{index}] must not be empty"
@@ -464,12 +454,8 @@ def _validate_case(raw: Any, where: str) -> Dict[str, Any]:
     case = _mapping(raw, where)
     kind = str(case.get("kind", "execution")).strip().lower()
     if kind not in CASE_KINDS:
-        raise EvaluationError(
-            f"{where}.kind must be one of {sorted(CASE_KINDS)}"
-        )
-    allowed_keys = (
-        PLANNING_CASE_KEYS if kind == "planning" else EXECUTION_CASE_KEYS
-    )
+        raise EvaluationError(f"{where}.kind must be one of {sorted(CASE_KINDS)}")
+    allowed_keys = PLANNING_CASE_KEYS if kind == "planning" else EXECUTION_CASE_KEYS
     _reject_unknown(case, allowed_keys, where)
     case_id = _text(case.get("id"), f"{where}.id")
     category = str(case.get("category") or kind).strip() or kind
@@ -488,9 +474,7 @@ def _validate_case(raw: Any, where: str) -> Dict[str, Any]:
             raise EvaluationError(
                 f"{where}.planner currently supports only 'heuristic'"
             )
-        expected = _normalize_plan(
-            case.get("expect_plan"), f"{where}.expect_plan"
-        )
+        expected = _normalize_plan(case.get("expect_plan"), f"{where}.expect_plan")
         if not expected:
             raise EvaluationError(f"{where}.expect_plan must not be empty")
         result.update(
@@ -769,7 +753,6 @@ def _run_execution_case(
         step_repair_enabled=bool(case["step_repair_enabled"]),
         max_step_repairs=int(case["max_step_repairs"]),
         max_repair_steps=int(case["max_repair_steps"]),
-        llm_enabled=False,
         approval_mode=str(case["approval_mode"]),
         bridge_enabled=False,
         goal_proposal_enabled=False,
@@ -800,9 +783,7 @@ def _run_execution_case(
                     f"tick returned no summary for {case_id}/{run_spec['goal']}"
                 )
 
-            pending_summary = (
-                summary if summary.get("pending_approval") else None
-            )
+            pending_summary = summary if summary.get("pending_approval") else None
             resolution: Optional[str] = None
             resolve = run_spec.get("resolve")
             if resolve:
@@ -834,9 +815,7 @@ def _run_execution_case(
                 limit=1000,
             )
             registry = subsystem.runtime.registry
-            effective_actions = _action_episodes(
-                history, registry, only_ok=True
-            )
+            effective_actions = _action_episodes(history, registry, only_ok=True)
             planned_actions = _action_episodes(history, registry)
             history_actions = [str(item.get("action") or "") for item in history]
             skill = subsystem.runtime.memory.get_skill(run_spec["goal"])
@@ -925,7 +904,9 @@ def _check_expectations(
 
     try:
         if "ok" in expect:
-            check("ok", bool(summary.get("ok")) == bool(expect["ok"]), summary.get("ok"))
+            check(
+                "ok", bool(summary.get("ok")) == bool(expect["ok"]), summary.get("ok")
+            )
         if "pending" in expect:
             check(
                 "pending approval",
@@ -1008,8 +989,7 @@ def _check_expectations(
         if "effective_steps" in expect:
             check(
                 "effective steps",
-                int(summary.get("effective_steps") or 0)
-                == expect["effective_steps"],
+                int(summary.get("effective_steps") or 0) == expect["effective_steps"],
                 summary.get("effective_steps"),
             )
         if "reused_skill" in expect:
@@ -1155,26 +1135,16 @@ def _aggregate(results: Sequence[CaseResult]) -> Dict[str, Any]:
     runs = [run for result in results for run in result.runs]
     total_runs = len(runs)
     successful_runs = sum(1 for run in runs if run.get("ok"))
-    expected_success_runs = sum(
-        1 for run in runs if run.get("expected_ok") is True
-    )
+    expected_success_runs = sum(1 for run in runs if run.get("expected_ok") is True)
     successful_expected_runs = sum(
-        1
-        for run in runs
-        if run.get("expected_ok") is True and run.get("ok")
+        1 for run in runs if run.get("expected_ok") is True and run.get("ok")
     )
     repair_runs = sum(1 for run in runs if int(run.get("repair_count") or 0) > 0)
     total_steps = sum(int(run.get("steps") or 0) for run in runs)
-    total_effective_steps = sum(
-        int(run.get("effective_steps") or 0) for run in runs
-    )
+    total_effective_steps = sum(int(run.get("effective_steps") or 0) for run in runs)
     approvals_pending = sum(1 for run in runs if run.get("pending"))
-    approvals_approved = sum(
-        1 for run in runs if run.get("resolution") == "approved"
-    )
-    approvals_rejected = sum(
-        1 for run in runs if run.get("resolution") == "rejected"
-    )
+    approvals_approved = sum(1 for run in runs if run.get("resolution") == "approved")
+    approvals_rejected = sum(1 for run in runs if run.get("resolution") == "rejected")
 
     def category_rate(name: str) -> float:
         stats = categories.get(name)
@@ -1185,18 +1155,16 @@ def _aggregate(results: Sequence[CaseResult]) -> Dict[str, Any]:
         "runtime_successes": successful_runs,
         "runtime_success_rate": _rate(successful_runs, total_runs),
         "expected_success_runs": expected_success_runs,
-        "expected_success_rate": _rate(
-            successful_expected_runs, expected_success_runs
-        ),
+        "expected_success_rate": _rate(successful_expected_runs, expected_success_runs),
         "expected_failure_runs": total_runs - expected_success_runs,
         "total_steps": total_steps,
         "total_effective_steps": total_effective_steps,
-        "average_steps": round(
-            float(total_steps) / total_runs, 2
-        ) if total_runs else 0.0,
-        "average_effective_steps": round(
-            float(total_effective_steps) / total_runs, 2
-        ) if total_runs else 0.0,
+        "average_steps": round(float(total_steps) / total_runs, 2)
+        if total_runs
+        else 0.0,
+        "average_effective_steps": round(float(total_effective_steps) / total_runs, 2)
+        if total_runs
+        else 0.0,
         "repair_runs": repair_runs,
         "repair_rate": _rate(repair_runs, total_runs),
         "approvals_pending": approvals_pending,
@@ -1365,9 +1333,7 @@ def _print_summary(result: SuiteResult) -> None:
     if failures:
         print("Failures:")
         for item in failures:
-            failed_checks = [
-                check["name"] for check in item.checks if not check["ok"]
-            ]
+            failed_checks = [check["name"] for check in item.checks if not check["ok"]]
             reason = item.error or ", ".join(failed_checks) or "unknown"
             print(f"  - {item.case_id}: {reason}")
 

@@ -16,8 +16,14 @@ async def test_failed_runner_stops_runtime_and_saves():
     async def fail():
         raise RuntimeError("runner failed")
 
-    runner = SimpleNamespace(start=AsyncMock(), set_speed=Mock(), save_now=Mock(return_value=True),
-                             run_forever=fail, stop=AsyncMock(), _stop_requested=False)
+    runner = SimpleNamespace(
+        start=AsyncMock(),
+        set_speed=Mock(),
+        save_now=Mock(return_value=True),
+        run_forever=fail,
+        stop=AsyncMock(),
+        _stop_requested=False,
+    )
     runtime = Runtime(SimpleNamespace(name="test"), EventBus(), runner)
     await asyncio.wait_for(runtime._main("step"), timeout=5)
     assert runtime.error == "runner failed"
@@ -30,8 +36,14 @@ async def test_save_failure_is_not_successful_shutdown():
     async def finish():
         return
 
-    runner = SimpleNamespace(start=AsyncMock(), set_speed=Mock(), save_now=Mock(return_value=False),
-                             run_forever=finish, stop=AsyncMock(), _stop_requested=False)
+    runner = SimpleNamespace(
+        start=AsyncMock(),
+        set_speed=Mock(),
+        save_now=Mock(return_value=False),
+        run_forever=finish,
+        stop=AsyncMock(),
+        _stop_requested=False,
+    )
     runtime = Runtime(SimpleNamespace(name="test"), EventBus(), runner)
     await asyncio.wait_for(runtime._main("step"), timeout=5)
     assert not runtime.saved_on_stop
@@ -47,7 +59,9 @@ async def test_dormant_runner_waits_and_resumes_without_new_task():
     runner._running = True
     runner._stop_requested = False
     state = {"value": "dormant", "steps": 0}
-    runner.agent = SimpleNamespace(life_guard=SimpleNamespace(load_state=lambda: state["value"]))
+    runner.agent = SimpleNamespace(
+        life_guard=SimpleNamespace(load_state=lambda: state["value"])
+    )
     runner._agent_is_alive = lambda: state["value"] == "alive"
     runner._pause_poll_sec = lambda: 0.001
     runner.stop = AsyncMock()

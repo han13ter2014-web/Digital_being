@@ -37,6 +37,7 @@ class RecordingBus:
 # Извлечение
 # ============================================================
 
+
 def test_agent_has_user_model():
     agent = DigitalBeing(name="UM")
     assert agent.user_model is not None
@@ -99,6 +100,7 @@ def test_latest_promise_overwrites_kind():
 # Сериализация
 # ============================================================
 
+
 def test_roundtrip_preserves_promises_and_traits():
     um = UserModel()
     um.observe("Не переживай, могу отлучаться надолго.", cycle=11)
@@ -130,9 +132,12 @@ def test_load_from_tolerates_garbage():
 # Счётчик контакта: цикл ответа, а не цикл вопроса
 # ============================================================
 
+
 def test_submit_answer_records_answer_cycle_not_question_cycle():
     ui = UserInteraction(agent_name="T")
-    assert ui.ask_user("Что такое время?", context="", cycle=5).get("status") == "queued"
+    assert (
+        ui.ask_user("Что такое время?", context="", cycle=5).get("status") == "queued"
+    )
 
     ui.submit_answer(1, "Идёт, пока мы говорим.", cycle=60)
     assert ui.get_last_user_message_cycle() == 60
@@ -149,12 +154,11 @@ def test_submit_answer_without_cycle_keeps_legacy_behavior():
 # Забота с учётом обещания
 # ============================================================
 
+
 def _communication(agent, cycle, last_user_cycle):
     ui = UserInteraction(agent_name="T")
     ui._last_user_message_cycle = last_user_cycle
-    pc = ProactiveCommunication(
-        agent_name="T", user_interaction=ui, attachment=None
-    )
+    pc = ProactiveCommunication(agent_name="T", user_interaction=ui, attachment=None)
     return pc.maybe_initiate(
         agent=agent,
         cycle=cycle,
@@ -185,6 +189,7 @@ def test_silence_without_promise_keeps_alarm():
 # ============================================================
 # Интеграция: социальная реплика через раннер наполняет модель
 # ============================================================
+
 
 @pytest.mark.asyncio
 async def test_social_message_through_runner_fills_user_model():

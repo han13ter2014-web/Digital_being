@@ -1,359 +1,309 @@
-"""
-Система мыслительных паттернов — базовые единицы мышления агента.
+"""Статистика реально использованных способов мышления.
 
-Паттерны можно:
-- Создавать новые
-- Усиливать/ослаблять существующие
-- Комбинировать для решения задач
-- Отбрасывать неэффективные
+Библиотека получает фактические ActionOutcome через IntegratedExperience.
+Вес описывает наблюдаемую историю, но не подаёт кандидатов и не меняет выбор.
 """
+
+from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime
+from typing import Optional
 
 
 class ThinkingPattern:
-    """Один паттерн мышления — способ обработки информации."""
-    
     def __init__(self, name: str, pattern_type: str, description: str = ""):
         self.name = name
-        self.pattern_type = pattern_type  # analysis, synthesis, reflection, creative, analogical
-        
-        # Вес — насколько часто агент его использует и предпочитает
-        self.weight = 0.5  # 0.0 - 1.0
-        
-        # История успешности
+        self.pattern_type = pattern_type
+        self.description = description
+        self.weight = 0.5
         self.usage_count = 0
         self.success_count = 0
         self.failure_count = 0
-        
-        # Эффективность (процент успеха)
         self.efficiency = 0.0
-        
-        # Контексты в которых паттерн работал хорошо/плохо
         self.effective_contexts = []
         self.failed_contexts = []
-        
-        # Параметры паттерна (настраиваемые)
         self.parameters = {}
-        
         self.created_at = datetime.now()
-        self.last_used = None
-        
-        self.history = []  # История изменений веса
-    
+        self.last_used: Optional[datetime] = None
+        self.history = []
+
     def use(self, success: bool, context: str = ""):
-        """Регистрирует использование паттерна."""
         self.usage_count += 1
         self.last_used = datetime.now()
-        
+        target = self.effective_contexts if success else self.failed_contexts
         if success:
             self.success_count += 1
-            if context:
-                self.effective_contexts.append(context)
         else:
             self.failure_count += 1
-            if context:
-                self.failed_contexts.append(context)
-        
-        # Пересчитывает эффективность
-        total = self.success_count + self.failure_count
-        self.efficiency = self.success_count / total if total > 0 else 0.0
-        
-        # Записывает состояние в историю
-        self.history.append({
-            "timestamp": datetime.now().isoformat(),
-            "efficiency": round(self.efficiency, 3),
-            "weight": round(self.weight, 3)
-        })
-    
+        if context:
+            target.append(str(context)[:200])
+            del target[:-50]
+        self.efficiency = self.success_count / self.usage_count
+        self.history.append(
+            {
+                "timestamp": self.last_used.isoformat(),
+                "efficiency": round(self.efficiency, 3),
+                "weight": round(self.weight, 3),
+            }
+        )
+        self.history = self.history[-100:]
+
     def strengthen(self, amount: float = 0.1):
-        """Усиливает паттерн (делает его более доступным)."""
-        self.weight = min(1.0, self.weight + amount)
-    
+        self.weight = min(1.0, self.weight + max(0.0, float(amount)))
+
     def weaken(self, amount: float = 0.1):
-        """Ослабляет паттерн."""
-        self.weight = max(0.05, self.weight - amount)
-    
+        self.weight = max(0.05, self.weight - max(0.0, float(amount)))
+
     def get_effectiveness_rating(self) -> float:
-        """Получает общую оценку эффективности с учетом веса и истории."""
-        if self.usage_count == 0:
-            return 0.5  # Нейтральная оценка для неиспользованных
-        
-        # Комбинация эффективности и частоты использования
+        if not self.usage_count:
+            return 0.5
         experience_factor = min(1.0, self.usage_count / 10)
-        weighted_effectiveness = self.efficiency * 0.7 + self.weight * 0.3
-        
-        return weighted_effectiveness * experience_factor
-    
+        return (self.efficiency * 0.7 + self.weight * 0.3) * experience_factor
+
     def should_evolve(self) -> tuple[bool, str]:
-        """Определяет нужно ли менять паттерн."""
         if self.usage_count < 2:
             return False, "недостаточно данных"
-        
-        # Если эффективность очень низкая — ослаблять или удалять
         if self.efficiency < 0.2 and self.usage_count >= 3:
             return True, f"низкая эффективность {self.efficiency:.1%}"
-        
-        # Если эффективность высокая — усиливать
         if self.efficiency > 0.8 and self.weight < 0.7:
             return True, f"высокая эффективность {self.efficiency:.1%} — можно усилить"
-        
         return False, "стабилен"
-    
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "pattern_type": self.pattern_type,
-            "weight": round(self.weight, 3),
+            "description": self.description,
+            "weight": self.weight,
             "usage_count": self.usage_count,
-            "success_rate": round(self.efficiency, 3),
-            "effectiveness_rating": round(self.get_effectiveness_rating(), 3),
+            "success_count": self.success_count,
+            "failure_count": self.failure_count,
+            "efficiency": self.efficiency,
+            "success_rate": self.efficiency,
+            "effectiveness_rating": self.get_effectiveness_rating(),
+            "effective_contexts": list(self.effective_contexts),
+            "failed_contexts": list(self.failed_contexts),
             "effective_contexts_count": len(self.effective_contexts),
             "failed_contexts_count": len(self.failed_contexts),
+            "created_at": self.created_at.isoformat(),
             "last_used": self.last_used.isoformat() if self.last_used else None,
-            "status": self._get_status()
+            "history": deepcopy(self.history),
+            "status": self._get_status(),
         }
-    
+
     def _get_status(self) -> str:
         rating = self.get_effectiveness_rating()
         if rating > 0.7:
             return "highly_effective"
-        elif rating > 0.4:
+        if rating > 0.4:
             return "moderate"
-        elif rating > 0.2:
+        if rating > 0.2:
             return "needs_improvement"
-        else:
-            return "ineffective"
+        return "ineffective"
+
+    @classmethod
+    def from_checkpoint(cls, data: dict):
+        pattern = cls(
+            str(data["name"]),
+            str(data["pattern_type"]),
+            str(data.get("description") or ""),
+        )
+        pattern.weight = float(data.get("weight", 0.5))
+        pattern.usage_count = int(data.get("usage_count", 0))
+        pattern.success_count = int(data.get("success_count", 0))
+        pattern.failure_count = int(data.get("failure_count", 0))
+        pattern.efficiency = (
+            pattern.success_count / pattern.usage_count if pattern.usage_count else 0.0
+        )
+        pattern.effective_contexts = list(data.get("effective_contexts") or [])[-50:]
+        pattern.failed_contexts = list(data.get("failed_contexts") or [])[-50:]
+        pattern.history = deepcopy(list(data.get("history") or []))[-100:]
+        if data.get("created_at"):
+            pattern.created_at = datetime.fromisoformat(data["created_at"])
+        if data.get("last_used"):
+            pattern.last_used = datetime.fromisoformat(data["last_used"])
+        return pattern
 
 
 class ThinkingPatternLibrary:
-    """Библиотека мыслительных паттернов агента."""
-    
-    # Стандартные паттерны для инициализации
     DEFAULT_PATTERNS = {
-        "pattern_analysis": {
-            "name": "analytical_thinking",
-            "type": "analysis",
-            "description": "Постепенный логический анализ проблемы"
-        },
-        "pattern_synthesis": {
-            "name": "creative_synthesis",
-            "type": "synthesis", 
-            "description": "Объединение разрозненных идей в новое целое"
-        },
-        "pattern_reflection": {
-            "name": "self_reflection",
-            "type": "reflection",
-            "description": "Самоанализ собственных мыслей и решений"
-        },
-        "pattern_analogical": {
-            "name": "analogical_reasoning",
-            "type": "analogical",
-            "description": "Рассуждение по аналогии с похожими ситуациями"
-        },
-        "pattern_contrarian": {
-            "name": "contrarian_thinking",
-            "type": "analysis",
-            "description": "Попытка посмотреть на проблему с противоположной стороны"
-        },
-        "pattern_decomposition": {
-            "name": "decomposition",
-            "type": "analysis",
-            "description": "Разбиение сложной проблемы на простые части"
-        },
+        "analytical_thinking": ("analysis", "Постепенный логический анализ проблемы"),
+        "creative_synthesis": ("synthesis", "Объединение идей в новое целое"),
+        "self_reflection": ("reflection", "Самоанализ собственных решений"),
+        "analogical_reasoning": ("analogical", "Рассуждение по аналогии"),
+        "contrarian_thinking": ("analysis", "Взгляд с противоположной стороны"),
+        "decomposition": ("analysis", "Разбиение проблемы на простые части"),
     }
-    
+
     def __init__(self):
         self.patterns: dict[str, ThinkingPattern] = {}
         self._load_default_patterns()
-        
-        # История эволюции паттернов
         self.evolution_log = []
-        self.created_patterns = []  # Паттерны созданные агентом
-    
+        self.created_patterns = []
+
     def _load_default_patterns(self):
-        """Загружает стандартные паттерны."""
-        for key, config in self.DEFAULT_PATTERNS.items():
-            pattern = ThinkingPattern(
-                name=config["name"],
-                pattern_type=config["type"],
-                description=config["description"]
+        for name, (kind, description) in self.DEFAULT_PATTERNS.items():
+            pattern = ThinkingPattern(name, kind, description)
+            pattern.weight = (
+                0.6 if kind == "analysis" else 0.3 if kind == "reflection" else 0.4
             )
-            # Начальный вес зависит от типа
-            if config["type"] == "analysis":
-                pattern.weight = 0.6  # Аналитика — базовый паттерн
-            elif config["type"] == "reflection":
-                pattern.weight = 0.3  # Рефлексия — развивается
-            else:
-                pattern.weight = 0.4
-            
-            self.patterns[config["name"]] = pattern
-    
-    def get_available_patterns(self, min_weight: float = 0.1) -> list[ThinkingPattern]:
-        """Возвращает доступные паттерны, отсортированные по весу."""
+            self.patterns[name] = pattern
+
+    def get_available_patterns(self, min_weight: float = 0.1):
         return sorted(
             [p for p in self.patterns.values() if p.weight >= min_weight],
             key=lambda p: (p.get_effectiveness_rating(), p.weight),
-            reverse=True
+            reverse=True,
         )
-    
-    def get_patterns_by_type(self, pattern_type: str) -> list[ThinkingPattern]:
-        """Возвращает паттерны определенного типа."""
+
+    def get_patterns_by_type(self, pattern_type: str):
         return [p for p in self.patterns.values() if p.pattern_type == pattern_type]
-    
+
     def use_pattern(self, pattern_name: str, success: bool, context: str = "") -> bool:
-        """Регистрирует использование паттерна и корректирует вес."""
-        if pattern_name not in self.patterns:
+        pattern = self.patterns.get(pattern_name)
+        if pattern is None:
             return False
-        
-        pattern = self.patterns[pattern_name]
         old_weight = pattern.weight
-        
-        pattern.use(success, context)
-        
-        # Корректировка веса на основе успеха
+        pattern.use(bool(success), context)
         if success:
             pattern.strengthen(0.05 * pattern.get_effectiveness_rating())
         else:
-            pattern.weaken(0.08 * (1 - pattern.efficiency))  # Сильнее ослабляем если неудача
-        
-        # Записывает в журнал эволюции
-        if abs(pattern.weight - old_weight) > 0.01:
-            self.evolution_log.append({
+            pattern.weaken(0.08 * (1 - pattern.efficiency))
+        self.evolution_log.append(
+            {
                 "action": "weight_change",
                 "pattern": pattern_name,
-                "from": round(old_weight, 3),
-                "to": round(pattern.weight, 3),
-                "reason": f"usage {'success' if success else 'failure'}",
-                "timestamp": datetime.now().isoformat()
-            })
-        
+                "from": old_weight,
+                "to": pattern.weight,
+                "reason": "observed_effect" if success else "observed_no_effect",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        self.evolution_log = self.evolution_log[-200:]
         return True
-    
-    def evolve_patterns(self) -> list[dict]:
-        """Выполняет эволюцию паттернов: усиливает эффективные, ослабляет неэффективные."""
+
+    def evolve_patterns(self):
+        """Пересчёт только статистических весов, не поведения Core."""
         changes = []
-        
         for name, pattern in self.patterns.items():
             should_change, reason = pattern.should_evolve()
-            
-            if should_change:
-                old_weight = pattern.weight
-                
-                if "низкая эффективность" in reason:
-                    pattern.weaken(0.15)
-                    changes.append({
-                        "action": "weaken",
-                        "pattern": name,
-                        "from": round(old_weight, 3),
-                        "to": round(pattern.weight, 3),
-                        "reason": reason
-                    })
-                
-                elif "усилить" in reason:
-                    pattern.strengthen(0.1)
-                    changes.append({
-                        "action": "strengthen",
-                        "pattern": name,
-                        "from": round(old_weight, 3),
-                        "to": round(pattern.weight, 3),
-                        "reason": reason
-                    })
-                
-                self.evolution_log.append({
-                    "action": "evolution_step",
-                    "pattern": name,
-                    "reason": reason,
-                    "timestamp": datetime.now().isoformat()
-                })
-        
+            if not should_change:
+                continue
+            old = pattern.weight
+            if "низкая" in reason:
+                pattern.weaken(0.15)
+                action = "weaken"
+            else:
+                pattern.strengthen(0.1)
+                action = "strengthen"
+            change = {
+                "action": action,
+                "pattern": name,
+                "from": old,
+                "to": pattern.weight,
+                "reason": reason,
+            }
+            changes.append(change)
+            self.evolution_log.append(change)
+        self.evolution_log = self.evolution_log[-200:]
         return changes
-    
-    def create_new_pattern(self, name: str, pattern_type: str, 
-                           initial_weight: float = 0.3,
-                           description: str = "") -> ThinkingPattern:
-        """Агент создает новый паттерн мышления."""
+
+    def create_new_pattern(
+        self,
+        name: str,
+        pattern_type: str,
+        initial_weight: float = 0.3,
+        description: str = "",
+    ) -> ThinkingPattern:
         if name in self.patterns:
             raise ValueError(f"Паттерн '{name}' уже существует")
-        
         pattern = ThinkingPattern(name, pattern_type, description)
-        pattern.weight = initial_weight
+        pattern.weight = max(0.05, min(1.0, float(initial_weight)))
         self.patterns[name] = pattern
         self.created_patterns.append(name)
-        
-        self.evolution_log.append({
-            "action": "creation",
-            "pattern": name,
-            "type": pattern_type,
-            "timestamp": datetime.now().isoformat()
-        })
-        
+        self.evolution_log.append(
+            {
+                "action": "creation",
+                "pattern": name,
+                "type": pattern_type,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         return pattern
-    
-    def get_dominant_pattern(self) -> ThinkingPattern:
-        """Возвращает доминирующий паттерн (наивысшая эффективность)."""
-        if not self.patterns:
-            return None
+
+    def get_dominant_pattern(self):
         return max(
             (p for p in self.patterns.values() if p.usage_count > 0),
             key=lambda p: p.get_effectiveness_rating(),
-            default=None
+            default=None,
         )
-    
-    def get_patterns_for_context(self, context: str, min_effectiveness: float = 0.3) -> list[ThinkingPattern]:
-        """Выбирает подходящие паттерны для данного контекста."""
+
+    def get_patterns_for_context(self, context: str, min_effectiveness: float = 0.3):
+        """Диагностический фильтр; основной арбитр его не вызывает."""
         relevant = []
-        
+        lowered = context.lower()
         for pattern in self.patterns.values():
             score = pattern.weight * pattern.get_effectiveness_rating()
-            
-            # Паттерны аналитики полезны для анализа
-            if "анализ" in context.lower() and pattern.pattern_type == "analysis":
+            if "анализ" in lowered and pattern.pattern_type == "analysis":
                 score *= 1.5
-            
-            # Паттерны синтеза полезны для креативных задач
-            if any(w in context.lower() for w in ["создать", "новая", "комбинация"]):
-                if pattern.pattern_type == "synthesis":
-                    score *= 1.5
-            
-            # Аналогические рассуждения полезны когда есть похожий опыт
-            if "похож" in context.lower() or "аналогия" in context.lower():
-                if pattern.pattern_type == "analogical":
-                    score *= 1.5
-            
+            if (
+                any(word in lowered for word in ("создать", "новая", "комбинация"))
+                and pattern.pattern_type == "synthesis"
+            ):
+                score *= 1.5
+            if (
+                "похож" in lowered or "аналогия" in lowered
+            ) and pattern.pattern_type == "analogical":
+                score *= 1.5
             if score >= min_effectiveness:
                 relevant.append(pattern)
-        
-        return sorted(relevant, key=lambda p: p.weight * p.get_effectiveness_rating(), reverse=True)
-    
+        return sorted(
+            relevant,
+            key=lambda p: p.weight * p.get_effectiveness_rating(),
+            reverse=True,
+        )
+
     def get_status(self) -> dict:
-        """Статус библиотеки паттернов."""
-        patterns_by_type = defaultdict(list)
-        for p in self.patterns.values():
-            patterns_by_type[p.pattern_type].append(p)
-        
-        active_patterns = [p for p in self.patterns.values() if p.usage_count > 0]
-        highly_effective = [p for p in active_patterns if p.get_effectiveness_rating() > 0.7]
-        
+        by_type = defaultdict(list)
+        for pattern in self.patterns.values():
+            by_type[pattern.pattern_type].append(pattern.name)
+        active = [p for p in self.patterns.values() if p.usage_count > 0]
+        dominant = self.get_dominant_pattern()
         return {
+            "mode": "observed_only",
             "total_patterns": len(self.patterns),
-            "used_patterns": len(active_patterns),
-            "highly_effective": len(highly_effective),
+            "used_patterns": len(active),
+            "highly_effective": sum(p.get_effectiveness_rating() > 0.7 for p in active),
             "created_by_agent": len(self.created_patterns),
-            "patterns_by_type": {
-                t: [p.name for p in pls]
-                for t, pls in patterns_by_type.items()
-            },
-            "dominant_pattern": self.get_dominant_pattern().name if self.get_dominant_pattern() else None,
-            "evolution_log_count": len(self.evolution_log)
-        }
-    
-    def to_dict(self) -> dict:
-        """Серилизует всю библиотеку."""
-        return {
-            "patterns": {name: p.to_dict() for name, p in self.patterns.items()},
-            "created_patterns": self.created_patterns,
+            "patterns_by_type": dict(by_type),
+            "dominant_pattern": dominant.name if dominant else None,
             "evolution_log_count": len(self.evolution_log),
-            "status": self.get_status()
         }
+
+    def to_dict(self) -> dict:
+        return {
+            "schema_version": 1,
+            "patterns": {
+                name: pattern.to_dict() for name, pattern in self.patterns.items()
+            },
+            "created_patterns": list(self.created_patterns),
+            "evolution_log": deepcopy(self.evolution_log),
+            "evolution_log_count": len(self.evolution_log),
+            "status": self.get_status(),
+        }
+
+    @classmethod
+    def from_checkpoint(cls, data: dict):
+        library = cls()
+        library.patterns = {
+            name: ThinkingPattern.from_checkpoint(raw)
+            for name, raw in (data.get("patterns") or {}).items()
+        }
+        library.created_patterns = list(data.get("created_patterns") or [])
+        library.evolution_log = deepcopy(list(data.get("evolution_log") or []))[-200:]
+        return library
+
+
+__all__ = ["ThinkingPattern", "ThinkingPatternLibrary"]

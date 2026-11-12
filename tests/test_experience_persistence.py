@@ -73,7 +73,9 @@ def test_agent_save_load_preserves_full_experiences(tmp_path):
     restored.mental_models._related_cache[("stale", 1)] = (0, [])
     DigitalBeing.load_mental_models(restored, str(path))
 
-    _assert_node_equal(restored.mental_models.concepts["память"], original.concepts["память"])
+    _assert_node_equal(
+        restored.mental_models.concepts["память"], original.concepts["память"]
+    )
     assert restored.mental_models.name == original.name
     assert restored.mental_models.metadata == original.metadata
     assert restored.mental_models.association_memory == original.association_memory
@@ -88,7 +90,9 @@ def test_node_storage_roundtrip_preserves_independent_data():
     assert original.experiences[0]["source"] == "test:source"
 
 
-@pytest.mark.parametrize("inherit", [False, True], ids=["agent-load", "seed-inheritance"])
+@pytest.mark.parametrize(
+    "inherit", [False, True], ids=["agent-load", "seed-inheritance"]
+)
 def test_legacy_summary_remains_loadable(tmp_path, inherit):
     summary = {
         "definition_hypothesis": "Старое определение памяти",

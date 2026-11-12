@@ -12,6 +12,7 @@ test_metrics_endpoint.py — тесты для /metrics endpoint (Prometheus exp
 - Опциональные метрики: goal_progress_percent (если передан), will_acts_total.
 - Корректно обрабатывает snapshot без goals/will (не падает).
 """
+
 import os
 import re
 import socket
@@ -28,7 +29,8 @@ aiohttp = pytest.importorskip("aiohttp", reason="aiohttp не установле
 from aiohttp import ClientSession  # noqa: E402
 
 from src.ui.web_dashboard import (  # noqa: E402
-    WebDashboard, SharedState, AIOHTTP_AVAILABLE,
+    WebDashboard,
+    AIOHTTP_AVAILABLE,
 )
 
 
@@ -135,7 +137,9 @@ async def test_metrics_format_is_valid_prometheus(dash):
     """
     _, port = dash
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    metric_re = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\{[^}]*\})?\s+(-?\d+(\.\d+)?|NaN|\+Inf|-Inf)$")
+    metric_re = re.compile(
+        r"^[a-zA-Z_][a-zA-Z0-9_]*(\{[^}]*\})?\s+(-?\d+(\.\d+)?|NaN|\+Inf|-Inf)$"
+    )
     for line in body.splitlines():
         if not line or line.startswith("#"):
             continue
@@ -162,45 +166,56 @@ async def test_metrics_contains_core_gauges(dash):
     ]
     for metric in required:
         # Проверяем по строкам значений (не по HELP/TYPE, чтобы избежать ложных срабатываний)
-        value_pattern = re.compile(rf"^{re.escape(metric)}(\{{[^}}]*\}})?\s+-?\d+(\.\d+)?$")
-        assert any(value_pattern.match(l) for l in body.splitlines()), \
-            f"метрика {metric!r} отсутствует в /metrics"
+        value_pattern = re.compile(
+            rf"^{re.escape(metric)}(\{{[^}}]*\}})?\s+-?\d+(\.\d+)?$"
+        )
+        assert any(
+            value_pattern.match(l) for l in body.splitlines()
+        ), f"метрика {metric!r} отсутствует в /metrics"
 
 
 @pytest.mark.asyncio
 async def test_metrics_energy_gauge_value(dash):
     """digital_being_energy отражает текущее значение из state."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "X", "energy": 145, "intelligence": 3, "cycle_count": 42},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X", "energy": 145, "intelligence": 3, "cycle_count": 42},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    assert re.search(r"^digital_being_energy\s+145(\.0+)?$", body, re.MULTILINE), \
-        f"digital_being_energy должно быть 145, body={body!r}"
+    assert re.search(
+        r"^digital_being_energy\s+145(\.0+)?$", body, re.MULTILINE
+    ), f"digital_being_energy должно быть 145, body={body!r}"
 
 
 @pytest.mark.asyncio
 async def test_metrics_intelligence_gauge_value(dash):
     """digital_being_intelligence отражает значение из state."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "X", "energy": 100, "intelligence": 7},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X", "energy": 100, "intelligence": 7},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    assert re.search(r"^digital_being_intelligence\s+7(\.0+)?$", body, re.MULTILINE), \
-        f"digital_being_intelligence должно быть 7"
+    assert re.search(
+        r"^digital_being_intelligence\s+7(\.0+)?$", body, re.MULTILINE
+    ), "digital_being_intelligence должно быть 7"
 
 
 @pytest.mark.asyncio
 async def test_metrics_cycle_count_value(dash):
     """digital_being_cycle_count — counter, отражает cycle_count из state."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "X", "cycle_count": 12345},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X", "cycle_count": 12345},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(r"^digital_being_cycle_count\s+12345$", body, re.MULTILINE)
 
@@ -209,11 +224,13 @@ async def test_metrics_cycle_count_value(dash):
 async def test_metrics_concepts_total_value(dash):
     """digital_being_concepts_total отражает total_concepts из mental_models."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "X"},
-        "mental_models": {"total_concepts": 87},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X"},
+            "mental_models": {"total_concepts": 87},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(r"^digital_being_concepts_total\s+87(\.0+)?$", body, re.MULTILINE)
 
@@ -241,11 +258,13 @@ async def test_metrics_goal_progress_optional(dash):
     assert "digital_being_goal_progress_percent" not in body
 
     # С goals.progress — должно появиться
-    d.state.update_status({
-        "agent": {"name": "X"},
-        "goals": {"progress": 65.5},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X"},
+            "goals": {"progress": 65.5},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(
         r"^digital_being_goal_progress_percent\s+65\.5$", body, re.MULTILINE
@@ -262,11 +281,13 @@ async def test_metrics_will_acts_optional(dash):
     assert "digital_being_will_acts_total" not in body
 
     # С will.total_acts=15 — должно появиться
-    d.state.update_status({
-        "agent": {"name": "X"},
-        "will": {"total_acts": 15},
-        "system": {},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X"},
+            "will": {"total_acts": 15},
+            "system": {},
+        }
+    )
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(r"^digital_being_will_acts_total\s+15$", body, re.MULTILINE)
 
@@ -295,7 +316,9 @@ async def test_metrics_completed_goals_is_counter_type(dash):
     """digital_being_completed_goals — counter."""
     _, port = dash
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
-    assert re.search(r"^# TYPE digital_being_completed_goals counter$", body, re.MULTILINE)
+    assert re.search(
+        r"^# TYPE digital_being_completed_goals counter$", body, re.MULTILINE
+    )
 
 
 # ============================================================
@@ -308,7 +331,10 @@ async def test_metrics_works_without_agent(dash):
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     # Базовые метрики должны присутствовать
     assert "digital_being_energy 0" in body or "digital_being_energy 0.0" in body
-    assert "digital_being_intelligence 1" in body or "digital_being_intelligence 1.0" in body
+    assert (
+        "digital_being_intelligence 1" in body
+        or "digital_being_intelligence 1.0" in body
+    )
     assert "digital_being_cycle_count 0" in body
 
 
@@ -320,7 +346,10 @@ async def test_metrics_handles_missing_keys_gracefully(dash):
     d.state.update_status({})
     _, _, body = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert "digital_being_energy 0" in body or "digital_being_energy 0.0" in body
-    assert "digital_being_concepts_total 0" in body or "digital_being_concepts_total 0.0" in body
+    assert (
+        "digital_being_concepts_total 0" in body
+        or "digital_being_concepts_total 0.0" in body
+    )
 
 
 # ============================================================
@@ -330,15 +359,19 @@ async def test_metrics_handles_missing_keys_gracefully(dash):
 async def test_metrics_reflects_state_updates(dash):
     """После update_status значения в /metrics меняются."""
     d, port = dash
-    d.state.update_status({
-        "agent": {"name": "X", "energy": 50, "intelligence": 2, "cycle_count": 10},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X", "energy": 50, "intelligence": 2, "cycle_count": 10},
+        }
+    )
     _, _, body1 = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(r"^digital_being_energy\s+50(\.0+)?$", body1, re.MULTILINE)
 
-    d.state.update_status({
-        "agent": {"name": "X", "energy": 200, "intelligence": 5, "cycle_count": 11},
-    })
+    d.state.update_status(
+        {
+            "agent": {"name": "X", "energy": 200, "intelligence": 5, "cycle_count": 11},
+        }
+    )
     _, _, body2 = await _get_text(f"http://127.0.0.1:{port}/metrics")
     assert re.search(r"^digital_being_energy\s+200(\.0+)?$", body2, re.MULTILINE)
     assert re.search(r"^digital_being_intelligence\s+5(\.0+)?$", body2, re.MULTILINE)

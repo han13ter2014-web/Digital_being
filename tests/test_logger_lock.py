@@ -1,11 +1,12 @@
-"""«Харднинг-1» (k16-21): BufferedLogger под concurrent-писателями.
+"""«Харднинг-1» (защиты логирования): BufferedLogger под concurrent-писателями.
 
-Вердикт k16-16 п.1: append в log() и check-then-act в flush() шли без
+До исправления append в log() и check-then-act в flush() шли без
 синхронизации — при конкурентных писателях возможны дубли/потери строк
 и перемежение чанков; get_logger() без лока давал бы два инстанса при
 первом одновременном вызове. Критерий: ни дублей, ни потерь, ни
 перепутанных чанков — при том, что однопоточный путь не изменился.
 """
+
 import threading
 from concurrent.futures import ThreadPoolExecutor
 

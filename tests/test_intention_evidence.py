@@ -15,11 +15,18 @@ def attempt(agent):
 
 def test_exposure_effect_does_not_finish_evidence_goal():
     agent = DigitalBeing(name="ExposureGoal")
-    with patch.object(agent.decision_arbitrator, "choose_action", return_value={"action": "explore", "params": {"topic": "память"}}):
+    with patch.object(
+        agent.decision_arbitrator,
+        "choose_action",
+        return_value={"action": "explore", "params": {"topic": "память"}},
+    ):
         # Регистрация темы — наблюдаемый эффект, но не свидетельство.
         def think(text):
-            agent.mental_models.encounter_concept("память", "встреча", "Встретил неизвестную тему")
+            agent.mental_models.encounter_concept(
+                "память", "встреча", "Встретил неизвестную тему"
+            )
             return "Не знаю"
+
         with patch.object(agent, "think", side_effect=think):
             agent.autonomous_tick()
     entry = agent._intention_history[-1]
@@ -47,13 +54,34 @@ def test_failed_continuation_waits_for_new_information():
 
 def test_new_source_finishes_but_repeated_source_does_not():
     agent = DigitalBeing(name="EvidenceGoal")
-    agent.mental_models.encounter_concept("память", "прочитал", "Сохранение и использование опыта", evidence_strength=0.7, evidence_kind="testimony", source="book:1")
+    agent.mental_models.encounter_concept(
+        "память",
+        "прочитал",
+        "Сохранение и использование опыта",
+        evidence_strength=0.7,
+        evidence_kind="testimony",
+        source="book:1",
+    )
     entry = attempt(agent)
-    agent.mental_models.encounter_concept("память", "повтор", "Сохранение и использование опыта", evidence_strength=0.7, evidence_kind="testimony", source="book:1")
+    agent.mental_models.encounter_concept(
+        "память",
+        "повтор",
+        "Сохранение и использование опыта",
+        evidence_strength=0.7,
+        evidence_kind="testimony",
+        source="book:1",
+    )
     finish_intention(entry)
     finish_evidence_goal(agent, entry)
     assert entry["evidence_goal"]["status"] == "pending"
-    agent.mental_models.encounter_concept("память", "наблюдение", "Запись восстановилась после перезапуска", evidence_strength=0.5, evidence_kind="observation", source="action:2")
+    agent.mental_models.encounter_concept(
+        "память",
+        "наблюдение",
+        "Запись восстановилась после перезапуска",
+        evidence_strength=0.5,
+        evidence_kind="observation",
+        source="action:2",
+    )
     finish_evidence_goal(agent, entry)
     assert entry["evidence_goal"]["status"] == "satisfied"
     assert entry["evidence_goal"]["new_sources"] == ["action:2"]

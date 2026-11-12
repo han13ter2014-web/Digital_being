@@ -45,16 +45,27 @@ def _ids(graph):
 
 def test_graph_uses_only_recorded_links():
     agent = _agent()
-    _concept(agent, "память", confidence=0.6, experiences=3,
-             connections={"внимание": 0.7})
+    _concept(
+        agent, "память", confidence=0.6, experiences=3, connections={"внимание": 0.7}
+    )
     _concept(agent, "внимание", confidence=0.4, experiences=2)
-    entry = begin_intention(agent, {"action": "explore", "source": "activity",
-                                    "params": {"topic": "память", "reason": "интерес"}})
+    entry = begin_intention(
+        agent,
+        {
+            "action": "explore",
+            "source": "activity",
+            "params": {"topic": "память", "reason": "интерес"},
+        },
+    )
 
     graph = build_life_graph(agent, build_life_snapshot(agent))
 
-    assert {"concept:память", "concept:внимание",
-            f"intention:{entry['id']}", "activity:explore"} <= _ids(graph)
+    assert {
+        "concept:память",
+        "concept:внимание",
+        f"intention:{entry['id']}",
+        "activity:explore",
+    } <= _ids(graph)
     edges = {(edge["source"], edge["target"], edge["kind"]) for edge in graph["edges"]}
     assert ("concept:память", "concept:внимание", "association") in edges
     assert (f"intention:{entry['id']}", "concept:память", "about") in edges
@@ -101,15 +112,17 @@ def test_concept_detail_reports_sources_and_last_seen():
 
 def test_forgotten_intention_is_marked_not_hidden():
     agent = _agent()
-    entry = {"id": "f" * 8, "action": "explore", "target": None,
-             "status": "performed"}
-    forgotten = dict(entry, resolution={
-        "kind": "forgotten", "reason": "источников нет", "cycle": 3})
+    entry = {"id": "f" * 8, "action": "explore", "target": None, "status": "performed"}
+    forgotten = dict(
+        entry, resolution={"kind": "forgotten", "reason": "источников нет", "cycle": 3}
+    )
 
     # Тот же id есть и в истории, и в забытых: узел должен стать забытым,
     # а не остаться «выполненным».
-    graph = build_life_graph(agent, {"intentions": {
-        "recent": [entry], "waiting": [], "forgotten": [forgotten]}})
+    graph = build_life_graph(
+        agent,
+        {"intentions": {"recent": [entry], "waiting": [], "forgotten": [forgotten]}},
+    )
 
     kinds = {node["id"]: node["kind"] for node in graph["nodes"]}
     assert kinds[f"intention:{entry['id']}"] == "forgotten"
@@ -202,8 +215,10 @@ def test_graph_does_not_create_lazy_fields_on_fresh_agent():
 
 
 def test_layout_is_deterministic_and_inside_bounds():
-    nodes = [{"id": f"concept:{index}", "kind": "concept", "weight": 0.3}
-             for index in range(30)]
+    nodes = [
+        {"id": f"concept:{index}", "kind": "concept", "weight": 0.3}
+        for index in range(30)
+    ]
     nodes.append({"id": "value:autonomy", "kind": "value", "weight": 0.5})
 
     first = layout_nodes(nodes, 800, 600)
@@ -239,20 +254,33 @@ def _label_box(position, text):
 
 def test_labels_do_not_overlap_and_stay_inside():
     nodes = [
-        {"id": f"concept:{index}", "kind": "concept", "label": f"тема {index}",
-         "weight": 0.9 - index * 0.05}
+        {
+            "id": f"concept:{index}",
+            "kind": "concept",
+            "label": f"тема {index}",
+            "weight": 0.9 - index * 0.05,
+        }
         for index in range(14)
     ]
-    nodes.append({"id": "intention:1", "kind": "intention",
-                  "label": "исследую тему «память»", "weight": 0.8})
-    nodes.append({"id": "value:autonomy", "kind": "value",
-                  "label": "автономия", "weight": 0.5})
+    nodes.append(
+        {
+            "id": "intention:1",
+            "kind": "intention",
+            "label": "исследую тему «память»",
+            "weight": 0.8,
+        }
+    )
+    nodes.append(
+        {"id": "value:autonomy", "kind": "value", "label": "автономия", "weight": 0.5}
+    )
     positions = layout_nodes(nodes, 800, 600)
 
     labels = layout_labels(nodes, positions, 800, 600)
     text_by_id = {node["id"]: node["label"] for node in nodes}
-    boxes = {node_id: _label_box(label, short_label(text_by_id[node_id]))
-             for node_id, label in labels.items()}
+    boxes = {
+        node_id: _label_box(label, short_label(text_by_id[node_id]))
+        for node_id, label in labels.items()
+    }
 
     assert len(boxes) >= 10
     for box in boxes.values():
@@ -260,15 +288,25 @@ def test_labels_do_not_overlap_and_stay_inside():
         assert box[2] <= 796 and box[3] <= 596
     ordered = list(boxes.values())
     for first_index, first in enumerate(ordered):
-        for second in ordered[first_index + 1:]:
-            assert (first[2] + 3 < second[0] or second[2] + 3 < first[0]
-                    or first[3] + 3 < second[1] or second[3] + 3 < first[1])
+        for second in ordered[first_index + 1 :]:
+            assert (
+                first[2] + 3 < second[0]
+                or second[2] + 3 < first[0]
+                or first[3] + 3 < second[1]
+                or second[3] + 3 < first[1]
+            )
 
 
 def test_labels_are_deterministic_and_skip_what_does_not_fit():
-    nodes = [{"id": f"concept:{index}", "kind": "concept",
-              "label": f"тема {index}", "weight": 0.7}
-             for index in range(6)]
+    nodes = [
+        {
+            "id": f"concept:{index}",
+            "kind": "concept",
+            "label": f"тема {index}",
+            "weight": 0.7,
+        }
+        for index in range(6)
+    ]
     positions = layout_nodes(nodes, 900, 600)
 
     first = layout_labels(nodes, positions, 900, 600)

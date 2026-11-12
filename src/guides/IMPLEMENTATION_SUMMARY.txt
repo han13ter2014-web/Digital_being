@@ -1,249 +1,70 @@
-🎉 РЕАЛИЗОВАНЫ ВСЕ СИСТЕМЫ ДЛЯ ЦИФРОВОГО СУЩЕСТВА С САМОЭВОЛЮЦИЕЙ
+DIGITAL BEING — ИТОГ ИНТЕГРАЦИОННОЙ ЧИСТКИ
 
-═══════════════════════════════════════════════════════════════════════
+Этот файл заменяет исторический отчёт о параллельном «расширенном агенте».
+Старые демонстрации demo_advanced_systems.py и demo_extended_lifecycle.py
+удалены вместе с дублирующими контурами, которые они показывали.
 
-✅ 1. ДОЛГОСРОЧНАЯ ПАМЯТЬ С DECAY-ФУНКЦИЕЙ
-   📁 Файл: src/memory/long_term_memory.py
+1. ЕДИНЫЙ КОНТУР
 
-   Особенности:
-   • Экспоненциальный decay воспоминаний (забывание со временем)
-   • Двухуровневая память: краткосрочная (100-200) → долгосрочная (консолидированная)
-   • Три типа памяти: эпизодическая, семантическая, процедурная
-   • Ассоциативные связи между воспоминаниями (граф памяти)
-   • Запрос с релевантностью и силой воспоминания
-   • Автоматическая консолидация важных воспоминаний
+Цели: GoalSubsystem и DigitalBeing.set_goal().
+Выбор: DecisionArbitrator и SoulController.
+Эмоции: EmotionalState.
+Тело: EmbodimentController, EnergySubsystem и Interoception.
+Ценности: ValueEvolution.
+Переходы жизни: LifeGuard.
 
-   Параметры:
-   - decay_rate = 0.95 (потеря 5% силы за цикл)
-   - consolidation_threshold = 0.7 (порог консолидации)
-   - importance модифицирует скорость забывания
-   - access_count усиливает память
+Параллельные менеджеры целей, эмоций, тела, предпочтений, поиска,
+воли и жизненного цикла удалены. ExtendedDigitalBeing и extend_agent()
+не используются; extended_agent.py оставлен deprecated-заглушкой.
 
-   Использование:
-   ```python
-   memory = LongTermMemory("Agent")
-   memory.store(content="факт", importance=0.8)
-   results = memory.recall("запрос", threshold=0.1)
-   memory.trigger_decay()
-   ```
+2. ПОДКЛЮЧЁННЫЕ НАБЛЮДАТЕЛИ
 
-═══════════════════════════════════════════════════════════════════════
+InternalSimulator получает прогнозы и фактические ActionOutcome/WorldDelta
+в shadow-режиме. MetaLearner сохраняет fitness с adapt=False.
+ContinuousTimeEngine связывает намерения, прогнозы и исходы.
+SocialCell получает реплику пользователя один раз.
+SensoryInterface наблюдает текст без подмены stimulus.
+MetaCognitiveSystem наблюдает мышление и исходы.
 
-✅ 2. МНОГОЗАДАЧНОСТЬ ЦЕЛЕЙ
-   📁 Файл: src/cognition/multi_goal_manager.py
+IntegratedExperience объединяет Personality, EmergenceEngine,
+ThinkingPatternLibrary и HormonalSystem. Эти модели видят фактический
+опыт, но не выбирают действия, не создают цели и не меняют конфигурацию.
 
-   Особенности:
-   • Параллельное управление N активными целями (по умолчанию 3)
-   • Состояния целей: PENDING → ACTIVE → PAUSED/BLOCKED → COMPLETED
-   • Приоритизация (1-5, где 5=критическая)
-   • Зависимости между целями (одна блокирует другую)
-   • Отслеживание эффективности (cycles_per_percent)
-   • Циклическое распределение энергии между целями
-   • История прерываний (interruptions)
+3. ЛОКАЛЬНЫЕ АДАПТЕРЫ
 
-   Алгоритм выбора целей:
-   1. Активируются новые цели если есть место
-   2. Сортируются по приоритету и времени затраченному
-   3. Берется топ-N целей для работы
+AgentCooperationHub создаётся per-instance, без глобального singleton.
+Общий хаб передаётся явно, идентификатор — непустой life_id.
+Входящая очередь обрабатывается автоматически в tick; знания только
+карантинируются и не попадают в память или цели Core.
 
-   Использование:
-   ```python
-   manager = MultiTaskGoalManager(max_active_goals=3)
-   goal = manager.add_goal("Цель", difficulty=2, priority=3)
-   active = manager.select_goals_for_cycle(available_energy=100)
-   manager.update_goal_progress(goal_id, progress_delta)
-   manager.complete_goal(goal_id)
-   ```
+MetricsCollector хранит ряды в памяти без автоматической записи на диск.
+I18n доступен локально. VoiceRouter включён, использует доступные локальные
+TTS/STT и console-fallback. WebhookManager запускает worker только при
+настроенных Telegram/Discord endpoint-ах и останавливает его вместе с runner.
 
-═══════════════════════════════════════════════════════════════════════
+4. EFFECTOR И РАЗВИТИЕ
 
-✅ 3. КООПЕРАЦИЯ МЕЖДУ АГЕНТАМИ
-   📁 Файл: src/cognition/agent_cooperation.py
+Core принимает EffectorResult и mapping отчёта драйвера.
+DigitalBeing.export_creative_draft() явно экспортирует существующий
+черновик; автоматического экспорта после создания нет.
 
-   Особенности:
-   • Глобальный хаб кооперации (singleton pattern)
-   • Типы сообщений: REQUEST, RESPONSE, SHARE_KNOWLEDGE, COLLABORATE, QUERY, FEEDBACK
-   • Общая база знаний по темам (shared_knowledge_base)
-   • Репутационная система между агентами (0.0-1.0)
-   • Группы сотрудничества (N агентов работают вместе)
-   • Приоритизированная очередь сообщений
-   • История всех взаимодействий
+SelfEvolutionAnalyzer только анализирует и предлагает. Скрытая
+самомодификация отсутствует. LLM/Ollama и учёт их токенов удалены;
+Delamain использует детерминированный планировщик.
 
-   Репутация:
-   - Начальная: 0.5 (нейтральная)
-   - +0.1 за каждое успешное взаимодействие
-   - Используется для выбора надежных источников
+5. СОХРАНЕНИЕ
 
-   Использование:
-   ```python
-   cooperation_hub.register_agent(agent)
-   cooperation_hub.send_message(from_id, to_id, message_type, content)
-   messages = cooperation_hub.get_pending_messages(agent_id)
-   result = cooperation_hub.query_knowledge(agent_id, topic)
-   stats = cooperation_hub.get_agent_statistics(agent_id)
-   ```
+Чекпоинты содержат integrated_experience, cooperation, meta_cognition
+и состояния остальных подключённых систем. Поддерживаются старые снимки
+без новых секций. Восстановление проверяется и подготавливается до
+применения изменений к живому объекту.
 
-═══════════════════════════════════════════════════════════════════════
+6. ПРОВЕРКА
 
-✅ 4. САМОЭВОЛЮЦИЯ И САМОУЛУЧШЕНИЕ
-   📁 Файл: src/evolution/self_evolution_analyzer.py
+Запуск из корня проекта:
 
-   Особенности:
-   • Анализ 5 метрик производительности:
-     - energy_efficiency (энергия / результаты)
-     - goal_completion_rate (завершение целей)
-     - learning_speed (концепции / циклы)
-     - memory_efficiency (качественные концепции / всего)
-     - concepts_quality (средняя уверенность)
-   • Идентификация bottlenecks (узких мест)
-   • Генерация код-предложений с оценкой impact
-   • Безопасное применение модификаций
-   • История всех эволюционных шагов
+  .venv/Scripts/python.exe -m pytest -q
+  python -m compileall -q src
 
-   Типы модификаций:
-   - parameter_adjustment: изменение параметров
-   - enable_feature: включение/отключение фич
-
-   Использование:
-   ```python
-   analyzer = SelfEvolutionAnalyzer(agent)
-   performance = analyzer.analyze_performance()
-   improvements = analyzer.identify_improvements()
-   suggestion = analyzer.generate_code_suggestion(improvement)
-   analyzer.apply_self_modification(suggestion)
-   report = analyzer.generate_self_report()
-   ```
-
-═══════════════════════════════════════════════════════════════════════
-
-✅ 5. ИНТЕГРАЦИОННЫЙ МОДУЛЬ
-   📁 Файл: src/core/extended_agent.py
-
-   Класс ExtendedDigitalBeing инкапсулирует все системы:
-   • perceive_and_remember() - восприятие + сохранение
-   • think_with_memory_recall() - мышление с воспоминаниями
-   • select_and_work_on_goals() - многозадачность
-   • cooperate_with_agent() - обмен знанием
-   • process_cooperation_messages() - получение сообщений
-   • perform_self_analysis() - анализ и улучшение
-   • trigger_memory_consolidation() - консолидация
-   • get_full_status() - полный статус
-   • print_status() - красивый вывод
-
-═══════════════════════════════════════════════════════════════════════
-
-📊 ТЕСТИРОВАНИЕ И ПРИМЕРЫ
-
-✓ demo_advanced_systems.py (работает)
-  - Каждая система тестируется отдельно
-  - 50+ тестов
-
-✓ demo_extended_lifecycle.py (работает)
-  - Полная интеграция всех систем
-  - Симуляция на 50 циклов
-  - Кооперация между двумя агентами
-  - Управление памятью и целями
-
-═══════════════════════════════════════════════════════════════════════
-
-🎯 КАК АГЕНТ СТАНОВИТСЯ УМНЕЕ
-
-1️⃣ ОБУЧЕНИЕ (через долгосрочную память)
-   - Восприятие → Запоминание (важное)
-   - Консолидация → Забывание (неважное)
-   - Результат: растет качество известных концепций
-
-2️⃣ ЭФФЕКТИВНОСТЬ (через многозадачность)
-   - Работает над несколькими целями одновременно
-   - Распределяет ресурсы по приоритету
-   - Результат: больше целей завершено за цикл
-
-3️⃣ КООПЕРАЦИЯ (через обмен знаниями)
-   - Получает знание от других агентов
-   - Интегрирует в свою память
-   - Повышает репутацию других
-   - Результат: коллективный интеллект
-
-4️⃣ САМОУЛУЧШЕНИЕ (через анализ)
-   - Периодический анализ производительности
-   - Идентификация проблем
-   - Применение оптимизаций
-   - Результат: скор производительности растет
-
-═══════════════════════════════════════════════════════════════════════
-
-📁 СТРУКТУРА ПРОЕКТА
-
-src/
-├── core/
-│   ├── agent.py                      # Основной DigitalBeing
-│   ├── extended_agent.py             # ✨ Интеграционный слой
-│   └── buffered_logger.py
-├── memory/
-│   ├── knowledge_base.py
-│   └── long_term_memory.py           # ✨ Долгосрочная память
-├── cognition/
-│   ├── mental_models.py
-│   ├── goal_management.py
-│   ├── multi_goal_manager.py         # ✨ Многозадачность
-│   ├── agent_cooperation.py          # ✨ Кооперация
-│   └── ...
-├── evolution/
-│   ├── self_modification.py
-│   └── self_evolution_analyzer.py    # ✨ Самоэволюция
-└── ...
-
-examples/
-├── demo_advanced_systems.py          # ✨ Тестирование всех систем
-├── demo_extended_lifecycle.py        # ✨ Полная интеграция
-└── ...
-
-data/
-├── memory/                            # ✨ Долгосрочная память на диск
-├── cooperation/                       # ✨ История кооперации
-└── evolution/                         # ✨ История эволюции
-
-═══════════════════════════════════════════════════════════════════════
-
-🚀 БЫСТРЫЙ СТАРТ
-
-# Запустить основное демо
-python examples/demo_advanced_systems.py
-
-# Запустить полную симуляцию с интеграцией
-python examples/demo_extended_lifecycle.py
-
-# Использовать в коде
-from src.core.agent import DigitalBeing
-from src.core.extended_agent import extend_agent
-
-agent = DigitalBeing("MyAgent")
-extended = extend_agent(agent)
-extended.print_status()
-
-═══════════════════════════════════════════════════════════════════════
-
-📖 ДОКУМЕНТАЦИЯ
-
-EXTENDED_SYSTEMS.md - подробное описание каждой системы с примерами
-README_EXTENDED.md - гайд по использованию и настройке
-
-═══════════════════════════════════════════════════════════════════════
-
-✨ ИТОГ:
-
-Вы получили:
-✅ Долгосрочную память с человеческим забыванием
-✅ Способность работать над несколькими целями одновременно
-✅ Кооперацию между несколькими агентами
-✅ Самоанализ и самоулучшение в реальном времени
-
-Агент теперь:
-- 🧠 УЧИТСЯ и ЗАПОМИНАЕТ важное
-- 🎯 МНОГОЗАДАЧЕН и эффективен
-- 🤝 КООПЕРИРУЕТ с другими агентами
-- 🔄 ЭВОЛЮЦИОНИРУЕТ и УЛУЧШАЕТСЯ
-
-Готов к долгой жизни и развитию! 🚀
-
-═══════════════════════════════════════════════════════════════════════
+Актуальные сведения о модулях и границах находятся в BIOLOGICAL_MAP.md
+и INTERNAL_SIMULATOR_WORLD_DELTA_PLAN.md.

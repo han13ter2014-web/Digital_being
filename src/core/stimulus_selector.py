@@ -21,6 +21,7 @@ stimulus_selector.py — единый модуль выбора стимула �
     >>> from src.core.stimulus_selector import select_stimulus
     >>> stim = select_stimulus(agent, goal_priority_prob=0.4)
 """
+
 from __future__ import annotations
 
 import random
@@ -77,12 +78,34 @@ def _pick_random(pool: list[str]) -> str:
 # Python-стимулы, которым даётся доп. приоритет (используются
 # в ``_apply_python_priority`` совместно с PYTHON_PRIORITY_MULTIPLIER).
 _PYTHON_TECH_KEYWORDS: tuple[str, ...] = (
-    "python", "питон", "import", "def", "класс", "объект",
-    "модуль", "словарь", "список", "цикл", "переменная",
-    "функция", "итерация", "генератор", "декоратор", "лямбда",
-    "код", "алгоритм", "структура данных", "база данных", "sql",
-    "нейросеть", "обучение", "трансформер", "языковая модель",
-    "обработка естественного", "робототехника", "искусственный интеллект",
+    "python",
+    "питон",
+    "import",
+    "def",
+    "класс",
+    "объект",
+    "модуль",
+    "словарь",
+    "список",
+    "цикл",
+    "переменная",
+    "функция",
+    "итерация",
+    "генератор",
+    "декоратор",
+    "лямбда",
+    "код",
+    "алгоритм",
+    "структура данных",
+    "база данных",
+    "sql",
+    "нейросеть",
+    "обучение",
+    "трансформер",
+    "языковая модель",
+    "обработка естественного",
+    "робототехника",
+    "искусственный интеллект",
 )
 
 
@@ -99,8 +122,10 @@ def _is_python_tech_stimulus(stimulus: str) -> bool:
 
 
 def _apply_python_priority(
-    high_priority: list[str], low_priority: list[str],
-    multiplier: float, threshold: float,
+    high_priority: list[str],
+    low_priority: list[str],
+    multiplier: float,
+    threshold: float,
 ) -> tuple[list[str], list[str]]:
     """Дублирует Python-стимулы в ``high_priority`` (с учётом множителя).
 
@@ -133,7 +158,8 @@ def _apply_python_priority(
 
 
 def _split_by_goal(
-    pool: list[str], goal_title: str,
+    pool: list[str],
+    goal_title: str,
     *,
     apply_python_priority: bool = True,
     python_multiplier: float = 3.0,
@@ -285,8 +311,7 @@ def select_novel_stimulus(
 
     if cooldown > 0 and recent:
         fresh = [
-            s for s in pool
-            if tick - recent.get(_stimulus_key(s), -(10 ** 9)) >= cooldown
+            s for s in pool if tick - recent.get(_stimulus_key(s), -(10**9)) >= cooldown
         ]
         if not fresh:
             return None

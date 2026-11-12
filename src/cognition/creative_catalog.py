@@ -2,7 +2,13 @@
 
 from copy import deepcopy
 
-from src.cognition.creative_draft import MAX_DRAFTS, draft_step, leave_draft, validate_draft, LIMIT
+from src.cognition.creative_draft import (
+    MAX_DRAFTS,
+    draft_step,
+    leave_draft,
+    validate_draft,
+    LIMIT,
+)
 
 
 def validate_catalog(catalog):
@@ -20,8 +26,11 @@ def creative_request(intention):
     identifier = params.get("draft_id")
     if mode not in {"continue", "new", "leave"}:
         raise ValueError("Неизвестный draft_mode")
-    if identifier is not None and (not isinstance(identifier, str) or len(identifier) != 32
-                                   or any(ch not in "0123456789abcdef" for ch in identifier)):
+    if identifier is not None and (
+        not isinstance(identifier, str)
+        or len(identifier) != 32
+        or any(ch not in "0123456789abcdef" for ch in identifier)
+    ):
         raise ValueError("Некорректный draft_id")
     if mode == "new" and identifier is not None:
         raise ValueError("Новая работа не принимает старый draft_id")
@@ -57,9 +66,15 @@ def perform_creative(agent, mode="continue", identifier=None, reason=""):
     else:
         if mode == "new" and len(catalog) >= MAX_DRAFTS:
             raise ValueError("Каталог работ заполнен")
-        if identifier is not None and (selected.get("status") == "left" or selected["revision"] >= LIMIT):
+        if identifier is not None and (
+            selected.get("status") == "left" or selected["revision"] >= LIMIT
+        ):
             raise ValueError("Выбранная работа оставлена или исчерпала лимит редакций")
-        updated = draft_step(None if mode == "new" else selected)
+        from src.core.activity_workspace import workspace_for
+
+        updated = draft_step(
+            None if mode == "new" else selected, workspace=workspace_for(agent)
+        )
     catalog[updated["id"]] = deepcopy(updated)
     validate_catalog(catalog)
     agent._creative_catalog = catalog

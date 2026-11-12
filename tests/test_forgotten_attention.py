@@ -1,17 +1,22 @@
 """Forgotten intention releases candidate attention; new interest is explicit."""
 
-from unittest.mock import patch
-
 from src.core.agent import DigitalBeing
 from src.cognition.intention_history import begin_intention, finish_intention
 from src.cognition.intention_evidence import finish_evidence_goal
-from src.cognition.intention_waiting import remember_wait, resolve_wait, start_new_intention
+from src.cognition.intention_waiting import (
+    remember_wait,
+    resolve_wait,
+    start_new_intention,
+)
 from src.cognition.intention_continuation import continuation_candidate
 
 
 def setup_waiting():
     agent = DigitalBeing(name="ForgottenAttention")
-    entry = begin_intention(agent, {"action": "explore", "params": {"topic": "память", "reason": "проверить"}})
+    entry = begin_intention(
+        agent,
+        {"action": "explore", "params": {"topic": "память", "reason": "проверить"}},
+    )
     finish_intention(entry)
     finish_evidence_goal(agent, entry)
     agent.cycle_count += 1
@@ -24,7 +29,12 @@ def setup_waiting():
 
 def test_forgotten_is_not_a_candidate_but_new_interest_is():
     agent = setup_waiting()
-    assert resolve_wait(agent, "explore", "память", kind="forgotten", reason="отпустить")['status'] == "forgotten"
+    assert (
+        resolve_wait(agent, "explore", "память", kind="forgotten", reason="отпустить")[
+            "status"
+        ]
+        == "forgotten"
+    )
     assert continuation_candidate(agent) is None
     new = start_new_intention(agent, "explore", "память", reason="новый интерес")
     assert new["new_interest"]

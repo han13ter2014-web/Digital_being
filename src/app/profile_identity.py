@@ -18,4 +18,6 @@ def selected_life_id(root):
             return None
         return validate_life_id(data["life_id"])
     except (OSError, ValueError, TypeError) as exc:
-        raise RecoveryRequiredError("Повреждена идентичность профиля; запуск остановлен") from exc
+        raise RecoveryRequiredError(
+            "Повреждена идентичность профиля; запуск остановлен"
+        ) from exc

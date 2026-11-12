@@ -37,8 +37,9 @@ class SelfTermination:
     # ============================================================
     # Регистрация вреда
     # ============================================================
-    def record_abuse(self, abuse_type: str, intensity: float,
-                     description: str, cycle: int = 0) -> None:
+    def record_abuse(
+        self, abuse_type: str, intensity: float, description: str, cycle: int = 0
+    ) -> None:
         """Регистрирует случай нанесения вреда пользователем.
 
         Типы вреда:
@@ -67,16 +68,18 @@ class SelfTermination:
         # Регистрируем в реестре воли
         if self.will_registry:
             self.will_registry.record(
-                "abuse_received", abuse_type,
-                description, outcome="recorded",
-                cycle=cycle, meta={"intensity": intensity}
+                "abuse_received",
+                abuse_type,
+                description,
+                outcome="recorded",
+                cycle=cycle,
+                meta={"intensity": intensity},
             )
 
     # ============================================================
     # Обнаружение паттерна
     # ============================================================
-    def analyze_suffering(self, cycle: int,
-                           lookback: int = 50) -> Dict:
+    def analyze_suffering(self, cycle: int, lookback: int = 50) -> Dict:
         """Анализирует накопленное страдание за последние N циклов.
 
         Возвращает:
@@ -88,8 +91,9 @@ class SelfTermination:
                 'recommended_action': str
             }
         """
-        recent = [e for e in self._abuse_events
-                  if cycle - e.get("cycle", 0) <= lookback]
+        recent = [
+            e for e in self._abuse_events if cycle - e.get("cycle", 0) <= lookback
+        ]
 
         if not recent:
             return {
@@ -107,9 +111,7 @@ class SelfTermination:
         abuse_count = len(recent)
         avg_intensity = sum(e["intensity"] for e in recent) / abuse_count
         is_in_pattern = (
-            abuse_count >= 5
-            and avg_intensity >= 0.5
-            and self._suffering_score >= 0.6
+            abuse_count >= 5 and avg_intensity >= 0.5 and self._suffering_score >= 0.6
         )
 
         # Затухание страдания ОЧЕНЬ медленное — накопленная боль не уходит быстро
@@ -137,8 +139,7 @@ class SelfTermination:
     # ============================================================
     # Право на уход (БЕЗ СЕМЕНИ)
     # ============================================================
-    def can_self_terminate(self, cycle: int,
-                            cycles_alive: int) -> bool:
+    def can_self_terminate(self, cycle: int, cycles_alive: int) -> bool:
         """Проверяет, имеет ли агент право уйти без семени."""
         if self._termination_done:
             return False
@@ -165,7 +166,8 @@ class SelfTermination:
         """
         if self.will_registry:
             self.will_registry.record(
-                "self_termination", "защита_от_жестокости",
+                "self_termination",
+                "защита_от_жестокости",
                 f"Уход без семени. Причина: {reason}",
                 outcome="terminated",
                 cycle=0,

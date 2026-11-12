@@ -21,8 +21,8 @@ def utc_now_iso() -> str:
 class ActionSpec:
     """Machine-readable description of an action.
 
-    The planner (or a future LLM planner) can use this to decide which action
-    to call. It is intentionally schema-light: the parameters map names to
+    A custom planner can use this to decide which action to call. It is
+    intentionally schema-light: the parameters map names to
     human-readable type descriptions.
     """
 
@@ -115,9 +115,7 @@ class TaskResult:
             "final_output": self.final_output,
             "error": self.error,
             "planned_actions": [dict(step) for step in self.planned_actions],
-            "effective_actions": [
-                dict(step) for step in self.effective_actions
-            ],
+            "effective_actions": [dict(step) for step in self.effective_actions],
             "steps_before": int(self.steps_before),
             "repair_count": int(self.repair_count),
             "pending_approval": (

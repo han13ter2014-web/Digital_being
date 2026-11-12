@@ -210,7 +210,10 @@ def test_pending_request_survives_restart_without_duplication(
     queued = first.effector.submit(request)
     assert queued.goal_id is not None
     first.tick(1, {})
-    assert first.effector.poll(request.request_id).status is EffectorStatus.WAITING_APPROVAL
+    assert (
+        first.effector.poll(request.request_id).status
+        is EffectorStatus.WAITING_APPROVAL
+    )
     first.teardown()
 
     second = make_sub(tmp_path, approval_mode="dangerous")
@@ -262,6 +265,7 @@ def test_poll_not_found_and_status_counts(tmp_path: Path) -> None:
 def test_event_sink_failure_does_not_break_execution(tmp_path: Path) -> None:
     sub = make_sub(tmp_path)
     try:
+
         def broken_sink(name: str, data: dict) -> None:
             raise RuntimeError("sink unavailable")
 
@@ -341,9 +345,9 @@ def test_core_driven_step_ignores_legacy_delamain_goals(
         assert result.request_id == "effector-only"
         assert sub.get_goal(legacy["id"])["status"] == "pending"
         assert not (tmp_path / "workspace" / "legacy.txt").exists()
-        assert (
-            tmp_path / "workspace" / "notes" / "a.txt"
-        ).read_text(encoding="utf-8") == "from-effector"
+        assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+            encoding="utf-8"
+        ) == "from-effector"
 
         # Even a later subsystem tick cannot turn the legacy queue into a
         # second action driver while core-driven mode is active.
@@ -433,9 +437,7 @@ def test_digital_being_wires_one_core_driver(
         assert agent.effector_driver is not None
         assert agent.effector_driver.effector is agent.delamain_effector
         assert agent.delamain.core_driven is True
-        assert (
-            agent.get_subsystems_status()["effector_driver"]["enabled"] is True
-        )
+        assert agent.get_subsystems_status()["effector_driver"]["enabled"] is True
 
         request = write_request("agent-core", content="agent")
         agent.delamain_effector.submit(request)

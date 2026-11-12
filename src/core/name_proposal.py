@@ -23,7 +23,7 @@ def extract_name_proposal(text):
             break
     if not matched and ("?" in value or len(value.split()) > 2):
         return None
-    value = value.strip().rstrip(".!?").strip().strip('"\'«»').strip()
+    value = value.strip().rstrip(".!?").strip().strip("\"'«»").strip()
     if not re.fullmatch(r"[^\W\d_]+(?:[- ][^\W\d_]+){0,2}", value, flags=re.UNICODE):
         return None
     if value.casefold() in {"привет", "не знаю", "да", "нет", "как дела", "не уверен"}:

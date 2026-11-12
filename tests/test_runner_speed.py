@@ -16,7 +16,7 @@ import pytest
 
 from src.core.agent import DigitalBeing
 from src.core.agent_runner import AgentRunner
-from src.core.event_bus import EventBus, Events
+from src.core.event_bus import EventBus
 
 
 @pytest.fixture()

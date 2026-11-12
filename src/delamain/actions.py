@@ -131,7 +131,13 @@ class ActionRegistry:
             output = None
             ok = False
             error = str(exc)
-        except (RunnerError, SandboxError, FileNotFoundError, FileExistsError, OSError) as exc:
+        except (
+            RunnerError,
+            SandboxError,
+            FileNotFoundError,
+            FileExistsError,
+            OSError,
+        ) as exc:
             output = None
             ok = False
             error = str(exc)
@@ -165,7 +171,9 @@ class ActionRegistry:
             WriteFileAction(sandbox),
             AppendFileAction(sandbox),
             MakeDirAction(sandbox),
-            WriteCreativeDraftAction(Sandbox(sandbox.root / "creative", max_file_bytes=8192, max_results=32)),
+            WriteCreativeDraftAction(
+                sandbox.child("creative", max_file_bytes=8192, max_results=32)
+            ),
             RunPythonAction(runner),
             SearchFilesAction(sandbox),
             VerifyFileAction(sandbox),
@@ -282,7 +290,11 @@ class WriteCreativeDraftAction(Action):
     spec = ActionSpec(
         name="write_creative_draft",
         description="Write a bounded creative artifact inside the creative workspace only.",
-        parameters={"path": "creative-relative .txt path", "content": "text", "overwrite": "boolean"},
+        parameters={
+            "path": "creative-relative .txt path",
+            "content": "text",
+            "overwrite": "boolean",
+        },
         dangerous=True,
     )
 
@@ -291,10 +303,17 @@ class WriteCreativeDraftAction(Action):
 
     def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
         path = _text_arg(args, "path")
-        if Path(path).is_absolute() or ".." in Path(path).parts or path.startswith("creative/") or not path.lower().endswith(".txt"):
+        if (
+            Path(path).is_absolute()
+            or ".." in Path(path).parts
+            or path.startswith("creative/")
+            or not path.lower().endswith(".txt")
+        ):
             raise ActionError("creative artifact must be a relative .txt path")
         content = _text_arg(args, "content")
-        return self.sandbox.write_text(path, content, overwrite=_bool_arg(args, "overwrite", True))
+        return self.sandbox.write_text(
+            path, content, overwrite=_bool_arg(args, "overwrite", True)
+        )
 
 
 class RunPythonAction(Action):
@@ -314,7 +333,14 @@ class RunPythonAction(Action):
 
     def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
         path = _text_arg(args, "path")
-        outcome = self.runner.run(path)
+        try:
+            outcome = self.runner.run(path)
+        finally:
+            # Approved code may create files in its workspace. Managed sandboxes
+            # register both new and changed artifacts, also after a failed run.
+            sync = getattr(self.runner.sandbox, "sync_artifacts", None)
+            if callable(sync):
+                sync()
         if outcome.timed_out:
             raise ActionError(
                 f"script timed out after {self.runner.timeout_sec:g}s: {path}"
@@ -322,9 +348,7 @@ class RunPythonAction(Action):
         if outcome.exit_code != 0:
             detail = outcome.stderr.strip() or outcome.stdout.strip()
             suffix = f": {_tail_text(detail)}" if detail else ""
-            raise ActionError(
-                f"script exited with code {outcome.exit_code}{suffix}"
-            )
+            raise ActionError(f"script exited with code {outcome.exit_code}{suffix}")
         return outcome.to_dict()
 
 
@@ -514,5 +538,7 @@ class ListGoalsAction(Action):
 
     def run(self, args: Mapping[str, Any]) -> Dict[str, Any]:
         status = args.get("status")
-        goals = self.memory.list_goals(status=str(status) if status is not None else None)
+        goals = self.memory.list_goals(
+            status=str(status) if status is not None else None
+        )
         return {"goals": goals, "count": len(goals)}

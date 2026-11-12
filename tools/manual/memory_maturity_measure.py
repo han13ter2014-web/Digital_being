@@ -235,20 +235,14 @@ async def main(
         f"  встречались дважды и более: {final['deep']} "
         f"({final['deep_share']:.0%} своих)"
     )
-    lines.append(
-        f"  встреч на концепцию: {final['mean_experiences']:.2f}"
-    )
+    lines.append(f"  встреч на концепцию: {final['mean_experiences']:.2f}")
     lines.append(
         f"  без свидетельств: {final['no_evidence']}, "
         f"с низкой уверенностью: {final['low_confidence']}, "
         f"суммарная сила свидетельств: {final['evidence_strength']:.2f}"
     )
-    lines.append(
-        f"  отвечает из памяти: {first['definable']} → {final['definable']}"
-    )
-    lines.append(
-        f"  с формулировкой: {first['defined']} → {final['defined']}"
-    )
+    lines.append(f"  отвечает из памяти: {first['definable']} → {final['definable']}")
+    lines.append(f"  с формулировкой: {first['defined']} → {final['defined']}")
     lines.append(
         f"  средняя уверенность: {first['mean_confidence']:.3f} → "
         f"{final['mean_confidence']:.3f}"
@@ -292,22 +286,22 @@ if __name__ == "__main__":
     if "--report" in args:
         index = args.index("--report")
         report = args[index + 1]
-        del args[index:index + 2]
+        del args[index : index + 2]
     sample_every = 50
     if "--sample-every" in args:
         index = args.index("--sample-every")
         sample_every = int(args[index + 1])
-        del args[index:index + 2]
+        del args[index : index + 2]
     seed = None
     if "--seed" in args:
         index = args.index("--seed")
         seed = int(args[index + 1])
-        del args[index:index + 2]
+        del args[index : index + 2]
     depth = None
     if "--depth" in args:
         index = args.index("--depth")
         depth = float(args[index + 1])
-        del args[index:index + 2]
+        del args[index : index + 2]
     args = [a for a in args if not a.startswith("--")]
     count = int(args[0]) if args else 500
     raise SystemExit(

@@ -38,6 +38,24 @@ Thumbs.db
 # AI-инструментарий (локальные планы и состояние агента-разработчика)
 .rufp/
 
+# Локальные архивы, отчёты, резервные копии и материалы разработки
+_archive/
+/tmp/
+/backups/
+/quality-skills/
+/digital_being_architecture.txt
+/digital_being_deep_architecture (2).pdf
+/STAGE6_LIVE_V3_ADOPTION_PLAN.md
+/SQLITE_MIGRATION_SCHEMA.md
+/body_plan.md
+/kimi_fix_tickets.md
+/docs/AI_HANDOFF.md
+/docs/PATCH_WORK_STATUS.md
+/docs/digital_being_brief.md
+/docs/freedom_charter.md
+/docs/verifier_selfcheck_matrix.md
+/docs/test_fic/pytest_collect.txt
+
 # PyInstaller (сборка .exe)
 build/
 dist/

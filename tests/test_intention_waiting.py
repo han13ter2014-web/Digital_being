@@ -19,7 +19,9 @@ def test_wait_survives_eviction_and_profile_restart(tmp_path, monkeypatch, backe
     try:
         env = setup_environment(chdir=False, console=False)
         agent, _ = create_agent(env, "WaitLife", new=True)
-        entry = begin_intention(agent, {"action": "explore", "params": {"topic": "память"}})
+        entry = begin_intention(
+            agent, {"action": "explore", "params": {"topic": "память"}}
+        )
         finish_intention(entry)
         finish_evidence_goal(agent, entry)
         agent.cycle_count += 1
@@ -39,9 +41,18 @@ def test_wait_survives_eviction_and_profile_restart(tmp_path, monkeypatch, backe
         restored.knowledge_base["новый материал"] = "Содержательное объяснение"
         proposal = continuation_candidate(restored)
         assert proposal["params"]["topic"] == "память"
-        restored.mental_models.encounter_concept("память", "ответ", "Память сохраняет и использует опыт",
-            evidence_strength=0.8, evidence_kind="testimony", source="user:new")
+        restored.mental_models.encounter_concept(
+            "память",
+            "ответ",
+            "Память сохраняет и использует опыт",
+            evidence_strength=0.8,
+            evidence_kind="testimony",
+            source="user:new",
+        )
         assert continuation_candidate(restored) is None
-        assert all(e["evidence_goal"]["status"] == "satisfied" for e in restored._waiting_intentions.values())
+        assert all(
+            e["evidence_goal"]["status"] == "satisfied"
+            for e in restored._waiting_intentions.values()
+        )
     finally:
         PluginRegistry.reset_global()

@@ -13,7 +13,9 @@ from src.core.checkpoint_serializer import CheckpointSerializer
 @pytest.fixture(params=[False, True], ids=["json", "gzip"])
 def serializer(request, tmp_path, monkeypatch):
     monkeypatch.setattr(checkpoint_serializer, "get_logger", Mock())
-    return CheckpointSerializer(str(tmp_path), max_checkpoints=2, compress=request.param)
+    return CheckpointSerializer(
+        str(tmp_path), max_checkpoints=2, compress=request.param
+    )
 
 
 def read_checkpoint(path, compress):
@@ -22,7 +24,9 @@ def read_checkpoint(path, compress):
         return json.load(checkpoint)
 
 
-def test_successful_save_publishes_complete_file_before_pruning(serializer, monkeypatch):
+def test_successful_save_publishes_complete_file_before_pruning(
+    serializer, monkeypatch
+):
     first = Path(serializer.save({"cycle": 1}, "agent", 1))
     second = Path(serializer.save({"cycle": 2}, "agent", 2))
     state = {"cycle": 3, "text": "Сохранено"}
@@ -54,7 +58,9 @@ def test_successful_save_publishes_complete_file_before_pruning(serializer, monk
 
 
 @pytest.mark.parametrize("cycle", [2, 3], ids=["overwrite", "new-checkpoint"])
-def test_replace_failure_preserves_all_checkpoints_and_removes_temp(serializer, monkeypatch, cycle):
+def test_replace_failure_preserves_all_checkpoints_and_removes_temp(
+    serializer, monkeypatch, cycle
+):
     serializer.save({"cycle": 1}, "agent", 1)
     serializer.save({"cycle": 2}, "agent", 2)
     directory = Path(serializer.checkpoint_dir)

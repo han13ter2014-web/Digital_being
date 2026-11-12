@@ -96,7 +96,9 @@ class Subsystem:
         self._setup_done = True
         logger.debug(f"[{self.name}] setup() done (agent={self.agent_name})")
 
-    def tick(self, cycle: int, context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def tick(
+        self, cycle: int, context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Главный цикл. Должен быть идемпотентным и быстрым.
 
         Возвращает dict с событиями для шины (опционально) или None.
@@ -156,7 +158,9 @@ class Subsystem:
             )
 
     def __repr__(self) -> str:
-        return f"<Subsystem {self.name} enabled={self.enabled} ticks={self._tick_count}>"
+        return (
+            f"<Subsystem {self.name} enabled={self.enabled} ticks={self._tick_count}>"
+        )
 
 
 # ============================================================
@@ -243,19 +247,28 @@ class PluginRegistry:
             self._items[name] = instance
             if not replace:
                 self._emit("registered", {"name": name, "version": instance.version})
-                logger.debug(f"[registry] зарегистрирована: {name} (v{instance.version})")
+                logger.debug(
+                    f"[registry] зарегистрирована: {name} (v{instance.version})"
+                )
             else:
                 self._emit("replaced", {"name": name, "version": instance.version})
             return True
 
-    def register_class(self, cls: Type[Subsystem], *, agent_name: str = "unknown",
-                        replace: bool = False) -> bool:
+    def register_class(
+        self,
+        cls: Type[Subsystem],
+        *,
+        agent_name: str = "unknown",
+        replace: bool = False,
+    ) -> bool:
         """Зарегистрировать класс (будет инстанциирован при первом запросе).
 
         Полезно для декларативной регистрации плагинов из конфига.
         """
         if not (isinstance(cls, type) and issubclass(cls, Subsystem)):
-            raise TypeError(f"register_class ожидает подкласс Subsystem, получено: {cls!r}")
+            raise TypeError(
+                f"register_class ожидает подкласс Subsystem, получено: {cls!r}"
+            )
         with self._lock:
             # Имя берём из класса, если у него не задан class-attr name.
             name = getattr(cls, "name", "") or cls.__name__.lower()
@@ -317,7 +330,9 @@ class PluginRegistry:
                 logger.warning(f"[registry] setup {inst.name} упал: {e}")
         return count
 
-    def tick_all(self, cycle: int, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tick_all(
+        self, cycle: int, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Вызвать tick() для всех enabled подсистем по priority.
 
         Возвращает сводный отчёт:
@@ -407,15 +422,17 @@ class PluginRegistry:
 
     def _push_history(self, report: Dict[str, Any]) -> None:
         with self._lock:
-            self._history.append({
-                "cycle": report.get("cycle"),
-                "ok_count": len(report.get("ok", [])),
-                "failed_count": len(report.get("failed", [])),
-                "elapsed_ms": report.get("elapsed_ms"),
-                "timestamp": time.time(),
-            })
+            self._history.append(
+                {
+                    "cycle": report.get("cycle"),
+                    "ok_count": len(report.get("ok", [])),
+                    "failed_count": len(report.get("failed", [])),
+                    "elapsed_ms": report.get("elapsed_ms"),
+                    "timestamp": time.time(),
+                }
+            )
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
 
     def get_history(self, last_n: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
@@ -455,9 +472,14 @@ class PluginRegistry:
 # Хелперы для регистрации в DigitalBeing
 # ============================================================
 
-def attach_existing_subsystem(agent: Any, attr_name: str, *,
-                              registry: Optional[PluginRegistry] = None,
-                              priority: int = 100) -> Optional[Subsystem]:
+
+def attach_existing_subsystem(
+    agent: Any,
+    attr_name: str,
+    *,
+    registry: Optional[PluginRegistry] = None,
+    priority: int = 100,
+) -> Optional[Subsystem]:
     """Обернуть существующую подсистему агента в Subsystem-адаптер
     и зарегистрировать в registry.
 
@@ -496,8 +518,15 @@ class LegacySubsystemAdapter(Subsystem):
     tick() — no-op по умолчанию (агент сам вызывает свои методы в evolve()).
     """
 
-    def __init__(self, name: str, wrapped: Any, agent: Any, *,
-                 priority: int = 100, agent_name: str = "unknown") -> None:
+    def __init__(
+        self,
+        name: str,
+        wrapped: Any,
+        agent: Any,
+        *,
+        priority: int = 100,
+        agent_name: str = "unknown",
+    ) -> None:
         super().__init__(agent_name=agent_name)
         self.name = name
         self.priority = priority

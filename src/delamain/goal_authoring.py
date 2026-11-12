@@ -4,8 +4,8 @@ Stage 12 links a cognitive goal to Delamain only when the goal already carries
 an explicit ``execution`` payload.  This module is the missing authoring layer:
 
 * ``/goals exec`` can attach an explicit command (a human decision);
-* ``/goals propose`` can ask the configured planner (heuristic or local LLM)
-  for a plan, but only stores a **proposal**;
+* ``/goals propose`` can ask the configured deterministic planner for a plan,
+  but only stores a **proposal**;
 * ``/goals accept`` attaches an approved proposal, ``/goals reject`` discards
   it;
 * a proposal records its steps, affected files, dangerous actions, the current
@@ -15,7 +15,7 @@ The module never executes an action.  Execution still goes through the
 Delamain runtime, including the existing approval gate for dangerous plans.
 Planner-generated proposals are disabled by default
 (``DELAMAIN_GOAL_PROPOSAL_ENABLED``); the manual command path is explicit and
-does not require the LLM.
+does not require planner-generated proposals.
 """
 
 from __future__ import annotations
@@ -74,7 +74,9 @@ def _normalize_plan(plan: Any) -> List[Dict[str, Any]]:
     return steps
 
 
-def _validate_plan(plan: Sequence[Mapping[str, Any]], registry: Any) -> List[Dict[str, Any]]:
+def _validate_plan(
+    plan: Sequence[Mapping[str, Any]], registry: Any
+) -> List[Dict[str, Any]]:
     """Reject unknown actions before a proposal can be accepted."""
 
     steps = _normalize_plan(plan)
@@ -86,9 +88,7 @@ def _validate_plan(plan: Sequence[Mapping[str, Any]], registry: Any) -> List[Dic
     if not callable(get):
         return steps
     unknown = [
-        str(step["action"])
-        for step in steps
-        if get(str(step["action"])) is None
+        str(step["action"]) for step in steps if get(str(step["action"])) is None
     ]
     if unknown:
         names = ", ".join(dict.fromkeys(unknown))
@@ -237,9 +237,7 @@ class GoalExecutionProposal:
             planner_error=data.get("planner_error"),
             created_at=str(data.get("created_at") or utc_now_iso()),
             decided_at=(
-                str(data["decided_at"])
-                if data.get("decided_at") is not None
-                else None
+                str(data["decided_at"]) if data.get("decided_at") is not None else None
             ),
             reason=str(data.get("reason") or ""),
         )
@@ -540,7 +538,9 @@ class GoalAuthoring:
             )
 
         try:
-            plan = _validate_plan(proposal.plan, runtime.registry) if proposal.plan else []
+            plan = (
+                _validate_plan(proposal.plan, runtime.registry) if proposal.plan else []
+            )
         except Exception as exc:
             proposal.status = "error"
             proposal.error = f"{type(exc).__name__}: {exc}"
@@ -713,19 +713,12 @@ class GoalAuthoring:
     def _planner_info(self, runtime: Any) -> tuple[str, str]:
         planner = runtime.planner
         used = str(getattr(planner, "last_used", "") or "")
-        if used == "fallback":
+        if used == "fallback" or isinstance(planner, HeuristicPlanner):
             source = "heuristic"
-        elif used == "primary":
-            source = "llm" if getattr(self.subsystem, "llm_enabled", False) else "planner"
-        elif isinstance(planner, HeuristicPlanner):
-            source = "heuristic"
-        elif getattr(self.subsystem, "llm_enabled", False):
-            source = "llm"
         else:
             source = "planner"
         mode = str(
-            getattr(self.subsystem, "_planner_mode", "")
-            or type(planner).__name__
+            getattr(self.subsystem, "_planner_mode", "") or type(planner).__name__
         )
         return source, mode
 
@@ -825,9 +818,7 @@ class GoalAuthoring:
             "goal": dict(goal) if isinstance(goal, Mapping) else None,
             "proposal": proposal.to_dict() if proposal is not None else None,
             "execution": (
-                dict(goal.get("execution") or {})
-                if isinstance(goal, Mapping)
-                else {}
+                dict(goal.get("execution") or {}) if isinstance(goal, Mapping) else {}
             ),
             "message": str(message),
             "error": str(message),

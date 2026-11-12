@@ -30,6 +30,7 @@ class FakeHistory:
 # Метаслова: распознавание
 # ============================================================
 
+
 def test_is_meta_topic_recognizes_dialogue_words():
     agent = DigitalBeing(name="HY")
     assert agent._is_meta_topic("вопрос") is True
@@ -57,6 +58,7 @@ def test_is_meta_topic_empty_string_is_meta():
 # ============================================================
 # Метаслова: не выбираются целями исследования
 # ============================================================
+
 
 def _strip_bootstrap(agent):
     for name in list(agent.mental_models.concepts):
@@ -93,9 +95,10 @@ def test_meta_topic_still_learnable_from_user():
     returned = agent.record_user_answer("диалог", "обмен репликами", cycle=3)
     assert returned == "диалог"
     assert "диалог" in agent.mental_models.concepts
-    assert agent.mental_models.concepts["диалог"].experiences[-1][
-        "evidence_kind"
-    ] == "testimony"
+    assert (
+        agent.mental_models.concepts["диалог"].experiences[-1]["evidence_kind"]
+        == "testimony"
+    )
 
 
 def test_ask_user_replaces_bare_meta_word_with_real_topic(monkeypatch):
@@ -140,15 +143,17 @@ def test_motivation_concept_skips_meta_words():
 
     system = UnifiedMotivationSystem(DigitalBeing(name="HY"))
 
-    assert system._pick_relevant_concept(
-        ["вопрос", "понимать", "знать", "обучение"]
-    ) == "понимать"
+    assert (
+        system._pick_relevant_concept(["вопрос", "понимать", "знать", "обучение"])
+        == "понимать"
+    )
     assert system._pick_relevant_concept(["вопрос"]) == "вопрос"
 
 
 # ============================================================
 # Mute: «ты повторяешься» закрывает реально заданную тему
 # ============================================================
+
 
 def test_mute_topic_stamps_actually_asked_topic():
     agent = DigitalBeing(name="HY")
@@ -194,17 +199,20 @@ def test_mute_has_no_concept_testimony():
 # Память диалога: социальные реплики — не темы
 # ============================================================
 
+
 def test_recent_dialogue_topics_excludes_social_acts():
     pc = ProactiveCommunication("HY")
     agent = SimpleNamespace(
-        user_interaction=FakeHistory([
-            {"sender": "agent", "content": "Я изучил тему."},
-            {"sender": "user", "content": "Привет! Я рядом с тобой."},
-            {
-                "sender": "user",
-                "content": "Квантовая запутанность и коллапс волновой функции.",
-            },
-        ])
+        user_interaction=FakeHistory(
+            [
+                {"sender": "agent", "content": "Я изучил тему."},
+                {"sender": "user", "content": "Привет! Я рядом с тобой."},
+                {
+                    "sender": "user",
+                    "content": "Квантовая запутанность и коллапс волновой функции.",
+                },
+            ]
+        )
     )
 
     topics = pc._recent_dialogue_topics(agent)
@@ -217,13 +225,15 @@ def test_recent_dialogue_topics_excludes_social_acts():
 def test_care_with_promise_quotes_content_not_smalltalk():
     pc = ProactiveCommunication("HY")
     agent = SimpleNamespace(
-        user_interaction=FakeHistory([
-            {"sender": "user", "content": "Скучаю по тебе, как дела?"},
-            {
-                "sender": "user",
-                "content": "Модуль math умеет логарифмы и тригонометрию.",
-            },
-        ])
+        user_interaction=FakeHistory(
+            [
+                {"sender": "user", "content": "Скучаю по тебе, как дела?"},
+                {
+                    "sender": "user",
+                    "content": "Модуль math умеет логарифмы и тригонометрию.",
+                },
+            ]
+        )
     )
 
     message = pc._compose_care_with_promise(agent, cycle=100)

@@ -16,7 +16,10 @@ def test_quiet_has_no_generated_pool_at_any_speed(speed):
     agent = DigitalBeing(name="QuietStimuli")
     runner = AgentRunner(agent, EventBus())
     runner.set_speed(speed)
-    with patch("src.core.agent_runner.select_novel_stimulus", side_effect=AssertionError("no imposed pool")) as pool:
+    with patch(
+        "src.core.agent_runner.select_novel_stimulus",
+        side_effect=AssertionError("no imposed pool"),
+    ) as pool:
         assert runner._next_stimulus() is None
     pool.assert_not_called()
 
@@ -32,7 +35,10 @@ def test_pool_is_explicit_independent_of_speed():
     agent = DigitalBeing(name="ExplicitPool")
     runner = AgentRunner(agent, EventBus())
     runner.set_stimulus_mode("pool")
-    with patch("src.core.agent_runner.select_novel_stimulus", return_value="лабораторный вопрос"):
+    with patch(
+        "src.core.agent_runner.select_novel_stimulus",
+        return_value="лабораторный вопрос",
+    ):
         assert runner._next_stimulus() == "лабораторный вопрос"
     assert parse_args([]).stimuli == "quiet"
     assert parse_args(["--stimuli", "pool"]).stimuli == "pool"
@@ -54,7 +60,7 @@ async def test_quiet_delivers_user_message_and_advances_idle_time():
     with patch.object(runner, "_do_one_agent_cycle") as process:
         await runner.step_once()
     for call in process.call_args_list:
-        assert call.args[0] != "сообщение", (
-            "текст пользователя не должен становиться стимулом тика"
-        )
+        assert (
+            call.args[0] != "сообщение"
+        ), "текст пользователя не должен становиться стимулом тика"
     await runner.stop()

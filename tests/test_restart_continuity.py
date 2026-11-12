@@ -6,7 +6,6 @@ import pytest
 
 from src.app.bootstrap import create_agent
 from src.app.paths import setup_environment
-from src.cognition.action_expectations import ActionExpectations
 from src.core.agent_runner import AgentRunner
 from src.core.checkpoint_serializer import apply_state_to_agent, build_state_from_agent
 from src.core.event_bus import EventBus
@@ -101,7 +100,9 @@ def test_legacy_checkpoint_does_not_borrow_unrelated_export(env):
     del state["mental_models"]
     from src.core.checkpoint_serializer import CheckpointSerializer
 
-    CheckpointSerializer(checkpoint_dir=first.checkpoint_dir).save(state, first.name, first.cycle_count)
+    CheckpointSerializer(checkpoint_dir=first.checkpoint_dir).save(
+        state, first.name, first.cycle_count
+    )
     second, report = create_agent(env, "Continuity")
     assert report["source"] == "checkpoint"
     assert second.cycle_count == 41

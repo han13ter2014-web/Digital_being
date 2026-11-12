@@ -15,13 +15,40 @@ def creative_choices(agent, candidate):
         if state.get("status", "active") != "active":
             continue
         if state["revision"] < LIMIT:
-            choices.append({**candidate, "params": {**params, "draft_mode": "continue",
-                            "draft_id": state["id"], "reason": "Продолжить доступный собственный черновик"}})
+            choices.append(
+                {
+                    **candidate,
+                    "params": {
+                        **params,
+                        "draft_mode": "continue",
+                        "draft_id": state["id"],
+                        "reason": "Продолжить доступный собственный черновик",
+                    },
+                }
+            )
         elif state == getattr(agent, "_creative_draft", None):
-            choices.append({**candidate, "strength": strength * 0.8,
-                            "params": {**params, "draft_mode": "leave", "draft_id": state["id"],
-                                       "reason": "Достигнут лимит редакций; оставить текст как есть"}})
+            choices.append(
+                {
+                    **candidate,
+                    "strength": strength * 0.8,
+                    "params": {
+                        **params,
+                        "draft_mode": "leave",
+                        "draft_id": state["id"],
+                        "reason": "Достигнут лимит редакций; оставить текст как есть",
+                    },
+                }
+            )
     if len(catalog) < MAX_DRAFTS and draft_available(None):
-        choices.append({**candidate, "strength": strength if not choices else strength * 0.8,
-                        "params": {**params, "draft_mode": "new", "reason": "Начать другую текстовую композицию"}})
+        choices.append(
+            {
+                **candidate,
+                "strength": strength if not choices else strength * 0.8,
+                "params": {
+                    **params,
+                    "draft_mode": "new",
+                    "reason": "Начать другую текстовую композицию",
+                },
+            }
+        )
     return choices

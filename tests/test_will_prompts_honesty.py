@@ -14,9 +14,9 @@ def test_prompts_do_not_promise_impossible_actions():
     impossible_markers = ("Нарисовать", "Посмотреть на небо", "спой", "станцуй")
     for prompt in SpontaneousGenerator.SPONTANEOUS_PROMPTS:
         for marker in impossible_markers:
-            assert marker not in prompt, (
-                f"сущность не должна желать невозможное: {prompt!r}"
-            )
+            assert (
+                marker not in prompt
+            ), f"сущность не должна желать невозможное: {prompt!r}"
 
 
 def test_prompts_are_unique_and_nonempty():

@@ -37,6 +37,7 @@ def _agent_with_knowledge(name="DM", topic="число"):
 # Дедуп рассказанного
 # ============================================================
 
+
 def test_share_message_is_not_repeated():
     agent = _agent_with_knowledge()
 
@@ -98,6 +99,7 @@ def test_shared_topics_capped_at_fifty():
 # Память диалога: get_history впервые реально используется
 # ============================================================
 
+
 def test_get_history_merges_user_messages_and_answers():
     ui = UserInteraction(agent_name="DM")
     ui.receive_user_message("Расскажи, что нового ты узнал?", cycle=2)
@@ -115,9 +117,7 @@ def test_recent_dialogue_topics_reads_history():
     ui = UserInteraction(agent_name="DM")
     ui.receive_user_message("Я ушёл разбираться с дедлайном на работе.", cycle=5)
     agent = SimpleNamespaceWrapper(user_interaction=ui)
-    pc = ProactiveCommunication(
-        agent_name="DM", user_interaction=ui, attachment=None
-    )
+    pc = ProactiveCommunication(agent_name="DM", user_interaction=ui, attachment=None)
 
     topics = pc._recent_dialogue_topics(agent)
     assert len(topics) == 1
@@ -130,9 +130,7 @@ def test_recent_dialogue_topics_limit_and_dedup():
     for i in range(5):
         ui.receive_user_message(f"реплика номер {i} о жизни", cycle=i)
     agent = SimpleNamespaceWrapper(user_interaction=ui)
-    pc = ProactiveCommunication(
-        agent_name="DM", user_interaction=ui, attachment=None
-    )
+    pc = ProactiveCommunication(agent_name="DM", user_interaction=ui, attachment=None)
 
     topics = pc._recent_dialogue_topics(agent)
 
@@ -142,9 +140,7 @@ def test_recent_dialogue_topics_limit_and_dedup():
 
 def test_recent_dialogue_topics_without_interaction():
     agent = SimpleNamespaceWrapper()
-    pc = ProactiveCommunication(
-        agent_name="DM", user_interaction=None, attachment=None
-    )
+    pc = ProactiveCommunication(agent_name="DM", user_interaction=None, attachment=None)
     assert pc._recent_dialogue_topics(agent) == []
 
 
@@ -152,10 +148,9 @@ def test_recent_dialogue_topics_without_interaction():
 # Care с промисом вспоминает диалог
 # ============================================================
 
+
 def _care_pc(ui):
-    return ProactiveCommunication(
-        agent_name="DM", user_interaction=ui, attachment=None
-    )
+    return ProactiveCommunication(agent_name="DM", user_interaction=ui, attachment=None)
 
 
 def test_care_with_promise_mentions_recent_dialogue():
@@ -176,9 +171,7 @@ def test_care_with_promise_without_history_keeps_quiet_text():
     um = UserModel()
     um.observe("Не переживай, могу отлучаться надолго.", cycle=1)
     agent = SimpleNamespaceWrapper(user_model=um)
-    pc = ProactiveCommunication(
-        agent_name="DM", user_interaction=None, attachment=None
-    )
+    pc = ProactiveCommunication(agent_name="DM", user_interaction=None, attachment=None)
 
     msg = pc._compose_care_with_promise(agent, cycle=100)
 
@@ -189,6 +182,7 @@ def test_care_with_promise_without_history_keeps_quiet_text():
 # ============================================================
 # Чекпоинт
 # ============================================================
+
 
 def test_shared_topics_survive_checkpoint():
     original = _agent_with_knowledge(name="DM")
@@ -217,6 +211,7 @@ def test_validation_rejects_bad_shared_topics():
 # ============================================================
 # Вспомогательное
 # ============================================================
+
 
 class SimpleNamespaceWrapper:
     """Минимальный агент-заглушка как в тестах «Собеседника-2»."""

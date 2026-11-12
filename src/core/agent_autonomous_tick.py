@@ -5,6 +5,7 @@ stays owned by the core without a reverse import. All periodic subsystem
 calls keep their original place and firing condition.
 """
 
+from copy import deepcopy
 from typing import Dict, List
 
 from config.simulation_config import LR_CONFIG, SIM_CONFIG
@@ -13,12 +14,14 @@ from src.core.agent_body import HEAVY_ACTIONS
 from src.core.buffered_logger import get_logger
 
 
-def _record_active_inference_experience_impl(self, action: str, obs_before: Dict, valence: float) -> None:
+def _record_active_inference_experience_impl(
+    self, action: str, obs_before: Dict, valence: float
+) -> None:
     """Outcome loop: стимул -> действие -> наблюдаемый результат -> валентность -> опыт.
 
-        Записывает опыт в буфер Active Inference и, при достижении batch_size,
-        запускает обучение (обновление переходных вероятностей модели).
-        """
+    Записывает опыт в буфер Active Inference и, при достижении batch_size,
+    запускает обучение (обновление переходных вероятностей модели).
+    """
     if not hasattr(self, "active_inference"):
         return
     try:
@@ -40,15 +43,25 @@ def _record_active_inference_experience_impl(self, action: str, obs_before: Dict
 def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
     """Этап 5: цели, сгенерированные мотивацией, → поток целей агента.
 
-        Цели без executable-payload остаются когнитивными (честно); исполняемые
-        цели проверяются через success predicate мостом Delamain.
-        """
+    Цели без executable-payload остаются когнитивными (честно); исполняемые
+    цели проверяются через success predicate мостом Delamain.
+    """
     if not new_goals:
         return
-    existing_titles = {g.get("title") for g in self.goals if g.get("title")}
+    from src.cognition.activity_goals import attach_activity, goal_work_key
+
+    existing_titles = {
+        str(g.get("title")).casefold() for g in self.goals if g.get("title")
+    }
+    existing_work = {goal_work_key(g) for g in self.goals}
     for g in new_goals:
-        title = str(g.get("title") or "")
-        if not title or title in existing_titles:
+        title = str(g.get("title") or "").strip()
+        work_key = goal_work_key(g)
+        if (
+            not title
+            or title.casefold() in existing_titles
+            or work_key in existing_work
+        ):
             continue
         try:
             gid = self.set_goal(
@@ -56,10 +69,9 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
                 difficulty=int(g.get("difficulty") or 1),
                 success_predicate=str(g.get("success_predicate") or ""),
             )
-            from src.cognition.activity_goals import attach_activity
-
             attach_activity(self, gid, g)
-            existing_titles.add(title)
+            existing_titles.add(title.casefold())
+            existing_work.add(work_key)
             get_logger().log(f"[MOTIVATION] Goal ingested: {title} (id={gid})")
         except Exception as e:
             get_logger().log(f"[MOTIVATION] Goal ingestion failed: {e}")
@@ -68,10 +80,10 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
 def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     """Автономный тик жизни — вызывается каждый цикл независимо от стимулов.
 
-        Это «сердцебиение» агента: спонтанность, сны, проактивность, телесность,
-        осознание смертности, привязанности — всё, что делает его живым
-        даже когда никто не пишет в чат.
-        """
+    Это «сердцебиение» агента: спонтанность, сны, проактивность, телесность,
+    осознание смертности, привязанности — всё, что делает его живым
+    даже когда никто не пишет в чат.
+    """
     cycle = self.cycle_count
     result = {
         "cycle": cycle,
@@ -81,11 +93,39 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         "soul": None,
         "active_inference": None,
         "arbitrator": None,
+        "continuous_time": None,
+        "meta_learning": None,
+        "integrated_experience": None,
+        "auxiliary_adapters": None,
     }
 
-    use_arbitrator = getattr(SIM_CONFIG, 'USE_ARBITRATOR', True)
+    # Эти системы уже принадлежат Core, но раньше только создавались.
+    # Время получает один логический такт; MetaLearner работает в shadow:
+    # fitness сохраняется, автономная мутация активных параметров запрещена.
+    from src.core.life_systems_bridge import (
+        step_meta_learning,
+        tick_continuous_time,
+    )
+
+    result["continuous_time"] = tick_continuous_time(self, cycle)
+    result["meta_learning"] = step_meta_learning(self)
+    from src.cognition.integrated_experience import tick_integrated_experience
+    from src.core.auxiliary_adapters import tick_auxiliary_adapters
+
+    result["integrated_experience"] = tick_integrated_experience(self, cycle)
+    result["auxiliary_adapters"] = tick_auxiliary_adapters(self, cycle)
+
+    use_arbitrator = getattr(SIM_CONFIG, "USE_ARBITRATOR", True)
     candidates = []
-    arbiter_context = {"energy": self.energy, "cycle": cycle, "intelligence": self.intelligence}
+    arbiter_context = {
+        "energy": self.energy,
+        "cycle": cycle,
+        "intelligence": self.intelligence,
+        "simulation_mode": getattr(SIM_CONFIG, "INTERNAL_SIMULATION_MODE", "shadow"),
+        "simulation_max_adjustment": getattr(
+            SIM_CONFIG, "INTERNAL_SIMULATION_MAX_ADJUSTMENT", 0.1
+        ),
+    }
     ai_intention = None
     obs_before: Dict = {}
     if hasattr(self, "active_inference"):
@@ -95,13 +135,28 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             action_name, ai_info = self.active_inference.step(observations)
             self._active_inference_intention = action_name
             self._active_inference_info = ai_info
-            result["active_inference"] = {"intention": action_name, "free_energy": ai_info.get("free_energy"), "beliefs": ai_info.get("beliefs"), "G_values": ai_info.get("G_values")}
-            get_logger().log(f"[ACTIVE_INFERENCE] Cycle {cycle}: intention={action_name}, F={ai_info.get('free_energy', 0):.3f}")
+            result["active_inference"] = {
+                "intention": action_name,
+                "free_energy": ai_info.get("free_energy"),
+                "beliefs": ai_info.get("beliefs"),
+                "G_values": ai_info.get("G_values"),
+            }
+            get_logger().log(
+                f"[ACTIVE_INFERENCE] Cycle {cycle}: intention={action_name}, F={ai_info.get('free_energy', 0):.3f}"
+            )
             ai_intention = action_name
             if action_name and action_name != "think_known":
                 fe = ai_info.get("free_energy", 1.0)
                 strength = max(0.1, min(1.0, 1.0 - fe / 5.0))
-                candidates.append({"source": "active_inference", "action": action_name, "strength": strength, "params": {}, "free_energy": fe})
+                candidates.append(
+                    {
+                        "source": "active_inference",
+                        "action": action_name,
+                        "strength": strength,
+                        "params": {},
+                        "free_energy": fe,
+                    }
+                )
         except Exception as e:
             get_logger().log(f"[ACTIVE_INFERENCE] Error in autonomous_tick: {e}")
 
@@ -110,22 +165,32 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
 
     candidates = apply_method_preferences(self, candidates)
 
-    from src.cognition.activity_goals import activity_candidate
+    from src.cognition.activity_goals import active_goal_candidate, activity_candidate
 
     own_activity = activity_candidate(self)
     if own_activity is not None:
         candidates.append(own_activity)
+    own_goal = active_goal_candidate(self)
+    if own_goal is not None:
+        candidates.append(own_goal)
 
     pending_stimulus = getattr(self, "_attention_stimulus", None)
     if pending_stimulus is not None:
-        candidates.append({"source": "external_attention", "action": "process_stimulus",
-                           "strength": 0.85 if pending_stimulus["user_initiated"] else 0.3,
-                           "params": {"user_initiated": pending_stimulus["user_initiated"]}})
+        candidates.append(
+            {
+                "source": "external_attention",
+                "action": "process_stimulus",
+                "strength": 0.85 if pending_stimulus["user_initiated"] else 0.3,
+                "params": {"user_initiated": pending_stimulus["user_initiated"]},
+            }
+        )
 
     # 1. Motivation candidates
     if hasattr(self, "motivation_system"):
         try:
-            motivation_candidates = self.motivation_system.get_action_candidates(arbiter_context)
+            motivation_candidates = self.motivation_system.get_action_candidates(
+                arbiter_context
+            )
             candidates.extend(motivation_candidates)
         except Exception as e:
             get_logger().log(f"[MOTIVATION_CANDIDATES] Error: {e}")
@@ -145,32 +210,34 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         try:
             intero_status = self.interoception.get_status()
             fatigue = float(intero_status.get("fatigue", 0.0) or 0.0)
-            energy_ratio = (
-                float(self.energy) / float(LR_CONFIG.ENERGY_MAX or 1.0)
-            )
-            rest_threshold = float(
-                getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6)
-            )
+            energy_ratio = float(self.energy) / float(LR_CONFIG.ENERGY_MAX or 1.0)
+            rest_threshold = float(getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6))
             low_ratio = float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
             if resting or fatigue >= rest_threshold or energy_ratio <= low_ratio:
-                candidates.append({
-                    "source": "embodiment",
-                    "action": "deep_rest",
-                    # Пока тело отдыхает — это главное дело. На входе
-                    # в отдых сила растёт быстрее усталости (0.6 → 0.75),
-                    # иначе отдых проигрывал обучению.
-                    "strength": 1.0 if resting else min(
-                        1.0,
-                        max(fatigue, 1.0 - energy_ratio) * 1.25,
-                    ),
-                    "params": {
-                        "reason": "resting" if resting else (
-                            "tired" if fatigue >= rest_threshold else "low_energy"
+                candidates.append(
+                    {
+                        "source": "embodiment",
+                        "action": "deep_rest",
+                        # Пока тело отдыхает — это главное дело. На входе
+                        # в отдых сила растёт быстрее усталости (0.6 → 0.75),
+                        # иначе отдых проигрывал обучению.
+                        "strength": 1.0
+                        if resting
+                        else min(
+                            1.0,
+                            max(fatigue, 1.0 - energy_ratio) * 1.25,
                         ),
-                        "fatigue": round(fatigue, 3),
-                        "energy_ratio": round(energy_ratio, 3),
-                    },
-                })
+                        "params": {
+                            "reason": "resting"
+                            if resting
+                            else (
+                                "tired" if fatigue >= rest_threshold else "low_energy"
+                            ),
+                            "fatigue": round(fatigue, 3),
+                            "energy_ratio": round(energy_ratio, 3),
+                        },
+                    }
+                )
         except Exception as e:
             get_logger().log(f"[EMBODIMENT_CANDIDATES] Error: {e}")
 
@@ -186,10 +253,16 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     from src.cognition.experiment_proposals import propose_experiment
 
     experimental = propose_experiment(
-        self.mental_models, energy=float(self.energy),
+        self.mental_models,
+        energy=float(self.energy),
         energy_max=float(LR_CONFIG.ENERGY_MAX),
-        fatigue=getattr(getattr(getattr(self, "interoception", None), "state", None), "fatigue", None),
-        cycle=cycle, last_cycle=getattr(self, "_last_experiment_cycle", None),
+        fatigue=getattr(
+            getattr(getattr(self, "interoception", None), "state", None),
+            "fatigue",
+            None,
+        ),
+        cycle=cycle,
+        last_cycle=getattr(self, "_last_experiment_cycle", None),
     )
     if experimental is not None:
         candidates.append(experimental)
@@ -208,14 +281,21 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     for waiting in getattr(self, "_waiting_intentions", {}).values():
         assessment = fading_assessment(self, waiting)
         if assessment.get("eligible"):
-            candidates.append({
-                "source": "self_fading",
-                "action": "let_go",
-                "strength": 0.4,
-                "params": {"action": waiting["action"], "topic": waiting["target"],
-                           "reason": "повторные попытки без новых свидетельств",
-                           "waiting_key": waiting_key(waiting["action"], waiting["target"])},
-            })
+            candidates.append(
+                {
+                    "source": "self_fading",
+                    "action": "let_go",
+                    "strength": 0.4,
+                    "params": {
+                        "action": waiting["action"],
+                        "topic": waiting["target"],
+                        "reason": "повторные попытки без новых свидетельств",
+                        "waiting_key": waiting_key(
+                            waiting["action"], waiting["target"]
+                        ),
+                    },
+                }
+            )
             result.setdefault("fading_proposals", []).append(waiting["target"])
             break
 
@@ -228,9 +308,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     try:
         intero = getattr(self, "interoception", None)
         throughput = (
-            float(intero.state.cognitive_throughput)
-            if intero is not None
-            else 1.0
+            float(intero.state.cognitive_throughput) if intero is not None else 1.0
         )
         if resting:
             # Пока тело отдыхает, тяжёлая работа не тянет: это не
@@ -240,9 +318,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             for candidate in candidates:
                 action_type = self._normalize_action(candidate.get("action"))
                 if action_type in HEAVY_ACTIONS:
-                    candidate["strength"] = float(
-                        candidate.get("strength", 0.5)
-                    ) * max(0.2, throughput)
+                    candidate["strength"] = float(candidate.get("strength", 0.5)) * max(
+                        0.2, throughput
+                    )
     except Exception as e:
         get_logger().log(f"[BODY] throughput damping error: {e}")
 
@@ -271,21 +349,21 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     # осталось бы помеченным как тупиковое.
     self._release_recovered_denials()
     candidates = [
-        candidate
-        for candidate in candidates
-        if self._is_candidate_available(candidate)
+        candidate for candidate in candidates if self._is_candidate_available(candidate)
     ]
 
     # Тело не может ничего из предложенного — но отдых доступен всегда.
     # Без этого арбитр получал пустой список и выбирал «wait», то есть
     # агент в истощении не отдыхал, а просто стоял.
     if not candidates and (self._body_needs_rest() or self._is_resting()):
-        candidates = [{
-            "source": "embodiment",
-            "action": "deep_rest",
-            "strength": 1.0,
-            "params": {"reason": "nothing_affordable"},
-        }]
+        candidates = [
+            {
+                "source": "embodiment",
+                "action": "deep_rest",
+                "strength": 1.0,
+                "params": {"reason": "nothing_affordable"},
+            }
+        ]
 
     from src.cognition.method_feedback import prepare_candidates
 
@@ -298,8 +376,14 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         else:
             fallback = "wait"
             reason = "no_working_method"
-        candidates = [{"action": fallback, "source": "deliberate_pause",
-                       "strength": 0.1, "params": {"reason": reason}}]
+        candidates = [
+            {
+                "action": fallback,
+                "source": "deliberate_pause",
+                "strength": 0.1,
+                "params": {"reason": reason},
+            }
+        ]
 
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===
     # Пережитое смещает тягу к занятиям: страх тянет к безопасному,
@@ -313,23 +397,59 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     except Exception as e:
         get_logger().log(f"[EMOTIONAL_BIAS] Error: {e}")
 
+    # Прогноз создаётся после фильтров доступности, но до арбитража.
+    # В shadow он сохраняет опыт и диагностику, не меняя прежние score.
+    from src.cognition.simulation_bridge import predict_candidates
+
+    candidates, simulation_diagnostics = predict_candidates(
+        self, candidates, mode=arbiter_context["simulation_mode"]
+    )
+    result["simulation"] = simulation_diagnostics
+
     # === ARBITRATION ===
     chosen_action = None
     arbitrator_result = None
     if use_arbitrator and hasattr(self, "decision_arbitrator"):
         try:
-            arbitrator_result = self.decision_arbitrator.choose_action(candidates, arbiter_context)
+            arbitrator_result = self.decision_arbitrator.choose_action(
+                candidates, arbiter_context
+            )
             chosen_action = arbitrator_result.get("action")
             result["arbitrator"] = arbitrator_result
-            get_logger().log(f"[ARBITRATOR] {arbitrator_result.get('reasoning', 'No reasoning')}")
+            get_logger().log(
+                f"[ARBITRATOR] {arbitrator_result.get('reasoning', 'No reasoning')}"
+            )
         except Exception as e:
             get_logger().log(f"[ARBITRATOR] Error: {e}")
             if candidates:
-                chosen_action = candidates[0].get("action")
-                result["arbitrator"] = {"action": chosen_action, "source": "fallback_first_candidate", "verdict": "proceed", "reasoning": f"Arbitrator error: {e}"}
+                fallback_candidate = candidates[0]
+                chosen_action = fallback_candidate.get("action")
+                result["arbitrator"] = {
+                    "action": chosen_action,
+                    "source": "fallback_first_candidate",
+                    "params": dict(fallback_candidate.get("params") or {}),
+                    "simulation": deepcopy(fallback_candidate.get("simulation")),
+                    "verdict": "proceed",
+                    "reasoning": f"Arbitrator error: {e}",
+                }
     else:
         chosen_action = ai_intention
-        result["arbitrator"] = {"action": chosen_action, "source": "legacy_active_inference", "verdict": "proceed" if chosen_action else "stop", "reasoning": "USE_ARBITRATOR=False or no arbitrator available"}
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.get("action") == chosen_action
+            ),
+            {},
+        )
+        result["arbitrator"] = {
+            "action": chosen_action,
+            "source": "legacy_active_inference",
+            "params": dict(selected_candidate.get("params") or {}),
+            "simulation": deepcopy(selected_candidate.get("simulation")),
+            "verdict": "proceed" if chosen_action else "stop",
+            "reasoning": "USE_ARBITRATOR=False or no arbitrator available",
+        }
 
     # === ВЫХОД ИЗ ТУПИКА ===
     # Если выбранное действие уже несколько раз подряд не давало
@@ -359,8 +479,10 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         if risk_entry is not None:
             result["will_risk_taken"] = risk_entry
         else:
-            result["action_refused"] = {"action": chosen_action,
-                                        "reason": arbitrator_data.get("reasoning", "stop")}
+            result["action_refused"] = {
+                "action": chosen_action,
+                "reason": arbitrator_data.get("reasoning", "stop"),
+            }
             if will_applies:
                 result["will_refusal"] = self.defend_refusal(
                     topic=str(chosen_action),
@@ -369,8 +491,10 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             chosen_action = "wait"
     if chosen_action == "let_go":
         selected_intention = result.get("arbitrator") or {}
-        result["autonomous_action"] = {"action": chosen_action,
-                                        "result": self.act(chosen_action, intention=selected_intention)}
+        result["autonomous_action"] = {
+            "action": chosen_action,
+            "result": self.act(chosen_action, intention=selected_intention),
+        }
         return result
     chosen_type = self._normalize_action(chosen_action)
     if chosen_action and self.loop_closer.is_stuck(chosen_type):
@@ -380,8 +504,11 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             if entry.get("verdict") == "stop"
         }
         ranked = sorted(
-            [candidate for candidate in candidates
-             if self._normalize_action(candidate.get("action")) not in stopped_types],
+            [
+                candidate
+                for candidate in candidates
+                if self._normalize_action(candidate.get("action")) not in stopped_types
+            ],
             key=lambda c: float(c.get("strength", 0.0)),
             reverse=True,
         )
@@ -405,7 +532,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 "denied_streak": self.loop_closer.denied_streak(chosen_type),
                 "had_effect_before": self.loop_closer.has_effect_history(chosen_type),
                 "fallback": alternative.get("reason") == "all_stuck",
-                "candidate_diagnostics": self.loop_closer.describe_candidates(ranked, normalize=self._normalize_action),
+                "candidate_diagnostics": self.loop_closer.describe_candidates(
+                    ranked, normalize=self._normalize_action
+                ),
             }
             get_logger().log(
                 f"[LOOP] '{chosen_action}' не даёт результата "
@@ -418,6 +547,11 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 arbitrator_result["action"] = chosen_action
                 arbitrator_result["source"] = "loop_closer"
                 arbitrator_result["params"] = dict(alternative.get("params") or {})
+                # Прогноз обязан принадлежать финальному действию, а не
+                # кандидату, которого LoopCloser только что заменил.
+                arbitrator_result["simulation"] = deepcopy(
+                    alternative.get("simulation")
+                )
                 result["arbitrator"] = arbitrator_result
 
     # === EXECUTE ===
@@ -432,20 +566,35 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     predicted_valence = 0.0
     if hasattr(self, "motivation_system") and chosen_action:
         try:
-            predicted_valence = self.motivation_system.predict_valence(chosen_action, valence_context)
+            predicted_valence = self.motivation_system.predict_valence(
+                chosen_action, valence_context
+            )
             result["predicted_valence"] = predicted_valence
-            get_logger().log(f"[VALENCE] Predicted for {chosen_action}: {predicted_valence:.3f}")
+            get_logger().log(
+                f"[VALENCE] Predicted for {chosen_action}: {predicted_valence:.3f}"
+            )
         except Exception as e:
             get_logger().log(f"[VALENCE] Prediction error: {e}")
 
     if chosen_action == "process_stimulus":
         result["attention_selected"] = True
-    if chosen_action and chosen_action not in ("think_known", "wait", "none", "process_stimulus"):
+    if chosen_action and chosen_action not in (
+        "think_known",
+        "wait",
+        "none",
+        "process_stimulus",
+    ):
         from src.cognition.intention_history import begin_intention, finish_intention
 
         history_selection = dict(result.get("arbitrator") or {})
         history_selection["action"] = chosen_action
         intention_entry = begin_intention(self, history_selection)
+        from src.core.life_systems_bridge import record_action_intention
+
+        record_action_intention(self, history_selection, intention_entry)
+        from src.cognition.experience_observers import observe_action_intention
+
+        observe_action_intention(self, history_selection, intention_entry)
         self._last_action_outcome = None
         # Прошлая стоимость не должна простить чужую ошибку: если
         # исключение случится до списания, прощать будет нечего.
@@ -457,14 +606,26 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 and chosen_action == experimental["action"]
             )
             selected_intention = result.get("arbitrator") or {}
-            from copy import deepcopy
 
-            activity_attrs = {"play": "_local_play", "create_draft": "_creative_draft",
-                              "draw": "_art_work", "compose_music": "_music_work"}
+            activity_attrs = {
+                "play": "_local_play",
+                "create_draft": "_creative_draft",
+                "draw": "_art_work",
+                "compose_music": "_music_work",
+            }
             activity_before = deepcopy(
-                getattr(self, activity_attrs.get(chosen_action, "_creative_draft"), None)
+                getattr(
+                    self, activity_attrs.get(chosen_action, "_creative_draft"), None
+                )
             )
-            if self._normalize_action(chosen_action) in {"explore", "decomposition", "synthesis", "ask_user", "web_search", "create_draft"} and selected_intention.get("params"):
+            if self._normalize_action(chosen_action) in {
+                "explore",
+                "decomposition",
+                "synthesis",
+                "ask_user",
+                "web_search",
+                "create_draft",
+            } and selected_intention.get("params"):
                 action_result = self.act(chosen_action, intention=selected_intention)
             else:
                 action_result = self.act(chosen_action)
@@ -472,49 +633,109 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
 
             last = getattr(self, "_last_action_outcome", None)
             normalized_action = self._normalize_action(chosen_action)
-            if normalized_action not in {"rest", "deep_rest", "wait", "checkpoint_now", "repair", "play", "create_draft", "draw", "compose_music"}:
+            if normalized_action not in {
+                "rest",
+                "deep_rest",
+                "wait",
+                "checkpoint_now",
+                "repair",
+                "play",
+                "create_draft",
+                "draw",
+                "compose_music",
+            }:
                 generic_outcome = "performed"
                 if last is not None and last.reason.startswith("denied:"):
                     generic_outcome = "denied"
-                observe_method(self, normalized_action, outcome=generic_outcome,
-                           had_effect=bool(last and last.had_effect),
-                           emotional_valence=result.get("actual_valence", 0.0))
+                observe_method(
+                    self,
+                    normalized_action,
+                    outcome=generic_outcome,
+                    had_effect=bool(last and last.had_effect),
+                    emotional_valence=result.get("actual_valence", 0.0),
+                )
             if normalized_action in {"play", "create_draft", "draw", "compose_music"}:
                 activity_state = getattr(self, activity_attrs[normalized_action], None)
-                activity_outcome = "left" if activity_state and activity_state.get("status") == "left" else "performed"
+                activity_outcome = (
+                    "left"
+                    if activity_state and activity_state.get("status") == "left"
+                    else "performed"
+                )
                 if last is not None and last.reason.startswith("denied:"):
                     activity_outcome = "denied"
-                observe_method(self, chosen_action, outcome=activity_outcome,
-                               had_effect=bool(last and last.had_effect),
-                               emotional_valence=result.get("actual_valence", 0.0))
+                observe_method(
+                    self,
+                    chosen_action,
+                    outcome=activity_outcome,
+                    had_effect=bool(last and last.had_effect),
+                    emotional_valence=result.get("actual_valence", 0.0),
+                )
             if normalized_action in {"play", "create_draft", "draw", "compose_music"}:
                 from src.cognition.activity_goals import record_activity_step
 
                 activity_type = self._normalize_action(chosen_action)
                 activity_after = getattr(self, activity_attrs[activity_type], None)
-                record_activity_step(self, selected_intention, activity_type, activity_before, activity_after)
-            finish_intention(intention_entry, getattr(self, "_last_action_outcome", None))
+                record_activity_step(
+                    self,
+                    selected_intention,
+                    activity_type,
+                    activity_before,
+                    activity_after,
+                )
+            from src.cognition.simulation_bridge import (
+                cancel_selected_prediction,
+                learn_from_selected_action,
+            )
+
+            if last is not None:
+                simulation_feedback = learn_from_selected_action(
+                    self, selected_intention, intention_entry, last
+                )
+                if simulation_feedback is not None:
+                    result["simulation_feedback"] = simulation_feedback
+            else:
+                cancel_selected_prediction(self, intention_entry, "unobserved")
+            from src.core.life_systems_bridge import record_action_outcome
+
+            record_action_outcome(self, intention_entry, last)
+            from src.cognition.experience_observers import observe_action_outcome
+
+            observe_action_outcome(self, intention_entry, last)
+            from src.cognition.integrated_experience import observe_integrated_action
+
+            observe_integrated_action(self, intention_entry, last)
+            finish_intention(intention_entry, last)
             self._record_core_life_episode(intention_entry)
             from src.cognition.intention_evidence import finish_evidence_goal
 
             finish_evidence_goal(self, intention_entry)
             result["intention_id"] = intention_entry["id"]
-            result["executed_intention"] = {"action": chosen_action,
-                                            "source": selected_intention.get("source"),
-                                            "params": dict(selected_intention.get("params") or {})}
+            result["executed_intention"] = {
+                "action": chosen_action,
+                "source": selected_intention.get("source"),
+                "params": dict(selected_intention.get("params") or {}),
+            }
             if experiment_selected:
                 self._last_experiment_cycle = cycle
-                observed = getattr(getattr(self, "action_expectations", None), "last_trial", None)
+                observed = getattr(
+                    getattr(self, "action_expectations", None), "last_trial", None
+                )
                 result["experiment_result"] = {
                     "claim_id": experimental["params"]["claim_id"],
                     "observation": observed,
                 }
-            result["autonomous_action"] = {"action": chosen_action, "result": action_result}
+            result["autonomous_action"] = {
+                "action": chosen_action,
+                "result": action_result,
+            }
             get_logger().log(f"[AUTONOMOUS_ACTION] {action_result}")
 
             # P1.2: Compute actual valence and update motivation
             success = True
-            if "error" in str(action_result).lower() or "fail" in str(action_result).lower():
+            if (
+                "error" in str(action_result).lower()
+                or "fail" in str(action_result).lower()
+            ):
                 success = False
             if not success:
                 # Право на ошибку: часть оплаченной стоимости — урок.
@@ -529,8 +750,11 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                     actual_valence = self.motivation_system.compute_actual_valence(
                         chosen_action, str(action_result), success, valence_context
                     )
-                    if (self._normalize_action(chosen_action) == "create_draft"
-                            and selected_intention.get("params", {}).get("draft_mode") == "leave"):
+                    if (
+                        self._normalize_action(chosen_action) == "create_draft"
+                        and selected_intention.get("params", {}).get("draft_mode")
+                        == "leave"
+                    ):
                         actual_valence = 0.0
                     result["actual_valence"] = actual_valence
                     prediction_error = actual_valence - predicted_valence
@@ -546,11 +770,25 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                     )
 
                     # P2: Outcome loop — стимул -> действие -> результат -> валентность -> опыт
-                    self._record_active_inference_experience(chosen_action, obs_before, actual_valence)
+                    self._record_active_inference_experience(
+                        chosen_action, obs_before, actual_valence
+                    )
                 except Exception as e:
                     get_logger().log(f"[VALENCE] Feedback error: {e}")
 
         except Exception as e:
+            from src.cognition.simulation_bridge import cancel_selected_prediction
+
+            cancel_selected_prediction(self, intention_entry, "execution_error")
+            from src.core.life_systems_bridge import record_action_outcome
+
+            record_action_outcome(self, intention_entry, error=e)
+            from src.cognition.experience_observers import observe_action_outcome
+
+            observe_action_outcome(self, intention_entry, error=e)
+            from src.cognition.integrated_experience import observe_integrated_action
+
+            observe_integrated_action(self, intention_entry, error=e)
             finish_intention(intention_entry, error=e)
             get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
             result["autonomous_action"] = {"action": chosen_action, "error": str(e)}
@@ -558,7 +796,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             if absolution:
                 result["will_fail_absolution"] = absolution
 
-            # «Эмоции-1» (k16-03): падение исполнения — тоже промах.
+            # «Эмоции-1» (оценки исхода): падение исполнения — тоже промах.
             _wire_execution_exception_emotion(self, chosen_action)
 
             # P1.2: Failed action - negative valence
@@ -571,8 +809,12 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                     prediction_error = actual_valence - predicted_valence
                     result["valence_prediction_error"] = prediction_error
 
-                    self.motivation_system.on_action_result(chosen_action, False, actual_valence)
-                    get_logger().log(f"[VALENCE] Failed action {chosen_action}: {actual_valence:.3f}")
+                    self.motivation_system.on_action_result(
+                        chosen_action, False, actual_valence
+                    )
+                    get_logger().log(
+                        f"[VALENCE] Failed action {chosen_action}: {actual_valence:.3f}"
+                    )
                 except Exception as e:
                     get_logger().log(f"[VALENCE] Feedback error on failure: {e}")
 
@@ -607,12 +849,16 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         result["soul"] = self.tick_soul(cycle)
 
     # 5. Death risk
-    if hasattr(self, 'death_risk'):
+    if hasattr(self, "death_risk"):
         death_result = self.death_risk.step(dt=1.0)
         result["death_risk"] = death_result
-        if not death_result['alive']:
-            cause = death_result.get('cause') or death_result.get('death_cause')
-            legacy = self.death_risk.legacy_package if hasattr(self.death_risk, 'legacy_package') else {}
+        if not death_result["alive"]:
+            cause = death_result.get("cause") or death_result.get("death_cause")
+            legacy = (
+                self.death_risk.legacy_package
+                if hasattr(self.death_risk, "legacy_package")
+                else {}
+            )
             get_logger().flush_immediate(f"[DEATH] Agent died: {cause}")
             raise AgentDeadSignal(cause, legacy)
         # «Эмоции-2»: структура ниже порога предупреждения — реальная

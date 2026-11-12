@@ -36,15 +36,53 @@ from config.simulation_config import LR_CONFIG
 # по окончаниям путает «нейросети» с глаголом. Применяется только если
 # после фильтра остаётся хотя бы одно другое слово — иначе «как работает
 # мышление» превращалось в «что такое работает».
-_VERB_FORMS = frozenset({
-    'работает', 'делает', 'значит', 'может', 'хочет', 'думает', 'знает',
-    'понимает', 'живёт', 'живет', 'любит', 'идёт', 'идет', 'стоит', 'имеет',
-    'даёт', 'дает', 'видит', 'слышит', 'говорит', 'пишет', 'читает',
-    'учится', 'учит', 'помогает', 'мешает', 'создаёт', 'создает', 'меняет',
-    'влияет', 'зависит', 'отличается', 'называется', 'является', 'происходит',
-    'случается', 'получается', 'используется', 'применяется', 'сравнить',
-    'понять', 'узнать', 'объяснить',
-})
+_VERB_FORMS = frozenset(
+    {
+        "работает",
+        "делает",
+        "значит",
+        "может",
+        "хочет",
+        "думает",
+        "знает",
+        "понимает",
+        "живёт",
+        "живет",
+        "любит",
+        "идёт",
+        "идет",
+        "стоит",
+        "имеет",
+        "даёт",
+        "дает",
+        "видит",
+        "слышит",
+        "говорит",
+        "пишет",
+        "читает",
+        "учится",
+        "учит",
+        "помогает",
+        "мешает",
+        "создаёт",
+        "создает",
+        "меняет",
+        "влияет",
+        "зависит",
+        "отличается",
+        "называется",
+        "является",
+        "происходит",
+        "случается",
+        "получается",
+        "используется",
+        "применяется",
+        "сравнить",
+        "понять",
+        "узнать",
+        "объяснить",
+    }
+)
 
 
 class ThinkingPipeline:
@@ -135,8 +173,9 @@ class ThinkingPipeline:
             agent.mental_models.encounter_concept(
                 clean_data,
                 f"гипотеза_цикл_{agent.cycle_count}",
-                hypothesis['text'][:80],
-                evidence_kind="hypothesis", source="self:hypothesis",
+                hypothesis["text"][:80],
+                evidence_kind="hypothesis",
+                source="self:hypothesis",
             )
             agent.energy -= 2
             return thought
@@ -166,9 +205,7 @@ class ThinkingPipeline:
                 str(q.get("text", "")).strip().lower() for q in open_questions
             }
             unanswered = sum(1 for q in open_questions if not q.get("answered"))
-            limit = int(
-                getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0
-            )
+            limit = int(getattr(LR_CONFIG, "OPEN_QUESTIONS_MAX_UNANSWERED", 3) or 0)
             if unanswered < limit:
                 for sub_question in decomposed[:3]:
                     key = sub_question.strip().lower()
@@ -221,26 +258,35 @@ class ThinkingPipeline:
         if not known_facts:
             return None
 
-        confidence = min(0.9, len(connections) * 0.2
-                         + sum(c["weight"] for c in connections[:3]))
+        confidence = min(
+            0.9, len(connections) * 0.2 + sum(c["weight"] for c in connections[:3])
+        )
 
         if "что такое" in concept_name or concept_name.startswith("что"):
-            template = ("Предполагаю что '{cn}' связано с: {facts}. "
-                        "Вероятно имеет отношение к {conns}.")
+            template = (
+                "Предполагаю что '{cn}' связано с: {facts}. "
+                "Вероятно имеет отношение к {conns}."
+            )
         elif "как" in concept_name or concept_name.startswith("как"):
-            template = ("Думаю '{cn}' работает через механизмы: {facts}. "
-                        "Основано на опыте с: {conns}.")
+            template = (
+                "Думаю '{cn}' работает через механизмы: {facts}. "
+                "Основано на опыте с: {conns}."
+            )
         elif "почему" in concept_name or concept_name.startswith("почему"):
-            template = ("Возможно '{cn}' объясняется через: {facts}. "
-                        "Связано с причинами: {conns}.")
+            template = (
+                "Возможно '{cn}' объясняется через: {facts}. "
+                "Связано с причинами: {conns}."
+            )
         else:
-            template = ("Гипотеза: '{cn}' может быть понято через: {facts}. "
-                        "Опирается на концепцию: {conns}.")
+            template = (
+                "Гипотеза: '{cn}' может быть понято через: {facts}. "
+                "Опирается на концепцию: {conns}."
+            )
 
         hypothesis_text = template.format(
             cn=concept_name,
-            facts='; '.join(known_facts[:2]),
-            conns='/'.join(c['concept'] for c in connections[:2]),
+            facts="; ".join(known_facts[:2]),
+            conns="/".join(c["concept"] for c in connections[:2]),
         )
 
         return {
@@ -301,9 +347,9 @@ class ThinkingPipeline:
         # Вопросы «как/почему/в чем» и словосочетания не дробим: статические
         # разборы выше покрывают известные сложные темы, а generic-путь
         # порождал «что такое компьютерное» и «что такое жизни».
-        has_connector = bool(re.search(
-            r"(?<!\w)(и|или|vs|против|между)(?!\w)", normalized
-        ))
+        has_connector = bool(
+            re.search(r"(?<!\w)(и|или|vs|против|между)(?!\w)", normalized)
+        )
         if not has_connector:
             return None
 
@@ -327,9 +373,11 @@ class ThinkingPipeline:
         if not agent.user_interaction.can_ask_question(agent.cycle_count):
             return
 
-        question = (f"Я изучаю концепцию '{concept}'. "
-                    f"Мне сложно понять без внешней помощи. "
-                    f"Можете кратко объяснить: {decomposed[0]}?")
+        question = (
+            f"Я изучаю концепцию '{concept}'. "
+            f"Мне сложно понять без внешней помощи. "
+            f"Можете кратко объяснить: {decomposed[0]}?"
+        )
         # Передаем ВСЕ под-вопросы для цепочки вопросов и последующего синтеза
         result = agent.user_interaction.ask_user(
             question=question,
@@ -337,7 +385,7 @@ class ThinkingPipeline:
             cycle=agent.cycle_count,
             complex_question=concept,
             sub_questions=decomposed,
-            sub_question_index=0
+            sub_question_index=0,
         )
         if result.get("status") == "queued":
             agent._user_cooldown = LR_CONFIG.USER_COOLDOWN_AFTER_ANSWER
@@ -365,12 +413,14 @@ class ThinkingPipeline:
             return "Ответ не принят: вопрос не найден или уже отвечен."
         attachment = getattr(agent, "attachment", None)
         if attachment is not None:
-            attachment.record_interaction("user", was_helpful=True, was_substantial=bool(answer_text.strip()))
+            attachment.record_interaction(
+                "user", was_helpful=True, was_substantial=bool(answer_text.strip())
+            )
 
         concept_name = pending["question"]
         if "задаю" in concept_name or "объясни" in concept_name:
             match = re.search(
-                r'(?:объясни|обьясни|расскажи о|что такое)\s+(.+?)[\.\?]',
+                r"(?:объясни|обьясни|расскажи о|что такое)\s+(.+?)[\.\?]",
                 concept_name,
             )
             if match:
@@ -380,8 +430,10 @@ class ThinkingPipeline:
             concept_name=concept_name,
             context=f"пользователь_ответ_цикл_{agent.cycle_count}",
             outcome=answer_text[:100],
-            valence=0.8, evidence_strength=0.8,
-            evidence_kind="testimony", source=f"user:answer:{pending['id']}",
+            valence=0.8,
+            evidence_strength=0.8,
+            evidence_kind="testimony",
+            source=f"user:answer:{pending['id']}",
         )
 
         agent.success_streak += 2
@@ -389,9 +441,9 @@ class ThinkingPipeline:
         get_logger().log(
             f"Пользователь ответил на '{concept_name}': {answer_text[:50]}..."
         )
-        
+
         # === Внутренняя мотивация: социальное взаимодействие ===
-        if hasattr(agent, 'internal_motivation'):
+        if hasattr(agent, "internal_motivation"):
             agent.internal_motivation.on_social_interaction(positive=True)
 
         # Если был запущен синтез — добавляем информацию в ответ
@@ -401,13 +453,17 @@ class ThinkingPipeline:
         elif result.get("next_sub_question"):
             synthesis_info = " [Следующий под-вопрос поставлен в очередь]"
 
-        return (f"[Ответ агента] Получен ответ от пользователя. "
-                f"Концепция '{concept_name}' обновлена "
-                f"(уверенность: {node.confidence:.0%}){synthesis_info}")
+        return (
+            f"[Ответ агента] Получен ответ от пользователя. "
+            f"Концепция '{concept_name}' обновлена "
+            f"(уверенность: {node.confidence:.0%}){synthesis_info}"
+        )
 
     # === ФАЗА СИНТЕЗА: превращает под-ответы в понимание целого ===
 
-    def _synthesize_complex_question(self, complex_question: str, sub_answers: dict) -> None:
+    def _synthesize_complex_question(
+        self, complex_question: str, sub_answers: dict
+    ) -> None:
         """Синтезирует понимание сложного вопроса из ответов на под-вопросы.
 
         Это КЛЮЧЕВОЙ метод: превращает набор изолированных фактов в целостное понимание.
@@ -424,9 +480,9 @@ class ThinkingPipeline:
         sub_concepts = {}
         for sub_q, answer in sub_answers.items():
             # Под-вопрос может быть в формате "что такое X" или "что такое X?" или "Также для понимания '...': что такое X?"
-            match = re.search(r'что такое\s+([^?]+)', sub_q.lower())
+            match = re.search(r"что такое\s+([^?]+)", sub_q.lower())
             if match:
-                concept_key = match.group(1).strip().rstrip('?').strip()
+                concept_key = match.group(1).strip().rstrip("?").strip()
                 # Ищем в ментальных моделях
                 node = agent.mental_models.concepts.get(concept_key)
                 if node:
@@ -435,19 +491,29 @@ class ThinkingPipeline:
                         node.experiences[-1]["outcome"] if node.experiences else ""
                     )
                     sub_concepts[concept_key] = definition
-                    get_logger().log(f"[СИНТЕЗ] Найдено определение '{concept_key}': {definition[:80]}...")
+                    get_logger().log(
+                        f"[СИНТЕЗ] Найдено определение '{concept_key}': {definition[:80]}..."
+                    )
                 else:
                     # Живой путь не заводит узел на каждый под-ответ —
                     # буквальный ответ пользователя и есть определение.
                     if answer:
                         sub_concepts[concept_key] = str(answer)
-                        get_logger().log(f"[СИНТЕЗ] Узла нет, беру ответ пользователя для '{concept_key}': {str(answer)[:80]}...")
+                        get_logger().log(
+                            f"[СИНТЕЗ] Узла нет, беру ответ пользователя для '{concept_key}': {str(answer)[:80]}..."
+                        )
                     else:
-                        get_logger().log(f"[СИНТЕЗ] Концепт '{concept_key}' не найден в ментальных моделях")
+                        get_logger().log(
+                            f"[СИНТЕЗ] Концепт '{concept_key}' не найден в ментальных моделях"
+                        )
             else:
-                get_logger().log(f"[СИНТЕЗ] Не удалось извлечь концепт из под-вопроса: {sub_q[:80]}")
+                get_logger().log(
+                    f"[СИНТЕЗ] Не удалось извлечь концепт из под-вопроса: {sub_q[:80]}"
+                )
 
-        get_logger().log(f"[СИНТЕЗ] Собранные под-концепты: {list(sub_concepts.keys())}")
+        get_logger().log(
+            f"[СИНТЕЗ] Собранные под-концепты: {list(sub_concepts.keys())}"
+        )
 
         # 2. Строим гипотезу о смысле сложного вопроса
         if sub_concepts:
@@ -457,7 +523,9 @@ class ThinkingPipeline:
             )
 
             # 3. Самопроверка: пытаемся сгенерировать осмысленный ответ
-            self_check = self._self_check_synthesis(complex_question, hypothesis, sub_concepts)
+            self_check = self._self_check_synthesis(
+                complex_question, hypothesis, sub_concepts
+            )
 
             if self_check:
                 # УСПЕХ: агент ПОНИМАЕТ вопрос
@@ -465,29 +533,41 @@ class ThinkingPipeline:
                     concept_name=complex_question,
                     context=f"synthesis_cycle_{agent.cycle_count}",
                     outcome=hypothesis,
-                    valence=0.9, evidence_kind="hypothesis", source="self:synthesis",
+                    valence=0.9,
+                    evidence_kind="hypothesis",
+                    source="self:synthesis",
                 )
 
                 agent.success_streak += 5
                 agent.intelligence += 2
-                get_logger().log(f"[СИНТЕЗ УСПЕХ] '{complex_question}' -> '{hypothesis[:100]}...'")
-                get_logger().log(f"[СИНТЕЗ] Интеллект +2, собственная гипотеза сохранена")
-                
+                get_logger().log(
+                    f"[СИНТЕЗ УСПЕХ] '{complex_question}' -> '{hypothesis[:100]}...'"
+                )
+                get_logger().log(
+                    "[СИНТЕЗ] Интеллект +2, собственная гипотеза сохранена"
+                )
+
                 # === Внутренняя мотивация: концепт усвоен ===
-                if hasattr(agent, 'internal_motivation'):
+                if hasattr(agent, "internal_motivation"):
                     # Уверенность узла как мера качества усвоения
                     node = agent.mental_models.concepts.get(complex_question)
                     confidence = node.confidence if node else 0.5
-                    agent.internal_motivation.on_concept_learned(complex_question, confidence)
+                    agent.internal_motivation.on_concept_learned(
+                        complex_question, confidence
+                    )
                     # Синтез — это и творческий акт
                     agent.internal_motivation.on_creative_act(novelty=0.7)
             else:
                 # Неудача: понимание не сложилось
-                get_logger().log(f"[СИНТЕЗ НЕУДАЧА] Не смог синтезировать понимание для '{complex_question}'")
+                get_logger().log(
+                    f"[СИНТЕЗ НЕУДАЧА] Не смог синтезировать понимание для '{complex_question}'"
+                )
         else:
-            get_logger().log(f"[СИНТЕЗ] Нет под-концептов для синтеза")
+            get_logger().log("[СИНТЕЗ] Нет под-концептов для синтеза")
 
-    def _generate_synthesis_hypothesis(self, complex_question: str, sub_concepts: dict) -> str:
+    def _generate_synthesis_hypothesis(
+        self, complex_question: str, sub_concepts: dict
+    ) -> str:
         """Генерирует гипотезу-ответ на сложный вопрос на основе под-концептов."""
         parts = []
         for concept, definition in sub_concepts.items():
@@ -495,14 +575,18 @@ class ThinkingPipeline:
 
         q_lower = complex_question.lower()
         if "понимаешь" in q_lower or "понимать" in q_lower:
-            return (f"Понимать — значит интегрировать смысл сказанного в свою модель мира. "
-                    f"На основе под-концептов: {'; '.join(parts)}")
+            return (
+                f"Понимать — значит интегрировать смысл сказанного в свою модель мира. "
+                f"На основе под-концептов: {'; '.join(parts)}"
+            )
         elif "что такое" in q_lower:
             return f"Синтез под-концептов: {'; '.join(parts)}"
         else:
             return f"На основе понимания под-частей: {'; '.join(parts)}"
 
-    def _self_check_synthesis(self, complex_question: str, hypothesis: str, sub_concepts: dict) -> bool:
+    def _self_check_synthesis(
+        self, complex_question: str, hypothesis: str, sub_concepts: dict
+    ) -> bool:
         """Самопроверка синтеза: пробует сгенерировать ответ и оценивает качество.
 
         Возвращает True если синтез кажется осмысленным.
@@ -539,7 +623,9 @@ class ThinkingPipeline:
             outcome=outcome,
             valence=valence,
         )
-        get_logger().log(f"Новый концепт: '{concept_name}' (уверенность: {node.confidence:.0%})")
+        get_logger().log(
+            f"Новый концепт: '{concept_name}' (уверенность: {node.confidence:.0%})"
+        )
 
     def _search_external_knowledge(self, clean_data: str, original_data: str) -> str:
         """Этап 2.5: локальный поиск → web-фоллбэк через Wikipedia.
@@ -553,8 +639,9 @@ class ThinkingPipeline:
         get_logger().log(f"Поиск: {clean_data}")
 
         keywords = clean_data.split()
-        search_terms = [w for w in keywords
-                        if w not in ("команда", "вопрос", "что", "такое")]
+        search_terms = [
+            w for w in keywords if w not in ("команда", "вопрос", "что", "такое")
+        ]
 
         # === Этап 1: локальный поиск в src/ ===
         index = self._get_src_file_index()
@@ -568,22 +655,26 @@ class ThinkingPipeline:
                 break
 
         if filepath:
-            docstring = self._read_docstring(
-                os.path.join(project_root(), filepath)
-            )
+            docstring = self._read_docstring(os.path.join(project_root(), filepath))
             if docstring:
                 reason = check_entry(clean_data, docstring)
                 if reason:
-                    thought = (f"Нашел файл {filepath}, но запись отклонена "
-                               f"фильтром качества ({reason}).")
+                    thought = (
+                        f"Нашел файл {filepath}, но запись отклонена "
+                        f"фильтром качества ({reason})."
+                    )
                     get_logger().log(thought)
                 else:
                     contradictions = self._detect_contradiction(clean_data, docstring)
                     if contradictions:
-                        warning = "\n  ⚠️ Обнаружены возможные противоречия с известными:"
+                        warning = (
+                            "\n  ⚠️ Обнаружены возможные противоречия с известными:"
+                        )
                         for c in contradictions[:2]:
-                            warning += (f"\n     - '{c['known_topic']}': {c['known_def'][:40]}..."
-                                        f" (конфликт: {c['conflict_ratio']:.0%})")
+                            warning += (
+                                f"\n     - '{c['known_topic']}': {c['known_def'][:40]}..."
+                                f" (конфликт: {c['conflict_ratio']:.0%})"
+                            )
                         get_logger().log(warning)
 
                     agent._known_definitions[clean_data] = docstring
@@ -594,8 +685,11 @@ class ThinkingPipeline:
                     context = f"поиск_в_файле:{filepath}"
                     outcome = docstring[:80]
                     agent.mental_models.encounter_concept(
-                        normalize_concept_name(clean_data), context, outcome,
-                        evidence_strength=0.5, evidence_kind="observation",
+                        normalize_concept_name(clean_data),
+                        context,
+                        outcome,
+                        evidence_strength=0.5,
+                        evidence_kind="observation",
                         source=f"file:{filepath}",
                     )
 
@@ -605,8 +699,10 @@ class ThinkingPipeline:
                     return thought
             thought = f"Файл {filepath} найден, но не содержит документации"
         else:
-            thought = (f"Не нашел файл для '{clean_data}'. "
-                       f"Концепт записан для дальнейшего изучения.")
+            thought = (
+                f"Не нашел файл для '{clean_data}'. "
+                f"Концепт записан для дальнейшего изучения."
+            )
             agent.preferences[clean_data] = "unknown"
 
         # === Этап 2: web-фоллбэк (Wikipedia) ===
@@ -639,7 +735,9 @@ class ThinkingPipeline:
             get_logger().log(f"WebSearcher упал: {e}")
             return {"found": False, "error": "exception"}
 
-    def _apply_web_result(self, clean_data: str, web_result: dict, fallback_thought: str) -> str:
+    def _apply_web_result(
+        self, clean_data: str, web_result: dict, fallback_thought: str
+    ) -> str:
         """Применяет web-результат: сохраняет в KB, публикует событие, возвращает мысль.
 
         Args:
@@ -672,20 +770,19 @@ class ThinkingPipeline:
         agent._save_knowledge_base()
 
         # 2. ЧЕСТНОЕ ОБУЧЕНИЕ: проверки перед закреплением
-        
+
         # 2a. Найти противоречия с уже известным
         contradictions = self._detect_contradiction(clean_data, extract)
-        
+
         # 2b. Найти связанные концепции в mental_models
         related = agent.mental_models.find_related_concepts(clean_data, max_distance=2)
         related_info = [
-            {"concept": n.name, "confidence": n.confidence}
-            for n in related
+            {"concept": n.name, "confidence": n.confidence} for n in related
         ]
-        
+
         # 2c. Самопроверка: "Действительно ли я это понимаю?"
         self_check = self._self_check_knowledge(clean_data)
-        
+
         # 2d. Вычислить обоснованную уверенность (не жёсткие 0.7)
         # Базовая уверенность от веба
         base_confidence = 0.7
@@ -695,8 +792,17 @@ class ThinkingPipeline:
         contradiction_penalty = min(0.3, len(contradictions) * 0.15)
         # Бонус за прохождение самопроверки
         self_check_bonus = 0.1 if self_check.get("can_apply") else 0.0
-        
-        final_confidence = max(0.1, min(0.95, base_confidence + related_bonus - contradiction_penalty + self_check_bonus))
+
+        final_confidence = max(
+            0.1,
+            min(
+                0.95,
+                base_confidence
+                + related_bonus
+                - contradiction_penalty
+                + self_check_bonus,
+            ),
+        )
 
         # 3. Зарегистрировать в mental_models с обоснованной уверенностью.
         # Имя узла — без вопросительной обёртки: «что такое счастье» → «счастье».
@@ -705,9 +811,10 @@ class ThinkingPipeline:
             f"web:{lang}_wikipedia",
             extract[:80],
             evidence_strength=final_confidence,
-            evidence_kind="testimony", source=url,
+            evidence_kind="testimony",
+            source=url,
         )
-        
+
         # 4. Сохранить метаданные обучения для анализа
         if not hasattr(agent, "_learning_metadata"):
             agent._learning_metadata = {}
@@ -725,25 +832,34 @@ class ThinkingPipeline:
         # 5. Увеличиваем success_streak ТОЛЬКО если обучение выглядит надёжным
         # (нет тяжёлых противоречий, самопроверка пройдена или есть связи)
         learning_quality_ok = (
-            len(contradictions) == 0 or max((c.get("conflict_ratio", 0) for c in contradictions), default=0) < 0.5
+            len(contradictions) == 0
+            or max((c.get("conflict_ratio", 0) for c in contradictions), default=0)
+            < 0.5
         ) and (self_check.get("can_apply") or len(related) > 0)
-        
+
         if learning_quality_ok:
             agent.success_streak += 1
         else:
             # Плохое качество обучения — сбрасываем стрик
             agent.success_streak = max(0, agent.success_streak - 1)
-            
+
         agent._check_goal_progress(clean_data, answered=True)
 
         # 6. Публикуем событие в EventBus (обогащённое метаданными)
-        self._publish_web_result(clean_data, title, extract, url, lang, {
-            "final_confidence": final_confidence,
-            "contradictions_count": len(contradictions),
-            "related_count": len(related),
-            "self_check_passed": self_check.get("can_apply", False),
-            "learning_quality_ok": learning_quality_ok,
-        })
+        self._publish_web_result(
+            clean_data,
+            title,
+            extract,
+            url,
+            lang,
+            {
+                "final_confidence": final_confidence,
+                "contradictions_count": len(contradictions),
+                "related_count": len(related),
+                "self_check_passed": self_check.get("can_apply", False),
+                "learning_quality_ok": learning_quality_ok,
+            },
+        )
 
         # 7. Формируем мысль с честной оценкой
         thought_parts = [f"🌐 Нашёл в интернете (Wikipedia/{lang}): '{title}'"]
@@ -758,12 +874,21 @@ class ThinkingPipeline:
         if self_check.get("can_apply"):
             thought_parts.append("✅ Самопроверка пройдена")
         else:
-            thought_parts.append("❓ Самопроверка: недостаточно связей для уверенного применения")
-        
+            thought_parts.append(
+                "❓ Самопроверка: недостаточно связей для уверенного применения"
+            )
+
         return "\n".join(thought_parts)
 
-    def _publish_web_result(self, concept: str, title: str, extract: str,
-                            url: str, lang: str, metadata: dict = None) -> None:
+    def _publish_web_result(
+        self,
+        concept: str,
+        title: str,
+        extract: str,
+        url: str,
+        lang: str,
+        metadata: dict = None,
+    ) -> None:
         """Публикует событие AGENT_WEB_RESULT в EventBus.
 
         Использует user_interaction._publish — тот же приватный метод, что
@@ -775,6 +900,7 @@ class ThinkingPipeline:
             return
         try:
             from src.core.event_bus import Events
+
             payload = {
                 "concept": concept,
                 "title": title,
@@ -805,7 +931,7 @@ class ThinkingPipeline:
                 end = content.find(quote, start + 3)
                 if end == -1:
                     continue
-                docstring = content[start + 3:end].strip()
+                docstring = content[start + 3 : end].strip()
                 return docstring if docstring else None
         except Exception:
             return None
@@ -820,25 +946,28 @@ class ThinkingPipeline:
         new_words = set(new_def.lower().split())
         for known_topic, known_def in agent._known_definitions.items():
             known_words = set(known_def.lower().split())
-            topic_similarity = (
-                len(set(new_topic.lower().split()) & set(known_topic.lower().split()))
-                / max(len(set(new_topic.lower().split())), 1)
-            )
+            topic_similarity = len(
+                set(new_topic.lower().split()) & set(known_topic.lower().split())
+            ) / max(len(set(new_topic.lower().split())), 1)
             if topic_similarity > 0.3:
                 diff_new = new_words - known_words
                 diff_known = known_words - new_words
-                if (len(diff_new) / max(len(new_words), 1) > 0.5
-                        or len(diff_known) / max(len(known_words), 1) > 0.5):
-                    contradictions.append({
-                        "known_topic": known_topic,
-                        "known_def": known_def[:80],
-                        "new_def": new_def[:80],
-                        "similarity": topic_similarity,
-                        "conflict_ratio": (
-                            max(len(diff_new), len(diff_known))
-                            / max(len(new_words | known_words), 1)
-                        ),
-                    })
+                if (
+                    len(diff_new) / max(len(new_words), 1) > 0.5
+                    or len(diff_known) / max(len(known_words), 1) > 0.5
+                ):
+                    contradictions.append(
+                        {
+                            "known_topic": known_topic,
+                            "known_def": known_def[:80],
+                            "new_def": new_def[:80],
+                            "similarity": topic_similarity,
+                            "conflict_ratio": (
+                                max(len(diff_new), len(diff_known))
+                                / max(len(new_words | known_words), 1)
+                            ),
+                        }
+                    )
         return contradictions
 
     def _self_check_knowledge(self, target_concept: str) -> dict:
@@ -901,6 +1030,7 @@ class ThinkingPipeline:
     def _invalidate_src_file_index(cls) -> None:
         """Сброс кэша файлов."""
         cls._SRC_FILE_INDEX = None
+
 
 # ============================================================
 # Public API

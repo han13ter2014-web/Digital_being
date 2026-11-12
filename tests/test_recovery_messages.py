@@ -9,9 +9,15 @@ from src.app.bootstrap import RecoveryRequiredError
 
 
 @pytest.mark.parametrize("args", [["--ui", "headless"], ["--maturity-json"]])
-def test_recovery_failure_returns_nonzero_without_atexit_save(monkeypatch, capsys, args):
+def test_recovery_failure_returns_nonzero_without_atexit_save(
+    monkeypatch, capsys, args
+):
     monkeypatch.setattr("src.app.paths.setup_environment", lambda **kwargs: object())
-    monkeypatch.setattr(main, "build_runtime", Mock(side_effect=RecoveryRequiredError("повреждён снимок")))
+    monkeypatch.setattr(
+        main,
+        "build_runtime",
+        Mock(side_effect=RecoveryRequiredError("повреждён снимок")),
+    )
     register = Mock()
     monkeypatch.setattr(main.atexit, "register", register)
     assert main.main(args) == 3

@@ -34,7 +34,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from .sandbox import Sandbox, SandboxError
 
@@ -112,9 +112,7 @@ class CodeRunner:
 
     def _clean_env(self) -> Dict[str, str]:
         env = {
-            key: value
-            for key, value in os.environ.items()
-            if key in self.ENV_WHITELIST
+            key: value for key, value in os.environ.items() if key in self.ENV_WHITELIST
         }
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONNOUSERSITE"] = "1"
@@ -169,13 +167,25 @@ class CodeRunner:
             )
         except subprocess.TimeoutExpired as exc:
             duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
-            stdout = (exc.stdout or b"") if isinstance(exc.stdout, (bytes, type(None))) else b""
-            stderr = (exc.stderr or b"") if isinstance(exc.stderr, (bytes, type(None))) else b""
+            stdout = (
+                (exc.stdout or b"")
+                if isinstance(exc.stdout, (bytes, type(None)))
+                else b""
+            )
+            stderr = (
+                (exc.stderr or b"")
+                if isinstance(exc.stderr, (bytes, type(None)))
+                else b""
+            )
             return RunOutcome(
                 path=relative,
                 exit_code=-1,
-                stdout=_cap(stdout.decode("utf-8", errors="replace"), self.output_chars),
-                stderr=_cap(stderr.decode("utf-8", errors="replace"), self.output_chars),
+                stdout=_cap(
+                    stdout.decode("utf-8", errors="replace"), self.output_chars
+                ),
+                stderr=_cap(
+                    stderr.decode("utf-8", errors="replace"), self.output_chars
+                ),
                 duration_ms=duration_ms,
                 timed_out=True,
             )
@@ -184,8 +194,12 @@ class CodeRunner:
         return RunOutcome(
             path=relative,
             exit_code=int(completed.returncode),
-            stdout=_cap(completed.stdout.decode("utf-8", errors="replace"), self.output_chars),
-            stderr=_cap(completed.stderr.decode("utf-8", errors="replace"), self.output_chars),
+            stdout=_cap(
+                completed.stdout.decode("utf-8", errors="replace"), self.output_chars
+            ),
+            stderr=_cap(
+                completed.stderr.decode("utf-8", errors="replace"), self.output_chars
+            ),
             duration_ms=duration_ms,
             timed_out=False,
         )

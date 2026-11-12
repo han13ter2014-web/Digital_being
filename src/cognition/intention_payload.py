@@ -15,7 +15,9 @@ def intention_target(intention):
             continue
         value = params[key]
         if not isinstance(value, str) or not value.strip() or len(value) > 1000:
-            raise ValueError(f"intention.params.{key}: нужна непустая тема до 1000 символов")
+            raise ValueError(
+                f"intention.params.{key}: нужна непустая тема до 1000 символов"
+            )
         targets.append(value.strip())
     if len(set(targets)) > 1:
         raise ValueError("Конфликтующие темы намерения")

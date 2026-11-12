@@ -1,12 +1,13 @@
-"""«Сироты-1» (k16-10): маппинги, коллизия парсера, наблюдаемость памяти.
+"""Маппинги действий, коллизия парсера и наблюдаемость памяти.
 
-Три дыры из ревизии k16-09: (1) имена действий мотивации
+Три дефекта маршрутизации: (1) имена действий мотивации
 (social_interaction, teaching, contribution) не ловились парсером и
 ACTION_ALIASES — исполнение вхолостую; (2) «не нашёл ответ» матчился
 подстрокой «нашёл» как know_answer — промах классифицировался как
 успех; (3) потеря эпизода при memory is None была невидима, а мостовой
 тест с Mock-памятью маскировал путь записи.
 """
+
 from types import SimpleNamespace
 
 from src.core.agent import DigitalBeing
@@ -15,6 +16,7 @@ from src.core.agent_effector import _record_core_life_episode_impl
 from src.delamain.memory import MemoryStore
 
 # === 1. Маппинги сирот ===
+
 
 def test_orphan_action_names_normalize():
     agent = DigitalBeing(name="OrphanRoutes")
@@ -56,12 +58,12 @@ def test_legacy_and_helping_others_stay_honest_default():
 
     sadness_before = agent.emotional_state.levels["sadness"]
     agent.act("legacy")
-    # default ничего не делает в мире: k16-03 красит это как промах.
+    # default ничего не делает в мире: результат классифицируется как промах.
     assert agent.emotional_state.levels["sadness"] > sadness_before
 
 
 # === 2. Коллизия парсера ===
-# «Единство-1» (k16-14): зеркала больше нет — тест импортирует тот же
+# Зеркала больше нет — тест импортирует тот же
 # classify_decision, которым пользуется парсер act() и фильтр кандидатов
 # (импорт — в шапке файла).
 
@@ -79,6 +81,7 @@ def test_positive_found_is_know_answer():
 
 # === 3. Наблюдаемость и запись эпизодов ===
 
+
 def test_life_episode_written_with_real_memory(tmp_path):
     """Мост с живым MemoryStore пишет эпизод — Mock больше не единственное покрытие."""
     store = MemoryStore(tmp_path / "memory.db")
@@ -86,7 +89,7 @@ def test_life_episode_written_with_real_memory(tmp_path):
         delamain=SimpleNamespace(
             runtime=SimpleNamespace(memory=store),
         ),
-        life_id="life-k16-10",
+        life_id="life-action-routing",
     )
     entry = {
         "id": "intention-42",
@@ -98,7 +101,7 @@ def test_life_episode_written_with_real_memory(tmp_path):
     result = _record_core_life_episode_impl(agent, entry)
     assert result is not None
 
-    episodes = store.recent_life_episodes(life_id="life-k16-10", limit=10)
+    episodes = store.recent_life_episodes(life_id="life-action-routing", limit=10)
     assert len(episodes) == 1
     assert episodes[0]["task_id"] == "intention-42"
     assert episodes[0]["action"] == "web_search"

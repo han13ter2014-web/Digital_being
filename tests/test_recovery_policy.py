@@ -29,7 +29,9 @@ def test_corrupt_latest_json_recovers_previous_without_rewriting(env):
     assert restored.cycle_count == 10
     assert report["recovered_from_older"]
     assert len(report["recovery_failures"]) == 1
-    assert {p.name: p.read_bytes() for p in Path(agent.checkpoint_dir).iterdir()} == before
+    assert {
+        p.name: p.read_bytes() for p in Path(agent.checkpoint_dir).iterdir()
+    } == before
 
 
 def test_all_corrupt_stops_instead_of_new_life(env):
@@ -54,7 +56,9 @@ def test_corrupt_sqlite_snapshot_recovers_older(env):
     newest = ser.save(state, agent.name, 20)
     database, ident = newest.rsplit("#snapshot=", 1)
     with sqlite3.connect(database) as connection:
-        connection.execute("UPDATE snapshots SET manifest = '{}' WHERE id = ?", (int(ident),))
+        connection.execute(
+            "UPDATE snapshots SET manifest = '{}' WHERE id = ?", (int(ident),)
+        )
     restored, report = create_agent(env, "Recovery")
     assert restored.cycle_count == 10
     assert report["recovered_from_older"]

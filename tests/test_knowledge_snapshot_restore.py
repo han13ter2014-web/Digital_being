@@ -30,6 +30,7 @@ DEF = "временное определение"
 # apply_state_to_agent (путь life_state.json)
 # ============================================================
 
+
 def test_deleted_before_checkpoint_stays_deleted_after_restore():
     """Тема удалена ДО сохранения чекпоинта — рестарт её не воскрешает."""
     original = DigitalBeing(name="KB")
@@ -117,10 +118,9 @@ def test_corrupted_knowledge_sections_are_rejected():
 # KnowledgeSubsystem.restore_from_checkpoint (путь CheckpointManager)
 # ============================================================
 
+
 def _subsystem(tmp_path):
-    return KnowledgeSubsystem(
-        "Tester", knowledge_file=str(tmp_path / "kb.json")
-    )
+    return KnowledgeSubsystem("Tester", knowledge_file=str(tmp_path / "kb.json"))
 
 
 def test_subsystem_restore_is_snapshot(tmp_path):
@@ -159,9 +159,7 @@ def test_subsystem_restore_skips_garbage_sections(tmp_path):
     kb = _subsystem(tmp_path)
     before_kb = dict(kb.knowledge_base)
 
-    kb.restore_from_checkpoint(
-        {"knowledge_base": "мусор", "_known_definitions": 42}
-    )
+    kb.restore_from_checkpoint({"knowledge_base": "мусор", "_known_definitions": 42})
 
     assert kb.knowledge_base == before_kb
     assert kb._known_definitions == {}

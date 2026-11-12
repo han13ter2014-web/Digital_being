@@ -29,6 +29,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 try:
     from aiohttp import web
+
     AIOHTTP_AVAILABLE = True
 except ImportError:  # необязательная зависимость: Tk продолжает работать
     AIOHTTP_AVAILABLE = False
@@ -266,8 +267,11 @@ class SharedState:
         self._status: Dict[str, Any] = {}
         self._life: Dict[str, Any] = {}
         self._graph: Dict[str, Any] = {}
-        self._diary: Dict[str, Any] = {"episodes": [], "count": 0,
-                                       "cache_limit": max_diary}
+        self._diary: Dict[str, Any] = {
+            "episodes": [],
+            "count": 0,
+            "cache_limit": max_diary,
+        }
         self._subsystem_status: Dict[str, Any] = {}
         self._life_prompt: Optional[Dict[str, Any]] = None
         self._life_result: Optional[Dict[str, Any]] = None
@@ -307,29 +311,50 @@ class SharedState:
         with self._lock:
             self._subsystem_status = deepcopy(dict(status or {}))
 
-    def push_thought(self, text: str, *, kind: str = "thought",
-                     cycle: Optional[int] = None,
-                     meta: Optional[Dict[str, Any]] = None) -> None:
+    def push_thought(
+        self,
+        text: str,
+        *,
+        kind: str = "thought",
+        cycle: Optional[int] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
         data: Dict[str, Any] = {"text": text}
         if meta:
             data["meta"] = deepcopy(meta)
         self.push_event(kind, data, cycle=cycle)
 
-    def push_event(self, name: str, data: Any, *, source: str = "agent",
-                   timestamp: Optional[float] = None,
-                   cycle: Optional[int] = None) -> None:
+    def push_event(
+        self,
+        name: str,
+        data: Any,
+        *,
+        source: str = "agent",
+        timestamp: Optional[float] = None,
+        cycle: Optional[int] = None,
+    ) -> None:
         """Добавить событие с монотонным SSE sequence и отразить life-протокол."""
-        payload = deepcopy(data) if isinstance(data, dict) else {"text": str(data or "")}
+        payload = (
+            deepcopy(data) if isinstance(data, dict) else {"text": str(data or "")}
+        )
         ts = float(timestamp or time.time())
         kind = {
-            "agent_question": "question", "agent_message": "agent",
-            "agent_thought": "thought", "agent_web_result": "web",
+            "agent_question": "question",
+            "agent_message": "agent",
+            "agent_thought": "thought",
+            "agent_web_result": "web",
             "user_message": "user",
         }.get(name, name)
-        text = (payload.get("content") or payload.get("text")
-                or payload.get("question") or payload.get("title")
-                or payload.get("extract") or payload.get("description")
-                or payload.get("message") or "")
+        text = (
+            payload.get("content")
+            or payload.get("text")
+            or payload.get("question")
+            or payload.get("title")
+            or payload.get("extract")
+            or payload.get("description")
+            or payload.get("message")
+            or ""
+        )
         with self._lock:
             if name == "life_prompt":
                 self._life_prompt = deepcopy(payload)
@@ -340,7 +365,9 @@ class SharedState:
                     self._life_prompt = None
         if cycle is None:
             try:
-                cycle = int(payload["cycle"]) if payload.get("cycle") is not None else None
+                cycle = (
+                    int(payload["cycle"]) if payload.get("cycle") is not None else None
+                )
             except (TypeError, ValueError):
                 cycle = None
         with self._lock:
@@ -377,11 +404,17 @@ class SharedState:
             # Ограниченный журнал + Last-Event-ID восполняет пропуск после reconnect.
             pass
 
-    def subscribe_events(self, after: Optional[int] = None) -> Tuple[asyncio.Queue, List[Dict[str, Any]]]:
+    def subscribe_events(
+        self, after: Optional[int] = None
+    ) -> Tuple[asyncio.Queue, List[Dict[str, Any]]]:
         queue: asyncio.Queue = asyncio.Queue(maxsize=300)
         with self._lock:
             events = list(self._events)
-            backlog = events[-20:] if after is None else [e for e in events if e["sequence"] > after]
+            backlog = (
+                events[-20:]
+                if after is None
+                else [e for e in events if e["sequence"] > after]
+            )
             self._sse_subscribers.append(queue)
         return queue, deepcopy(backlog)
 
@@ -441,7 +474,9 @@ class SharedState:
                 }
             result["life"] = deepcopy(life.get("life", {}))
             result["subsystem_count"] = self._subsystem_status.get("subsystem_count", 0)
-            result["subsystems"] = deepcopy(self._subsystem_status.get("subsystems", []))
+            result["subsystems"] = deepcopy(
+                self._subsystem_status.get("subsystems", [])
+            )
             result["last_update_ts"] = self._last_update_ts
             result["uptime_sec"] = status.get("uptime_sec", 0) or 0
             return result
@@ -486,27 +521,37 @@ class SharedState:
         with self._lock:
             episodes = deepcopy(self._diary.get("episodes", []))
             cache_limit = int(self._diary.get("cache_limit", 500) or 500)
-        returned = episodes[offset:offset + limit]
+        returned = episodes[offset : offset + limit]
         next_offset = offset + len(returned)
         has_more = next_offset < len(episodes)
         return {
-            "episodes": returned, "offset": offset, "limit": limit,
-            "returned": len(returned), "stored": len(episodes),
+            "episodes": returned,
+            "offset": offset,
+            "limit": limit,
+            "returned": len(returned),
+            "stored": len(episodes),
             "next_offset": next_offset if has_more else None,
-            "has_more": has_more, "cache_limit": cache_limit,
+            "has_more": has_more,
+            "cache_limit": cache_limit,
             "may_have_older_outside_cache": len(episodes) >= cache_limit,
         }
 
-    def dialogue_history(self, after: Optional[int] = None,
-                         limit: int = 50) -> Dict[str, Any]:
+    def dialogue_history(
+        self, after: Optional[int] = None, limit: int = 50
+    ) -> Dict[str, Any]:
         limit = max(1, min(200, int(limit)))
         with self._lock:
             events = list(self._events)
             latest = self._sequence
-        selected = events[-limit:] if after is None else [e for e in events if e["sequence"] > after][:limit]
+        selected = (
+            events[-limit:]
+            if after is None
+            else [e for e in events if e["sequence"] > after][:limit]
+        )
         oldest = events[0]["sequence"] if events else 0
         return {
-            "events": deepcopy(selected), "count": len(selected),
+            "events": deepcopy(selected),
+            "count": len(selected),
             "latest_sequence": latest,
             "has_more": bool(selected and selected[-1]["sequence"] < latest),
             "history_gap": bool(after is not None and oldest and after < oldest - 1),
@@ -535,7 +580,9 @@ async def handle_diary(request: Any) -> Any:
         offset = int(request.query.get("offset", "0"))
         limit = int(request.query.get("limit", "20"))
     except ValueError:
-        return _json_response({"error": "offset и limit должны быть целыми"}, status=400)
+        return _json_response(
+            {"error": "offset и limit должны быть целыми"}, status=400
+        )
     return _json_response(state.diary_page(offset, limit))
 
 
@@ -587,22 +634,35 @@ def _publish_event(request: Any, name: str, data: Dict[str, Any]) -> Any:
     """Единственная мутация веба: опубликовать существующее событие Tk."""
     bus = request.app[BUS_KEY]
     if bus is None:
-        return _json_response({
-            "status": "unavailable", "message": "ядро не подключено; команда не отправлена",
-        }, status=503)
+        return _json_response(
+            {
+                "status": "unavailable",
+                "message": "ядро не подключено; команда не отправлена",
+            },
+            status=503,
+        )
     accepted = bus.publish_sync(name, data, source="web")
     if not accepted:
-        return _json_response({
-            "status": "unavailable", "message": "очередь событий недоступна; команда не принята",
-        }, status=503)
-    return _json_response({
-        "status": "accepted", "event": name,
-        "message": "событие принято; результат появится в следующем снимке",
-    }, status=202)
+        return _json_response(
+            {
+                "status": "unavailable",
+                "message": "очередь событий недоступна; команда не принята",
+            },
+            status=503,
+        )
+    return _json_response(
+        {
+            "status": "accepted",
+            "event": name,
+            "message": "событие принято; результат появится в следующем снимке",
+        },
+        status=202,
+    )
 
 
 async def handle_dialogue_send(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         text = str(data.get("text", "")).strip()
@@ -611,45 +671,56 @@ async def handle_dialogue_send(request: Any) -> Any:
         if len(text) > MAX_DIALOGUE_CHARS:
             raise CommandError(f"сообщение длиннее {MAX_DIALOGUE_CHARS} символов")
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
     return _publish_event(request, Events.USER_MESSAGE, {"text": text})
 
 
 async def handle_control(request: Any) -> Any:
-    return _json_response(request.app[STATE_KEY].control_snapshot(
-        bus_connected=request.app[BUS_KEY] is not None,
-    ))
+    return _json_response(
+        request.app[STATE_KEY].control_snapshot(
+            bus_connected=request.app[BUS_KEY] is not None,
+        )
+    )
 
 
 async def handle_pause(request: Any) -> Any:
     from src.core.event_bus import Events
+
     return _publish_event(request, Events.PAUSE_REQUESTED, {})
 
 
 async def handle_resume(request: Any) -> Any:
     from src.core.event_bus import Events
+
     return _publish_event(request, Events.RESUME_REQUESTED, {})
 
 
 async def handle_save(request: Any) -> Any:
     from src.core.event_bus import Events
+
     return _publish_event(request, Events.SAVE_REQUESTED, {})
 
 
 async def handle_speed(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         mode = str(data.get("mode", "")).strip().lower()
         if mode not in SPEED_MODES:
             raise CommandError("темп должен быть live, fast или max")
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
     return _publish_event(request, Events.SPEED_CHANGED, {"mode": mode})
 
 
 async def handle_life_request(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         kind = str(data.get("kind", "dream")).strip().lower()
@@ -659,12 +730,17 @@ async def handle_life_request(request: Any) -> Any:
         if not reason or len(reason) > MAX_REASON_CHARS:
             raise CommandError("причина пуста или слишком длинна")
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
-    return _publish_event(request, Events.LIFE_REQUEST, {"kind": kind, "reason": reason})
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
+    return _publish_event(
+        request, Events.LIFE_REQUEST, {"kind": kind, "reason": reason}
+    )
 
 
 async def handle_life_confirm(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         request_id = str(data.get("request_id", "")).strip()
@@ -673,34 +749,54 @@ async def handle_life_confirm(request: Any) -> Any:
             raise CommandError("нужны request_id и непустая фраза допустимой длины")
         prompt = request.app[STATE_KEY].current_life_prompt()
         if not prompt or str(prompt.get("request_id", "")) != request_id:
-            raise CommandError("сначала дождитесь подтверждающего запроса ядра", status=409)
+            raise CommandError(
+                "сначала дождитесь подтверждающего запроса ядра", status=409
+            )
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
-    return _publish_event(request, Events.LIFE_CONFIRM, {
-        "request_id": request_id, "phrase": phrase,
-    })
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
+    return _publish_event(
+        request,
+        Events.LIFE_CONFIRM,
+        {
+            "request_id": request_id,
+            "phrase": phrase,
+        },
+    )
 
 
 async def handle_life_cancel(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         request_id = str(data.get("request_id", "")).strip()
         prompt = request.app[STATE_KEY].current_life_prompt()
-        if not request_id or not prompt or str(prompt.get("request_id", "")) != request_id:
-            raise CommandError("активный запрос с таким request_id не найден", status=409)
+        if (
+            not request_id
+            or not prompt
+            or str(prompt.get("request_id", "")) != request_id
+        ):
+            raise CommandError(
+                "активный запрос с таким request_id не найден", status=409
+            )
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
     return _publish_event(request, Events.LIFE_CANCEL, {"request_id": request_id})
 
 
 async def handle_life_wake(request: Any) -> Any:
     from src.core.event_bus import Events
+
     return _publish_event(request, Events.LIFE_WAKE, {})
 
 
 async def handle_access(request: Any) -> Any:
     from src.core.event_bus import Events
+
     try:
         data = await _read_json_object(request)
         key = str(data.get("key", "")).strip().lower()
@@ -708,8 +804,12 @@ async def handle_access(request: Any) -> Any:
         if key not in ACCESS_KEYS or state not in {"on", "off"}:
             raise CommandError("нужны известный доступ и состояние on/off")
     except CommandError as exc:
-        return _json_response({"status": "rejected", "message": str(exc)}, status=exc.status)
-    return _publish_event(request, Events.USER_COMMAND, {"command": f"access {key} {state}"})
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
+    return _publish_event(
+        request, Events.USER_COMMAND, {"command": f"access {key} {state}"}
+    )
 
 
 async def handle_health(request: Any) -> Any:
@@ -721,15 +821,35 @@ async def handle_health(request: Any) -> Any:
     age = now - updated if updated else None
     if request.query.get("check", "live").lower() == "ready":
         if not responsive:
-            reason = "ядро не подключено" if not bus_connected else "no agent update in 60+ seconds"
-            return _json_response({"status": "not_ready", "agent_responsive": False,
-                                   "last_update_age_sec": age,
-                                   "reason": reason}, status=503)
-        return _json_response({"status": "ready", "agent_responsive": True,
-                               "last_update_age_sec": round(age, 2)})
-    return _json_response({"status": "ok", "agent_responsive": responsive,
-                           "last_update_age_sec": round(age, 2) if age is not None else None,
-                           "subsystem_count": snapshot.get("subsystem_count", 0)})
+            reason = (
+                "ядро не подключено"
+                if not bus_connected
+                else "no agent update in 60+ seconds"
+            )
+            return _json_response(
+                {
+                    "status": "not_ready",
+                    "agent_responsive": False,
+                    "last_update_age_sec": age,
+                    "reason": reason,
+                },
+                status=503,
+            )
+        return _json_response(
+            {
+                "status": "ready",
+                "agent_responsive": True,
+                "last_update_age_sec": round(age, 2),
+            }
+        )
+    return _json_response(
+        {
+            "status": "ok",
+            "agent_responsive": responsive,
+            "last_update_age_sec": round(age, 2) if age is not None else None,
+            "subsystem_count": snapshot.get("subsystem_count", 0),
+        }
+    )
 
 
 async def handle_metrics(request: Any) -> Any:
@@ -749,16 +869,32 @@ async def handle_metrics(request: Any) -> Any:
         ("digital_being_uptime_seconds", "gauge", snap.get("uptime_sec", 0)),
     ]
     if goals.get("progress") is not None:
-        metrics.append(("digital_being_goal_progress_percent", "gauge", goals["progress"]))
+        metrics.append(
+            ("digital_being_goal_progress_percent", "gauge", goals["progress"])
+        )
     if will.get("total_acts") or will.get("total"):
-        metrics.append(("digital_being_will_acts_total", "counter",
-                        will.get("total_acts") or will.get("total")))
+        metrics.append(
+            (
+                "digital_being_will_acts_total",
+                "counter",
+                will.get("total_acts") or will.get("total"),
+            )
+        )
     lines: List[str] = []
     for name, kind, val in metrics:
-        lines.extend((f"# HELP {name} Digital Being read-only metric",
-                      f"# TYPE {name} {kind}", f"{name} {val}"))
-    return web.Response(text="\n".join(lines) + "\n", content_type="text/plain",
-                        charset="utf-8", headers={"Cache-Control": "no-store"})
+        lines.extend(
+            (
+                f"# HELP {name} Digital Being read-only metric",
+                f"# TYPE {name} {kind}",
+                f"{name} {val}",
+            )
+        )
+    return web.Response(
+        text="\n".join(lines) + "\n",
+        content_type="text/plain",
+        charset="utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def handle_subsystems(request: Any) -> Any:
@@ -779,7 +915,9 @@ async def handle_thoughts_history(request: Any) -> Any:
 
 async def handle_action(request: Any) -> Any:
     """Прежняя дверь управления закрыта без чтения/исполнения тела запроса."""
-    return _json_response({"status": "forbidden", "message": READ_ONLY_MESSAGE}, status=403)
+    return _json_response(
+        {"status": "forbidden", "message": READ_ONLY_MESSAGE}, status=403
+    )
 
 
 async def handle_sse(request: Any) -> Any:
@@ -789,10 +927,14 @@ async def handle_sse(request: Any) -> Any:
         after = max(0, int(raw_after)) if raw_after not in (None, "") else None
     except ValueError:
         after = None
-    response = web.StreamResponse(headers={
-        "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
-        "Connection": "keep-alive", "X-Accel-Buffering": "no",
-    })
+    response = web.StreamResponse(
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
     await response.prepare(request)
     task = asyncio.current_task()
     state.register_sse_task(task)
@@ -834,8 +976,14 @@ class WebDashboard:
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8765
 
-    def __init__(self, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
-                 state: Optional[SharedState] = None, bus: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        *,
+        host: str = DEFAULT_HOST,
+        port: int = DEFAULT_PORT,
+        state: Optional[SharedState] = None,
+        bus: Optional[Any] = None,
+    ) -> None:
         if not AIOHTTP_AVAILABLE:
             raise RuntimeError("aiohttp не установлен; веб отключён, Tk может работать")
         if host not in {"127.0.0.1", "localhost", "::1"}:
@@ -853,14 +1001,17 @@ class WebDashboard:
 
     @property
     def running(self) -> bool:
-        return bool(self._loop and self._loop.is_running() and self._start_error is None)
+        return bool(
+            self._loop and self._loop.is_running() and self._start_error is None
+        )
 
     def start(self, *, in_thread: bool = True) -> None:
         self._start_error = None
         self._started.clear()
         if in_thread:
-            self._thread = threading.Thread(target=self._run_in_thread,
-                                            name="web-dashboard", daemon=True)
+            self._thread = threading.Thread(
+                target=self._run_in_thread, name="web-dashboard", daemon=True
+            )
             self._thread.start()
             self._started.wait(timeout=10)
             if self._start_error is not None:
@@ -894,9 +1045,9 @@ class WebDashboard:
             if self._loop and not self._loop.is_closed():
                 if self._start_error is not None and self._runner is not None:
                     try:
-                        self._loop.run_until_complete(asyncio.wait_for(
-                            self._runner.cleanup(), timeout=1.0
-                        ))
+                        self._loop.run_until_complete(
+                            asyncio.wait_for(self._runner.cleanup(), timeout=1.0)
+                        )
                     except Exception:
                         pass
                 self._loop.close()
@@ -950,7 +1101,9 @@ class WebDashboard:
             if loop is not None and not loop.is_closed():
                 try:
                     if loop.is_running():
-                        future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), loop)
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._shutdown_async(), loop
+                        )
                         try:
                             future.result(timeout=3)
                         finally:
@@ -960,7 +1113,11 @@ class WebDashboard:
                         loop.run_until_complete(self._shutdown_async())
                 except Exception as exc:
                     logger.warning("Остановка веб-наблюдателя: %s", exc)
-        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+        if (
+            self._thread
+            and self._thread.is_alive()
+            and self._thread is not threading.current_thread()
+        ):
             self._thread.join(timeout=2)
         elif self._thread is None and self._loop and not self._loop.is_closed():
             self._loop.close()
@@ -983,25 +1140,56 @@ class WebDashboard:
     def publish_event(self, name: str, data: Any, **kwargs: Any) -> None:
         self.state.push_event(name, data, **kwargs)
 
-    def publish_thought(self, text: str, *, cycle: Optional[int] = None,
-                        kind: str = "thought", meta: Optional[Dict[str, Any]] = None) -> None:
+    def publish_thought(
+        self,
+        text: str,
+        *,
+        cycle: Optional[int] = None,
+        kind: str = "thought",
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.state.push_thought(text, cycle=cycle, kind=kind, meta=meta)
 
 
 def _demo_state() -> SharedState:
-    """Маленький честный standalone: это демонстрационные DTO, не живая Тэсс."""
+    """Маленький честный standalone: демонстрационные DTO, не живой профиль."""
     state = SharedState()
-    state.update_status({"name": "Standalone preview", "cycle": 0, "energy": 0,
-                         "max_energy": 200, "concepts": 0, "uptime_sec": 0})
-    state.update_life({
-        "name": "Standalone preview",
-        "life": {"cycle": 0, "energy": 0, "state": "unknown", "state_label": "ядро не подключено"},
-        "now": {"activity": None}, "motivation": {}, "intentions": {"recent": []},
-        "emotions": {"levels": {}, "dominant": None}, "body": {},
-        "activities": {}, "access": {}, "effector": {"counts": {}},
-    })
+    state.update_status(
+        {
+            "name": "Standalone preview",
+            "cycle": 0,
+            "energy": 0,
+            "max_energy": 200,
+            "concepts": 0,
+            "uptime_sec": 0,
+        }
+    )
+    state.update_life(
+        {
+            "name": "Standalone preview",
+            "life": {
+                "cycle": 0,
+                "energy": 0,
+                "state": "unknown",
+                "state_label": "ядро не подключено",
+            },
+            "now": {"activity": None},
+            "motivation": {},
+            "intentions": {"recent": []},
+            "emotions": {"levels": {}, "dominant": None},
+            "body": {},
+            "activities": {},
+            "access": {},
+            "effector": {"counts": {}},
+        }
+    )
     state.update_diary({"episodes": [], "cache_limit": 500})
-    state.push_event("agent_message", {"text": "Standalone preview: ядро не запущено, данные не выдаются за живую сущность."})
+    state.push_event(
+        "agent_message",
+        {
+            "text": "Standalone preview: ядро не запущено, данные не выдаются за живую сущность."
+        },
+    )
     return state
 
 

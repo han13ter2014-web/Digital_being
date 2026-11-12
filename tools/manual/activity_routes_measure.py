@@ -29,20 +29,38 @@ def measure():
         # Отключённые в контроле драйвы не маскируют причинную связь need→hint.
         for drive in motivation.drives.values():
             drive.current_level = 0.0
-        candidates = motivation.get_action_candidates({"energy": agent.energy, "cycle": 100})
-        rows.append({"need": target, "candidates": [
-            {"hint": c["action"], "handler": agent._normalize_action(c["action"]),
-             "params": c.get("params"), "strength": c["strength"]}
-            for c in candidates if c.get("need") == target]})
+        candidates = motivation.get_action_candidates(
+            {"energy": agent.energy, "cycle": 100}
+        )
+        rows.append(
+            {
+                "need": target,
+                "candidates": [
+                    {
+                        "hint": c["action"],
+                        "handler": agent._normalize_action(c["action"]),
+                        "params": c.get("params"),
+                        "strength": c["strength"],
+                    }
+                    for c in candidates
+                    if c.get("need") == target
+                ],
+            }
+        )
     for need in motivation.needs.values():
         need.current_level = need.base_level
     for drive in motivation.drives.values():
         drive.current_level = 0.0
     default = motivation.get_action_candidates({})
     PluginRegistry.reset_global()
-    return {"isolated_needs": rows, "no_pressing_needs": default,
-            "research_feedback_aliases": {key: ACTION_ALIASES[key] for key in ("explore", "synthesis", "know_answer")},
-            "limits": "Generator routes only; no execution, no sentience or diversity claims"}
+    return {
+        "isolated_needs": rows,
+        "no_pressing_needs": default,
+        "research_feedback_aliases": {
+            key: ACTION_ALIASES[key] for key in ("explore", "synthesis", "know_answer")
+        },
+        "limits": "Generator routes only; no execution, no sentience or diversity claims",
+    }
 
 
 if __name__ == "__main__":
@@ -53,7 +71,10 @@ if __name__ == "__main__":
         os.environ["DIGITAL_BEING_DATA_DIR"] = directory
         os.environ["DIGITAL_BEING_TEST_MODE"] = "1"
         from config.simulation_config import LR_CONFIG
+
         LR_CONFIG.WEB_SEARCH_ENABLED = False
         result = measure()
-        args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        args.report.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         print(json.dumps(result, ensure_ascii=True, indent=2))

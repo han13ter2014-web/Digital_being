@@ -79,9 +79,7 @@ class EffectorDriver:
             "last_cycle": self._last_cycle,
             "last_error": self._last_error,
             "last_result": (
-                self._last_result.to_dict()
-                if self._last_result is not None
-                else None
+                self._last_result.to_dict() if self._last_result is not None else None
             ),
         }
 

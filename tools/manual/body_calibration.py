@@ -37,16 +37,22 @@ def _row(step: int, phase: str, model: InteroceptiveModel) -> str:
     )
 
 
-def run_phase(model: InteroceptiveModel, steps: int, *, load: float,
-              rest: float, phase: str, every: int = 5):
+def run_phase(
+    model: InteroceptiveModel,
+    steps: int,
+    *,
+    load: float,
+    rest: float,
+    phase: str,
+    every: int = 5,
+):
     for i in range(steps):
         model.step(dt=1.0, cognitive_load=load, rest_depth=rest)
         if i % every == 0 or i == steps - 1:
             print(_row(i, phase, model))
 
 
-def scenario(label: str, steps: int, *, load: float, rest: float,
-             every: int = 5):
+def scenario(label: str, steps: int, *, load: float, rest: float, every: int = 5):
     print(f"\n=== {label} ===")
     run_phase(
         InteroceptiveModel(_FakeAgent()),

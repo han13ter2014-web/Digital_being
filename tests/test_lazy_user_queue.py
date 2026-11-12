@@ -15,6 +15,7 @@ test_lazy_user_queue.py — ленивое создание _pending_user_messag
 3. start() создаёт очередь и НЕ пересоздаёт её при сообщениях.
 4. Пустые сообщения и data=None игнорируются.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock
@@ -34,23 +35,35 @@ if PROJECT_ROOT not in sys.path:
 class FakeEnergyPolicy:
     def __init__(self, energy=100.0):
         self._energy = energy
+
     def current_tick_interval_sec(self):
         return 1.0
+
     def regenerate(self, dt):
         pass
+
     def get_status(self):
-        return {"energy": self._energy, "max_energy": 200,
-                "percent": self._energy / 200 * 100, "level": "normal",
-                "tick_interval_sec": 1.0}
+        return {
+            "energy": self._energy,
+            "max_energy": 200,
+            "percent": self._energy / 200 * 100,
+            "level": "normal",
+            "tick_interval_sec": 1.0,
+        }
+
     def attach_setter(self, setter):
         self._setter = setter
+
     @property
     def energy_percent(self):
         return self._energy / 200 * 100
+
     def should_publish_critical(self):
         return False
+
     def should_publish_low(self):
         return False
+
     def should_publish_recovered(self):
         return False
 
@@ -91,13 +104,17 @@ class FakeAgent:
 
 class FakeBus:
     """Минимальная имитация EventBus для тестов."""
+
     def __init__(self):
         self.published = []
+
     def subscribe(self, event_name, callback):
         pass
+
     async def publish(self, name, data=None, **kwargs):
         """Async-публикация, как у настоящего EventBus."""
         self.published.append({"name": name, "data": data, **kwargs})
+
     def publish_sync(self, name, data=None, **kwargs):
         self.published.append({"name": name, "data": data, **kwargs})
 
@@ -107,6 +124,7 @@ class FakeBus:
 # ============================================================
 def _make_runner():
     from src.core.agent_runner import AgentRunner
+
     agent = FakeAgent()
     bus = FakeBus()
     runner = AgentRunner(agent, bus)
@@ -126,8 +144,10 @@ async def test_message_before_start_gets_honest_reply_not_queue():
     runner, agent, bus = _make_runner()
 
     # До start() — очереди НЕТ.
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+    )
 
     # Имитируем получение user_message ДО start().
     event = MagicMock()
@@ -135,13 +155,14 @@ async def test_message_before_start_gets_honest_reply_not_queue():
     await runner._on_user_message(event)
 
     # Очередь не создалась: продюсера у неё больше нет.
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None or \
-           runner._pending_user_messages.empty()
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+        or runner._pending_user_messages.empty()
+    )
     # Сообщение не потеряно — получен честный отклик.
     thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
-    assert any("не понимаю" in (p["data"] or {}).get("text", "")
-               for p in thoughts)
+    assert any("не понимаю" in (p["data"] or {}).get("text", "") for p in thoughts)
 
 
 @pytest.mark.asyncio
@@ -159,9 +180,11 @@ async def test_multiple_messages_before_start_each_gets_reply():
     thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
     replies = [(p["data"] or {}).get("text", "") for p in thoughts]
     assert len(replies) == len(msgs)
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None or \
-           runner._pending_user_messages.empty()
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+        or runner._pending_user_messages.empty()
+    )
 
 
 @pytest.mark.asyncio
@@ -178,9 +201,9 @@ async def test_start_does_not_recreate_queue_on_messages():
     await runner._on_user_message(event)
 
     queue_after = runner._pending_user_messages
-    assert queue_after is queue_before, (
-        "очередь пересоздалась на сообщении — legacy-потребитель сломан!"
-    )
+    assert (
+        queue_after is queue_before
+    ), "очередь пересоздалась на сообщении — legacy-потребитель сломан!"
     # Очередь остаётся пустой: нераспознанное в стимулы не идёт.
     assert queue_after.empty()
 
@@ -194,8 +217,10 @@ async def test_start_creates_queue_if_not_exist():
     runner, agent, bus = _make_runner()
 
     # Очереди нет.
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+    )
 
     await runner.start()
     # Очередь создана.
@@ -216,9 +241,11 @@ async def test_empty_message_ignored():
     event.data = {"text": ""}
     await runner._on_user_message(event)
     # Очередь даже не создаётся.
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None or \
-           runner._pending_user_messages.empty()
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+        or runner._pending_user_messages.empty()
+    )
 
     # Cleanup.
     await runner.stop()
@@ -233,9 +260,11 @@ async def test_message_with_none_data_ignored():
     event.data = None
     await runner._on_user_message(event)
     # Очередь не создалась.
-    assert not hasattr(runner, "_pending_user_messages") or \
-           runner._pending_user_messages is None or \
-           runner._pending_user_messages.empty()
+    assert (
+        not hasattr(runner, "_pending_user_messages")
+        or runner._pending_user_messages is None
+        or runner._pending_user_messages.empty()
+    )
 
     # Cleanup.
     await runner.stop()
@@ -256,8 +285,7 @@ async def test_message_after_start_gets_reply_queue_stays_empty():
     assert runner._pending_user_messages is queue_after_start
     assert runner._pending_user_messages.empty()
     thoughts = [p for p in bus.published if p["name"] == Events.AGENT_THOUGHT]
-    assert any("не понимаю" in (p["data"] or {}).get("text", "")
-               for p in thoughts)
+    assert any("не понимаю" in (p["data"] or {}).get("text", "") for p in thoughts)
 
     # Cleanup.
     await runner.stop()

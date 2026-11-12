@@ -12,7 +12,9 @@ def test_write_read_roundtrip(tmp_path: Path) -> None:
     assert info["path"] == "notes/a.txt"
     assert info["created"] is True
     assert sandbox.read_text("notes/a.txt") == "привет\nмир\n"
-    assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(encoding="utf-8") == "привет\nмир\n"
+    assert (tmp_path / "workspace" / "notes" / "a.txt").read_text(
+        encoding="utf-8"
+    ) == "привет\nмир\n"
 
 
 def test_absolute_and_parent_paths_are_rejected(tmp_path: Path) -> None:

@@ -37,10 +37,10 @@ def knowledge_base_set_impl(self, value: Dict[str, str]) -> None:
 def open_questions_get_impl(self) -> list:
     """Backward-compat property: возвращает очередь OpenQuestionsManager.
 
-        Позволяет существующему коду (``for q in self._open_questions:``,
-        ``self._open_questions.append(...)``) работать без изменений.
-        Изменения через этот property проксируются в manager.queue.
-        """
+    Позволяет существующему коду (``for q in self._open_questions:``,
+    ``self._open_questions.append(...)``) работать без изменений.
+    Изменения через этот property проксируются в manager.queue.
+    """
     if not hasattr(self, "_open_questions_manager"):
         return []
     return self._open_questions_manager.queue
@@ -49,10 +49,10 @@ def open_questions_get_impl(self) -> list:
 def open_questions_set_impl(self, value) -> None:
     """Backward-compat setter: заменяет очередь целиком.
 
-        Используется в тестах для сброса (``a._open_questions = []``) и в
-        legacy-коде, который не знает про OpenQuestionsManager. После
-        присвоения все методы Open Questions будут работать с новой очередью.
-        """
+    Используется в тестах для сброса (``a._open_questions = []``) и в
+    legacy-коде, который не знает про OpenQuestionsManager. После
+    присвоения все методы Open Questions будут работать с новой очередью.
+    """
     if not hasattr(self, "_open_questions_manager"):
         return
     if value is None:

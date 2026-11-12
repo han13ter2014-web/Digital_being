@@ -6,13 +6,10 @@
 
 import json
 
-import pytest
 
 from src.core.maturity import (
-    CONFIDENT_THRESHOLD,
     CriterionResult,
     MaturityCriteria,
-    MaturityReport,
     assess,
     load_criteria,
 )
@@ -90,7 +87,7 @@ def test_newborn_is_not_mature():
     """Порог не проходит на пустом месте — иначе он бесполезен."""
     newborn = FakeAgent(
         cycles=0,
-        confidences=[0.1] * 26,   # родовые знания
+        confidences=[0.1] * 26,  # родовые знания
         birth=26,
         value_changes=0,
         goals=0,
@@ -128,7 +125,7 @@ def _mature_agent():
         confidences=[0.8] * 50,
         birth=26,
         birth_defined=0,
-        defined=30,               # у 30 есть своя формулировка
+        defined=30,  # у 30 есть своя формулировка
         value_changes=2,
         goals=3,
         effective_ratio=0.8,
@@ -157,9 +154,14 @@ def test_mature_summary_has_no_missing_parts():
 def test_cycles_criterion():
     report = assess(
         FakeAgent(cycles=499, confidences=[0.8] * 50, birth=26),
-        MaturityCriteria(min_cycles=500, min_new_concepts=1,
-                         min_defined_concepts=1, min_value_changes=0,
-                         min_goals_completed=0, min_effective_ratio_pct=0),
+        MaturityCriteria(
+            min_cycles=500,
+            min_new_concepts=1,
+            min_defined_concepts=1,
+            min_value_changes=0,
+            min_goals_completed=0,
+            min_effective_ratio_pct=0,
+        ),
     )
     cycles = next(c for c in report.criteria if c.name == "cycles")
     assert cycles.met is False
@@ -188,26 +190,22 @@ def test_new_concepts_never_negative():
 def test_defined_concepts_counts_definitions():
     """Считаются концепции с собственной формулировкой сверх родовых."""
     agent = FakeAgent(
-        confidences=[0.1] * 12, birth=0, birth_defined=0,
+        confidences=[0.1] * 12,
+        birth=0,
+        birth_defined=0,
         defined=7,
     )
     report = assess(agent)
-    item = next(
-        c for c in report.criteria if c.name == "defined_concepts"
-    )
+    item = next(c for c in report.criteria if c.name == "defined_concepts")
 
     assert item.value == 7
 
 
 def test_defined_concepts_excludes_innate():
     """Родовые определения не засчитываются как достижение агента."""
-    agent = FakeAgent(
-        confidences=[0.8] * 10, birth=10, birth_defined=4, defined=10
-    )
+    agent = FakeAgent(confidences=[0.8] * 10, birth=10, birth_defined=4, defined=10)
     report = assess(agent)
-    item = next(
-        c for c in report.criteria if c.name == "defined_concepts"
-    )
+    item = next(c for c in report.criteria if c.name == "defined_concepts")
 
     assert item.value == 6  # 10 всего минус 4 родовых
 
@@ -225,9 +223,7 @@ def test_effective_ratio_is_percentage():
     """Доля результативных действий показывается в процентах."""
     agent = FakeAgent(confidences=[], birth=0, effective_ratio=0.73)
     report = assess(agent)
-    item = next(
-        c for c in report.criteria if c.name == "effective_ratio"
-    )
+    item = next(c for c in report.criteria if c.name == "effective_ratio")
 
     assert item.value == 73
     assert item.target == 50
@@ -236,9 +232,7 @@ def test_effective_ratio_is_percentage():
 
 def test_zero_ratio_is_not_met():
     agent = FakeAgent(confidences=[], birth=0, effective_ratio=0.0)
-    item = next(
-        c for c in assess(agent).criteria if c.name == "effective_ratio"
-    )
+    item = next(c for c in assess(agent).criteria if c.name == "effective_ratio")
     assert item.met is False
 
 
@@ -306,9 +300,7 @@ def test_criteria_from_garbage_is_default():
 
 def test_load_criteria_from_file(tmp_path):
     path = tmp_path / "maturity.json"
-    path.write_text(
-        json.dumps({"criteria": {"min_cycles": 42}}), encoding="utf-8"
-    )
+    path.write_text(json.dumps({"criteria": {"min_cycles": 42}}), encoding="utf-8")
     criteria = load_criteria(str(path))
     assert criteria.min_cycles == 42
 
@@ -340,9 +332,7 @@ def test_report_describe_mentions_verdict():
 
 
 def test_criterion_progress_for_ui():
-    item = CriterionResult(
-        name="cycles", label="Циклы", value=250, target=500
-    )
+    item = CriterionResult(name="cycles", label="Циклы", value=250, target=500)
     assert item.progress() == 0.5
     assert item.met is False
 

@@ -8,8 +8,10 @@ from src.core.personal_continuity import capture_personal_state
 
 
 def equal_candidates():
-    return [{"action": "play", "source": "activity", "strength": 0.8, "params": {}},
-            {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}}]
+    return [
+        {"action": "play", "source": "activity", "strength": 0.8, "params": {}},
+        {"action": "create_draft", "source": "activity", "strength": 0.8, "params": {}},
+    ]
 
 
 def test_successful_new_opportunity_restores_method_without_value_change():
@@ -32,13 +34,22 @@ def test_new_opportunity_can_change_real_arbitration_but_not_force_it():
     agent = DigitalBeing(name="PreferenceRecoveryChoice")
     for _ in range(5):
         observe(agent, "play", outcome="error")
-    verdict = {"score": 0.5, "verdict": "proceed", "confidence": 0.5,
-               "reasoning": "controlled", "voices": {}}
+    verdict = {
+        "score": 0.5,
+        "verdict": "proceed",
+        "confidence": 0.5,
+        "reasoning": "controlled",
+        "voices": {},
+    }
     with patch.object(agent.decision_arbitrator, "arbitrate", return_value=verdict):
-        before = agent.decision_arbitrator.choose_action(apply(agent, equal_candidates()), {})
+        before = agent.decision_arbitrator.choose_action(
+            apply(agent, equal_candidates()), {}
+        )
         for _ in range(10):
             observe(agent, "play", had_effect=True)
-        after = agent.decision_arbitrator.choose_action(apply(agent, equal_candidates()), {})
+        after = agent.decision_arbitrator.choose_action(
+            apply(agent, equal_candidates()), {}
+        )
     assert before["action"] == "create_draft"
     assert after["action"] in {"play", "create_draft"}
     assert agent._is_action_available("play")

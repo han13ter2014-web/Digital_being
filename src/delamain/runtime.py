@@ -20,9 +20,8 @@ from .sandbox import Sandbox
 class DelamainRuntime:
     """Execute plans in a sandbox and persist every observation.
 
-    The runtime is intentionally synchronous. It is a small deterministic
-    kernel; an LLM can be plugged in as a planner, but it is not needed for
-    the loop to function.
+    The runtime is intentionally synchronous and deterministic. Planning uses
+    the built-in heuristic implementation or an explicitly supplied planner.
 
     Approval is a preflight gate for the *whole* plan: if any step is marked
     dangerous (or if mode is ``all``), no step runs until the user approves
@@ -53,12 +52,15 @@ class DelamainRuntime:
         max_step_repairs: int = 1,
         max_repair_steps: int = 5,
         code_runner: Optional[CodeRunner] = None,
+        life_id: Optional[str] = None,
     ) -> None:
         if memory is None and db_path is None:
             raise ValueError("db_path is required when memory is not provided")
+        if memory is not None and life_id is not None and memory.life_id != life_id:
+            raise ValueError("Переданная память Delamain принадлежит другой жизни")
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self.sandbox = sandbox or Sandbox(self.workspace_root)
-        self.memory = memory or MemoryStore(db_path)  # type: ignore[arg-type]
+        self.memory = memory or MemoryStore(db_path, life_id=life_id)  # type: ignore[arg-type]
         self._owns_memory = memory is None
         self.registry = registry or ActionRegistry.default(
             self.sandbox,
@@ -612,10 +614,7 @@ class DelamainRuntime:
                 continue
 
             repair_error = None
-            if (
-                self.step_repair_enabled
-                and repair_count < self.max_step_repairs
-            ):
+            if self.step_repair_enabled and repair_count < self.max_step_repairs:
                 # The current failure is the last attempted step.  Passing the
                 # exact index matters when earlier repair segments failed too.
                 failed_index = len(planned_actions) - 1
@@ -637,8 +636,8 @@ class DelamainRuntime:
                     repair_count=repair_count,
                     failed_index=failed_index,
                 )
-                repair_requests, prep_error, repair_planned = (
-                    self._prepare_repair_plan(task, context)
+                repair_requests, prep_error, repair_planned = self._prepare_repair_plan(
+                    task, context
                 )
                 if repair_requests is not None and prep_error is None:
                     validation_error = self._repair_validation_error(
@@ -646,9 +645,7 @@ class DelamainRuntime:
                         planned_actions,
                     )
                 else:
-                    validation_error = prep_error or (
-                        "planner returned no repair plan"
-                    )
+                    validation_error = prep_error or ("planner returned no repair plan")
 
                 if validation_error is None and repair_requests is not None:
                     requires_approval, dangerous_actions = (
@@ -680,9 +677,7 @@ class DelamainRuntime:
                             metadata={
                                 "kind": "step_repair",
                                 "prior_actions": list(planned_actions),
-                                "prior_effective_actions": list(
-                                    effective_actions
-                                ),
+                                "prior_effective_actions": list(effective_actions),
                                 "prior_steps": len(planned_actions),
                                 "repair_count": next_repair_count,
                                 "failed_step": context.get("failed_step"),
@@ -747,9 +742,7 @@ class DelamainRuntime:
                     metadata={"repair_count": repair_count},
                 )
 
-            include_effective = (
-                self.step_repair_enabled or resumed or repair_count > 0
-            )
+            include_effective = self.step_repair_enabled or resumed or repair_count > 0
             finish_output: Dict[str, Any] = {
                 "steps": steps_before + len(steps),
                 "planned_actions": list(planned_actions),
@@ -787,9 +780,7 @@ class DelamainRuntime:
             )
 
         final_output = steps[-1].output if steps else None
-        include_effective = (
-            self.step_repair_enabled or resumed or repair_count > 0
-        )
+        include_effective = self.step_repair_enabled or resumed or repair_count > 0
         finish_output = {
             "steps": steps_before + len(steps),
             "planned_actions": list(planned_actions),
@@ -829,7 +820,9 @@ class DelamainRuntime:
     def describe_actions(self) -> List[Dict[str, Any]]:
         return [spec.to_dict() for spec in self.registry.specs()]
 
-    def history(self, task_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+    def history(
+        self, task_id: Optional[str] = None, limit: int = 20
+    ) -> List[Dict[str, Any]]:
         return self.memory.recent_episodes(task_id=task_id, limit=limit)
 
     def close(self) -> None:

@@ -27,8 +27,14 @@ def test_snapshot_does_not_create_lazy_core_fields():
 
 def test_snapshot_does_not_mutate_agent():
     agent = _agent("Stable")
-    entry = begin_intention(agent, {"action": "play", "source": "activity",
-                                    "params": {"topic": "партия", "reason": "интерес"}})
+    entry = begin_intention(
+        agent,
+        {
+            "action": "play",
+            "source": "activity",
+            "params": {"topic": "партия", "reason": "интерес"},
+        },
+    )
     keys_before = set(agent.__dict__)
     cycle_before = agent.cycle_count
     energy_before = agent.energy
@@ -58,10 +64,17 @@ def test_snapshot_returns_deep_copies_of_core_data():
 
 
 def test_snapshot_shows_queued_effector_separately_from_succeeded():
-    counts = {"queued": 2, "waiting_approval": 1, "succeeded": 3,
-              "failed": 1, "rejected": 0}
+    counts = {
+        "queued": 2,
+        "waiting_approval": 1,
+        "succeeded": 3,
+        "failed": 1,
+        "rejected": 0,
+    }
     agent = _agent("Effector")
-    agent.delamain_effector = SimpleNamespace(enabled=True, status=lambda: {"counts": counts})
+    agent.delamain_effector = SimpleNamespace(
+        enabled=True, status=lambda: {"counts": counts}
+    )
 
     snapshot = build_life_snapshot(agent)
 
@@ -93,10 +106,20 @@ def test_broken_subsystem_does_not_break_snapshot():
 
 def test_waiting_intentions_are_listed_only_while_unresolved():
     agent = _agent("Waiting")
-    entry = begin_intention(agent, {"action": "explore", "source": "activity",
-                                   "params": {"topic": "память", "reason": "нет источников"}})
-    entry["evidence_goal"] = {"kind": "new_topic_evidence", "status": "pending",
-                              "baseline_sources": [], "new_sources": []}
+    entry = begin_intention(
+        agent,
+        {
+            "action": "explore",
+            "source": "activity",
+            "params": {"topic": "память", "reason": "нет источников"},
+        },
+    )
+    entry["evidence_goal"] = {
+        "kind": "new_topic_evidence",
+        "status": "pending",
+        "baseline_sources": [],
+        "new_sources": [],
+    }
     entry["continuation_of"] = "previous"
     finish_intention(entry, outcome=None)
     from src.cognition.intention_waiting import remember_wait
@@ -105,7 +128,10 @@ def test_waiting_intentions_are_listed_only_while_unresolved():
     assert len(build_life_snapshot(agent)["intentions"]["waiting"]) == 1
 
     agent._waiting_intentions[next(iter(agent._waiting_intentions))]["resolution"] = {
-        "kind": "forgotten", "reason": "источников нет", "cycle": agent.cycle_count}
+        "kind": "forgotten",
+        "reason": "источников нет",
+        "cycle": agent.cycle_count,
+    }
     snapshot = build_life_snapshot(agent)
     assert snapshot["intentions"]["waiting"] == []
     # Забытое не исчезает: оно уходит в отдельный список для карты.
@@ -128,11 +154,20 @@ def test_activity_catalog_matches_core_not_filesystem():
 
 def test_diary_includes_finished_core_intention_without_delamain():
     agent = _agent("CoreDiary")
-    entry = begin_intention(agent, {"action": "create_draft", "source": "activity",
-                                    "params": {"topic": "тишина", "reason": "интерес"}})
-    finish_intention(entry, outcome=SimpleNamespace(
-        reason="", as_dict=lambda: {"action": "create_draft", "had_effect": True}
-    ))
+    entry = begin_intention(
+        agent,
+        {
+            "action": "create_draft",
+            "source": "activity",
+            "params": {"topic": "тишина", "reason": "интерес"},
+        },
+    )
+    finish_intention(
+        entry,
+        outcome=SimpleNamespace(
+            reason="", as_dict=lambda: {"action": "create_draft", "had_effect": True}
+        ),
+    )
 
     diary = build_life_snapshot(agent)["diary"]["episodes"]
     assert len(diary) == 1
@@ -143,11 +178,19 @@ def test_diary_includes_finished_core_intention_without_delamain():
 
 def test_diary_snapshot_reads_episodes_without_mutating_core():
     agent = _agent("DiaryCopies")
-    rows = [{"id": 1, "action": "play", "args": {"target": "партия"},
-             "metadata": {"status": "performed"}}]
-    agent.delamain = SimpleNamespace(runtime=SimpleNamespace(
-        memory=SimpleNamespace(recent_life_episodes=lambda **kwargs: rows)
-    ))
+    rows = [
+        {
+            "id": 1,
+            "action": "play",
+            "args": {"target": "партия"},
+            "metadata": {"status": "performed"},
+        }
+    ]
+    agent.delamain = SimpleNamespace(
+        runtime=SimpleNamespace(
+            memory=SimpleNamespace(recent_life_episodes=lambda **kwargs: rows)
+        )
+    )
     before = set(agent.__dict__)
     snapshot = build_life_snapshot(agent)
     snapshot["diary"]["episodes"][0]["args"]["target"] = "изменено"
@@ -172,11 +215,17 @@ def test_extended_diary_uses_same_collector_without_changing_tk_window():
     from src.ui.life_snapshot import build_diary_snapshot
 
     agent = _agent("DiaryPages")
-    rows = [{"id": index, "action": "play", "args": {"target": str(index)}}
-            for index in range(30)]
-    agent.delamain = SimpleNamespace(runtime=SimpleNamespace(
-        memory=SimpleNamespace(recent_life_episodes=lambda **kwargs: rows[-kwargs["limit"]:])
-    ))
+    rows = [
+        {"id": index, "action": "play", "args": {"target": str(index)}}
+        for index in range(30)
+    ]
+    agent.delamain = SimpleNamespace(
+        runtime=SimpleNamespace(
+            memory=SimpleNamespace(
+                recent_life_episodes=lambda **kwargs: rows[-kwargs["limit"] :]
+            )
+        )
+    )
 
     tk_snapshot = build_life_snapshot(agent)
     web_snapshot = build_diary_snapshot(agent)

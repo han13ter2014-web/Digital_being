@@ -337,9 +337,7 @@ class GoalBridge:
             command = payload.get("command")
             plan = payload.get("plan")
             predicate = str(
-                payload.get("success_predicate")
-                or goal.get("success_predicate")
-                or ""
+                payload.get("success_predicate") or goal.get("success_predicate") or ""
             )
             metadata = {
                 "bridge_source": "goal_subsystem",
@@ -546,7 +544,9 @@ class GoalBridge:
             except Exception:
                 approval = None
             if approval is not None:
-                dangerous = [str(item) for item in approval.get("dangerous_actions") or []]
+                dangerous = [
+                    str(item) for item in approval.get("dangerous_actions") or []
+                ]
         if dangerous:
             return "approval required: " + ", ".join(dangerous)
         if approval_id:

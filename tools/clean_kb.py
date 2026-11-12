@@ -60,9 +60,7 @@ def main() -> int:
         print("\nDry-run. Для записи добавьте --apply.")
         return 0
 
-    path.write_text(
-        json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nЗаписано: {path}")
     return 0
 

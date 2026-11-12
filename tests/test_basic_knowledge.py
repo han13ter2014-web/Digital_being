@@ -76,9 +76,9 @@ class TestDefaultKnowledge:
         for topic, definition in fresh_kb.DEFAULT_KNOWLEDGE.items():
             assert topic, "пустой ключ в DEFAULT_KNOWLEDGE"
             assert definition, f"пустое определение для '{topic}'"
-            assert len(definition) >= 10, (
-                f"слишком короткое определение для '{topic}': {definition!r}"
-            )
+            assert (
+                len(definition) >= 10
+            ), f"слишком короткое определение для '{topic}': {definition!r}"
 
 
 class TestCategories:

@@ -18,15 +18,40 @@ import re
 
 # Короткие ответы-подтверждения. Длинные фразы сознательно не угадываем:
 # «Да, я тебя слышу и стараюсь понять» — это не согласие на смену имени.
-_AFFIRMATIVE = frozenset({
-    "да", "ага", "угу", "давай", "конечно", "хорошо", "ладно",
-    "ок", "окей", "ok", "yes", "согласен", "согласна", "можно",
-    "пусть будет так", "не против", "я не против",
-})
-_NEGATIVE = frozenset({
-    "нет", "неа", "не надо", "не нужно", "не хочу", "не стоит",
-    "отставить", "оставь как есть", "я против",
-})
+_AFFIRMATIVE = frozenset(
+    {
+        "да",
+        "ага",
+        "угу",
+        "давай",
+        "конечно",
+        "хорошо",
+        "ладно",
+        "ок",
+        "окей",
+        "ok",
+        "yes",
+        "согласен",
+        "согласна",
+        "можно",
+        "пусть будет так",
+        "не против",
+        "я не против",
+    }
+)
+_NEGATIVE = frozenset(
+    {
+        "нет",
+        "неа",
+        "не надо",
+        "не нужно",
+        "не хочу",
+        "не стоит",
+        "отставить",
+        "оставь как есть",
+        "я против",
+    }
+)
 
 
 def classify_confirmation(text: str) -> str:
@@ -60,8 +85,7 @@ class NamingDialogue:
     # и продолжает жить, не блокируя работу.
     NAME_TIMEOUT_CYCLES = 200
 
-    def __init__(self, agent_name: str = "agent",
-                 user_interaction=None):
+    def __init__(self, agent_name: str = "agent", user_interaction=None):
         self.agent_name = agent_name
         self.user_interaction = user_interaction
         self.phase = self.PHASE_NONE
@@ -103,14 +127,18 @@ class NamingDialogue:
         if self.phase != self.PHASE_AWAITING_NAME:
             return {"handled": False, "reason": "не в фазе ожидания"}
 
-        fallback_name = getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        fallback_name = (
+            getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        )
         self.phase = self.PHASE_COMPLETED
-        self._name_history.append({
-            "old_name": self.agent_name,
-            "new_name": fallback_name,
-            "reason": "timeout_fallback",
-            "at_cycle": current_cycle,
-        })
+        self._name_history.append(
+            {
+                "old_name": self.agent_name,
+                "new_name": fallback_name,
+                "reason": "timeout_fallback",
+                "at_cycle": current_cycle,
+            }
+        )
         return {
             "handled": True,
             "fallback_name": fallback_name,
@@ -120,8 +148,7 @@ class NamingDialogue:
     # ============================================================
     # Главный метод: инициация диалога об имени
     # ============================================================
-    def initiate_naming_dialogue(self, agent=None,
-                                 cycle: int = 0) -> dict:
+    def initiate_naming_dialogue(self, agent=None, cycle: int = 0) -> dict:
         """Инициирует диалог об имени.
 
         Вызывается при первом контакте (если у агента временное имя).
@@ -143,7 +170,9 @@ class NamingDialogue:
         self.phase = self.PHASE_AWAITING_NAME
         self._initiated_at_cycle = cycle  # для таймаута
         self._timeout_warned = False
-        current_name = getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        current_name = (
+            getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        )
 
         if current_name == "Без имени":
             introduction = "У меня пока нет имени."
@@ -163,6 +192,7 @@ class NamingDialogue:
 
         # Адаптация к attachment
         from src.core.subsystems.proactive_communication import StyleAdapter
+
         attachment = getattr(agent, "attachment", None) if agent else None
         styled = StyleAdapter.adapt(content, attachment)
 
@@ -179,9 +209,9 @@ class NamingDialogue:
     # ============================================================
     # Обработка ответа пользователя на предложение имени
     # ============================================================
-    def process_name_proposal(self, proposed_name: str,
-                              agent=None,
-                              cycle: int = 0) -> dict:
+    def process_name_proposal(
+        self, proposed_name: str, agent=None, cycle: int = 0
+    ) -> dict:
         """Обрабатывает предложенное пользователем имя.
 
         Агент принимает или предлагает альтернативу
@@ -214,6 +244,7 @@ class NamingDialogue:
 
         # Агент принимает или хочет альтернативу (пока 50/50)
         import random
+
         wants_alternative = random.random() < 0.3  # 30% хочет альтернативу
 
         if not wants_alternative:
@@ -223,17 +254,20 @@ class NamingDialogue:
             # Предлагает альтернативу
             return self._propose_alternative(proposed_name, agent, cycle)
 
-    def _accept_name(self, name: str, agent=None, cycle: int = 0,
-                     source: str = "user") -> dict:
+    def _accept_name(
+        self, name: str, agent=None, cycle: int = 0, source: str = "user"
+    ) -> dict:
         """Принимает предложенное имя."""
         old_name = getattr(agent, "name", self.agent_name) if agent else self.agent_name
         if agent:
-            self._name_history.append({
-                "old_name": old_name,
-                "new_name": name,
-                "cycle": cycle,
-                "source": source,
-            })
+            self._name_history.append(
+                {
+                    "old_name": old_name,
+                    "new_name": name,
+                    "cycle": cycle,
+                    "source": source,
+                }
+            )
             agent.name = name
         if self.user_interaction is not None:
             self.user_interaction.agent_name = name
@@ -251,6 +285,7 @@ class NamingDialogue:
         )
 
         from src.core.subsystems.proactive_communication import StyleAdapter
+
         attachment = getattr(agent, "attachment", None) if agent else None
         styled = StyleAdapter.adapt(content, attachment)
 
@@ -273,8 +308,7 @@ class NamingDialogue:
             "phase": self.phase,
         }
 
-    def _propose_alternative(self, proposed: str,
-                            agent=None, cycle: int = 0) -> dict:
+    def _propose_alternative(self, proposed: str, agent=None, cycle: int = 0) -> dict:
         """Предлагает альтернативу к предложенному имени."""
         # Генерируем альтернативу на основе текущего состояния
         alternatives = [
@@ -290,6 +324,7 @@ class NamingDialogue:
             current + "-Искатель",  # с эпитетом
         ]
         import random
+
         alt = random.choice(alts)
         # Запоминаем: пользователь может согласиться (accept_alternative).
         self._alternative_name = alt
@@ -298,6 +333,7 @@ class NamingDialogue:
         self.phase = self.PHASE_CONSIDERING
 
         from src.core.subsystems.proactive_communication import StyleAdapter
+
         attachment = getattr(agent, "attachment", None) if agent else None
         styled = StyleAdapter.adapt(content, attachment)
 
@@ -340,8 +376,7 @@ class NamingDialogue:
     # ============================================================
     # Осознанное переименование: имя уже принято, агент переспрашивает
     # ============================================================
-    def offer_rename(self, proposed_name: str,
-                     agent=None, cycle: int = 0) -> dict:
+    def offer_rename(self, proposed_name: str, agent=None, cycle: int = 0) -> dict:
         """Новое имя при уже принятом имени: не менять молча, а переспросить."""
         proposed_name = (proposed_name or "").strip()
         if not proposed_name:
@@ -375,6 +410,7 @@ class NamingDialogue:
         )
 
         from src.core.subsystems.proactive_communication import StyleAdapter
+
         attachment = getattr(agent, "attachment", None) if agent else None
         styled = StyleAdapter.adapt(content, attachment)
 
@@ -415,8 +451,11 @@ class NamingDialogue:
         self._rename_candidate = ""
 
         import random
+
         if random.random() < 0.3:
-            current = getattr(agent, "name", self.agent_name) if agent else self.agent_name
+            current = (
+                getattr(agent, "name", self.agent_name) if agent else self.agent_name
+            )
             content = (
                 f"Подумала. «{candidate}» — красивое имя, но я ещё не готова "
                 f"расстаться с «{current}».\n\n"
@@ -424,6 +463,7 @@ class NamingDialogue:
             )
 
             from src.core.subsystems.proactive_communication import StyleAdapter
+
             attachment = getattr(agent, "attachment", None) if agent else None
             styled = StyleAdapter.adapt(content, attachment)
 
@@ -447,8 +487,7 @@ class NamingDialogue:
 
         return self._accept_name(candidate, agent, cycle, source="rename")
 
-    def cancel_rename(self, agent=None, cycle: int = 0,
-                      notify: bool = True) -> dict:
+    def cancel_rename(self, agent=None, cycle: int = 0, notify: bool = True) -> dict:
         """Пользователь против переименования — имя не меняется."""
         if self.phase != self.PHASE_RENAMING_PENDING:
             return {"status": "no_rename_pending"}
@@ -461,6 +500,7 @@ class NamingDialogue:
         if notify and self.user_interaction:
             content = f"Хорошо. Останусь «{current}» — это имя моё."
             from src.core.subsystems.proactive_communication import StyleAdapter
+
             attachment = getattr(agent, "attachment", None) if agent else None
             styled = StyleAdapter.adapt(content, attachment)
             msg_id = self.user_interaction.send_message(
@@ -482,10 +522,13 @@ class NamingDialogue:
     # ============================================================
     # Агент САМ просит переименовать
     # ============================================================
-    def request_renaming(self, reason: str = "вырос из старого имени",
-                          agent=None, cycle: int = 0) -> dict:
+    def request_renaming(
+        self, reason: str = "вырос из старого имени", agent=None, cycle: int = 0
+    ) -> dict:
         """Агент сам просит о переименовании."""
-        current_name = getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        current_name = (
+            getattr(agent, "name", self.agent_name) if agent else self.agent_name
+        )
 
         content = (
             f"Знаешь, мне кажется моё имя '{current_name}' "
@@ -495,6 +538,7 @@ class NamingDialogue:
         )
 
         from src.core.subsystems.proactive_communication import StyleAdapter
+
         attachment = getattr(agent, "attachment", None) if agent else None
         styled = StyleAdapter.adapt(content, attachment)
 

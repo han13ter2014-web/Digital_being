@@ -25,8 +25,12 @@ def measure(case):
     PluginRegistry.reset_global()
     agent = DigitalBeing(name="NewEvidenceMeasure")
     agent.cycle_count = 100
-    first = begin_intention(agent, {"action": "explore", "source": "test", "params": {"topic": "память"}})
-    agent.mental_models.encounter_concept("память", "первая встреча", "Встретил неизвестную тему")
+    first = begin_intention(
+        agent, {"action": "explore", "source": "test", "params": {"topic": "память"}}
+    )
+    agent.mental_models.encounter_concept(
+        "память", "первая встреча", "Встретил неизвестную тему"
+    )
     finish_intention(first)
     finish_evidence_goal(agent, first)
     agent.cycle_count += 1
@@ -38,22 +42,28 @@ def measure(case):
     before_sources = evidence_sources(agent, "память")
     if case != "no_source":
         topic = "память" if case == "relevant_answer" else "дерево"
-        answer = ("Память сохраняет опыт и позволяет использовать его позднее."
-                  if topic == "память" else "Дерево — многолетнее растение с одревесневшим стволом.")
+        answer = (
+            "Память сохраняет опыт и позволяет использовать его позднее."
+            if topic == "память"
+            else "Дерево — многолетнее растение с одревесневшим стволом."
+        )
         queued = agent.user_interaction.ask_user(topic, cycle=agent.cycle_count)
         if queued["status"] != "queued":
             raise RuntimeError(queued)
         agent._process_user_answer(answer)
     proposal = continuation_candidate(agent)
     thought = agent.think("вопрос: память") if case == "relevant_answer" else None
-    result = {"case": case,
-              "goal_status": retry["evidence_goal"]["status"],
-              "answer_from_memory": bool(thought and "[Ментальная модель]" in thought), "sources_before": before_sources,
-              "sources_after": evidence_sources(agent, "память"),
-              "information_context_changed": before_context != information_context(agent),
-              "continuation_offered": proposal is not None,
-              "offered_topic": proposal["params"]["topic"] if proposal else None,
-              "meaning": "New evidence is not proof of full understanding"}
+    result = {
+        "case": case,
+        "goal_status": retry["evidence_goal"]["status"],
+        "answer_from_memory": bool(thought and "[Ментальная модель]" in thought),
+        "sources_before": before_sources,
+        "sources_after": evidence_sources(agent, "память"),
+        "information_context_changed": before_context != information_context(agent),
+        "continuation_offered": proposal is not None,
+        "offered_topic": proposal["params"]["topic"] if proposal else None,
+        "meaning": "New evidence is not proof of full understanding",
+    }
     PluginRegistry.reset_global()
     return result
 
@@ -66,8 +76,14 @@ if __name__ == "__main__":
         os.environ["DIGITAL_BEING_DATA_DIR"] = directory
         os.environ["DIGITAL_BEING_TEST_MODE"] = "1"
         from config.simulation_config import LR_CONFIG
+
         LR_CONFIG.WEB_SEARCH_ENABLED = False
-        results = [measure(case) for case in ("no_source", "unrelated_answer", "relevant_answer")]
-        args.report.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        results = [
+            measure(case)
+            for case in ("no_source", "unrelated_answer", "relevant_answer")
+        ]
+        args.report.write_text(
+            json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         print(json.dumps(results, ensure_ascii=True, indent=2))
         logging.shutdown()

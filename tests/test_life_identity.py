@@ -24,9 +24,9 @@ def test_active_profile_keeps_life_id_with_renamed_display_name(tmp_path):
     life_id = new_life_id()
     remember_active_name(tmp_path, "Омелла", life_id)
     assert selected_life_id(tmp_path) == life_id
-    assert json.loads((tmp_path / "active_profile.json").read_text(encoding="utf-8")) == {
-        "name": "Омелла", "life_id": life_id
-    }
+    assert json.loads(
+        (tmp_path / "active_profile.json").read_text(encoding="utf-8")
+    ) == {"name": "Омелла", "life_id": life_id}
 
 
 def test_uuid_survives_real_save_rename_restart(tmp_path, monkeypatch):
@@ -42,8 +42,9 @@ def test_uuid_survives_real_save_rename_restart(tmp_path, monkeypatch):
     first.name = "Омелла"
     first.cycle_count = 23
     assert AgentRunner(first, EventBus()).save_now()
-    second, report = create_agent(env, active_name(tmp_path, "Alpha"),
-                                  expected_life_id=selected_life_id(tmp_path))
+    second, report = create_agent(
+        env, active_name(tmp_path, "Alpha"), expected_life_id=selected_life_id(tmp_path)
+    )
     assert report["source"] == "checkpoint"
     assert second.life_id == original
     assert second.name == "Омелла"

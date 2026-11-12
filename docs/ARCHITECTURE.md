@@ -87,10 +87,8 @@
 * `ApprovalPolicy` — preflight-политика для опасных действий;
 * `build_failure_context` — компактный контекст упавшего шага, остатка
   плана и успешного пути;
-* `HeuristicPlanner` — детерминированный планировщик без LLM;
-* `OllamaPlanner` — опциональный локальный LLM-планировщик через
-  `/api/chat`, только stdlib;
-* `FallbackPlanner` — primary-планировщик с обязательным откатом на
+* `HeuristicPlanner` — детерминированный планировщик;
+* `FallbackPlanner` — custom primary-планировщик с откатом на
   эвристики;
 * `GoalBridge` — опциональный мост активной когнитивной цели в одну
   исполняемую цель Delamain;
@@ -142,9 +140,9 @@ backoff.
 упавшего шага, аргументы, ошибку, вывод и уже выполненные шаги. Контекст
 ограничен по размеру и переживает перезапуск. При следующей попытке
 `DelamainRuntime.run_task(..., failure_context=...)` вызывает
-`planner.replan()`, если он есть; `OllamaPlanner` добавляет контекст в
-prompt как недоверенные данные, `HeuristicPlanner` просто разбирает задачу
-заново. Это по-прежнему retry между попытками, а не перестройка плана после
+`planner.replan()`, если он есть. `HeuristicPlanner` просто разбирает задачу
+заново; custom deterministic planner может учесть переданный контекст. Это
+по-прежнему retry между попытками, а не перестройка плана после
 каждого шага. Флаг по умолчанию выключен.
 
 С этапа 16 ошибку шага можно исправить внутри той же попытки. При
@@ -199,12 +197,9 @@ legacy-цели остаются pending до единой очереди эта
 границы и переход к единой истории описаны в
 [INTEGRATION.md](INTEGRATION.md).
 
-С этапа 10 planner можно заменить локальной LLM. `OllamaPlanner` получает
-live-схему действий через `bind_registry()`, требует JSON-план, проверяет
-имена действий и лимит шагов. `FallbackPlanner` при любой ошибке
-планирования вызывает `HeuristicPlanner`; LLM не исполняет действия
-напрямую. Слой LLM выключен по умолчанию (`DELAMAIN_LLM_ENABLED=0`), не
-запускает Ollama и не делает сетевых запросов при создании.
+Планирование выполняет `HeuristicPlanner` либо явно переданный план.
+`FallbackPlanner` остаётся универсальной композицией для детерминированных
+custom primary/fallback-планировщиков. LLM/Ollama-слой и его настройки удалены.
 
 С этапа 11 опасные планы проходят approval-preflight **до** `task.start` и
 до первого действия. `write_file` и `set_self_model` помечены
@@ -212,8 +207,8 @@ live-схему действий через `bind_registry()`, требует JS
 `DELAMAIN_APPROVAL_MODE`. Pending approval хранится в SQLite, связан с
 целью (если план пришёл из неё) и исполняется ровно один раз после
 `/delamain approve`; `/delamain reject` отклоняет план и завершает цель
-как `failed`. Approval применяется к любому плану — от эвристики, явного
-`metadata.plan` или LLM.
+как `failed`. Approval применяется к любому плану — от эвристики или явного
+`metadata.plan`.
 
 С этапа 12 `GoalBridge` связывает активную когнитивную цель с одной
 исполняемой целью Delamain. Мост выключен по умолчанию
@@ -239,8 +234,8 @@ metadata когнитивной цели (`execution_proposal`, `execution_decis
 Опасные шаги по-прежнему проходят существующий approval, а proposal сам
 ничего не исполняет.
 
-Слой можно запускать и отдельно: `python -m src.delamain` (с `--llm` —
-через локальную Ollama, с `--approval-mode` — с preflight-проверкой).
+Слой можно запускать и отдельно: `python -m src.delamain`
+(с `--approval-mode` — с preflight-проверкой).
 Подробности и ограничения — в [DELAMAIN_LOCAL.md](DELAMAIN_LOCAL.md),
 итоги этапов — в [STAGE10_REPORT.md](STAGE10_REPORT.md),
 [STAGE11_REPORT.md](STAGE11_REPORT.md),

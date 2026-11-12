@@ -2,7 +2,16 @@
 
 import random
 
-LINES = ((0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6))
+LINES = (
+    (0, 1, 2),
+    (3, 4, 5),
+    (6, 7, 8),
+    (0, 3, 6),
+    (1, 4, 7),
+    (2, 5, 8),
+    (0, 4, 8),
+    (2, 4, 6),
+)
 
 
 def outcome(board):
@@ -20,7 +29,11 @@ def validate_game(state):
     if not isinstance(state, dict):
         raise ValueError("local_play: нужен словарь")
     board = state.get("board")
-    if not isinstance(board, list) or len(board) != 9 or any(cell not in (".", "X", "O") for cell in board):
+    if (
+        not isinstance(board, list)
+        or len(board) != 9
+        or any(cell not in (".", "X", "O") for cell in board)
+    ):
         raise ValueError("local_play.board")
     if type(state.get("turns")) is not int or state["turns"] != board.count("X"):
         raise ValueError("local_play.turns")
@@ -41,17 +54,26 @@ def play_turn(state):
         state.update(new_game())
         state["round"] = number
     # Один выбранный ход и ответ локального соперника, не отдельный act.
-    chosen = random.choice([index for index, cell in enumerate(state["board"]) if cell == "."])
+    chosen = random.choice(
+        [index for index, cell in enumerate(state["board"]) if cell == "."]
+    )
     state["board"][chosen] = "X"
     state["turns"] += 1
     state["result"] = outcome(state["board"])
     opponent = None
     if state["result"] is None:
-        opponent = random.choice([index for index, cell in enumerate(state["board"]) if cell == "."])
+        opponent = random.choice(
+            [index for index, cell in enumerate(state["board"]) if cell == "."]
+        )
         state["board"][opponent] = "O"
         state["result"] = outcome(state["board"])
-    return {"chosen_cell": chosen, "opponent_cell": opponent, "result": state["result"],
-            "board": list(state["board"]), "round": state["round"]}
+    return {
+        "chosen_cell": chosen,
+        "opponent_cell": opponent,
+        "result": state["result"],
+        "board": list(state["board"]),
+        "round": state["round"],
+    }
 
 
 # ============================================================
@@ -94,7 +116,9 @@ def validate_guess(state):
     if type(state.get("round")) is not int or state["round"] < 1:
         raise ValueError("local_guess.round")
     history = state.get("history")
-    if not isinstance(history, list) or any(type(a) is not int or a < 1 for a in history):
+    if not isinstance(history, list) or any(
+        type(a) is not int or a < 1 for a in history
+    ):
         raise ValueError("local_guess.history")
     # Выигрыш возможен только когда диапазон сошёлся на секрете.
     if state.get("result") == "win" and not (low == high == secret):

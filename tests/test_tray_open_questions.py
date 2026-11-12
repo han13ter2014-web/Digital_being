@@ -18,6 +18,7 @@ from src.core.event_bus import EventBus, Events
 def _make_agent_with_question():
     """Создаёт агента с одним поставленным в очередь вопросом."""
     from src.core.agent import DigitalBeing
+
     a = DigitalBeing("TestAgent")
     # Не используя init-логику напрямую — просто кладём вопрос вручную.
     a._open_questions = []
@@ -42,11 +43,13 @@ def test_generate_prioritized_stimulus_consumes_open_question():
 def test_generate_prioritized_stimulus_falls_back_to_pool():
     """Если открытых вопросов нет — должен возвращаться случайный стимул из пула."""
     from src.core.agent import DigitalBeing
+
     a = DigitalBeing("TestAgent")
     assert not a.has_open_questions()
 
     # Подменяем пул, чтобы проверить детерминированно
     from config.simulation_config import LR_CONFIG
+
     original_pool = LR_CONFIG.STIMULI_POOL
     LR_CONFIG.STIMULI_POOL = ["стимул-A", "стимул-B"]
     try:
@@ -82,7 +85,6 @@ def test_agent_runner_publishes_answer_when_question_resolved(monkeypatch):
     """
     from src.core.agent import DigitalBeing
     from src.core.agent_runner import AgentRunner
-    from src.core.event_bus import EventBus
 
     bus = EventBus()
     agent = DigitalBeing("TestAgent")
@@ -119,12 +121,10 @@ def test_agent_runner_publishes_answer_when_question_resolved(monkeypatch):
 
     # Должно быть опубликовано хотя бы одно AGENT_THOUGHT с ответом
     answer_events = [
-        t for t in published_thoughts
-        if "Ответ на вопрос" in t or "любовь" in t.lower()
+        t for t in published_thoughts if "Ответ на вопрос" in t or "любовь" in t.lower()
     ]
     assert len(answer_events) >= 1, (
-        f"Ожидался ответ на вопрос в AGENT_THOUGHT, "
-        f"получено: {published_thoughts}"
+        f"Ожидался ответ на вопрос в AGENT_THOUGHT, " f"получено: {published_thoughts}"
     )
     # Вопрос должен быть помечен как answered
     assert agent._open_questions[0]["answered"] is True
@@ -135,7 +135,6 @@ def test_agent_runner_subscribed_to_user_command():
     """AgentRunner должен быть подписан на USER_COMMAND (для /ask из чата)."""
     from src.core.agent import DigitalBeing
     from src.core.agent_runner import AgentRunner
-    from src.core.event_bus import EventBus
 
     bus = EventBus()
     try:

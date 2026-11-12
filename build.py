@@ -15,6 +15,7 @@ build.py — one-command сборка DigitalBeing.exe.
 # UTF-8 для Windows-консоли (эмодзи ✅ 🛠 и т.п.)
 import io
 import sys
+
 if sys.stdout.encoding != "utf-8":
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -103,8 +104,11 @@ def check_icon() -> bool:
     x = (size - text_w) // 2
     y = (size - text_h) // 2 - 10
     draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
-    img.save(icon_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48),
-                                              (64, 64), (128, 128), (256, 256)])
+    img.save(
+        icon_path,
+        format="ICO",
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
     print(f"✅ Иконка создана: {icon_path}")
     return True
 
@@ -119,7 +123,9 @@ def build() -> None:
     print("\n🚀 Собираю DigitalBeing.exe...")
     print("   Это займёт 1-3 минуты при первом запуске.")
     cmd = [
-        sys.executable, "-m", "PyInstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         SPEC_FILE,
         "--clean",
         "--noconfirm",
@@ -129,7 +135,7 @@ def build() -> None:
     if os.path.isfile(exe_path):
         size_mb = os.path.getsize(exe_path) / (1024 * 1024)
         print(f"\n✅ Готово! {exe_path} ({size_mb:.1f} MB)")
-        print(f"   Двойной клик → агент поселяется в трее.")
+        print("   Двойной клик → агент поселяется в трее.")
     else:
         print(f"\n❌ Сборка прошла, но {exe_path} не найден.")
         sys.exit(1)

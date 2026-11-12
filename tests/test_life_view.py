@@ -6,19 +6,29 @@ from src.ui import life_view as view
 def _snapshot(**overrides):
     base = {
         "name": "Alpha",
-        "life": {"cycle": 428, "energy": 148.0, "state": "alive",
-                 "fatigue": 0.21, "fatigue_level": "normal", "needs_rest": False},
+        "life": {
+            "cycle": 428,
+            "energy": 148.0,
+            "state": "alive",
+            "fatigue": 0.21,
+            "fatigue_level": "normal",
+            "needs_rest": False,
+        },
         "now": {"activity": None, "goal": None, "loop": {}},
         "motivation": {},
         "intentions": {"active": None, "waiting": [], "recent": []},
         "activities": {"creative": {"count": 0, "drafts": []}, "game": None},
         "preferences": {},
         "goals": {},
-        "access": {"network": {"enabled": True, "label": "Интернет-поиск"},
-                   "delamain": {"enabled": False, "label": "Delamain (эффектор)"},
-                   "effector": {"enabled": False, "label": "Выполнение действий"},
-                   "workspace": {"path": "profile/delamain/workspace/creative",
-                                 "label": "Творческая рабочая область"}},
+        "access": {
+            "network": {"enabled": True, "label": "Интернет-поиск"},
+            "delamain": {"enabled": False, "label": "Delamain (эффектор)"},
+            "effector": {"enabled": False, "label": "Выполнение действий"},
+            "workspace": {
+                "path": "profile/delamain/workspace/creative",
+                "label": "Творческая рабочая область",
+            },
+        },
         "effector": {"available": True, "counts": {}, "last_error": None},
     }
     for key, value in overrides.items():
@@ -67,7 +77,9 @@ def test_activity_rows_empty_when_nothing_started():
 def test_activity_rows_play_use_real_game_state():
     snap = _snapshot(
         now={"activity": {"action": "play", "target": "партия"}},
-        activities={"game": {"board": ["X"] * 0, "turns": 4, "round": 2, "result": "draw"}},
+        activities={
+            "game": {"board": ["X"] * 0, "turns": 4, "round": 2, "result": "draw"}
+        },
     )
     rows = dict(view.activity_rows(snap))
     assert rows["Ходов"] == "4"
@@ -77,9 +89,20 @@ def test_activity_rows_play_use_real_game_state():
 def test_activity_rows_creative_use_real_draft():
     snap = _snapshot(
         now={"activity": {"action": "create_draft", "target": "тишина"}},
-        activities={"creative": {"count": 1, "drafts": [
-            {"id": "a" * 32, "theme": "тишина", "revision": 3, "status": "active",
-             "sha256": "b" * 64}]}},
+        activities={
+            "creative": {
+                "count": 1,
+                "drafts": [
+                    {
+                        "id": "a" * 32,
+                        "theme": "тишина",
+                        "revision": 3,
+                        "status": "active",
+                        "sha256": "b" * 64,
+                    }
+                ],
+            }
+        },
     )
     rows = dict(view.activity_rows(snap))
     assert rows["Редакция"] == "3"
@@ -93,9 +116,16 @@ def test_activity_rows_creative_use_real_draft():
 
 def test_choice_rows_include_recorded_reason_only():
     snap = _snapshot(
-        now={"activity": {"action": "play", "target": "партия", "source": "activity",
-                          "reason": "интерес к партии выше", "cycle": 12},
-             "loop": {"last_action": "explore", "last_effect": False}},
+        now={
+            "activity": {
+                "action": "play",
+                "target": "партия",
+                "source": "activity",
+                "reason": "интерес к партии выше",
+                "cycle": 12,
+            },
+            "loop": {"last_action": "explore", "last_effect": False},
+        },
         preferences={"play": {"attempts": 5, "effects": 3, "failures": 1, "leaves": 0}},
     )
     rows = dict(view.choice_rows(snap))
@@ -106,8 +136,9 @@ def test_choice_rows_include_recorded_reason_only():
 
 
 def test_choice_rows_do_not_invent_alternatives():
-    snap = _snapshot(now={"activity": {"action": "play", "target": "партия",
-                                       "source": "activity"}})
+    snap = _snapshot(
+        now={"activity": {"action": "play", "target": "партия", "source": "activity"}}
+    )
     labels = [label for label, _ in view.choice_rows(snap)]
     assert "Рассматривал" not in labels
     assert "Другие варианты" not in labels
@@ -130,9 +161,11 @@ def test_body_summary_is_one_compact_line():
 
 def test_influence_rows_show_needs_and_waiting():
     snap = _snapshot(
-        motivation={"most_pressing_need": "curiosity",
-                    "pressing_needs": ["curiosity", "rest"],
-                    "active_drives": ["exploration"]},
+        motivation={
+            "most_pressing_need": "curiosity",
+            "pressing_needs": ["curiosity", "rest"],
+            "active_drives": ["exploration"],
+        },
         intentions={"waiting": [{"target": "память"}]},
     )
     rows = dict(view.influence_rows(snap))
@@ -159,8 +192,18 @@ def test_access_rows_show_real_switches():
 
 
 def test_effector_rows_keep_queued_and_succeeded_separate():
-    snap = _snapshot(effector={"available": True, "counts": {
-        "queued": 2, "waiting_approval": 1, "succeeded": 3, "failed": 1, "rejected": 0}})
+    snap = _snapshot(
+        effector={
+            "available": True,
+            "counts": {
+                "queued": 2,
+                "waiting_approval": 1,
+                "succeeded": 3,
+                "failed": 1,
+                "rejected": 0,
+            },
+        }
+    )
     rows = dict(view.effector_rows(snap))
     assert rows["в очереди"] == "2"
     assert rows["ждёт подтверждения"] == "1"
@@ -168,11 +211,15 @@ def test_effector_rows_keep_queued_and_succeeded_separate():
 
 
 def test_effector_absent_is_stated_not_hidden():
-    rows = dict(view.effector_rows(_snapshot(effector={"available": False, "counts": {}})))
+    rows = dict(
+        view.effector_rows(_snapshot(effector={"available": False, "counts": {}}))
+    )
     assert "не подключён" in rows["Состояние"]
 
 
 def test_pending_note_only_when_something_is_unfinished():
     assert view.pending_effector_note(_snapshot()) is None
-    snap = _snapshot(effector={"available": True, "counts": {"queued": 1, "succeeded": 9}})
+    snap = _snapshot(
+        effector={"available": True, "counts": {"queued": 1, "succeeded": 9}}
+    )
     assert "Не завершено" in view.pending_effector_note(snap)

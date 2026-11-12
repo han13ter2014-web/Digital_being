@@ -17,14 +17,15 @@ from typing import Dict
 class EnergySubsystem:
     """Подсистема энергетики агента."""
 
-    def __init__(self,
-                 starting_energy: float = 150,
-                 max_energy: float = 200,
-                 regen_per_cycle: float = 5,
-                 low_threshold: float = 20,
-                 critical_threshold: float = 5,
-                 gc_interval: int = 5):
-
+    def __init__(
+        self,
+        starting_energy: float = 150,
+        max_energy: float = 200,
+        regen_per_cycle: float = 5,
+        low_threshold: float = 20,
+        critical_threshold: float = 5,
+        gc_interval: int = 5,
+    ):
         # max_energy должен быть известен до первой записи в energy:
         # свойство energy клампит значение в [0, max_energy].
         self.max_energy = max_energy
@@ -76,8 +77,7 @@ class EnergySubsystem:
     def regenerate(self) -> None:
         """Восстанавливает энергию на regen_per_cycle (не выше max)."""
         if self.energy < self.max_energy:
-            self.energy = min(self.max_energy,
-                              self.energy + self.regen_per_cycle)
+            self.energy = min(self.max_energy, self.energy + self.regen_per_cycle)
 
     def refill_to(self, target: float = 100) -> None:
         """Восстанавливает энергию до целевого уровня (для восстановления)."""
@@ -118,8 +118,7 @@ class EnergySubsystem:
         self.energy -= cost
         return cost
 
-    def adapt_cost(self, action_type: str, success: bool,
-                   rate: float = 0.1) -> None:
+    def adapt_cost(self, action_type: str, success: bool, rate: float = 0.1) -> None:
         """Адаптирует стоимость действия по результату.
         Успех → повышает (агент готов платить больше).
         Неуспех → снижает (агент избегает)."""
@@ -165,10 +164,9 @@ class EnergySubsystem:
             self._concept_usage_count.get(concept, 0) + 1
         )
 
-    def forget_unused(self,
-                      mental_models,
-                      min_confidence: float = 0.1,
-                      max_forget_pct: int = 20) -> int:
+    def forget_unused(
+        self, mental_models, min_confidence: float = 0.1, max_forget_pct: int = 20
+    ) -> int:
         """Забывает неиспользуемые концепции с низкой уверенностью.
         Возвращает количество забытых."""
         to_remove = []
@@ -216,6 +214,4 @@ class EnergySubsystem:
         self._creative_wins = state.get("_creative_wins", 0)
         self._creative_losses = state.get("_creative_losses", 0)
         self.epsilon_greedy = state.get("epsilon_greedy", 0.15)
-        self._concept_usage_count.update(
-            state.get("_concept_usage_count", {})
-        )
+        self._concept_usage_count.update(state.get("_concept_usage_count", {}))

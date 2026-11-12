@@ -18,11 +18,18 @@ def test_arbitrator_shares_identity_and_only_reads_it():
     assert identity is not None
     assert agent.decision_arbitrator._systems["self"] is identity
     before = deepcopy(identity.to_dict())
-    with patch.object(identity, "synthesize", side_effect=AssertionError("candidate is not lived experience")) as synthesize:
-        agent.decision_arbitrator.choose_action([
-            {"source": "test", "action": "rest", "strength": 0.5},
-            {"source": "test", "action": "explore", "strength": 0.6},
-        ], {})
+    with patch.object(
+        identity,
+        "synthesize",
+        side_effect=AssertionError("candidate is not lived experience"),
+    ) as synthesize:
+        agent.decision_arbitrator.choose_action(
+            [
+                {"source": "test", "action": "rest", "strength": 0.5},
+                {"source": "test", "action": "explore", "strength": 0.6},
+            ],
+            {},
+        )
     synthesize.assert_not_called()
     assert identity.to_dict() == before
 

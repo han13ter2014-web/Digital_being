@@ -74,6 +74,7 @@ def test_tray_import_survives_broken_pystray(caplog):
 
     try:
         import pystray  # noqa: F401
+
         _pystray_importable = True
     except Exception:  # noqa: BLE001 — тот же класс отказа, что ловит guard
         _pystray_importable = False
@@ -106,14 +107,18 @@ def test_subsystem_specs_all_attached():
     with _WiringRuntime("WiringSpecs") as runtime:
         agent = runtime.agent
         missing = [
-            attr for attr, _factory, _post, _prio in DigitalBeing.SUBSYSTEM_SPECS
+            attr
+            for attr, _factory, _post, _prio in DigitalBeing.SUBSYSTEM_SPECS
             if not hasattr(agent, attr)
         ]
         assert not missing, f"Не прикреплены: {missing}"
         # Вне декларации, но обязательные для диалогового контура:
         for attr in (
-            "user_interaction", "long_term_memory", "user_model",
-            "mental_models", "_open_questions_manager",
+            "user_interaction",
+            "long_term_memory",
+            "user_model",
+            "mental_models",
+            "_open_questions_manager",
         ):
             assert hasattr(agent, attr), attr
 
@@ -125,9 +130,14 @@ def test_runtime_bus_wiring():
 
         subscribed = set(bus._subscribers.keys())
         expected = {
-            "user_message", "user_command", "pause_requested",
-            "resume_requested", "shutdown_requested", "save_requested",
-            "speed_changed", "step_requested",
+            "user_message",
+            "user_command",
+            "pause_requested",
+            "resume_requested",
+            "shutdown_requested",
+            "save_requested",
+            "speed_changed",
+            "step_requested",
         }
         missing = expected - subscribed
         assert not missing, f"Раннер не подписан: {missing}"
@@ -136,9 +146,9 @@ def test_runtime_bus_wiring():
         assert ui._bus is bus, "user_interaction не привязан к шине"
         for attr in ("naming_dialogue", "proactive_communication", "mind_dream"):
             subsystem = getattr(agent, attr)
-            assert subsystem.user_interaction is ui, (
-                f"{attr} держит чужой user_interaction"
-            )
+            assert (
+                subsystem.user_interaction is ui
+            ), f"{attr} держит чужой user_interaction"
         assert runner.agent is agent
         assert runtime.window is None  # headless
 
@@ -198,7 +208,10 @@ def test_runner_hint_uses_public_contract_only():
         assert f'"{phase}"' in runner_source, phase
     dialogue_source = inspect.getsource(AgentRunner)
     for method in (
-        "confirm_rename", "cancel_rename", "accept_alternative",
-        "decline_alternative", "classify_confirmation",
+        "confirm_rename",
+        "cancel_rename",
+        "accept_alternative",
+        "decline_alternative",
+        "classify_confirmation",
     ):
         assert method in dialogue_source, method

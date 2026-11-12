@@ -13,7 +13,9 @@ def show_recovery_notice(message: str) -> bool:
 
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("Digital Being — восстановление остановлено", message, parent=root)
+        messagebox.showerror(
+            "Digital Being — восстановление остановлено", message, parent=root
+        )
         return True
     except Exception as exc:
         logger.warning("Не удалось показать окно восстановления: %s", exc)

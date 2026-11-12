@@ -63,38 +63,26 @@ def _commands(bus):
 @pytest.mark.asyncio
 async def test_plain_text_during_naming_routes_to_propose_name():
     window, bus = _make_window("Мелория")
-    await window._on_naming_initiated(
-        SimpleNamespace(data={"agent_name": "Alpha"})
-    )
+    await window._on_naming_initiated(SimpleNamespace(data={"agent_name": "Alpha"}))
     window._on_send()
     assert _commands(bus) == ["propose_name Мелория"]
-    assert not any(
-        name == Events.USER_MESSAGE for name, _ in bus.published
-    )
+    assert not any(name == Events.USER_MESSAGE for name, _ in bus.published)
 
 
 @pytest.mark.asyncio
 async def test_plain_text_after_name_changed_is_normal_message():
     window, bus = _make_window("просто привет")
-    await window._on_naming_initiated(
-        SimpleNamespace(data={"agent_name": "Alpha"})
-    )
-    await window._on_agent_name_changed(
-        SimpleNamespace(data={"new_name": "Омелла"})
-    )
+    await window._on_naming_initiated(SimpleNamespace(data={"agent_name": "Alpha"}))
+    await window._on_agent_name_changed(SimpleNamespace(data={"new_name": "Омелла"}))
     window._on_send()
-    assert any(
-        name == Events.USER_MESSAGE for name, _ in bus.published
-    )
+    assert any(name == Events.USER_MESSAGE for name, _ in bus.published)
     assert _commands(bus) == []
 
 
 @pytest.mark.asyncio
 async def test_slash_command_still_works_during_naming():
     window, bus = _make_window("/status")
-    await window._on_naming_initiated(
-        SimpleNamespace(data={"agent_name": "Alpha"})
-    )
+    await window._on_naming_initiated(SimpleNamespace(data={"agent_name": "Alpha"}))
     window._on_send()
     assert _commands(bus) == ["status"]
 

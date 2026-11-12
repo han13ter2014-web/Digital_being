@@ -24,7 +24,9 @@ def isolated_registry():
 
 @pytest.mark.parametrize("backend", ["json", "sqlite"])
 @pytest.mark.parametrize("sleeping", [False, True], ids=["awake", "dormant"])
-def test_restored_profile_preserves_experience_and_life_state(tmp_path, monkeypatch, backend, sleeping):
+def test_restored_profile_preserves_experience_and_life_state(
+    tmp_path, monkeypatch, backend, sleeping
+):
     source = tmp_path / "original"
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(source))
     monkeypatch.setattr(SIM_CONFIG, "CHECKPOINT_BACKEND", backend)
@@ -37,7 +39,10 @@ def test_restored_profile_preserves_experience_and_life_state(tmp_path, monkeypa
         first.act("rest")
     first._last_experiment_cycle = 40
     pending = first.action_expectations.begin(
-        first.mental_models, "rest", first.energy, 200,
+        first.mental_models,
+        "rest",
+        first.energy,
+        200,
         fatigue=first.interoception.state.fatigue,
     )
     if sleeping:
@@ -46,8 +51,11 @@ def test_restored_profile_preserves_experience_and_life_state(tmp_path, monkeypa
     assert runner.save_now()
     before_memory = first.mental_models.to_storage_dict()
     energy, fatigue = first.energy, first.interoception.state.fatigue
-    before_files = {p.relative_to(source).as_posix(): p.read_bytes()
-                    for p in source.rglob("*") if p.is_file() and "logs" not in p.parts}
+    before_files = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file() and "logs" not in p.parts
+    }
     backup = tmp_path / "backup"
     create_backup(source, backup)
     restored_root = tmp_path / "restored"

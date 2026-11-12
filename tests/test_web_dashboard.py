@@ -1,4 +1,4 @@
-"""К9: read-only DTO-контракт, HTTP, SSE reconnect и отсутствие мутаций."""
+"""Read-only DTO-контракт, HTTP, SSE reconnect и отсутствие мутаций."""
 
 import asyncio
 from copy import deepcopy
@@ -20,7 +20,10 @@ pytest.importorskip("aiohttp", reason="aiohttp не установлен")
 from aiohttp import ClientSession, ClientTimeout  # noqa: E402
 
 from src.ui.web_dashboard import (  # noqa: E402
-    DASHBOARD_HTML, READ_ONLY_MESSAGE, SharedState, WebDashboard,
+    DASHBOARD_HTML,
+    READ_ONLY_MESSAGE,
+    SharedState,
+    WebDashboard,
 )
 
 
@@ -45,17 +48,29 @@ def _wait_for_url(url: str, timeout: float = 5.0) -> bool:
 def _life() -> dict:
     return {
         "name": "Parity",
-        "life": {"cycle": 7, "energy": 123.0, "state": "alive",
-                 "state_label": "жив", "speed_mode": "step"},
+        "life": {
+            "cycle": 7,
+            "energy": 123.0,
+            "state": "alive",
+            "state_label": "жив",
+            "speed_mode": "step",
+        },
         "now": {"activity": {"action": "play", "target": "партия"}},
         "motivation": {"most_pressing_need": "curiosity"},
         "intentions": {"recent": []},
-        "emotions": {"levels": {"fear": 0.1, "joy": 0.4,
-                                  "sadness": 0.2, "calm": 0.4},
-                     "dominant": {"emotion": "joy", "label": "мне радостно"},
-                     "episodes": 3},
-        "body": {"glucose": 80.0, "atp": 55.0, "atp_ratio": 0.55,
-                 "fatigue": 0.25, "fatigue_level": "normal", "needs_rest": False},
+        "emotions": {
+            "levels": {"fear": 0.1, "joy": 0.4, "sadness": 0.2, "calm": 0.4},
+            "dominant": {"emotion": "joy", "label": "мне радостно"},
+            "episodes": 3,
+        },
+        "body": {
+            "glucose": 80.0,
+            "atp": 55.0,
+            "atp_ratio": 0.55,
+            "fatigue": 0.25,
+            "fatigue_level": "normal",
+            "needs_rest": False,
+        },
         "activities": {"creative": {"count": 1, "drafts": [{"title": "Тишина"}]}},
         "access": {
             "network": {"enabled": True, "label": "Интернет-поиск"},
@@ -81,7 +96,9 @@ def dashboard():
 
 
 def _get_json(port: int, path: str) -> dict:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=3) as response:
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}{path}", timeout=3
+    ) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -99,13 +116,27 @@ def test_shared_state_copies_dto_and_has_no_core():
 
 def test_status_uses_flat_runtime_dto():
     state = SharedState()
-    state.update_status({"name": "Parity", "cycle": 7, "energy": 123,
-                         "concepts": 9, "rss_mb": 42, "goals_completed": 2})
+    state.update_status(
+        {
+            "name": "Parity",
+            "cycle": 7,
+            "energy": 123,
+            "concepts": 9,
+            "rss_mb": 42,
+            "goals_completed": 2,
+        }
+    )
     state.update_life(_life())
     snap = state.snapshot()
-    assert snap["agent"] == {"name": "Parity", "cycle_count": 7, "energy": 123,
-                             "intelligence": 1, "completed_goals": 2,
-                             "success_streak": 0, "is_alive": True}
+    assert snap["agent"] == {
+        "name": "Parity",
+        "cycle_count": 7,
+        "energy": 123,
+        "intelligence": 1,
+        "completed_goals": 2,
+        "success_streak": 0,
+        "is_alive": True,
+    }
     assert snap["mental_models"]["total_concepts"] == 9
     assert snap["system"]["current_rss_mb"] == 42
     assert snap["panel"]["cycle"] == 7
@@ -130,7 +161,9 @@ def test_diary_pagination_contract():
 def test_dialogue_sequence_history_and_gap_are_explicit():
     state = SharedState(max_thoughts=3)
     for index in range(5):
-        state.push_event("agent_message", {"id": f"m{index}", "content": f"текст {index}"})
+        state.push_event(
+            "agent_message", {"id": f"m{index}", "content": f"текст {index}"}
+        )
     replay = state.dialogue_history(after=1, limit=10)
     assert [item["sequence"] for item in replay["events"]] == [3, 4, 5]
     assert replay["history_gap"] is True
@@ -141,8 +174,11 @@ def test_dialogue_sequence_history_and_gap_are_explicit():
 def test_all_readonly_http_sections_match_published_dto(dashboard):
     _, port, state = dashboard
     life = _life()
-    graph = {"nodes": [{"id": "c1", "kind": "concept", "label": "память"}],
-             "edges": [], "omitted": 0}
+    graph = {
+        "nodes": [{"id": "c1", "kind": "concept", "label": "память"}],
+        "edges": [],
+        "omitted": 0,
+    }
     state.update_life(life)
     state.update_graph(graph)
     assert _get_json(port, "/api/life") == life
@@ -164,12 +200,17 @@ def test_action_is_always_403_and_state_is_unchanged(dashboard):
     _, port, state = dashboard
     state.update_life(_life())
     before = deepcopy(state.life_snapshot())
-    for body in ({}, {"action": "save"}, {"action": "shutdown"},
-                 {"action": "set_goal", "args": {"title": "мутация"}}):
+    for body in (
+        {},
+        {"action": "save"},
+        {"action": "shutdown"},
+        {"action": "set_goal", "args": {"title": "мутация"}},
+    ):
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/action",
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST",
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
         with pytest.raises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(request, timeout=3)

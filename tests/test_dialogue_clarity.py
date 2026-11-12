@@ -41,11 +41,13 @@ def test_thought_may_return_after_quiet_window():
 
 def test_curiosity_uses_only_recorded_connection():
     proactive = ProactiveCommunication("Alpha")
-    agent = Agent({
-        "время": Concept({"память": 0.7}),
-        "память": Concept(),
-        "случайная": Concept(),
-    })
+    agent = Agent(
+        {
+            "время": Concept({"память": 0.7}),
+            "память": Concept(),
+            "случайная": Concept(),
+        }
+    )
     message = proactive._compose_curiosity_message(agent, 100)
     assert message is not None
     assert "время" in message["content"]
@@ -63,11 +65,13 @@ def test_no_recorded_connection_means_no_claim():
 
 def test_curiosity_does_not_repeat_same_pair_while_other_links_exist():
     proactive = ProactiveCommunication("Alpha")
-    agent = Agent({
-        "а": Concept({"б": 0.5}),
-        "б": Concept({"в": 0.5}),
-        "в": Concept(),
-    })
+    agent = Agent(
+        {
+            "а": Concept({"б": 0.5}),
+            "б": Concept({"в": 0.5}),
+            "в": Concept(),
+        }
+    )
     first = proactive._compose_curiosity_message(agent, 1)["content"]
     second = proactive._compose_curiosity_message(agent, 2)["content"]
     assert first != second
@@ -89,14 +93,22 @@ def test_agent_question_has_no_service_code():
     window.agent_name = "Омелла"
     window._incoming_queue = queue.Queue()
 
-    asyncio.run(window._on_agent_question(type("E", (), {
-        "data": {
-            "id": "q-42",
-            "priority": "high",
-            "question": "Что для тебя важно?",
-            "context": "",
-        }
-    })()))
+    asyncio.run(
+        window._on_agent_question(
+            type(
+                "E",
+                (),
+                {
+                    "data": {
+                        "id": "q-42",
+                        "priority": "high",
+                        "question": "Что для тебя важно?",
+                        "context": "",
+                    }
+                },
+            )()
+        )
+    )
 
     first = window._incoming_queue.get_nowait()
     text = first[1]

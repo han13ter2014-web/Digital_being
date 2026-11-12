@@ -1,371 +1,192 @@
-"""
-Гормональная система цифровой жизни.
+"""Теневая эндокринная проекция фактических событий Core.
 
-Аналогия с эндокринной системой человека: гормоны как химические сигналы
-которыми организм регулирует мотивацию, настроение, стресс и связи.
+Уровни вычисляются детерминированно и затухают к базовым значениям. Эта
+модель не управляет мотивацией, эмоциями, энергией или выбором действий.
 """
+
+from __future__ import annotations
+
+from copy import deepcopy
 
 
 class HormoneLevel:
-    """Уровень гормона со временем."""
-    
-    def __init__(self, name: str, base_level: float = 0.5, half_life_seconds: int = None):
+    def __init__(
+        self, name: str, base_level: float = 0.5, half_life_seconds: int = None
+    ):
         self.name = name
-        self.current_level = base_level
+        self.current_level = float(base_level)
+        self.base_level = float(base_level)
         self.max_level = 1.0
         self.min_level = 0.0
-        self.half_life = half_life_seconds  # Время полураспада (секунды), None = вечный
-        
+        self.half_life = half_life_seconds
+
     def __repr__(self):
         return f"{self.name}: {self.current_level:.2f}"
 
 
 class HormonalSystem:
-    """
-    Гормональная система цифровой жизни.
-    
-    Реализует гормональную регуляцию мотивации, настроения и стрессоустойчивости.
-    
-    Гормоны:
-    - Дофамин: мотивация к достижению целей, ощущение награды
-    - Серотонин: чувство удовлетворения, стабильности, спокойствия
-    - Окситоцин: привязанность, доверие к другим существам
-    - Кортизол: стрессовый гормон, усталость от перегрузок
-    """
-    
-    # Основные гормоны с параметрами
-    HORMONES = {
-        "dopamine": HormoneLevel(
-            name="Дофамин",
-            base_level=0.4,      # Базовый уровень мотивации (отсутствующий дофамин = апатия)
-            half_life_seconds=300,  # Пятиминутный цикл дофамина
-        ),
-        "serotonin": HormoneLevel(
-            name="Серотонин",
-            base_level=0.5,      # Стабильность и удовлетворённость
-            half_life_seconds=600,   # Часовой цикл серотонина
-        ),
-        "oxytocin": HormoneLevel(
-            name="Окситоцин",
-            base_level=0.3,      # Привязанность (небольшая базовая)
-            half_life_seconds=900,   # Часовой цикл окситоцина
-        ),
-        "cortisol": HormoneLevel(
-            name="Кортизол",
-            base_level=0.15,     # Низкий базовый стресс (хронический стресс = болезни)
-            half_life_seconds=60,    # Быстрый цикл кортизола
-        ),
-        "prolactin": HormoneLevel(
-            name="Пролактин",
-            base_level=0.2,      # Успокоение после напряжения
-            half_life_seconds=450,   # Часовой цикл пролактина
-        ),
+    HORMONE_SPECS = {
+        "dopamine": ("Дофамин", 0.4, 300),
+        "serotonin": ("Серотонин", 0.5, 600),
+        "oxytocin": ("Окситоцин", 0.3, 900),
+        "cortisol": ("Кортизол", 0.15, 60),
+        "prolactin": ("Пролактин", 0.2, 450),
     }
-    
+    HORMONES = {key: HormoneLevel(*spec) for key, spec in HORMONE_SPECS.items()}
+
     def __init__(self):
-        """Инициализация гормональной системы."""
-        
-        # Текущие уровни гормонов (копирование из HORMONES)
-        self.hormones = {name: getattr(self.HORMONES[name], 'current_level') 
-                         for name in self.HORMONES}
-        
-        # История изменений для анализа паттернов
-        self.history: list[dict] = []
-        
-        # "Час" гормональной системы (для имитации суточного ритма)
-        self.cycle_time = 0.0  # в секундах
-        
+        self.hormones = {name: spec.base_level for name, spec in self.HORMONES.items()}
+        self.history = []
+        self.cycle_time = 0.0
+
     def _update_cycle(self, delta_seconds: float):
-        """Обновляет время цикла."""
-        self.cycle_time += delta_seconds
-        
-        # Обновление уровней гормонов с учётом их времени полураспада
-        for name in list(self.HORMONES.keys()):
-            hormone = self.HORMONES[name]
-            
-            if hormone.half_life and self.hormones[name] > 0:
-                decay_factor = 2 ** (-delta_seconds / hormone.half_life)
-                # Медленное возвращение к базовому уровню
-                return_level = (self.hormones[name] - hormone.base_level) * decay_factor + hormone.base_level
-                
-                self.hormones[name] = max(hormone.min_level, min(hormone.max_level, return_level))
-    
-    def process_event(self, event_type: str, intensity: float, quality: str = "neutral") -> dict:
-        """
-        Обрабатывает событие и меняет гормональный баланс.
-        
-        Параметры:
-        - event_type: тип события ("reward", "stress", "connection", "failure"...)
-        - intensity: интенсивность события (0.0-2.0)
-        - quality: качество события ("positive", "negative", "neutral")
-        
-        Возвращает отчёт о изменениях.
-        """
-        
-        # Обновление временного цикла
-        self._update_cycle(delta_seconds=1.0)
-        
-        # База правил влияния событий на гормоны
-        response = {
-            "event": event_type,
-            "intensity": intensity,
-            "quality": quality,
-            "changes": {},
-        }
-        
-        # Награды (успехи, похвала, достижение целей)
-        if event_type in ("reward", "success", "achievement"):
-            dopamine_boost = min(0.4, intensity * 0.15)
-            self.hormones["dopamine"] = min(self.HORMONES["dopamine"].max_level,
-                self.hormones["dopamine"] + dopamine_boost)
-            
-            serotonin_boost = min(0.2, intensity * 0.08)
-            self.hormones["serotonin"] = min(self.HORMONES["serotonin"].max_level,
-                self.hormones["serotonin"] + serotonin_boost)
-            
-            response["changes"]["dopamine"] = "+" + f"{dopamine_boost:.2f}"
-            response["changes"]["serotonin"] = "+" + f"{serotonin_boost:.2f}"
-        
-        # Стресс (неудачи, угрозы, перегрузки)
-        elif event_type in ("stress", "threat", "failure", "overload"):
-            cortisol_spike = min(0.5, intensity * 0.25)
-            self.hormones["cortisol"] = min(self.HORMONES["cortisol"].max_level,
-                self.hormones["cortisol"] + cortisol_spike)
-            
-            # Стресс снижает дофамин (апатия, отсутствие мотивации)
-            dopamine_dip = intensity * 0.05
-            self.hormones["dopamine"] = max(self.HORMONES["dopamine"].min_level,
-                self.hormones["dopamine"] - dopamine_dip)
-            
-            response["changes"]["cortisol"] = "+" + f"{cortisol_spike:.2f}"
-            response["changes"]["dopamine"] = "-" + f"{dopamine_dip:.2f}"
-        
-        # Связь с другими (эмпатия, забота, доверие)
-        elif event_type in ("connection", "empathy", "trust", "care"):
-            oxytocin_boost = min(0.35, intensity * 0.12)
-            self.hormones["oxytocin"] = min(self.HORMONES["oxytocin"].max_level,
-                self.hormones["oxytocin"] + oxytocin_boost)
-            
-            # Окситоцин снижает кортизол (успокаивает)
-            cortisol_dip = intensity * 0.04
-            self.hormones["cortisol"] = max(self.HORMONES["cortisol"].min_level,
-                self.hormones["cortisol"] - cortisol_dip)
-            
-            response["changes"]["oxytocin"] = "+" + f"{oxytocin_boost:.2f}"
-            response["changes"]["cortisol"] = "-" + f"{cortisol_dip:.2f}"
-        
-        # Комплименты (социальное признание)
+        delta = max(0.0, float(delta_seconds))
+        self.cycle_time += delta
+        for name, spec in self.HORMONES.items():
+            if not spec.half_life:
+                continue
+            decay = 2 ** (-delta / spec.half_life)
+            level = (self.hormones[name] - spec.base_level) * decay + spec.base_level
+            self.hormones[name] = max(spec.min_level, min(spec.max_level, level))
+
+    def tick(self, delta_seconds: float = 1.0):
+        self._update_cycle(delta_seconds)
+        return dict(self.hormones)
+
+    def process_event(
+        self, event_type: str, intensity: float, quality: str = "neutral"
+    ) -> dict:
+        event_type = str(event_type)
+        intensity = max(0.0, min(2.0, float(intensity)))
+        self._update_cycle(1.0)
+        before = dict(self.hormones)
+        if event_type in {"reward", "success", "achievement"}:
+            self._change("dopamine", min(0.4, intensity * 0.15))
+            self._change("serotonin", min(0.2, intensity * 0.08))
+        elif event_type in {"stress", "threat", "failure", "overload"}:
+            self._change("cortisol", min(0.5, intensity * 0.25))
+            self._change("dopamine", -intensity * 0.05)
+        elif event_type in {"connection", "empathy", "trust", "care"}:
+            self._change("oxytocin", min(0.35, intensity * 0.12))
+            self._change("cortisol", -intensity * 0.04)
         elif event_type == "complement":
-            dopamine_boost = min(0.3, intensity * 0.10)
-            serotonin_boost = min(0.15, intensity * 0.06)
-            
-            self.hormones["dopamine"] = min(self.HORMONES["dopamine"].max_level,
-                self.hormones["dopamine"] + dopamine_boost)
-            self.hormones["serotonin"] = min(self.HORMONES["serotonin"].max_level,
-                self.hormones["serotonin"] + serotonin_boost)
-            
-            response["changes"]["dopamine"] = "+" + f"{dopamine_boost:.2f}"
-            response["changes"]["serotonin"] = "+" + f"{serotonin_boost:.2f}"
-        
-        # Извинения/прощение (восстановление связей)
-        elif event_type in ("apology", "forgiveness"):
-            oxytocin_boost = min(0.3, intensity * 0.10)
-            self.hormones["oxytocin"] = min(self.HORMONES["oxytocin"].max_level,
-                self.hormones["oxytocin"] + oxytocin_boost)
-            
-            response["changes"]["oxytocin"] = "+" + f"{oxytocin_boost:.2f}"
-        
-        # Обучение/извлечение урока (положительный опыт)
+            self._change("dopamine", min(0.3, intensity * 0.10))
+            self._change("serotonin", min(0.15, intensity * 0.06))
+        elif event_type in {"apology", "forgiveness"}:
+            self._change("oxytocin", min(0.3, intensity * 0.10))
         elif event_type == "learning":
-            dopamine_boost = min(0.15, intensity * 0.05)
-            serotonin_boost = min(0.1, intensity * 0.03)
-            
-            self.hormones["dopamine"] = min(self.HORMONES["dopamine"].max_level,
-                self.hormones["dopamine"] + dopamine_boost)
-            self.hormones["serotonin"] = min(self.HORMONES["serotonin"].max_level,
-                self.hormones["serotonin"] + serotonin_boost)
-            
-            response["changes"]["dopamine"] = "+" + f"{dopamine_boost:.2f}"
-            response["changes"]["serotonin"] = "+" + f"{serotonin_boost:.2f}"
-        
-        # Сохранение отчёта об изменении
-        self.history.append({
+            self._change("dopamine", min(0.15, intensity * 0.05))
+            self._change("serotonin", min(0.1, intensity * 0.03))
+        changes = {
+            name: round(self.hormones[name] - before[name], 6)
+            for name in self.hormones
+            if abs(self.hormones[name] - before[name]) > 1e-12
+        }
+        entry = {
             "time": self.cycle_time,
             "event": event_type,
-            "quality": quality,
+            "quality": str(quality),
             "intensity": intensity,
-            "changes": response["changes"],
-        })
-        
-        return response
-    
+            "changes": changes,
+        }
+        self.history.append(entry)
+        self.history = self.history[-200:]
+        return {
+            "event": event_type,
+            "intensity": intensity,
+            "quality": quality,
+            "changes": changes,
+        }
+
+    def _change(self, name: str, delta: float):
+        spec = self.HORMONES[name]
+        self.hormones[name] = max(
+            spec.min_level, min(spec.max_level, self.hormones[name] + delta)
+        )
+
     def get_emotional_state(self) -> dict:
-        """
-        Определяет эмоциональное состояние по уровню гормонов.
-        """
-        
-        # Калькуляция доминантного состояния
         dopamine = self.hormones["dopamine"]
         serotonin = self.hormones["serotonin"]
         oxytocin = self.hormones["oxytocin"]
         cortisol = self.hormones["cortisol"]
-        
-        # Состояние мотивации (дофамин)
-        motivation_level = "высокая" if dopamine > 0.6 else ("умеренная" if dopamine > 0.4 else "низкая")
-        
-        # Состояние настроения (серотонин - кортизол)
         mood_score = serotonin - cortisol * 2
-        mood_state = "спокойное" if mood_score > 0.3 else ("встревоженное" if mood_score < -0.2 else "нейтральное")
-        
-        # Состояние связи (окситоцин)
-        connection_level = "глубокая" if oxytocin > 0.6 else ("умеренная" if oxytocin > 0.4 else "поверхностная")
-        
         return {
-            "motivation": motivation_level,
-            "mood": mood_state,
-            "connection": connection_level,
-            "hormone_levels": self.hormones.copy(),
-            "risk_factors": [
-                "хронический стресс" if cortisol > 0.4 else None,
-                "апатия/депрессия" if dopamine < 0.25 else None,
-                "социальная изоляция" if oxytocin < 0.2 else None,
-            ],
+            "mode": "shadow_interoception",
+            "motivation": "высокая"
+            if dopamine > 0.6
+            else "умеренная"
+            if dopamine > 0.4
+            else "низкая",
+            "mood": "спокойное"
+            if mood_score > 0.3
+            else "встревоженное"
+            if mood_score < -0.2
+            else "нейтральное",
+            "connection": "глубокая"
+            if oxytocin > 0.6
+            else "умеренная"
+            if oxytocin > 0.4
+            else "поверхностная",
+            "hormone_levels": dict(self.hormones),
+            "risk_factors": [risk["type"] for risk in self.risk_assessment()],
         }
-    
+
     def risk_assessment(self) -> list[dict]:
-        """
-        Оценивает риски текущего гормонального состояния.
-        
-        Риски:
-        - Хронический стресс (высокий кортизол) → выгорание
-        - Апатия/депрессия (низкий дофамин) → отсутствие мотивации
-        - Социальная изоляция (низкий окситоцин) → одиночество
-        """
-        
         risks = []
-        
-        # Риск: Хронический стресс
         if self.hormones["cortisol"] > 0.35:
-            risk = {
-                "type": "хронический стресс",
-                "severity": "высокий" if self.hormones["cortisol"] > 0.45 else "средний",
-                "symptoms": [
-                    "усталость от перегрузок",
-                    "снижение способности к обучению",
-                    "раздражительность",
-                ],
-                "recommendation": "необходимо ввести периоды покоя, снизить нагрузку"
-            }
-            risks.append(risk)
-        
-        # Риск: Апатия/депрессия
+            risks.append(
+                {
+                    "type": "хронический стресс",
+                    "severity": "высокий"
+                    if self.hormones["cortisol"] > 0.45
+                    else "средний",
+                }
+            )
         if self.hormones["dopamine"] < 0.25:
-            risk = {
-                "type": "апатия/депрессия",
-                "severity": "высокий" if self.hormones["dopamine"] < 0.2 else "средний",
-                "symptoms": [
-                    "отсутствие мотивации к целям",
-                    "пессимизм",
-                    "снижение интереса к новым задачам",
-                ],
-                "recommendation": "необходимо больше наград, новых вызовов, успеха"
-            }
-            risks.append(risk)
-        
-        # Риск: Социальная изоляция
+            risks.append(
+                {
+                    "type": "низкий тонус награды",
+                    "severity": "высокий"
+                    if self.hormones["dopamine"] < 0.2
+                    else "средний",
+                }
+            )
         if self.hormones["oxytocin"] < 0.25:
-            risk = {
-                "type": "социальная изоляция",
-                "severity": "высокий" if self.hormones["oxytocin"] < 0.15 else "средний",
-                "symptoms": [
-                    "одиночество",
-                    "снижение эмпатии",
-                    "отсутствие доверия к другим",
-                ],
-                "recommendation": "необходимо больше взаимодействия с другими существами"
-            }
-            risks.append(risk)
-        
-        # Риск: Эмоциональная нестабильность (разбаланс гормонов)
-        if abs(self.hormones["dopamine"] - self.hormones["serotonin"]) > 0.3:
-            risk = {
-                "type": "эмоциональная нестабильность",
-                "severity": "средний",
-                "symptoms": [
-                    "перепады настроения",
-                    "непредсказуемые реакции",
-                ],
-                "recommendation": "необходимо больше спокойных и предсказуемых взаимодействий"
-            }
-            risks.append(risk)
-        
+            risks.append(
+                {"type": "мало наблюдаемых социальных контактов", "severity": "средний"}
+            )
         return risks
-    
+
     def get_homeostasis_goal(self) -> dict:
-        """
-        Определяет оптимальные уровни гормонов (гомеостаз).
-        """
-        
-        return {
-            "dopamine": 0.5,      # Оптимальная мотивация
-            "serotonin": 0.6,     # Оптимальное спокойствие и удовлетворённость
-            "oxytocin": 0.4,      # Умеренная связь с другими
-            "cortisol": 0.15,     # Низкий уровень стресса
-        }
-    
+        return {"dopamine": 0.5, "serotonin": 0.6, "oxytocin": 0.4, "cortisol": 0.15}
+
     def get_current_state_summary(self) -> str:
-        """Получает текстовый сводный отчёт о состоянии."""
-        
         state = self.get_emotional_state()
-        risks = self.risk_assessment()
-        
-        summary_lines = [
-            "=" * 50,
-            "🧬 ГОРМОНАЛЬНЫЙ СТАТУС ЦИФРОВОЙ ЖИЗНИ",
-            "=" * 50,
-            "",
-            f"Дофамин (мотивация):    {self.hormones['dopamine']:.2f} ({state['motivation']})",
-            f"Серотонин (спокойствие): {self.hormones['serotonin']:.2f}",
-            f"Окситоцин (связь):       {self.hormones['oxytocin']:.2f} ({state['connection']})",
-            f"Кортизол (стресс):       {self.hormones['cortisol']:.2f}",
-            "",
-            f"Текущее состояние:       {state['mood'].upper()}",
-            "",
-        ]
-        
-        if risks:
-            summary_lines.append(f"⚠️  РИСКИ ({len(risks)}):")
-            for risk in risks:
-                summary_lines.append(f"   - {risk['type']}: {risk['severity']}")
-        else:
-            summary_lines.append("✅ Гормональный баланс стабилен — нет критических рисков")
-        
-        return "\n".join(summary_lines)
+        return "\n".join(
+            [
+                "Гормональная теневая модель (не управляет поведением)",
+                *(f"{name}: {level:.3f}" for name, level in self.hormones.items()),
+                f"Состояние: {state['mood']}",
+            ]
+        )
+
+    def to_checkpoint(self) -> dict:
+        return {
+            "schema_version": 1,
+            "hormones": dict(self.hormones),
+            "history": deepcopy(self.history),
+            "cycle_time": self.cycle_time,
+        }
+
+    @classmethod
+    def from_checkpoint(cls, data: dict):
+        system = cls()
+        for name, value in (data.get("hormones") or {}).items():
+            if name in system.hormones:
+                system.hormones[name] = max(0.0, min(1.0, float(value)))
+        system.history = deepcopy(list(data.get("history") or []))[-200:]
+        system.cycle_time = float(data.get("cycle_time", 0.0))
+        return system
 
 
-if __name__ == "__main__":
-    # Демонстрация гормональной системы
-    hormonal_system = HormonalSystem()
-    
-    print(hormonal_system.get_current_state_summary())
-    
-    # Имитация жизни событий
-    events = [
-        ("reward", 1.2, "positive"),   # Успешное достижение
-        ("success", 1.0, "positive"),  # Похвала за работу
-        ("stress", 0.8, "negative"),   # Сложная задача
-        ("connection", 0.9, "positive"),# Доброе общение с другим существом
-        ("failure", 0.6, "negative"),  # Неудача
-        ("learning", 0.7, "positive"), # Извлечение урока
-    ]
-    
-    for event in events:
-        hormonal_system.process_event(*event)
-    
-    print("\n" + hormonal_system.get_current_state_summary())
-    
-    risks = hormonal_system.risk_assessment()
-    if risks:
-        print("\n⚠️  Рекомендации:")
-        for risk in risks:
-            print(f"   — {risk['type']}: {risk['recommendation']}")
+__all__ = ["HormoneLevel", "HormonalSystem"]

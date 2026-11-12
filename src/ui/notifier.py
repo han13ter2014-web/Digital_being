@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Пробуем импортировать plyer (опциональная зависимость)
 try:
     from plyer import notification as _plyer_notification
+
     _HAS_PLYER = True
 except ImportError:
     _HAS_PLYER = False

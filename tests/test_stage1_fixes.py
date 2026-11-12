@@ -55,6 +55,7 @@ class _FakeAgentWithModels:
 # 1. Декомпозиция
 # ============================================================
 
+
 def test_simple_what_is_question_is_not_decomposed(pipeline):
     """«что такое X» — уже простой вопрос, дробить нечего.
 
@@ -139,6 +140,7 @@ def test_normalize_concept_name():
 # 2. Ротация логов
 # ============================================================
 
+
 def test_buffered_logger_rotates(tmp_path):
     log_path = tmp_path / "agent_log.txt"
     logger = BufferedLogger(
@@ -186,6 +188,7 @@ def test_rotation_disabled_when_max_bytes_zero(tmp_path):
 # 3. Энергия
 # ============================================================
 
+
 def test_energy_never_goes_negative():
     energy = EnergySubsystem(starting_energy=5)
     for _ in range(10):
@@ -197,7 +200,7 @@ def test_energy_never_goes_negative():
 
 def test_energy_is_capped_at_max():
     energy = EnergySubsystem(starting_energy=150, max_energy=200)
-    energy.energy = 10 ** 9
+    energy.energy = 10**9
     assert energy.energy == 200
     energy.energy += 100
     assert energy.energy == 200
@@ -208,7 +211,7 @@ def test_restore_clamps_negative_energy():
     energy = EnergySubsystem(starting_energy=150, max_energy=200)
     energy.restore_from_checkpoint({"energy": -2.34})
     assert energy.energy == 0.0
-    energy.restore_from_checkpoint({"energy": 10 ** 6})
+    energy.restore_from_checkpoint({"energy": 10**6})
     assert energy.energy == 200
 
 
@@ -221,6 +224,7 @@ def test_non_numeric_energy_does_not_crash():
 # ============================================================
 # 4. Кулдаун стимулов
 # ============================================================
+
 
 class FakeAgent:
     """Минимальный агент для тестов селектора."""
@@ -246,17 +250,23 @@ def test_novel_stimulus_skips_recent():
     recent = {"вопрос: a": 9, "вопрос: b": 10}
     # tick=10, cooldown=2 → «a» (10-9=1) и «b» (0) скучные, «c» свежий.
     for _ in range(20):
-        assert select_novel_stimulus(
-            agent, recent, 10, 2, stimuli_pool=POOL, goal_priority_prob=0.0
-        ) == "вопрос: c"
+        assert (
+            select_novel_stimulus(
+                agent, recent, 10, 2, stimuli_pool=POOL, goal_priority_prob=0.0
+            )
+            == "вопрос: c"
+        )
 
 
 def test_novel_stimulus_returns_none_when_everything_cools_down():
     agent = FakeAgent()
     recent = {s: 10 for s in POOL}
-    assert select_novel_stimulus(
-        agent, recent, 10, 5, stimuli_pool=POOL, goal_priority_prob=0.0
-    ) is None
+    assert (
+        select_novel_stimulus(
+            agent, recent, 10, 5, stimuli_pool=POOL, goal_priority_prob=0.0
+        )
+        is None
+    )
 
 
 def test_stimulus_becomes_fresh_again_after_cooldown():
@@ -264,9 +274,12 @@ def test_stimulus_becomes_fresh_again_after_cooldown():
     recent = {"вопрос: a": 1, "вопрос: b": 10, "вопрос: c": 10}
     # Прошло 20 тиков — «a» снова можно.
     for _ in range(20):
-        assert select_novel_stimulus(
-            agent, recent, 21, 20, stimuli_pool=POOL, goal_priority_prob=0.0
-        ) == "вопрос: a"
+        assert (
+            select_novel_stimulus(
+                agent, recent, 21, 20, stimuli_pool=POOL, goal_priority_prob=0.0
+            )
+            == "вопрос: a"
+        )
 
 
 def test_open_question_ignores_cooldown():

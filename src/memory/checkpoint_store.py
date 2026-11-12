@@ -15,16 +15,23 @@ import sqlite3
 
 class SQLiteCheckpointStore:
     SCHEMA_VERSION = 1
+    # Базы LifeDatabase v2/v3 добавляют таблицы, но формат snapshots/blobs
+    # не меняют. Поэтому read-only по смыслу загрузчик может открывать
+    # все версии; миграцией владеет только LifeDatabase.
+    SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3)
     CHUNK_SIZE = 128
 
-    def __init__(self, path):
+    def __init__(self, path, *, schema_version=SCHEMA_VERSION):
         self.path = Path(path)
+        self.schema_version = int(schema_version)
+        if self.schema_version not in self.SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError(f"Unsupported checkpoint schema version: {schema_version}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, self.SCHEMA_VERSION):
+            if version != 0 and version not in self.SUPPORTED_SCHEMA_VERSIONS:
                 raise ValueError(f"Unsupported checkpoint schema version: {version}")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS blobs "
@@ -39,7 +46,10 @@ class SQLiteCheckpointStore:
                 "CREATE INDEX IF NOT EXISTS snapshots_agent_id "
                 "ON snapshots(agent_name, id)"
             )
-            connection.execute(f"PRAGMA user_version={self.SCHEMA_VERSION}")
+            # Новая standalone-база остаётся v1. Существующую managed v2
+            # загрузчик не понижает; миграцией владеет только LifeDatabase.
+            if version == 0:
+                connection.execute(f"PRAGMA user_version={self.schema_version}")
 
     def _connect(self):
         connection = sqlite3.connect(self.path, timeout=30)
@@ -49,7 +59,10 @@ class SQLiteCheckpointStore:
     @staticmethod
     def _canonical(value):
         return json.dumps(
-            value, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
         )
 
@@ -74,11 +87,13 @@ class SQLiteCheckpointStore:
                     for offset in range(0, len(value), self.CHUNK_SIZE):
                         children = [
                             self._encode(connection, item, active)
-                            for item in value[offset:offset + self.CHUNK_SIZE]
+                            for item in value[offset : offset + self.CHUNK_SIZE]
                         ]
-                        chunks.append(self._put_node(
-                            connection, {"kind": "chunk", "children": children}
-                        ))
+                        chunks.append(
+                            self._put_node(
+                                connection, {"kind": "chunk", "children": children}
+                            )
+                        )
                     return self._put_node(
                         connection, {"kind": "list", "children": chunks}
                     )
@@ -98,9 +113,14 @@ class SQLiteCheckpointStore:
                     else:
                         self._validate_scalar(item)
                         inline[key] = item
-                return self._put_node(connection, {
-                    "kind": "dict", "value": inline, "children": children,
-                })
+                return self._put_node(
+                    connection,
+                    {
+                        "kind": "dict",
+                        "value": inline,
+                        "children": children,
+                    },
+                )
             finally:
                 active.remove(identity)
         self._validate_scalar(value)
@@ -113,8 +133,17 @@ class SQLiteCheckpointStore:
         if isinstance(value, float) and (value != value or abs(value) == float("inf")):
             raise ValueError("Checkpoint numbers must be finite")
 
-    def save(self, state, agent_name, cycle_count, max_checkpoints=20) -> int:
-        """Save atomically and retain the newest checkpoints for this agent only."""
+    def save(
+        self,
+        state,
+        agent_name,
+        cycle_count,
+        max_checkpoints=20,
+        *,
+        saved_at=None,
+        connection=None,
+    ) -> int:
+        """Save atomically; an owner may supply an outer transaction."""
         if not isinstance(state, dict):
             raise TypeError("Checkpoint state must be a dictionary")
         if not isinstance(agent_name, str):
@@ -125,28 +154,46 @@ class SQLiteCheckpointStore:
             raise TypeError("max_checkpoints must be an integer")
         if max_checkpoints < 1:
             raise ValueError("max_checkpoints must be positive")
-        with closing(self._connect()) as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
-            root = self._encode(connection, state, set(), root=True)
-            cursor = connection.execute(
-                "INSERT INTO snapshots(agent_name, cycle, saved_at, manifest) "
-                "VALUES (?, ?, ?, ?)",
-                (agent_name, cycle_count, datetime.now(timezone.utc).isoformat(),
-                 self._canonical({"root": root})),
+        if saved_at is not None and (
+            not isinstance(saved_at, str) or not saved_at.strip()
+        ):
+            raise ValueError("saved_at must be a non-empty ISO timestamp string")
+        timestamp = saved_at or datetime.now(timezone.utc).isoformat()
+        if connection is not None:
+            return self._save_in_transaction(
+                connection, state, agent_name, cycle_count, max_checkpoints, timestamp
             )
-            snapshot_id = cursor.lastrowid
-            connection.execute(
-                "DELETE FROM snapshots WHERE agent_name = ? AND id NOT IN "
-                "(SELECT id FROM snapshots WHERE agent_name = ? "
-                "ORDER BY id DESC LIMIT ?)",
-                (agent_name, agent_name, max_checkpoints),
+        with closing(self._connect()) as owned, owned:
+            owned.execute("BEGIN IMMEDIATE")
+            return self._save_in_transaction(
+                owned, state, agent_name, cycle_count, max_checkpoints, timestamp
             )
-            return snapshot_id
+
+    def _save_in_transaction(
+        self, connection, state, agent_name, cycle_count, max_checkpoints, timestamp
+    ):
+        root = self._encode(connection, state, set(), root=True)
+        cursor = connection.execute(
+            "INSERT INTO snapshots(agent_name, cycle, saved_at, manifest) "
+            "VALUES (?, ?, ?, ?)",
+            (agent_name, cycle_count, timestamp, self._canonical({"root": root})),
+        )
+        snapshot_id = cursor.lastrowid
+        connection.execute(
+            "DELETE FROM snapshots WHERE agent_name = ? AND id NOT IN "
+            "(SELECT id FROM snapshots WHERE agent_name = ? "
+            "ORDER BY id DESC LIMIT ?)",
+            (agent_name, agent_name, max_checkpoints),
+        )
+        return snapshot_id
 
     @staticmethod
     def _check_hash(digest):
-        if (not isinstance(digest, str) or len(digest) != 64
-                or any(char not in "0123456789abcdef" for char in digest)):
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
             raise ValueError("Invalid checkpoint blob reference")
 
     def _manifest_root(self, manifest):
@@ -167,8 +214,10 @@ class SQLiteCheckpointStore:
         if row is None:
             raise ValueError(f"Missing checkpoint blob: {digest}")
         payload = row[0]
-        if (not isinstance(payload, str)
-                or hashlib.sha256(payload.encode("utf-8")).hexdigest() != digest):
+        if (
+            not isinstance(payload, str)
+            or hashlib.sha256(payload.encode("utf-8")).hexdigest() != digest
+        ):
             raise ValueError(f"Checkpoint blob hash mismatch: {digest}")
         try:
             node = json.loads(payload)
@@ -184,7 +233,9 @@ class SQLiteCheckpointStore:
                 for value in values:
                     self._validate_scalar(value)
             elif kind == "dict" and set(node) == {"kind", "value", "children"}:
-                if not isinstance(node["value"], dict) or not isinstance(node["children"], dict):
+                if not isinstance(node["value"], dict) or not isinstance(
+                    node["children"], dict
+                ):
                     raise ValueError("Invalid checkpoint dictionary")
                 if node["value"].keys() & node["children"].keys():
                     raise ValueError("Duplicate checkpoint dictionary keys")
@@ -228,9 +279,13 @@ class SQLiteCheckpointStore:
             if kind == "list":
                 result = []
                 for child in node["children"]:
-                    result.extend(self._decode(connection, child, active, expected="chunk"))
+                    result.extend(
+                        self._decode(connection, child, active, expected="chunk")
+                    )
                 return result
-            return [self._decode(connection, child, active) for child in node["children"]]
+            return [
+                self._decode(connection, child, active) for child in node["children"]
+            ]
         finally:
             active.remove(digest)
 
@@ -267,9 +322,10 @@ class SQLiteCheckpointStore:
         """
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            pending = [self._manifest_root(row[0]) for row in connection.execute(
-                "SELECT manifest FROM snapshots"
-            )]
+            pending = [
+                self._manifest_root(row[0])
+                for row in connection.execute("SELECT manifest FROM snapshots")
+            ]
             reachable = set()
             while pending:
                 digest = pending.pop()

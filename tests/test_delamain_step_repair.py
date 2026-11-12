@@ -51,9 +51,7 @@ class PlanThenRepairPlanner:
         return [ActionRequest("read_file", {"path": "missing.txt"})]
 
     def replan(self, task: str, failure_context):
-        return [
-            ActionRequest("write_file", {"path": "recovered.txt", "content": "ok"})
-        ]
+        return [ActionRequest("write_file", {"path": "recovered.txt", "content": "ok"})]
 
 
 def make_sub(tmp_path: Path, **kwargs) -> DelamainSubsystem:
@@ -113,7 +111,9 @@ def test_step_repair_is_off_by_default(tmp_path: Path) -> None:
         assert result.repair_count == 0
         assert planner.replan_calls == 0
         assert not (root / "recovered.txt").exists()
-        assert [item["action"] for item in runtime.history(task_id="off-by-default")] == [
+        assert [
+            item["action"] for item in runtime.history(task_id="off-by-default")
+        ] == [
             "task.start",
             "read_file",
             "task.finish",
@@ -158,8 +158,14 @@ def test_step_repair_replaces_the_remaining_plan(tmp_path: Path) -> None:
             "write_file",
         ]
         assert result.effective_actions == [
-            {"action": "write_file", "args": {"path": "completed.txt", "content": "done"}},
-            {"action": "write_file", "args": {"path": "recovered.txt", "content": "ok"}},
+            {
+                "action": "write_file",
+                "args": {"path": "completed.txt", "content": "done"},
+            },
+            {
+                "action": "write_file",
+                "args": {"path": "recovered.txt", "content": "ok"},
+            },
         ]
         assert (root / "completed.txt").read_text(encoding="utf-8") == "done"
         assert (root / "recovered.txt").read_text(encoding="utf-8") == "ok"
@@ -173,10 +179,16 @@ def test_step_repair_replaces_the_remaining_plan(tmp_path: Path) -> None:
         assert context["args"] == {"path": "missing.txt"}
         assert "missing.txt" in context["error"]
         assert context["completed_steps"] == [
-            {"action": "write_file", "args": {"path": "completed.txt", "content": "done"}}
+            {
+                "action": "write_file",
+                "args": {"path": "completed.txt", "content": "done"},
+            }
         ]
         assert context["remaining_steps"] == [
-            {"action": "write_file", "args": {"path": "original-tail.txt", "content": "no"}}
+            {
+                "action": "write_file",
+                "args": {"path": "original-tail.txt", "content": "no"},
+            }
         ]
         assert context["repair_count"] == 0
 
@@ -339,7 +351,10 @@ def test_two_repair_segments_can_follow_each_other(tmp_path: Path) -> None:
         ]
         assert result.effective_actions == [
             {"action": "write_file", "args": {"path": "first-fix.txt", "content": "1"}},
-            {"action": "write_file", "args": {"path": "second-fix.txt", "content": "2"}},
+            {
+                "action": "write_file",
+                "args": {"path": "second-fix.txt", "content": "2"},
+            },
         ]
         assert planner.replan_calls == 2
         assert planner.contexts[0]["repair_count"] == 0
@@ -486,7 +501,9 @@ def test_repair_approval_resumes_with_completed_steps_preserved(
         ]
         assert stored["metadata"]["prior_effective_actions"] == []
         assert not (root / "recovered.txt").exists()
-        assert [item["action"] for item in runtime.history(task_id="repair-approval")] == [
+        assert [
+            item["action"] for item in runtime.history(task_id="repair-approval")
+        ] == [
             "task.start",
             "read_file",
             "task.repair",
@@ -513,13 +530,18 @@ def test_repair_approval_resumes_with_completed_steps_preserved(
         assert len(result.steps) == 1
         assert result.planned_actions == [
             {"action": "read_file", "args": {"path": "missing.txt"}},
-            {"action": "write_file", "args": {"path": "recovered.txt", "content": "ok"}},
+            {
+                "action": "write_file",
+                "args": {"path": "recovered.txt", "content": "ok"},
+            },
         ]
         assert result.effective_actions == [
             {"action": "write_file", "args": {"path": "recovered.txt", "content": "ok"}}
         ]
         assert (root / "recovered.txt").read_text(encoding="utf-8") == "ok"
-        assert [item["action"] for item in runtime.history(task_id="repair-approval")] == [
+        assert [
+            item["action"] for item in runtime.history(task_id="repair-approval")
+        ] == [
             "task.start",
             "read_file",
             "task.repair",
@@ -633,9 +655,7 @@ def test_repair_approval_created_while_resuming_initial_approval(
         sub.queue_goal(
             "approved then repaired",
             plan=[
-                ActionRequest(
-                    "write_file", {"path": "marker.txt", "content": "kept"}
-                ),
+                ActionRequest("write_file", {"path": "marker.txt", "content": "kept"}),
                 ActionRequest("read_file", {"path": "missing.txt"}),
             ],
         )
@@ -745,8 +765,7 @@ def test_subsystem_repair_approval_completes_goal_and_skill(
         assert sub.list_goals()[0]["status"] == "pending"
         assert sub.list_goals()[0]["metadata"]["step_repairs"] == 1
         assert (
-            sub.list_approvals(status="pending")[0]["metadata"]["kind"]
-            == "step_repair"
+            sub.list_approvals(status="pending")[0]["metadata"]["kind"] == "step_repair"
         )
         assert sub.tick(2, {}) is None
         assert len(sub.list_approvals(status="pending")) == 1
@@ -799,9 +818,7 @@ def test_agent_runner_shows_repair_status_and_pending_note(
         runner = AgentRunner(FakeAgent(sub), EventBus(), watchdog=object())
 
         async def scenario() -> None:
-            pending_text = await runner.handle_command(
-                "/delamain run read missing"
-            )
+            pending_text = await runner.handle_command("/delamain run read missing")
             assert "нужно подтверждение" in pending_text
             assert "Это repair-план" in pending_text
             assert "уже выполнено шагов: 1" in pending_text

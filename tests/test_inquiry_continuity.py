@@ -19,7 +19,9 @@ def test_inquiry_resumes_next_strategy_after_startup(tmp_path, monkeypatch, back
         first, _ = create_agent(env, "InquiryLife", new=True)
         first.ask_user("как устроена память", source="self", max_explorations=3)
         stimulus = first._consume_open_question()
-        first._record_open_question_exploration(stimulus, "Не знаю, пока нет свидетельств")
+        first._record_open_question_exploration(
+            stimulus, "Не знаю, пока нет свидетельств"
+        )
         expected = first._consume_open_question()
         assert "попытка 2/3" in expected
         first.save_state(force=True)

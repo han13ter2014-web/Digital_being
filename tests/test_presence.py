@@ -6,6 +6,7 @@
 тихая близость, не разлука: укола тоски нет, потребность в связи
 гаснет лишь частично.
 """
+
 from types import SimpleNamespace
 
 from src.core.emotional_state import EmotionalState
@@ -22,6 +23,7 @@ from src.perception.presence import (
 
 # ---------------- орган ----------------
 
+
 def test_disabled_sense_never_touches_os():
     def forbidden():
         raise AssertionError("выключенный орган не должен читать ОС")
@@ -32,7 +34,9 @@ def test_disabled_sense_never_touches_os():
 
 
 def test_classification_boundaries():
-    sense = PresenceSense(enabled=True, app_reader=lambda: "Code", idle_reader=lambda: 5.0)
+    sense = PresenceSense(
+        enabled=True, app_reader=lambda: "Code", idle_reader=lambda: 5.0
+    )
     assert sense.snapshot(force=True)["state"] == STATE_ACTIVE
     sense._idle_reader = lambda: 120.0
     assert sense.snapshot(force=True)["state"] == STATE_QUIET
@@ -43,7 +47,9 @@ def test_classification_boundaries():
 
 
 def test_snapshot_hides_document_titles():
-    sense = PresenceSense(enabled=True, app_reader=lambda: "Unknown", idle_reader=lambda: 5.0)
+    sense = PresenceSense(
+        enabled=True, app_reader=lambda: "Unknown", idle_reader=lambda: 5.0
+    )
     assert sense.snapshot(force=True)["active_app"] is None
 
 
@@ -56,9 +62,13 @@ def test_is_near_only_active_or_quiet():
 
 # ---------------- переключатель доступа ----------------
 
+
 def test_access_switch_roundtrip(tmp_path):
     from src.app.access_control import (
-        apply_choice, apply_saved, current_state, set_access,
+        apply_choice,
+        apply_saved,
+        current_state,
+        set_access,
     )
 
     agent = SimpleNamespace(presence=None)
@@ -76,6 +86,7 @@ def test_access_switch_roundtrip(tmp_path):
 
 
 # ---------------- тихая близость ----------------
+
 
 class _FakeUI:
     def __init__(self, last_user_cycle=0):
@@ -126,8 +137,9 @@ def test_near_silence_is_quiet_closeness_not_separation():
     proactive = _make_proactive(agent, last_user_cycle=0)
     before = agent.emotional_state.levels["sadness"]
 
-    proactive.maybe_initiate(agent=agent, cycle=100,
-                             user_context={"should_interrupt": True})
+    proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     # Укола тоски нет — человек рядом. Эпизод не помечен: когда он
     # отойдёт, честный укол случится тогда.
@@ -142,8 +154,9 @@ def test_away_silence_pangs_once_as_before():
     proactive = _make_proactive(agent, last_user_cycle=0)
     before = agent.emotional_state.levels["sadness"]
 
-    proactive.maybe_initiate(agent=agent, cycle=100,
-                             user_context={"should_interrupt": True})
+    proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     assert agent.emotional_state.levels["sadness"] > before
     assert proactive._silence_felt_for_user_cycle == 0
@@ -155,8 +168,9 @@ def test_near_care_speaks_quiet_closeness_not_longing():
     agent = _make_agent(near=True)
     proactive = _make_proactive(agent, last_user_cycle=0)
 
-    msg = proactive.maybe_initiate(agent=agent, cycle=100,
-                                   user_context={"should_interrupt": True})
+    msg = proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     assert msg is not None
     assert msg["msg_type"] == "care"
@@ -176,8 +190,9 @@ def test_near_but_truly_sad_says_so_honestly():
     agent.emotional_state.handle_event("long_silence", cycle=50, scale=1.0)
     proactive = _make_proactive(agent, last_user_cycle=0)
 
-    msg = proactive.maybe_initiate(agent=agent, cycle=100,
-                                   user_context={"should_interrupt": True})
+    msg = proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     assert msg is not None
     assert msg["context"] == "quiet_closeness"
@@ -192,8 +207,9 @@ def test_away_care_keeps_longing_voice():
     agent = _make_agent(near=False)
     proactive = _make_proactive(agent, last_user_cycle=0)
 
-    msg = proactive.maybe_initiate(agent=agent, cycle=100,
-                                   user_context={"should_interrupt": True})
+    msg = proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     assert msg is not None
     assert msg["context"] == "silence_detected"
@@ -204,8 +220,9 @@ def test_disabled_presence_changes_nothing():
     proactive = _make_proactive(agent, last_user_cycle=0)
     before = agent.emotional_state.levels["sadness"]
 
-    proactive.maybe_initiate(agent=agent, cycle=100,
-                             user_context={"should_interrupt": True})
+    proactive.maybe_initiate(
+        agent=agent, cycle=100, user_context={"should_interrupt": True}
+    )
 
     assert agent.emotional_state.levels["sadness"] > before
     assert agent.motivation.soothed == []

@@ -22,10 +22,16 @@ def test_pause_selection_does_not_execute_research(monkeypatch):
     from unittest.mock import Mock
 
     agent = DigitalBeing(name="PauseNotFailure")
-    monkeypatch.setattr(agent.decision_arbitrator, "choose_action", lambda candidates, context: {
-        "action": "wait", "source": "motivation", "verdict": "proceed",
-        "params": {"reason": "no_pressing_needs"},
-    })
+    monkeypatch.setattr(
+        agent.decision_arbitrator,
+        "choose_action",
+        lambda candidates, context: {
+            "action": "wait",
+            "source": "motivation",
+            "verdict": "proceed",
+            "params": {"reason": "no_pressing_needs"},
+        },
+    )
     think = Mock(side_effect=AssertionError("pause must not force learning"))
     act = Mock(side_effect=AssertionError("pause must not execute work"))
     monkeypatch.setattr(agent, "think", think)
@@ -47,4 +53,7 @@ def test_real_curiosity_still_proposes_its_own_activity():
         drive.current_level = 0
     system.needs["curiosity"].current_level = 0
     candidates = system.get_action_candidates({})
-    assert any(candidate.get("need") == "curiosity" and candidate["action"] != "wait" for candidate in candidates)
+    assert any(
+        candidate.get("need") == "curiosity" and candidate["action"] != "wait"
+        for candidate in candidates
+    )

@@ -16,9 +16,14 @@ def evidence_sources(agent, target):
         strength = experience.get("evidence_strength", 0.0)
         source = experience.get("source")
         text = experience.get("outcome")
-        if (isinstance(strength, (int, float)) and EVIDENCE_MIN <= strength <= 1
-                and isinstance(source, str) and source.strip()
-                and isinstance(text, str) and len(text.strip()) > 10):
+        if (
+            isinstance(strength, (int, float))
+            and EVIDENCE_MIN <= strength <= 1
+            and isinstance(source, str)
+            and source.strip()
+            and isinstance(text, str)
+            and len(text.strip()) > 10
+        ):
             sources.add(source)
     return sorted(sources)
 
@@ -27,10 +32,13 @@ def begin_evidence_goal(agent, entry):
     if agent._normalize_action(entry["action"]) == "explore" and entry.get("target"):
         from src.cognition.method_feedback import information_context
 
-        entry["evidence_goal"] = {"kind": "new_topic_evidence",
-                                  "information_context": information_context(agent),
-                                  "baseline_sources": evidence_sources(agent, entry["target"]),
-                                  "status": "pending", "new_sources": []}
+        entry["evidence_goal"] = {
+            "kind": "new_topic_evidence",
+            "information_context": information_context(agent),
+            "baseline_sources": evidence_sources(agent, entry["target"]),
+            "status": "pending",
+            "new_sources": [],
+        }
 
 
 def finish_evidence_goal(agent, entry):

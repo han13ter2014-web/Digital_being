@@ -25,12 +25,13 @@ class DecisionArbitrator:
         # Ленивые импорты через importlib.util (обход __init__.py пакета src.emotion)
         import importlib.util
         import os
+
         self._systems: Dict[str, object] = {}
         self._available = {}
 
         def _try_load(key, module_path, class_name):
-            parts = module_path.split('.')
-            file_path = os.path.join(*parts) + '.py'
+            parts = module_path.split(".")
+            file_path = os.path.join(*parts) + ".py"
             if not os.path.exists(file_path):
                 self._available[key] = False
                 return
@@ -46,8 +47,9 @@ class DecisionArbitrator:
             except Exception:
                 self._available[key] = False
 
-        _try_load("dialogue", "src.consciousness.internal_dialogue",
-                  "InternalDialogueEngine")
+        _try_load(
+            "dialogue", "src.consciousness.internal_dialogue", "InternalDialogueEngine"
+        )
         _try_load("ethics", "src.emotion.ethical_core", "EthicalCoreSystem")
         _try_load("self", "src.core.self_identity_module", "CoreSelfModule")
 
@@ -108,6 +110,7 @@ class DecisionArbitrator:
         if self._available.get("ethics"):
             try:
                 from src.emotion.ethical_core import MoralDilemma
+
                 dilemma = MoralDilemma(
                     scenario=topic,
                     stakes=["репутация", "время", "энергия", "знание"],
@@ -221,7 +224,9 @@ class DecisionArbitrator:
         survival = opinions.get("survival", {})
         if not survival.get("homeostasis_maintained", True):
             score -= 0.10
-            reasons.append(f"⚠️ Нарушен гомеостаз: {len(survival.get('alarms', []))} тревог")
+            reasons.append(
+                f"⚠️ Нарушен гомеостаз: {len(survival.get('alarms', []))} тревог"
+            )
 
         # Финальный вердикт
         score = max(0.0, min(1.0, score))
@@ -247,31 +252,10 @@ class DecisionArbitrator:
     # ============================================================
     # НОВЫЙ МЕТОД P1.1: Выбор действия из кандидатов
     # ============================================================
-    def choose_action(self, candidates: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Выбирает лучшее действие из списка кандидатов.
-        
-        Args:
-            candidates: Список кандидатов от разных источников.
-                Пример:
-                [
-                    {"source": "active_inference", "action": "explore", "strength": 0.7, "params": {}},
-                    {"source": "motivation", "action": "ask_question", "strength": 0.9, "params": {"topic": "python"}},
-                    {"source": "embodiment", "action": "rest", "strength": 0.3, "params": {}},
-                ]
-            context: Контекст агента (energy, cycle, pressing_needs, etc.)
-        
-        Returns:
-            {
-                "action": str,           # выбранное действие
-                "source": str,           # источник кандидата
-                "verdict": "proceed|caution|stop",
-                "confidence": float,
-                "reasoning": str,
-                "voices": dict,          # голоса систем для выбранного действия
-                "all_evaluations": list  # оценки всех кандидатов
-            }
-        """
+    def choose_action(
+        self, candidates: List[Dict[str, Any]], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Выбирает действие; симулятор может лишь ограниченно менять score."""
         if not candidates:
             return {
                 "action": "wait",
@@ -280,72 +264,103 @@ class DecisionArbitrator:
                 "confidence": 0.0,
                 "reasoning": "Нет доступных кандидатов",
                 "voices": {},
-                "all_evaluations": []
+                "all_evaluations": [],
+                "simulation": None,
             }
 
-        # Оцениваем каждого кандидата через арбитраж
+        from copy import deepcopy
+
+        simulation_mode = context.get("simulation_mode", "shadow")
+        try:
+            max_adjustment = float(context.get("simulation_max_adjustment", 0.0))
+        except (TypeError, ValueError, OverflowError):
+            max_adjustment = 0.0
+        max_adjustment = max(0.0, min(0.1, max_adjustment))
+
         evaluations = []
         for cand in candidates:
             action_name = cand.get("action", "unknown")
             source = cand.get("source", "unknown")
             strength = cand.get("strength", 0.5)
-            
-            # Формируем топик для арбитража: источник + действие
             topic = f"{source}:{action_name}"
-            
-            # Получаем вердикт арбитра для этого действия
             verdict_result = self.arbitrate(topic, action_name)
-            
-            # Комбинированный скор: strength кандидата * confidence арбитра
-            # verdict score уже в verdict_result["score"] (0.0-1.0)
             arbiter_score = verdict_result.get("score", 0.5)
-            combined_score = strength * 0.4 + arbiter_score * 0.6
-            
-            evaluations.append({
-                "candidate": cand,
-                "verdict": verdict_result,
-                "combined_score": combined_score,
-                "arbiter_score": arbiter_score,
-            })
+            base_score = strength * 0.4 + arbiter_score * 0.6
 
-        # Сортируем по комбинированному скору (убывание)
-        evaluations.sort(key=lambda e: e["combined_score"], reverse=True)
-        
-        allowed = [entry for entry in evaluations if entry["verdict"]["verdict"] != "stop"]
+            simulation = deepcopy(cand.get("simulation"))
+            probability = None
+            confidence = 0.0
+            adjustment = 0.0
+            if isinstance(simulation, dict):
+                probability = simulation.get("predicted_effect_probability")
+                confidence = simulation.get("confidence", 0.0) or 0.0
+                if (
+                    simulation_mode == "advisor"
+                    and simulation.get("status") == "predicted"
+                    and isinstance(probability, (int, float))
+                    and not isinstance(probability, bool)
+                ):
+                    adjustment = max_adjustment * confidence * (2 * probability - 1)
+                simulation["adjustment"] = adjustment
+            combined_score = max(0.0, min(1.0, base_score + adjustment))
+            evaluations.append(
+                {
+                    "candidate": cand,
+                    "simulation": simulation,
+                    "verdict": verdict_result,
+                    "base_combined_score": base_score,
+                    "combined_score": combined_score,
+                    "arbiter_score": arbiter_score,
+                    "simulation_adjustment": adjustment,
+                }
+            )
+
+        evaluations.sort(key=lambda entry: entry["combined_score"], reverse=True)
+
+        def public_evaluation(entry):
+            simulation = entry["simulation"] or {}
+            return {
+                "action": entry["candidate"]["action"],
+                "source": entry["candidate"]["source"],
+                "base_combined_score": round(entry["base_combined_score"], 3),
+                "predicted_effect_probability": simulation.get(
+                    "predicted_effect_probability"
+                ),
+                "simulation_confidence": simulation.get("confidence", 0.0),
+                "simulation_adjustment": round(entry["simulation_adjustment"], 3),
+                "combined_score": round(entry["combined_score"], 3),
+                "verdict": entry["verdict"]["verdict"],
+            }
+
+        allowed = [
+            entry for entry in evaluations if entry["verdict"]["verdict"] != "stop"
+        ]
         if not allowed:
             return {
-                "action": "wait", "source": "arbitrator_refusal", "params": {},
-                "verdict": "stop", "confidence": 1.0,
+                "action": "wait",
+                "source": "arbitrator_refusal",
+                "params": {},
+                "verdict": "stop",
+                "confidence": 1.0,
                 "reasoning": "Все предложенные действия остановлены арбитром",
                 "voices": {},
-                "all_evaluations": [
-                    {"action": entry["candidate"]["action"], "source": entry["candidate"]["source"],
-                     "combined_score": round(entry["combined_score"], 3),
-                     "verdict": entry["verdict"]["verdict"]} for entry in evaluations
-                ],
+                "simulation": None,
+                "all_evaluations": [public_evaluation(entry) for entry in evaluations],
             }
         best = allowed[0]
         best_candidate = best["candidate"]
         best_verdict = best["verdict"]
         reasoning = f"Выбрано: {best_candidate['action']} (источник: {best_candidate['source']}, score: {best['combined_score']:.2f}). {best_verdict['reasoning']}"
-
         return {
             "action": best_candidate["action"],
             "source": best_candidate["source"],
             "params": best_candidate.get("params", {}),
+            "simulation": deepcopy(best["simulation"]),
             "verdict": best_verdict["verdict"],
             "confidence": best_verdict["confidence"],
             "reasoning": reasoning,
             "voices": best_verdict["voices"],
-            "all_evaluations": [
-                {
-                    "action": e["candidate"]["action"],
-                    "source": e["candidate"]["source"],
-                    "combined_score": round(e["combined_score"], 3),
-                    "verdict": e["verdict"]["verdict"],
-                }
-                for e in evaluations
-            ]
+            "all_evaluations": [public_evaluation(entry) for entry in evaluations],
         }
 
     # ============================================================

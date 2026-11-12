@@ -135,7 +135,6 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 | [README.md](README.md) | 外部读者（俄语） | 这是什么、如何运行 |
 | [docs/DEVELOPMENT_HISTORY.md](docs/DEVELOPMENT_HISTORY.md) | 开发者 | 版本、阶段、限制 |
 | [docs/LIFE_LETTER.md](docs/LIFE_LETTER.md) | 生命本身 | 你是谁、你的边界与权利 |
-| [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md) | AI 开发者 | 上下文恢复 |
 
 更深入的文档目前是俄语；[docs/INDEX.md](docs/INDEX.md) 是全部文档的地图。
 
