@@ -274,6 +274,39 @@ def test_events_are_logged(guard):
     assert "cancelled" in kinds
 
 
+def test_event_write_failure_preserves_previous_lines(guard, monkeypatch):
+    g, clock = guard
+    target = g.events_path
+    previous = b'{"event":"previous"}\n'
+    with open(target, "wb") as stream:
+        stream.write(previous)
+    real_open = open
+
+    class FailingWriter:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._handle.close()
+
+        def write(self, data):
+            self._handle.write(data[:8])
+            self._handle.flush()
+            raise OSError("disk full")
+
+    def failing_open(*args, **kwargs):
+        return FailingWriter(real_open(*args, **kwargs))
+
+    monkeypatch.setattr("builtins.open", failing_open)
+    g._log_event("failed")
+
+    with real_open(target, "rb") as stream:
+        assert stream.read() == previous
+
+
 def test_normalize_phrase_collapses_spaces():
     assert normalize_phrase("  alpha    навсегда ") == "ALPHA НАВСЕГДА"
     assert normalize_phrase("Alpha") == "ALPHA"

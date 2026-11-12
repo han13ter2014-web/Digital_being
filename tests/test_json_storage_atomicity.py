@@ -82,3 +82,20 @@ def test_proposal_decision_failure_preserves_pending_record(tmp_path, monkeypatc
     assert result["decided"] is False
     assert_previous_file_survived(path, previous)
     api.registry.record.assert_not_called()
+
+
+def test_proposal_creation_failure_leaves_no_pending_record(tmp_path, monkeypatch):
+    api = ArchitectureProposal(registry=Mock(), proposals_dir=str(tmp_path))
+
+    def fail_after_complete_dump(data, stream, **kwargs):
+        stream.write(json.dumps(data, ensure_ascii=False))
+        raise OSError("disk full")
+
+    monkeypatch.setattr(json, "dump", fail_after_complete_dump)
+    result = api.propose("method_add", "Не должно появиться", "проверка")
+
+    assert result["created"] is False
+    assert api.list_pending() == []
+    assert list(tmp_path.glob("*.json")) == []
+    assert list(tmp_path.glob("*.tmp")) == []
+    api.registry.record.assert_not_called()

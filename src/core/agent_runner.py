@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -302,6 +303,7 @@ class AgentRunner:
         self._last_save_at: Optional[float] = None
         self._dialogue_journal_backend: Optional[str] = None
         self._dialogue_journal_error: Optional[str] = None
+        self._dialogue_journal_lock = threading.RLock()
         self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
 
@@ -1805,9 +1807,27 @@ class AgentRunner:
                 self._dialogue_journal_backend = "jsonl"
                 path = data_path("logs", "dialogue_cycles.jsonl")
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "a", encoding="utf-8") as stream:
-                    stream.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    stream.flush()
+                line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+                with self._dialogue_journal_lock:
+                    try:
+                        original_size = os.path.getsize(path)
+                    except FileNotFoundError:
+                        original_size = 0
+                    try:
+                        with open(path, "ab") as stream:
+                            written = stream.write(line)
+                            if written != len(line):
+                                raise OSError("partial dialogue journal write")
+                            stream.flush()
+                    except Exception:
+                        try:
+                            os.truncate(path, original_size)
+                        except OSError as rollback_error:
+                            logger.warning(
+                                f"[{self.name}] dialogue journal rollback failed: "
+                                f"{rollback_error}"
+                            )
+                        raise
             self._dialogue_journal_error = None
         except Exception as exc:
             self._dialogue_journal_error = f"{type(exc).__name__}: {exc}"

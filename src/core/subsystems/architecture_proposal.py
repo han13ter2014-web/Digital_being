@@ -129,10 +129,16 @@ class ArchitectureProposal:
 
         # Сохраняем в файл (standalone)
         filepath = f"{self.proposals_dir}/{proposal_id}.json"
+        temporary = filepath + ".tmp"
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(proposal, f, indent=2, ensure_ascii=False)
+            os.replace(temporary, filepath)
         except Exception as e:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
             return {"created": False, "reason": f"ошибка записи: {e}"}
 
         # Регистрируем

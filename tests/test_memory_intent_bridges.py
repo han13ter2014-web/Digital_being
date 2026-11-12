@@ -216,6 +216,53 @@ async def test_dialogue_snapshot_contains_both_sides_and_survives_new_runner():
     assert records[-1]["schema_version"] == 1
 
 
+def test_dialogue_snapshot_failure_preserves_previous_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    target = tmp_path / "logs" / "dialogue_cycles.jsonl"
+    target.parent.mkdir()
+    previous = b'{"schema_version":1,"cycle":1}\n'
+    target.write_bytes(previous)
+    interaction = SimpleNamespace(
+        to_checkpoint_dict=lambda: {},
+        message_history=[],
+        OUTGOING_TRACE_MAX=100,
+    )
+    agent = SimpleNamespace(
+        name="JournalTest",
+        energy=100.0,
+        cycle_count=2,
+        user_interaction=interaction,
+        life_guard=None,
+    )
+    runner = AgentRunner(agent, RecordingBus())
+    runner._last_tick_ledger = {}
+    real_open = open
+
+    class FailingWriter:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._handle.close()
+
+        def write(self, data):
+            self._handle.write(data[:8])
+            self._handle.flush()
+            raise OSError("disk full")
+
+    def failing_open(*args, **kwargs):
+        return FailingWriter(real_open(*args, **kwargs))
+
+    monkeypatch.setattr("builtins.open", failing_open)
+    runner._save_dialogue_cycle_snapshot()
+
+    assert "disk full" in runner._dialogue_journal_error
+    assert target.read_bytes() == previous
+
+
 @pytest.mark.asyncio
 async def test_tick_once_automatically_appends_dialogue_snapshot():
     agent, runner, bus = _make_runner()

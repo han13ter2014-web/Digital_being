@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
 from contextlib import closing, nullcontext
 from dataclasses import asdict, dataclass, field
@@ -248,6 +249,7 @@ class LifeGuard:
     name_provider: Any = field(default=None, repr=False)
     life_id: Optional[str] = None
     database: Any = field(default=None, repr=False)
+    _events_lock: Any = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
         if self.database is not None:
@@ -824,8 +826,23 @@ class LifeGuard:
             return
         try:
             os.makedirs(os.path.dirname(self.events_path) or ".", exist_ok=True)
-            with open(self.events_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+            with self._events_lock:
+                try:
+                    original_size = os.path.getsize(self.events_path)
+                except FileNotFoundError:
+                    original_size = 0
+                try:
+                    with open(self.events_path, "ab") as fh:
+                        written = fh.write(line)
+                        if written != len(line):
+                            raise OSError("partial life event write")
+                except OSError:
+                    try:
+                        os.truncate(self.events_path, original_size)
+                    except OSError:
+                        pass
+                    raise
         except OSError:
             return
 
