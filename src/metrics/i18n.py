@@ -125,9 +125,23 @@ class I18n:
     # Загрузка / сохранение
     # ----------------------------------------------------------------
 
+    def _language_path(self, language: str) -> Optional[str]:
+        if (
+            not language
+            or language in {".", ".."}
+            or "/" in language
+            or "\\" in language
+            or ":" in language
+        ):
+            logger.warning(f"[i18n] небезопасный идентификатор языка: {language!r}")
+            return None
+        return os.path.join(self._locale_dir, f"{language}.json")
+
     def _load_language(self, language: str) -> bool:
         """Загрузить переводы из JSON-файла. Возвращает успех."""
-        path = os.path.join(self._locale_dir, f"{language}.json")
+        path = self._language_path(language)
+        if path is None:
+            return False
         if not os.path.isfile(path):
             logger.debug(f"[i18n] файл не найден: {path}")
             return False
@@ -156,10 +170,12 @@ class I18n:
 
     def save_translations(self, language: str, translations: Dict[str, str]) -> bool:
         """Сохранить переводы в JSON-файл."""
+        path = self._language_path(language)
+        if path is None:
+            return False
         temporary = None
         try:
             os.makedirs(self._locale_dir, exist_ok=True)
-            path = os.path.join(self._locale_dir, f"{language}.json")
             fd, temporary = tempfile.mkstemp(
                 prefix=".i18n-", suffix=".tmp", dir=self._locale_dir
             )

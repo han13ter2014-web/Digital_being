@@ -226,6 +226,40 @@ class TestI18n:
         assert target.read_bytes() == previous
         assert i18n.t("hello") == "Привет"
 
+    def test_save_translations_rejects_path_escape(self, tmp_path):
+        from src.metrics import I18n
+
+        locale_dir = tmp_path / "locales"
+        i18n = I18n(locale_dir=str(locale_dir))
+        outside = tmp_path / "escaped.json"
+
+        assert i18n.save_translations("../escaped", {"secret": "outside"}) is False
+        assert not outside.exists()
+        assert "../escaped" not in i18n.list_languages()
+
+    def test_save_translations_rejects_drive_relative_path(self, tmp_path):
+        from src.metrics import I18n
+
+        locale_dir = tmp_path / "locales"
+        i18n = I18n(locale_dir=str(locale_dir))
+
+        assert i18n.save_translations("C:escaped", {"secret": "outside"}) is False
+        assert not (locale_dir / "escaped.json").exists()
+        assert not (locale_dir / "C:escaped.json").exists()
+        assert "C:escaped" not in i18n.list_languages()
+
+    def test_set_language_rejects_path_escape(self, tmp_path):
+        from src.metrics import I18n
+
+        locale_dir = tmp_path / "locales"
+        locale_dir.mkdir()
+        (tmp_path / "secret.json").write_text('{"secret": "outside"}', encoding="utf-8")
+        i18n = I18n(locale_dir=str(locale_dir))
+
+        assert i18n.set_language("../secret") is False
+        assert i18n.get_language() == "ru"
+        assert i18n.t("secret") == "secret"
+
     def test_global_helpers(self, tmp_path):
         from src.metrics.i18n import reset_i18n, set_language, get_i18n
 
