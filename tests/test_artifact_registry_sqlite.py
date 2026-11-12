@@ -299,6 +299,55 @@ def test_write_artifact_transaction_restores_intermediate_versions(tmp_path):
     assert list(database.life_dir.rglob(".artifact-backup-*")) == []
 
 
+def test_concurrent_failed_write_cannot_restore_over_committed_artifact(
+    tmp_path, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    database = _database(tmp_path)
+    row = database.write_artifact("exports/state.json", b"old", kind="export")
+    target = database.life_dir / row["relative_path"]
+    first_replaced = Event()
+    second_finished = Event()
+    original_finish = database._finish_artifact_change
+
+    def controlled_finish(connection, change, kwargs):
+        writer = kwargs["metadata"]["writer"]
+        if writer == "first":
+            first_replaced.set()
+            second_finished.wait(timeout=1)
+        result = original_finish(connection, change, kwargs)
+        if writer == "second":
+            second_finished.set()
+        return result
+
+    monkeypatch.setattr(database, "_finish_artifact_change", controlled_finish)
+
+    def write(payload, writer, invalid=False):
+        metadata = {"writer": writer}
+        if invalid:
+            metadata["invalid"] = float("nan")
+        return database.write_artifact(
+            "exports/state.json", payload, kind="export", metadata=metadata
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        failed = pool.submit(write, b"first", "first", True)
+        assert first_replaced.wait(timeout=2)
+        committed = pool.submit(write, b"second", "second")
+        committed.result(timeout=5)
+        with pytest.raises(ValueError, match="float values"):
+            failed.result(timeout=5)
+
+    assert target.read_bytes() == b"second"
+    assert (
+        database.get_artifact(row["id"])["sha256"]
+        == hashlib.sha256(b"second").hexdigest()
+    )
+    assert database.verify_artifacts()["ok"] is True
+
+
 def test_register_artifact_failure_restores_previous_file(tmp_path):
     database = _database(tmp_path)
     original = _file(tmp_path / "outside", "old.txt", b"old")

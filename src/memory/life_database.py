@@ -563,6 +563,17 @@ class LifeDatabase:
         else:
             rel = self.safe_relative_path(relative_path)
         target = self._artifact_target(life_dir, rel, database_name=self.path.name)
+        if connection is None:
+            with self.write() as owned:
+                return self.register_artifact(
+                    source,
+                    kind=kind,
+                    relative_path=relative_path,
+                    metadata=metadata,
+                    artifact_id=artifact_id,
+                    update=update,
+                    connection=owned,
+                )
         copied = False
         backup = None
         if resolved != target:
@@ -632,6 +643,16 @@ class LifeDatabase:
         """
         rel = self.safe_relative_path(relative_path)
         target = self._artifact_target(self.life_dir, rel, database_name=self.path.name)
+        if connection is None:
+            with self.write() as owned:
+                return self.write_artifact(
+                    relative_path,
+                    data,
+                    kind=kind,
+                    metadata=metadata,
+                    artifact_id=artifact_id,
+                    connection=owned,
+                )
         payload = bytes(data)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
