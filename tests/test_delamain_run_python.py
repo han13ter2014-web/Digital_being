@@ -6,6 +6,7 @@ the child gets a cleaned environment, a timeout kills it, output is capped,
 and the action is dangerous so the approval gate can hold it.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -131,6 +132,19 @@ def test_runner_cleans_environment(
     assert outcome.exit_code == 0
     assert "s3cret" not in outcome.stdout
     assert "None" in outcome.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows environment semantics")
+def test_runner_preserves_system_root_regardless_of_environment_key_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SystemRoot", raising=False)
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    runner = CodeRunner(Sandbox(tmp_path / "workspace"))
+
+    env = runner._clean_env()
+
+    assert env["SystemRoot"] == r"C:\Windows"
 
 
 def test_runner_rejects_non_py_escape_missing_and_large(tmp_path: Path) -> None:

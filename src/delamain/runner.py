@@ -111,9 +111,13 @@ class CodeRunner:
         self.max_code_bytes = int(max_code_bytes)
 
     def _clean_env(self) -> Dict[str, str]:
-        env = {
-            key: value for key, value in os.environ.items() if key in self.ENV_WHITELIST
-        }
+        # os.environ.get is case-insensitive on Windows, unlike comparing the
+        # original keys with this whitelist. Keep canonical names in the child.
+        env = {}
+        for key in self.ENV_WHITELIST:
+            value = os.environ.get(key)
+            if value is not None:
+                env[key] = value
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONNOUSERSITE"] = "1"
         # Do not litter her workspace with __pycache__ directories.
