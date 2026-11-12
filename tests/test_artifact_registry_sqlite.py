@@ -215,6 +215,113 @@ def test_write_artifact_exports_and_refreshes_registration(tmp_path):
     assert database.verify_artifacts()["ok"] is True
 
 
+def test_write_artifact_failure_removes_new_file(tmp_path):
+    database = _database(tmp_path)
+    target = database.life_dir / "exports" / "new.json"
+
+    with pytest.raises(ValueError, match="float values"):
+        database.write_artifact(
+            "exports/new.json",
+            b"new",
+            kind="export",
+            metadata={"invalid": float("nan")},
+        )
+
+    assert not target.exists()
+    assert database.list_artifacts() == []
+
+
+def test_write_artifact_failure_restores_previous_file(tmp_path):
+    database = _database(tmp_path)
+    row = database.write_artifact("exports/state.json", b"old", kind="export")
+    target = database.life_dir / row["relative_path"]
+
+    with pytest.raises(ValueError, match="float values"):
+        database.write_artifact(
+            "exports/state.json",
+            b"new",
+            kind="export",
+            metadata={"invalid": float("nan")},
+        )
+
+    assert target.read_bytes() == b"old"
+    assert database.get_artifact(row["id"]) == row
+    assert database.verify_artifacts()["ok"] is True
+
+
+def test_write_artifact_transaction_rollback_restores_previous_file(tmp_path):
+    database = _database(tmp_path)
+    row = database.write_artifact("exports/state.json", b"old", kind="export")
+    target = database.life_dir / row["relative_path"]
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        with database.write() as connection:
+            database.write_artifact(
+                "exports/state.json", b"new", kind="export", connection=connection
+            )
+            raise RuntimeError("rollback")
+
+    assert target.read_bytes() == b"old"
+    assert database.get_artifact(row["id"]) == row
+    assert database.verify_artifacts()["ok"] is True
+
+
+def test_write_artifact_transaction_restores_intermediate_versions(tmp_path):
+    database = _database(tmp_path)
+    row = database.write_artifact("exports/state.json", b"old", kind="export")
+    target = database.life_dir / row["relative_path"]
+
+    with database.write() as connection:
+        database.write_artifact(
+            "exports/state.json", b"v1", kind="export", connection=connection
+        )
+        database.write_artifact(
+            "exports/state.json", b"v2", kind="export", connection=connection
+        )
+    assert target.read_bytes() == b"v2"
+    assert list(database.life_dir.rglob(".artifact-backup-*")) == []
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        with database.write() as connection:
+            database.write_artifact(
+                "exports/state.json", b"v3", kind="export", connection=connection
+            )
+            database.write_artifact(
+                "exports/state.json", b"v4", kind="export", connection=connection
+            )
+            raise RuntimeError("rollback")
+
+    assert target.read_bytes() == b"v2"
+    assert (
+        database.get_artifact(row["id"])["sha256"] == hashlib.sha256(b"v2").hexdigest()
+    )
+    assert database.verify_artifacts()["ok"] is True
+    assert list(database.life_dir.rglob(".artifact-backup-*")) == []
+
+
+def test_register_artifact_failure_restores_previous_file(tmp_path):
+    database = _database(tmp_path)
+    original = _file(tmp_path / "outside", "old.txt", b"old")
+    row = database.register_artifact(
+        original, kind="export", relative_path="exports/state.txt"
+    )
+    revised = _file(tmp_path / "outside", "new.txt", b"new")
+    target = database.life_dir / row["relative_path"]
+
+    with pytest.raises(ValueError, match="float values"):
+        database.register_artifact(
+            revised,
+            kind="export",
+            relative_path="exports/state.txt",
+            update=True,
+            metadata={"invalid": float("nan")},
+        )
+
+    assert target.read_bytes() == b"old"
+    assert database.get_artifact(row["id"]) == row
+    assert database.verify_artifacts()["ok"] is True
+
+
 @pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
 def test_write_artifact_refuses_database_files(tmp_path, suffix):
     database = _database(tmp_path)

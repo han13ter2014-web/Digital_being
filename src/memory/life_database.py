@@ -228,6 +228,7 @@ class LifeDatabase:
         self.path = Path(path)
         self.life_id = validate_life_id(life_id)
         self._write_lock = threading.RLock()
+        self._artifact_changes = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._preflight_identity()
         # Сохраняем проверенный алгоритм content-addressed snapshots.
@@ -307,13 +308,23 @@ class LifeDatabase:
         """Одна логическая запись = одна атомарная транзакция."""
         with self._write_lock, closing(self.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            changes = []
+            self._artifact_changes[id(connection)] = changes
             try:
-                yield connection
-            except BaseException:
-                connection.rollback()
-                raise
-            else:
-                connection.commit()
+                try:
+                    yield connection
+                    connection.commit()
+                except BaseException as original:
+                    connection.rollback()
+                    try:
+                        self._rollback_artifact_changes(changes)
+                    except BaseException as restoration_error:
+                        raise restoration_error from original
+                    raise
+                else:
+                    self._cleanup_artifact_changes(changes)
+            finally:
+                self._artifact_changes.pop(id(connection), None)
 
     def set_meta(self, key: str, value, connection=None) -> None:
         payload = json.dumps(value, ensure_ascii=False, allow_nan=False)
@@ -391,6 +402,69 @@ class LifeDatabase:
             for block in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(block)
         return digest.hexdigest()
+
+    @staticmethod
+    def _backup_artifact(target: Path):
+        if not target.exists():
+            return None
+        fd, backup_name = tempfile.mkstemp(
+            prefix=".artifact-backup-", suffix=".tmp", dir=str(target.parent)
+        )
+        os.close(fd)
+        try:
+            shutil.copy2(target, backup_name)
+        except BaseException:
+            try:
+                os.unlink(backup_name)
+            except OSError:
+                pass
+            raise
+        return Path(backup_name)
+
+    @staticmethod
+    def _rollback_artifact_changes(changes: list) -> None:
+        first_error = None
+        for target, backup in reversed(changes):
+            try:
+                if backup is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, target)
+            except OSError as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
+
+    @staticmethod
+    def _cleanup_artifact_changes(changes: list) -> None:
+        for _, backup in changes:
+            if backup is not None:
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def _finish_artifact_change(self, connection, change, kwargs) -> dict:
+        if connection is not None:
+            changes = self._artifact_changes.get(id(connection))
+            if changes is not None:
+                changes.append(change)
+                return self._upsert_artifact(connection, **kwargs)
+        try:
+            if connection is not None:
+                result = self._upsert_artifact(connection, **kwargs)
+            else:
+                with self.write() as owned:
+                    result = self._upsert_artifact(owned, **kwargs)
+        except BaseException as original:
+            try:
+                self._rollback_artifact_changes([change])
+            except BaseException as restoration_error:
+                raise restoration_error from original
+            raise
+        self._cleanup_artifact_changes([change])
+        return result
 
     _ARTIFACT_COLUMNS = (
         "id, kind, relative_path, sha256, bytes, created_at, metadata_json"
@@ -489,8 +563,11 @@ class LifeDatabase:
         else:
             rel = self.safe_relative_path(relative_path)
         target = self._artifact_target(life_dir, rel, database_name=self.path.name)
+        copied = False
+        backup = None
         if resolved != target:
             target.parent.mkdir(parents=True, exist_ok=True)
+            copy_required = False
             if target.exists():
                 if target.is_symlink() or not target.is_file():
                     raise ValueError(f"Путь занят не файлом: {rel}")
@@ -499,18 +576,39 @@ class LifeDatabase:
                         raise ValueError(
                             f"В каталоге жизни уже лежит другой файл: {rel}"
                         )
-                    shutil.copy2(resolved, target)
+                    copy_required = True
             else:
-                shutil.copy2(resolved, target)
-        kwargs = dict(
-            kind=kind,
-            relative_path=rel.as_posix(),
-            sha256=self._digest_file(target),
-            size=target.stat().st_size,
-            metadata=metadata,
-            artifact_id=artifact_id,
-            update=update,
-        )
+                copy_required = True
+            if copy_required:
+                backup = self._backup_artifact(target)
+                copied = True
+                try:
+                    shutil.copy2(resolved, target)
+                except BaseException as original:
+                    try:
+                        self._rollback_artifact_changes([(target, backup)])
+                    except BaseException as restoration_error:
+                        raise restoration_error from original
+                    raise
+        try:
+            kwargs = dict(
+                kind=kind,
+                relative_path=rel.as_posix(),
+                sha256=self._digest_file(target),
+                size=target.stat().st_size,
+                metadata=metadata,
+                artifact_id=artifact_id,
+                update=update,
+            )
+        except BaseException as original:
+            if copied:
+                try:
+                    self._rollback_artifact_changes([(target, backup)])
+                except BaseException as restoration_error:
+                    raise restoration_error from original
+            raise
+        if copied:
+            return self._finish_artifact_change(connection, (target, backup), kwargs)
         if connection is not None:
             return self._upsert_artifact(connection, **kwargs)
         with self.write() as owned:
@@ -539,10 +637,16 @@ class LifeDatabase:
         fd, tmp_name = tempfile.mkstemp(
             prefix=".artifact-", suffix=".tmp", dir=str(target.parent)
         )
+        backup = None
         try:
             with os.fdopen(fd, "wb") as handle:
                 handle.write(payload)
-            os.replace(tmp_name, target)
+            backup = self._backup_artifact(target)
+            try:
+                os.replace(tmp_name, target)
+            except BaseException:
+                self._cleanup_artifact_changes([(target, backup)])
+                raise
         finally:
             if os.path.exists(tmp_name):
                 try:
@@ -552,16 +656,13 @@ class LifeDatabase:
         kwargs = dict(
             kind=kind,
             relative_path=rel.as_posix(),
-            sha256=self._digest_file(target),
-            size=target.stat().st_size,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size=len(payload),
             metadata=metadata,
             artifact_id=artifact_id,
             update=True,
         )
-        if connection is not None:
-            return self._upsert_artifact(connection, **kwargs)
-        with self.write() as owned:
-            return self._upsert_artifact(owned, **kwargs)
+        return self._finish_artifact_change(connection, (target, backup), kwargs)
 
     def list_artifacts(self, kind=None) -> list:
         query = f"SELECT {self._ARTIFACT_COLUMNS} FROM artifacts"  # nosec B608
