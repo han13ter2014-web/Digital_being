@@ -114,6 +114,21 @@ def test_corrupt_settings_do_not_stop_life(tmp_path):
     assert report["error"]
 
 
+def test_corrupt_settings_reject_changes_without_overwrite(tmp_path):
+    path = tmp_path / "access_settings.json"
+    corrupted = "{битый"
+    path.write_text(corrupted, encoding="utf-8")
+    agent = FakeAgent(searcher=FakeSearcher(True))
+
+    result = set_access(agent, "network", False, root=tmp_path)
+
+    assert result["ok"] is False
+    assert "Не удалось прочитать" in result["error"]
+    assert agent.web_searcher.is_enabled is True
+    assert agent.web_searcher.calls == []
+    assert path.read_text(encoding="utf-8") == corrupted
+
+
 def test_current_state_reads_real_flags(tmp_path):
     agent = FakeAgent(
         searcher=FakeSearcher(False),

@@ -161,15 +161,18 @@ def apply_choice(agent: Any, key: str, enabled: bool) -> Dict[str, Any]:
 
 
 def set_access(agent: Any, key: str, enabled: bool, *, root) -> Dict[str, Any]:
-    """Применить выбор и сохранить его только после успеха."""
+    """Применить выбор; повреждённый файл настроек запрещает изменение."""
+    if key not in LABELS:
+        return apply_choice(agent, key, enabled)
+    try:
+        saved = load_saved(root)
+    except ValueError as exc:
+        return {"ok": False, "label": LABELS[key], "error": str(exc)}
+
     previous_state = current_state(agent)
     result = apply_choice(agent, key, enabled)
     if not result.get("ok"):
         return result
-    try:
-        saved = load_saved(root)
-    except ValueError:
-        saved = {}
     saved[key] = bool(enabled)
     try:
         _write_saved(root, saved)
