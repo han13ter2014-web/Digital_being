@@ -109,6 +109,23 @@ class TestMetricsCollector:
         assert "channels" in data
         assert "energy" in data["channels"]
 
+    def test_export_json_preserves_previous_file_on_failure(self, tmp_path):
+        from src.metrics import MetricsCollector
+
+        target = tmp_path / "metrics.json"
+        previous = '{"previous": true}'
+        target.write_text(previous, encoding="utf-8")
+        mc = MetricsCollector(persist_dir=str(tmp_path), agent_name="TestExport")
+
+        def fail_dump(data, handle, **kwargs):
+            handle.write('{"partial":')
+            raise OSError("disk full")
+
+        with patch("src.metrics.metrics_collector.json.dump", new=fail_dump):
+            assert mc.export_json(str(target)) == ""
+
+        assert target.read_text(encoding="utf-8") == previous
+
     def test_list_channels(self):
         from src.metrics import MetricsCollector
 
@@ -189,6 +206,24 @@ class TestI18n:
         assert i18n.t("hello") == "Bonjour"
         # Возвращаемся на ru
         i18n.set_language("ru")
+        assert i18n.t("hello") == "Привет"
+
+    def test_save_translations_preserves_previous_file_on_failure(self, tmp_path):
+        from src.metrics import I18n
+
+        i18n = I18n(locale_dir=str(tmp_path))
+        assert i18n.save_translations("ru", {"hello": "Привет"}) is True
+        target = tmp_path / "ru.json"
+        previous = target.read_bytes()
+
+        def fail_dump(data, handle, **kwargs):
+            handle.write('{"partial":')
+            raise OSError("disk full")
+
+        with patch("src.metrics.i18n.json.dump", new=fail_dump):
+            assert i18n.save_translations("ru", {"hello": "Здравствуй"}) is False
+
+        assert target.read_bytes() == previous
         assert i18n.t("hello") == "Привет"
 
     def test_global_helpers(self, tmp_path):

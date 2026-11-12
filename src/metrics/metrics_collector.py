@@ -28,6 +28,7 @@ MetricsCollector — сбор и хранение метрик Digital Being (Э
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 from collections import deque
@@ -237,14 +238,27 @@ class MetricsCollector:
             self._persist_dir or data_path("metrics"),
             f"{self._agent_name}_metrics_{int(time.time())}.json",
         )
+        temporary = None
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            directory = os.path.dirname(path) or "."
+            os.makedirs(directory, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(
+                prefix=".metrics-", suffix=".tmp", dir=directory
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(snap, f, ensure_ascii=False, indent=2)
+            os.replace(temporary, path)
+            temporary = None
             return path
         except Exception as e:
             logger.warning(f"[metrics] ошибка экспорта: {e}")
             return ""
+        finally:
+            if temporary is not None:
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    pass
 
     def append_ndjson(
         self, path: str, channel: str, value: float, cycle: Optional[int] = None

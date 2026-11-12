@@ -21,6 +21,7 @@ i18n — базовый менеджер локализаций Digital Being (�
 import json
 import logging
 import os
+import tempfile
 import threading
 from typing import Any, Dict, Optional
 
@@ -155,11 +156,17 @@ class I18n:
 
     def save_translations(self, language: str, translations: Dict[str, str]) -> bool:
         """Сохранить переводы в JSON-файл."""
+        temporary = None
         try:
             os.makedirs(self._locale_dir, exist_ok=True)
             path = os.path.join(self._locale_dir, f"{language}.json")
-            with open(path, "w", encoding="utf-8") as f:
+            fd, temporary = tempfile.mkstemp(
+                prefix=".i18n-", suffix=".tmp", dir=self._locale_dir
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(translations, f, ensure_ascii=False, indent=2)
+            os.replace(temporary, path)
+            temporary = None
             # Обновляем кэш
             with self._lock:
                 self._translations[language] = dict(translations)
@@ -167,6 +174,12 @@ class I18n:
         except Exception as e:
             logger.warning(f"[i18n] ошибка сохранения: {e}")
             return False
+        finally:
+            if temporary is not None:
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    pass
 
     # ----------------------------------------------------------------
     # Утилиты для тестов
