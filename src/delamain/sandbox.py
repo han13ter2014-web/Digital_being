@@ -76,7 +76,7 @@ class Sandbox:
 
     def child(self, path, **kwargs):
         """Create a nested sandbox; managed subclasses preserve their binding."""
-        return Sandbox(self.root / path, **kwargs)
+        return Sandbox(self.resolve(path), **kwargs)
 
     # ------------------------------------------------------------------
     # Path policy

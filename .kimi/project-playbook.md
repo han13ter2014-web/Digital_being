@@ -44,6 +44,6 @@
 
 ## Environment and recovery
 
-- Baseline Git: `66c2923`; предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
-- Текущие исправления багхантинга локальные и незакоммиченные; не считать baseline частью рабочего diff.
+- Baseline Git: `57a130c` — 15 исправлений багхантинга; предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
+- Новые изменения после baseline коммитить и отправлять только по явному разрешению владельца.
 - Evidence: verified, 2026-11-12.

@@ -27,7 +27,7 @@ class ArtifactSandbox(Sandbox):
         """Keep artifact binding for the narrow ``creative/`` action sandbox."""
         kind = "creative" if Path(path).as_posix() == "creative" else self.kind
         return ArtifactSandbox(
-            self.root / path,
+            self.resolve(path),
             database=self.database,
             kind=kind,
             **kwargs,

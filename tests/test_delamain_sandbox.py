@@ -36,6 +36,26 @@ def test_write_is_confined_to_root(tmp_path: Path) -> None:
     assert not (tmp_path / "a.txt").exists()
 
 
+def test_child_sandboxes_cannot_escape_parent(tmp_path: Path) -> None:
+    sandbox = Sandbox(tmp_path / "workspace")
+
+    with pytest.raises(SandboxError):
+        sandbox.child("../outside").write_text("escape.txt", "bad")
+    with pytest.raises(SandboxError):
+        sandbox.child(tmp_path / "absolute-outside")
+    assert not (tmp_path / "outside" / "escape.txt").exists()
+
+    from uuid import uuid4
+
+    from src.delamain.artifact_sandbox import ArtifactSandbox
+    from src.memory.life_database import LifeDatabase
+
+    database = LifeDatabase(tmp_path / "life" / "life.sqlite3", str(uuid4()))
+    managed = ArtifactSandbox(tmp_path / "life" / "workspace", database=database)
+    with pytest.raises(SandboxError):
+        managed.child("../outside-workspace")
+
+
 def test_list_and_search(tmp_path: Path) -> None:
     sandbox = Sandbox(tmp_path / "workspace")
     sandbox.write_text("one.txt", "hello world\nsecond line\n")
