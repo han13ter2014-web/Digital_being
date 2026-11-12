@@ -127,3 +127,30 @@ def test_build_runtime_writes_pointer_immediately(tmp_path, monkeypatch):
     payload = json.loads((tmp_path / "active_profile.json").read_text(encoding="utf-8"))
     assert payload["name"] == "Alpha"
     assert payload["life_id"] == runtime.agent.life_id
+
+
+def test_second_writer_on_selected_profile_is_rejected(tmp_path, monkeypatch):
+    import main
+    import pytest
+    from src.app.paths import setup_environment
+    from src.core.subsystem_base import PluginRegistry
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    env = setup_environment(chdir=False, console=False)
+    args = main.parse_args(["--ui", "headless"])
+    PluginRegistry.reset_global()
+    runtimes = []
+    try:
+        first = main.build_runtime(args, env)
+        runtimes.append(first)
+        assert first.runner.save_now()
+        with pytest.raises(RuntimeError, match="уже используется"):
+            second = main.build_runtime(args, env)
+            runtimes.append(second)
+    finally:
+        for runtime in runtimes:
+            lock = getattr(runtime, "profile_lock", None)
+            if lock is not None:
+                lock.release()
+            runtime.agent.plugin_registry.teardown_all()
+        PluginRegistry.reset_global()

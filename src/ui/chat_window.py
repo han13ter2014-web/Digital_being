@@ -659,11 +659,16 @@ class ChatWindow:
 
         # Обычное сообщение → EventBus
         self._append_user(text)
-        self.bus.publish_sync(
+        accepted = self.bus.publish_sync(
             Events.USER_MESSAGE,
             {"text": text},
             source="chat",
         )
+        if not accepted:
+            self._append_error(
+                "Очередь сообщений переполнена. Сообщение не принято — "
+                "подожди немного и отправь его ещё раз."
+            )
 
     def _on_history_up(self, event) -> None:
         """Up — предыдущее сообщение из истории."""

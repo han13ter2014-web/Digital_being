@@ -192,6 +192,9 @@ class Runtime:
             tray = getattr(self, "tray", None)
             if tray is not None:
                 tray.stop()
+            profile_lock = getattr(self, "profile_lock", None)
+            if profile_lock is not None:
+                profile_lock.release()
             self.finished.set()
             if self.window is not None:
                 self.window.request_close()
@@ -258,11 +261,11 @@ class Runtime:
 
         await bus.start()
         bus.attach_loop(asyncio.get_running_loop())
+        await self.runner.start()
         delivered = bus.drain_pre_start()
         if delivered:
             logger.info("[EventBus] Доставлено %s отложенных событий", delivered)
 
-        await self.runner.start()
         self.runner.set_speed(speed_mode)
 
         # Первый чекпоинт сразу после старта: если окно закроют или
@@ -303,12 +306,24 @@ class Runtime:
         try:
             await asyncio.wait(tasks, timeout=2.0)
         except Exception:
-            pass
+            logger.exception("Ошибка ожидания фоновых задач при остановке")
+        try:
+            drained = await bus.drain(timeout=5.0)
+            if drained:
+                logger.info("[EventBus] Доставлено %s событий при остановке", drained)
+        except Exception as exc:
+            self.error = self.error or f"Не удалось обработать очередь событий: {exc}"
+            logger.exception("Ошибка drain EventBus при остановке: %s", exc)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await self.runner.stop()
-        self.saved_on_stop = self.runner.save_now()
+        try:
+            await self.runner.stop()
+        except Exception as exc:
+            self.error = self.error or f"Не удалось обработать очередь сообщений: {exc}"
+            logger.exception("Ошибка остановки AgentRunner: %s", exc)
+        finally:
+            self.saved_on_stop = self.runner.save_now()
         if not self.saved_on_stop:
             self.error = self.error or "Не удалось сохранить состояние при остановке"
         self._stop_dashboard()
@@ -454,14 +469,45 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         interactive=interactive,
         ask=ask,
     )
-    agent, report = create_agent(
-        env,
-        name,
-        new=args.new,
-        restore=not args.no_restore,
-        seed=args.seed,
-        expected_life_id=expected_life_id,
-    )
+    from pathlib import Path
+    from src.app.profile_lock import ProfileWriterLock
+
+    profile_lock = None
+    if expected_life_id is not None:
+        # Существующий профиль блокируется до открытия любых writer-хранилищ.
+        profile_lock = ProfileWriterLock(
+            Path(env.data_root) / "lives" / expected_life_id
+        )
+        profile_lock.acquire()
+        atexit.register(profile_lock.release)
+    try:
+        agent, report = create_agent(
+            env,
+            name,
+            new=args.new,
+            restore=not args.no_restore,
+            seed=args.seed,
+            expected_life_id=expected_life_id,
+        )
+    except BaseException:
+        if profile_lock is not None:
+            profile_lock.release()
+        raise
+    if profile_lock is None:
+        # У новой жизни UUID появляется в конструкторе; конкурентного
+        # существующего профиля с этим идентификатором ещё нет.
+        profile_lock = ProfileWriterLock(
+            Path(env.data_root) / "lives" / str(agent.life_id)
+        )
+        try:
+            profile_lock.acquire()
+        except BaseException:
+            agent.plugin_registry.teardown_all()
+            raise
+        atexit.register(profile_lock.release)
+    # Для maturity-отчёта фоновой Runtime не запускается: блокировку снимет
+    # atexit. В обычном режиме её раньше освободит Runtime._run().
+
     # Биография фиксирует сам запуск процесса. Первая версия журнала не
     # дорисовывает разрывы прошлого; следующий запуск увидит этот run_id.
     try:
@@ -523,6 +569,7 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             logger.warning("Веб отключён: %s", exc)
 
     runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
+    runtime.profile_lock = profile_lock  # type: ignore[attr-defined]
     runtime.open_browser = not getattr(args, "no_web_open", False)  # type: ignore[attr-defined]
     runtime.report = report  # type: ignore[attr-defined]
     runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
@@ -720,6 +767,7 @@ def main(argv: Optional[list] = None) -> int:
     env = setup_environment(console=not json_output)
 
     from src.app.bootstrap import RecoveryRequiredError
+    from src.app.profile_lock import ProfileWriterLockError
 
     try:
         if json_output:
@@ -729,6 +777,11 @@ def main(argv: Optional[list] = None) -> int:
                 runtime = build_runtime(args, env)
         else:
             runtime = build_runtime(args, env)
+    except ProfileWriterLockError as exc:
+        message = f"Запуск остановлен: {exc}"
+        logger.error("%s", message)
+        print(message, file=sys.stderr)
+        return 4
     except RecoveryRequiredError as exc:
         message = (
             f"Восстановление жизни остановлено: {exc}\n\n"

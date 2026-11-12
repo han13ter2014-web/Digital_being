@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import replace
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -135,6 +136,23 @@ class DelamainEffectorAdapter:
                 success_predicate=request.success_predicate,
                 metadata=metadata,
             )
+        except sqlite3.IntegrityError as exc:
+            # Другой writer мог вставить тот же request_id после нашего поиска.
+            # UNIQUE в SQLite — последняя линия защиты; здесь возвращаем уже
+            # существующую цель, а не создаём второй внешний эффект.
+            existing = self._find_goal(request.request_id, open_runtime=True)
+            if existing is None:
+                raise EffectorError(
+                    f"could not queue effector request: {exc}"
+                ) from exc
+            if self._goal_fingerprint(existing) != self._request_fingerprint(request):
+                raise EffectorConflict(
+                    f"request_id {request.request_id!r} already exists with a "
+                    "different payload"
+                ) from exc
+            result = self._result_from_goal(request.request_id, existing)
+            self._emit_once("effector.duplicate", result)
+            return result
         except (TypeError, ValueError) as exc:
             raise EffectorError(f"could not queue effector request: {exc}") from exc
 

@@ -195,6 +195,9 @@ class MemoryStore:
             );
             CREATE INDEX IF NOT EXISTS idx___GOALS_TABLE___status
                 ON __GOALS_TABLE__(status, priority DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx___GOALS_TABLE___effector_request
+                ON __GOALS_TABLE__(json_extract(meta_json, '$.effector_request_id'))
+                WHERE json_extract(meta_json, '$.effector_request_id') IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS skills (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

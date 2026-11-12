@@ -163,17 +163,98 @@ def generate_prioritized_stimulus(agent) -> str:
 
 
 class PersistentMessageQueue(asyncio.Queue):
-    """Зеркало ожидающих сообщений для согласованного checkpoint раннера."""
+    """Очередь с write-ahead журналом между согласованными checkpoint.
 
-    def __init__(self, agent):
-        super().__init__()
+    ``get_nowait()`` обновляет только будущий snapshot, но не журнал. Текущее
+    сообщение подтверждается после обработки, поэтому авария между извлечением
+    и завершением вернёт его в восстановленную очередь. Побочный ответ уже мог
+    быть отправлен: семантика восстановления — at-least-once, не exactly-once.
+    """
+
+    def __init__(self, agent, maxsize: int = 1000, put_timeout: float = 5.0):
+        if maxsize <= 0:
+            raise ValueError("Размер очереди сообщений должен быть положительным")
+        if put_timeout <= 0:
+            raise ValueError("Таймаут помещения сообщения должен быть положительным")
+        super().__init__(maxsize=maxsize)
         self.agent = agent
-        for text in getattr(agent, "_pending_message_texts", []) or []:
+        self._put_timeout = float(put_timeout)
+        self._journal_path = self._journal_path_for_agent()
+        pending = list(getattr(agent, "_pending_message_texts", []) or [])
+        journal = self._read_journal()
+        if journal is not None:
+            pending = journal["pending"]
+            self.agent._deferred_stimulus = journal["deferred"]
+        if len(pending) > maxsize:
+            raise ValueError(
+                f"Восстановленных сообщений ({len(pending)}) больше лимита {maxsize}; "
+                "очередь не усечена"
+            )
+        for text in pending:
             super().put_nowait(text)
-        self._sync()
+        self._sync(persist=False)
 
-    def _sync(self):
+    def _journal_path_for_agent(self) -> Optional[str]:
+        if not getattr(self.agent, "_profile_managed", False):
+            return None
+        directory = getattr(self.agent, "checkpoint_dir", None) or data_path(
+            "checkpoints"
+        )
+        return os.path.join(directory, "pending_messages.json")
+
+    def _read_journal(self) -> Optional[Dict[str, Any]]:
+        if self._journal_path is None or not os.path.isfile(self._journal_path):
+            return None
+        try:
+            with open(self._journal_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if payload.get("schema_version") != 1:
+                raise ValueError("неподдерживаемая версия журнала сообщений")
+            if payload.get("life_id") != self.agent.life_id:
+                raise ValueError("журнал сообщений принадлежит другой жизни")
+            pending = payload.get("pending")
+            deferred = payload.get("deferred")
+            if not isinstance(pending, list) or not all(
+                isinstance(text, str) for text in pending
+            ):
+                raise ValueError("некорректная очередь в журнале сообщений")
+            if deferred is not None and (
+                not isinstance(deferred, dict)
+                or not isinstance(deferred.get("text"), str)
+                or not isinstance(deferred.get("user_initiated"), bool)
+            ):
+                raise ValueError("некорректный текущий стимул в журнале сообщений")
+            return {"pending": pending, "deferred": deferred}
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            raise ValueError(
+                "Не удалось восстановить журнал принятых сообщений; данные сохранены"
+            ) from exc
+
+    def _persist_journal(self) -> None:
+        if self._journal_path is None:
+            return
+        os.makedirs(os.path.dirname(self._journal_path), exist_ok=True)
+        temporary = self._journal_path + ".tmp"
+        payload = {
+            "schema_version": 1,
+            "life_id": self.agent.life_id,
+            "pending": list(self._queue),
+            "deferred": getattr(self.agent, "_deferred_stimulus", None),
+        }
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, self._journal_path)
+
+    def _sync(self, *, persist: bool = True):
         self.agent._pending_message_texts = list(self._queue)
+        if persist:
+            self._persist_journal()
+
+    async def put(self, item):
+        """Ждать место ограниченное время; переполнение не скрывать."""
+        await asyncio.wait_for(super().put(item), timeout=self._put_timeout)
 
     def put_nowait(self, item):
         super().put_nowait(item)
@@ -181,7 +262,7 @@ class PersistentMessageQueue(asyncio.Queue):
 
     def get_nowait(self):
         item = super().get_nowait()
-        self._sync()
+        self._sync(persist=False)
         return item
 
 
@@ -1365,6 +1446,7 @@ class AgentRunner:
     def _save_state_safe(self) -> bool:
         """Сохранить состояние и ментальные модели. Не падает при ошибках."""
         try:
+            self._sync_message_journal()
             self.agent.save_state(force=True)
             from config.simulation_config import SIM_CONFIG
 
@@ -1410,6 +1492,13 @@ class AgentRunner:
         """
         return self._save_state_safe()
 
+    def _sync_message_journal(self) -> None:
+        """Зафиксировать начало или завершение обработки сообщения."""
+        queue = getattr(self, "_pending_user_messages", None)
+        sync = getattr(queue, "_sync", None)
+        if callable(sync):
+            sync()
+
     async def start(self) -> None:
         """Запустить фоновый цикл. Возвращает управление сразу (async task).
 
@@ -1440,7 +1529,7 @@ class AgentRunner:
         )
 
     async def stop(self) -> None:
-        """Остановить фоновый цикл, внешние адаптеры и сохранить состояние."""
+        """Обработать принятые сообщения, остановить адаптеры и сохраниться."""
         webhooks = getattr(self.agent, "webhooks", None)
         stop_webhooks = getattr(webhooks, "stop", None)
         if callable(stop_webhooks):
@@ -1452,13 +1541,38 @@ class AgentRunner:
             return
         logger.info(f"[{self.name}] Остановка...")
         self._stop_requested = True
-        self._running = False
-        self._save_state_safe()
+        queue = getattr(self, "_pending_user_messages", None)
+        drain_error = None
+        try:
+            if queue is not None:
+                # Каждый poison stimulus отпускается после MAX_STIMULUS_RETRIES;
+                # общий предел не даёт ошибочной реализации блокировать выход вечно.
+                deferred_count = int(
+                    getattr(self.agent, "_deferred_stimulus", None) is not None
+                )
+                max_attempts = max(1, queue.qsize() + deferred_count) * MAX_STIMULUS_RETRIES
+                attempts = 0
+                while not queue.empty() and attempts < max_attempts:
+                    await self._tick_once(wait_for_user=False)
+                    attempts += 1
+                if not queue.empty():
+                    raise RuntimeError(
+                        f"Не обработано {queue.qsize()} принятых сообщений за "
+                        f"{max_attempts} попыток"
+                    )
+        except Exception as exc:
+            drain_error = exc
+            logger.exception(f"[{self.name}] Ошибка drain очереди сообщений: {exc}")
+        finally:
+            self._running = False
+            self._save_state_safe()
         await self.bus.publish(
             Events.TIMER_TICK,
             {"phase": "stopped", "ticks": self._tick_count},
             source="runner",
         )
+        if drain_error is not None:
+            raise drain_error
 
     async def run_forever(self) -> None:
         """Бесконечный цикл. Возвращает управление когда stop_requested."""
@@ -1803,6 +1917,7 @@ class AgentRunner:
             return
         self._deferred_fail_count = 0
         self.agent._deferred_stimulus = None
+        self._sync_message_journal()
         text = str(stimulus or "")
         preview = text[:60] + ("…" if len(text) > 60 else "")
         logger.error(
@@ -1842,6 +1957,7 @@ class AgentRunner:
             "text": stimulus,
             "user_initiated": user_initiated,
         }
+        self._sync_message_journal()
         self.agent._attention_stimulus = {
             "text": stimulus,
             "user_initiated": user_initiated,
@@ -1938,6 +2054,7 @@ class AgentRunner:
             return
 
         self.agent._deferred_stimulus = None
+        self._sync_message_journal()
         self._deferred_fail_count = 0
         self._last_tick_ledger = {
             "kind": "stimulus_processed",

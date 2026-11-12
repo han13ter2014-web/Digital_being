@@ -48,7 +48,7 @@ from .context import build_failure_context
 from .effector import DelamainEffectorAdapter
 from .goal_authoring import GoalAuthoring
 from .goal_bridge import GoalBridge, derive_bridge_status
-from .models import ActionRequest, TaskResult, utc_now_iso
+from .models import ActionRequest, ActionResult, TaskResult, utc_now_iso
 from .planner import Planner
 from .runner import CodeRunner
 from .runtime import DelamainRuntime
@@ -1005,6 +1005,148 @@ class DelamainSubsystem(Subsystem):
         self._last_result = summary
         return summary
 
+    def _begin_goal_attempt(
+        self,
+        runtime: DelamainRuntime,
+        goal: Dict[str, Any],
+        metadata: Mapping[str, Any],
+        *,
+        task_id: str,
+        attempt_number: int,
+        plan: Optional[List[Any]],
+        approval_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist an attempt boundary before any external side effect."""
+        marker = {
+            "task_id": task_id,
+            "attempt": int(attempt_number),
+            "plan": self._normalize_plan(list(plan or [])),
+            "started_at": utc_now_iso(),
+            "approval_id": approval_id,
+        }
+        runtime.memory.update_goal(
+            int(goal["id"]), metadata={"attempt_in_progress": marker}
+        )
+        updated = dict(goal)
+        updated_metadata = dict(metadata)
+        updated_metadata["attempt_in_progress"] = marker
+        updated["metadata"] = updated_metadata
+        return updated
+
+    def _recover_interrupted_goal(
+        self,
+        runtime: DelamainRuntime,
+        goal: Dict[str, Any],
+        metadata: Mapping[str, Any],
+        *,
+        trigger: str,
+        previous_attempts: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Recover a provable write; fail closed when the effect is unknown."""
+        marker = metadata.get("attempt_in_progress")
+        if not isinstance(marker, Mapping):
+            return None
+
+        goal_id = int(goal["id"])
+        title = str(goal.get("title") or f"goal-{goal_id}")
+        task = self._goal_command(goal) or title
+        task_id = str(marker.get("task_id") or f"goal-{goal_id}")
+        raw_plan = marker.get("plan")
+        plan = [dict(raw_plan[0])] if (
+            isinstance(raw_plan, (list, tuple))
+            and len(raw_plan) == 1
+            and isinstance(raw_plan[0], Mapping)
+        ) else []
+        recovered = False
+        output: Any = None
+        error = (
+            "interrupted attempt could not be verified; manual review required"
+        )
+        action = "interrupted"
+        if plan:
+            action = str(plan[0].get("action") or "interrupted")
+            args = plan[0].get("args")
+            if action == "write_file" and isinstance(args, Mapping) and "content" in args:
+                path = args.get("path")
+                overwrite = args.get("overwrite", True)
+                if isinstance(overwrite, str):
+                    overwrite = overwrite.strip().lower() in {
+                        "1", "true", "yes", "on", "да",
+                    }
+                if isinstance(path, str) and path and bool(overwrite):
+                    expected = (
+                        args["content"]
+                        if isinstance(args["content"], str)
+                        else str(args["content"])
+                    )
+                    try:
+                        actual = runtime.sandbox.read_text(path)
+                    except Exception as exc:
+                        error = f"interrupted write could not be verified: {exc}"
+                    else:
+                        if actual == expected:
+                            recovered = True
+                            error = None
+                            output = {
+                                "path": path,
+                                "bytes": len(actual.encode("utf-8")),
+                                "recovered": True,
+                            }
+                        else:
+                            error = (
+                                "interrupted write content differs; manual review required"
+                            )
+
+        step = ActionResult(
+            action=action,
+            ok=recovered,
+            output=output,
+            error=error,
+            metadata={"recovered_after_interruption": recovered},
+        )
+        result = TaskResult(
+            task_id=task_id,
+            task=task,
+            ok=recovered,
+            steps=[step],
+            final_output=output,
+            error=error,
+            planned_actions=plan,
+            effective_actions=plan if recovered else [],
+            approval_id=(
+                str(marker["approval_id"]) if marker.get("approval_id") else None
+            ),
+        )
+        runtime.memory.record_episode(
+            task_id=task_id,
+            task=task,
+            action="task.recovered" if recovered else "task.interrupted",
+            args={},
+            ok=recovered,
+            output={"plan": plan, "output": output},
+            error=error,
+            metadata={"attempt": previous_attempts + 1},
+        )
+        recovered_metadata = dict(metadata)
+        recovered_metadata.update(
+            {
+                "attempt_in_progress": None,
+                "recovered_after_interruption": recovered,
+                "interrupted_attempt_unverified": not recovered,
+            }
+        )
+        recovered_goal = dict(goal)
+        recovered_goal["metadata"] = recovered_metadata
+        return self._finish_goal(
+            runtime,
+            recovered_goal,
+            result,
+            trigger=trigger,
+            previous_attempts=previous_attempts,
+            reused_skill=False,
+            allow_retry=False,
+        )
+
     def _run_goal(
         self,
         runtime: DelamainRuntime,
@@ -1022,6 +1164,15 @@ class DelamainSubsystem(Subsystem):
         if not isinstance(metadata, Mapping):
             metadata = {}
         previous_attempts = self._attempts(metadata)
+        recovered = self._recover_interrupted_goal(
+            runtime,
+            goal,
+            metadata,
+            trigger=trigger,
+            previous_attempts=previous_attempts,
+        )
+        if recovered is not None:
+            return recovered
         # Stage 14: a retry may deliberately discard the stored explicit plan
         # and the cached skill plan, then let the active planner try again.
         replan_requested = bool(metadata.get("replan_on_next_attempt"))
@@ -1085,6 +1236,15 @@ class DelamainSubsystem(Subsystem):
                     )
                     if blocked is not None:
                         return blocked
+                    goal = self._begin_goal_attempt(
+                        runtime,
+                        goal,
+                        metadata,
+                        task_id=str(approval.get("task_id") or f"goal-{goal_id}"),
+                        attempt_number=attempt_number,
+                        plan=list(approval.get("plan") or []),
+                        approval_id=str(approval_id),
+                    )
                     result = runtime.run_approved(str(approval_id))
                     return self._finish_goal(
                         runtime,
@@ -1166,6 +1326,14 @@ class DelamainSubsystem(Subsystem):
         )
         if blocked is not None:
             return blocked
+        goal = self._begin_goal_attempt(
+            runtime,
+            goal,
+            metadata,
+            task_id=task_id,
+            attempt_number=attempt_number,
+            plan=plan,
+        )
         result = runtime.run_task(
             task,
             plan=plan,
@@ -1193,6 +1361,7 @@ class DelamainSubsystem(Subsystem):
         previous_attempts: int,
         reused_skill: bool,
         replanned: bool = False,
+        allow_retry: bool = True,
     ) -> Dict[str, Any]:
         goal_id = int(goal["id"])
         title = str(goal.get("title") or f"goal-{goal_id}")
@@ -1248,7 +1417,7 @@ class DelamainSubsystem(Subsystem):
                 success=True,
             )
         else:
-            retry_scheduled = attempt_number < self.max_attempts
+            retry_scheduled = allow_retry and attempt_number < self.max_attempts
             status = "pending" if retry_scheduled else "failed"
             retry_delay_sec = (
                 self._retry_delay(attempt_number) if retry_scheduled else 0.0
@@ -1265,6 +1434,7 @@ class DelamainSubsystem(Subsystem):
         new_metadata = dict(metadata)
         new_metadata.update(
             {
+                "attempt_in_progress": None,
                 "attempts": attempt_number,
                 "last_attempt_at": utc_now_iso(),
                 "last_error": result.error,
@@ -1364,6 +1534,7 @@ class DelamainSubsystem(Subsystem):
         new_metadata = dict(metadata)
         new_metadata.update(
             {
+                "attempt_in_progress": None,
                 "approval_id": approval_id,
                 "approval_status": "pending",
                 "approval_requested_at": utc_now_iso(),

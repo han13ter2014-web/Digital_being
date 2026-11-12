@@ -109,6 +109,9 @@ SCHEMA_STATEMENTS = (
     )""",
     """CREATE INDEX IF NOT EXISTS idx_execution_goals_status
        ON execution_goals(status, priority DESC)""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_goals_effector_request
+       ON execution_goals(json_extract(meta_json, '$.effector_request_id'))
+       WHERE json_extract(meta_json, '$.effector_request_id') IS NOT NULL""",
     """CREATE TABLE IF NOT EXISTS skills (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,

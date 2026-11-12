@@ -24,8 +24,10 @@ watchdog, notifier) идёт через одну шину. Это:
 """
 
 import asyncio
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 import inspect
 import logging
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -75,15 +77,24 @@ class EventBus:
     - stop() безопасно останавливает run() без потери текущих событий.
     """
 
-    def __init__(self, max_queue_size: int = 1000, history_size: int = 200):
+    def __init__(
+        self,
+        max_queue_size: int = 1000,
+        history_size: int = 200,
+        publish_timeout: float = 5.0,
+    ):
         """
         Args:
             max_queue_size: Максимум событий в очереди (защита от переполнения).
             history_size: Сколько последних событий хранить в истории (для отладки).
+            publish_timeout: Лимит ожидания места и подтверждения из другого потока.
         """
+        if max_queue_size <= 0 or publish_timeout <= 0:
+            raise ValueError("Лимиты EventBus должны быть положительными")
         self._subscribers: Dict[str, List[Subscriber]] = defaultdict(list)
         self._queue: asyncio.Queue = None  # создаётся в start()
         self._max_queue_size = max_queue_size
+        self._publish_timeout = float(publish_timeout)
         self._history: List[Event] = []
         self._history_max = history_size
         self._running = False
@@ -134,31 +145,27 @@ class EventBus:
         source: str = "system",
         priority: int = 1,
     ) -> bool:
-        """Опубликовать событие.
-
-        Если очередь переполнена — событие отбрасывается (но считается в статистике).
-        Возвращает True, если событие добавлено в очередь.
-        """
+        """Опубликовать событие, ограниченно ожидая место в очереди."""
         if self._queue is None:
             logger.warning("EventBus.publish() до start() — событие отброшено")
             self._dropped_count += 1
             return False
 
-        event = Event(
-            name=name,
-            data=data,
-            source=source,
-            priority=priority,
-        )
-
+        event = Event(name=name, data=data, source=source, priority=priority)
         try:
-            self._queue.put_nowait(event)
-            self._stats[name] += 1
-            return True
-        except asyncio.QueueFull:
+            await asyncio.wait_for(
+                self._queue.put(event), timeout=self._publish_timeout
+            )
+        except asyncio.TimeoutError:
             self._dropped_count += 1
-            logger.warning(f"EventBus переполнен, отброшено: {event}")
+            logger.warning(
+                "EventBus переполнен более %.3f с, отброшено: %s",
+                self._publish_timeout,
+                event,
+            )
             return False
+        self._stats[name] += 1
+        return True
 
     def publish_sync(
         self,
@@ -167,107 +174,137 @@ class EventBus:
         source: str = "system",
         priority: int = 1,
     ) -> bool:
-        """Синхронная публикация — для вызова из любого потока и контекста.
+        """Синхронно принять событие и вернуть фактический результат enqueue.
 
-        Безопасно вызывать:
-        - из coroutine (возвращает True/False без warning);
-        - из синхронного кода внутри main loop (через call_soon_threadsafe);
-        - из GUI-потока (Tkinter tray/chat) — если loop запущен в другом потоке,
-          использует call_soon_threadsafe, иначе call_soon.
-
-        Этап 2.5: была проблема — publish_sync из GUI-потока, когда loop ещё
-        не стартовал, тихо ронял событие в _dropped_count без доставки.
-        Теперь событие доставляется в любом случае, если EventBus.start() был
-        вызван.
+        Из потока GUI публикация выполняется в event loop с ограниченным
+        ожиданием подтверждения. При timeout отложенный callback отменяется,
+        чтобы событие не появилось в очереди после возврата ``False``.
         """
         event = Event(name=name, data=data, source=source, priority=priority)
 
-        # Всегда сохраняем в историю (для отладки) и инкрементируем счётчик.
-        self._add_to_history(event)
-        self._stats[name] += 1
+        def finish(accepted: bool) -> bool:
+            # Историческая семантика sync API: принятое событие видно в истории
+            # сразу, даже если consumer ещё не вызвал _dispatch().
+            if accepted:
+                self._add_to_history(event)
+            return bool(accepted)
 
-        # Ищем запущенный loop в текущем потоке.
         try:
             running_loop = asyncio.get_running_loop()
         except RuntimeError:
             running_loop = None
 
         if running_loop is not None and running_loop.is_running():
-            # Вызваны из корутины. Планируем put_nowait напрямую.
-            try:
-                running_loop.create_task(
-                    self._enqueue_event(event),
-                    name=f"publish:{name}",
-                )
-                return True
-            except RuntimeError:
-                pass
+            return finish(self._enqueue_event_sync(event))
 
-        # Цикл не в этом потоке (или его нет). Ищем глобальный loop.
         global_loop = getattr(self, "_global_loop", None)
         if global_loop is not None and not global_loop.is_closed():
+            future = Future()
+            callback_lock = threading.Lock()
+
+            def enqueue_with_confirmation() -> None:
+                with callback_lock:
+                    if future.cancelled():
+                        return
+                    try:
+                        accepted = self._enqueue_event_sync(event)
+                    except Exception as exc:
+                        logger.exception("EventBus sync enqueue failed: %s", exc)
+                        accepted = False
+                    if not future.done():
+                        future.set_result(accepted)
+
             try:
-                global_loop.call_soon_threadsafe(self._enqueue_event_sync, event)
-                return True
+                global_loop.call_soon_threadsafe(enqueue_with_confirmation)
             except RuntimeError:
-                pass
+                return finish(self._enqueue_event_sync(event))
+            try:
+                return finish(future.result(timeout=self._publish_timeout))
+            except FutureTimeoutError:
+                with callback_lock:
+                    if future.done():
+                        return finish(future.result())
+                    future.cancel()
+                    self._dropped_count += 1
+                    logger.warning(
+                        "EventBus не подтвердил enqueue за %.3f с: %s",
+                        self._publish_timeout,
+                        event,
+                    )
+                    return False
 
-        # Последний шанс: сохраняем в историю и считаем как доставленное позже.
-        # Если start() не был вызван, очередь не создана — тогда
-        # создаём отложенный буфер.
+        return finish(self._enqueue_event_sync(event))
+
+    def _enqueue_event_sync(self, event: Event) -> bool:
+        """Принять событие без ожидания; ``False`` означает отказ без enqueue."""
         if self._queue is None:
+            if len(self._pending_pre_start) >= self._max_queue_size:
+                self._dropped_count += 1
+                logger.warning("Pre-start буфер EventBus полон, отброшено: %s", event)
+                return False
             self._pending_pre_start.append(event)
+            self._stats[event.name] += 1
             return True
-
-        # Если loop есть, но недоступен — пробуем put_nowait из текущего потока.
         try:
             self._queue.put_nowait(event)
-            return True
-        except (asyncio.QueueFull, RuntimeError):
+        except (asyncio.QueueFull, RuntimeError) as exc:
             self._dropped_count += 1
+            logger.warning("EventBus не принял событие %s: %s", event, exc)
             return False
-
-    async def _enqueue_event(self, event: Event) -> None:
-        """Async-обёртка для _enqueue_event_sync (нужна для create_task)."""
-        self._enqueue_event_sync(event)
-
-    def _enqueue_event_sync(self, event: Event) -> None:
-        """Синхронная версия enqueue — вызывается из call_soon_threadsafe."""
-        if self._queue is None:
-            # loop стартовал, но queue ещё нет — отложим.
-            self._pending_pre_start.append(event)
-            return
-        try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            self._dropped_count += 1
+        self._stats[event.name] += 1
+        return True
 
     def attach_loop(self, loop) -> None:
-        """Привязать loop (вызывается из main_async() в main_tray.py).
-
-        Этап 2.5: без этого call_soon_threadsafe не нашёл бы loop из других
-        потоков. После attach_loop() publish_sync() работает из GUI-потоков.
-        """
+        """Привязать loop для публикации из GUI и других потоков."""
         self._global_loop = loop
 
     def drain_pre_start(self) -> int:
-        """Слить отложенные события, накопленные до start().
-
-        Вызывается сразу после start() в main_async() — все события, которые
-        publish_sync сохранил пока loop ещё не работал, попадают в очередь.
-        Возвращает количество доставленных.
-        """
+        """Перенести pre-start события в FIFO, сохранив не поместившийся остаток."""
         if self._queue is None:
             return 0
         delivered = 0
-        for ev in self._pending_pre_start:
-            try:
-                self._queue.put_nowait(ev)
-                delivered += 1
-            except asyncio.QueueFull:
-                self._dropped_count += 1
-        self._pending_pre_start = []
+        for event in self._pending_pre_start:
+            if self._queue.full():
+                logger.warning(
+                    "Основная очередь EventBus полна; %s pre-start событий оставлены",
+                    len(self._pending_pre_start) - delivered,
+                )
+                break
+            if not self._enqueue_event_sync(event):
+                break
+            delivered += 1
+        if delivered:
+            del self._pending_pre_start[:delivered]
         return delivered
+
+    async def drain(self, timeout: float = 5.0) -> int:
+        """Доставить pre-start и queued события с явным ограничением ожидания."""
+        if timeout <= 0:
+            raise ValueError("Таймаут drain должен быть положительным")
+        if self._queue is None:
+            await self.start()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        processed = 0
+        while self._pending_pre_start or not self._queue.empty():
+            self.drain_pre_start()
+            if self._queue.empty():
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"EventBus drain: осталось {self._queue.qsize()} queued и "
+                    f"{len(self._pending_pre_start)} pre-start событий"
+                )
+            event = self._queue.get_nowait()
+            try:
+                await asyncio.wait_for(self._dispatch(event), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"EventBus drain: подписчики не завершили {event.name} за {timeout} с"
+                ) from exc
+            processed += 1
+        return processed
 
     # ============================================================
     # Цикл обработки

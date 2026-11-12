@@ -378,3 +378,38 @@ def test_apply_rejects_late_corruption_before_any_memory_mutation(late_field):
     assert after == before
     assert agent.mental_models.concepts["original"] is original_node
     assert state == incoming
+
+
+def test_apply_rolls_back_when_inplace_subsystem_restore_fails():
+    class FailingLoopCloser:
+        def __init__(self):
+            self.no_effect_streak = {"old": 4}
+
+        def to_checkpoint_dict(self):
+            return {"no_effect_streak": self.no_effect_streak}
+
+        def restore_from_checkpoint(self, state):
+            self.no_effect_streak = {"changed": 99}
+            raise RuntimeError("injected restore failure")
+
+    agent = _agent()
+    agent.loop_closer = FailingLoopCloser()
+    original_loop = agent.loop_closer
+    original_kb = agent.knowledge_base
+    before = deepcopy(build_state_from_agent(agent))
+    before.pop("saved_at")
+    state = {
+        "energy": 10,
+        "knowledge_base": {"replacement": "new"},
+        "loop_closure": {"no_effect_streak": {"new": 8}},
+    }
+
+    with pytest.raises(RuntimeError, match="injected restore failure"):
+        apply_state_to_agent(agent, state)
+
+    after = build_state_from_agent(agent)
+    after.pop("saved_at")
+    assert after == before
+    assert agent.loop_closer is original_loop
+    assert agent.loop_closer.no_effect_streak == {"old": 4}
+    assert agent.knowledge_base is original_kb

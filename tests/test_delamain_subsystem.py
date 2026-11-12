@@ -738,3 +738,66 @@ def test_digital_being_registers_delamain_disabled(tmp_path: Path, monkeypatch) 
         if agent is not None:
             agent.plugin_registry.teardown_all()
         PluginRegistry.reset_global()
+
+
+@pytest.mark.parametrize("content_matches", [True, False])
+def test_interrupted_write_is_recovered_only_when_content_proves_it(
+    tmp_path: Path, monkeypatch, content_matches: bool
+) -> None:
+    class CrashAfterWrite(BaseException):
+        pass
+
+    sub = make_sub(tmp_path)
+    goal = sub.queue_goal(
+        "crash-safe write",
+        plan=[
+            {
+                "action": "write_file",
+                "args": {"path": "once.txt", "content": "записано один раз"},
+            }
+        ],
+    )
+    runtime = sub._ensure_runtime()
+    original_write = runtime.sandbox.write_text
+    write_calls = 0
+
+    def write_then_crash(*args, **kwargs):
+        nonlocal write_calls
+        write_calls += 1
+        original_write(*args, **kwargs)
+        raise CrashAfterWrite()
+
+    monkeypatch.setattr(runtime.sandbox, "write_text", write_then_crash)
+    with pytest.raises(CrashAfterWrite):
+        sub.tick(1, {})
+    target = tmp_path / "workspace" / "once.txt"
+    assert target.read_text(encoding="utf-8") == "записано один раз"
+    assert write_calls == 1
+    if not content_matches:
+        target.write_text("внешнее изменение", encoding="utf-8")
+
+    # Авария: первый runtime не закрывается штатно. Новый процесс видит только
+    # durable goal и уже выполненный внешний эффект, но не terminal status.
+    restored = make_sub(tmp_path)
+    restored_runtime = restored._ensure_runtime()
+    restored_write = restored_runtime.sandbox.write_text
+
+    def unexpected_second_write(*args, **kwargs):
+        nonlocal write_calls
+        write_calls += 1
+        return restored_write(*args, **kwargs)
+
+    monkeypatch.setattr(restored_runtime.sandbox, "write_text", unexpected_second_write)
+    event = restored.tick(2, {})
+    assert event is not None
+    summary = event["events"][0]["data"]
+    assert write_calls == 1
+    assert summary["ok"] is content_matches
+    assert summary["attempts"] == 1
+    stored = restored.get_goal(goal["id"])
+    assert stored["status"] == ("done" if content_matches else "failed")
+    assert stored["metadata"]["last_ok"] is content_matches
+    assert stored["metadata"]["recovered_after_interruption"] is content_matches
+    assert stored["metadata"]["interrupted_attempt_unverified"] is not content_matches
+    assert restored.tick(3, {}) is None
+    restored.teardown()

@@ -335,26 +335,166 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
     }
 
 
+# Объекты, которые фаза 2 меняет на месте. Полный deepcopy(agent) здесь
+# невозможен: среди атрибутов живого агента есть RLock и SQLite-соединения.
+_INPLACE_RESTORE_PATHS = (
+    ("energy_subsystem",),
+    ("knowledge_base",),
+    ("_goal_progress",),
+    ("_open_questions",),
+    ("_known_definitions",),
+    ("mental_models",),
+    ("goal_subsystem",),
+    ("loop_closer",),
+    ("internal_simulator",),
+    ("naming_dialogue",),
+    ("user_model",),
+    ("user_interaction",),
+    ("dialogue_learning",),
+    ("emotional_state",),
+    ("interoception",),
+    ("interoception", "state"),
+    ("continuous_time",),
+    ("continuous_time", "subjective_time"),
+    ("meta_learner",),
+    ("social_cell",),
+    ("death_risk",),
+    ("death_risk", "integrity"),
+    ("active_inference",),
+    ("active_inference", "model"),
+    ("active_inference", "inference"),
+    ("soul",),
+    ("soul", "_systems"),
+    ("will_registry",),
+    ("value_evolution",),
+    ("right_to_refuse",),
+    ("attachment",),
+    ("decision_arbitrator",),
+)
+
+
+def _snapshot_copy(value, preserved_ids):
+    """Скопировать значение, сохраняя некопируемые ресурсы по ссылке."""
+    if id(value) in preserved_ids:
+        return value
+    try:
+        return deepcopy(value)
+    except Exception:
+        return value
+
+
+def _capture_inplace_state(agent):
+    """Сохранить локальное состояние, не копируя ресурсы всего агента."""
+    targets = []
+    seen = set()
+
+    def add(value):
+        if value is None or id(value) in seen:
+            return
+        if not (
+            isinstance(value, (dict, list, set, deque)) or hasattr(value, "__dict__")
+        ):
+            return
+        seen.add(id(value))
+        targets.append(value)
+        if isinstance(value, dict):
+            children = value.values()
+        elif isinstance(value, (list, set, deque)):
+            children = value
+        else:
+            # Не обходим весь граф агента: из атрибутов подсистем рекурсивно
+            # берём только контейнеры. Объекты внутри них (ConceptNode,
+            # Hyperparameter и т. п.) сохраняют и ссылку, и собственное состояние.
+            children = (
+                item
+                for item in vars(value).values()
+                if isinstance(item, (dict, list, set, deque))
+            )
+        for child in children:
+            add(child)
+
+    for path in _INPLACE_RESTORE_PATHS:
+        value = agent
+        for attribute in path:
+            value = getattr(value, attribute, None)
+            if value is None:
+                break
+        add(value)
+    soul = getattr(agent, "soul", None)
+    if soul is not None and hasattr(soul, "get"):
+        add(soul.get("self"))
+
+    preserved_ids = {id(value) for value in targets}
+    snapshots = []
+    for value in targets:
+        if isinstance(value, dict):
+            kind = "dict"
+            data = [
+                (_snapshot_copy(key, preserved_ids), _snapshot_copy(item, preserved_ids))
+                for key, item in value.items()
+            ]
+        elif isinstance(value, list):
+            kind = "list"
+            data = [_snapshot_copy(item, preserved_ids) for item in value]
+        elif isinstance(value, set):
+            kind = "set"
+            data = [_snapshot_copy(item, preserved_ids) for item in value]
+        elif isinstance(value, deque):
+            kind = "deque"
+            data = [_snapshot_copy(item, preserved_ids) for item in value]
+        else:
+            kind = "object"
+            data = {
+                key: _snapshot_copy(item, preserved_ids)
+                for key, item in vars(value).items()
+            }
+        snapshots.append((value, kind, data))
+    return snapshots
+
+
+def _restore_inplace_state(agent, agent_attributes, snapshots):
+    """Откатить вложенные объекты, затем исходные ссылки агента."""
+    for value, kind, data in reversed(snapshots):
+        if kind == "dict":
+            value.clear()
+            value.update(data)
+        elif kind == "list":
+            value[:] = data
+        elif kind == "set":
+            value.clear()
+            value.update(data)
+        elif kind == "deque":
+            value.clear()
+            value.extend(data)
+        else:
+            vars(value).clear()
+            vars(value).update(data)
+    vars(agent).clear()
+    vars(agent).update(agent_attributes)
+
+
 def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
-    """Восстановить состояние агента из state-словаря.
+    """Атомарно восстановить in-memory состояние из state-словаря.
 
-    Применение двухфазное. Фаза 1 разбирает и валидирует всё, что
-    может упасть (модели памяти, preference-правила, историю намерений,
-    прогресс целей, вопросы, социальные модели, мотивацию, доступность
-    памяти жизни) — не трогая агента. Фаза 2 только присваивает
-    готовые значения. Повреждённый чекпоинт падает в фазе 1 и
-    оставляет существо нетронутым, а не наполовину восстановленным.
-
-    Граница честности: restore-методы отдельных подсистем
-    (user_interaction, interoception, meta_learner, death_risk,
-    continuous_time, user_model, personal_state) меняют свои объекты
-    на месте и остаются в фазе 2 — их собственную транзакционность
-    фаза 1 не покрывает.
-
-    Args:
-        agent: экземпляр DigitalBeing.
-        state: словарь, полученный из ``build_state_from_agent``.
+    Сначала выполняются разбор и валидация, затем присваивания и in-place
+    restore подсистем. При любом исключении исходные объекты и их содержимое
+    восстанавливаются. Внешние побочные эффекты rebind в БД этим не откатываются.
     """
+    agent_attributes = dict(vars(agent))
+    snapshots = _capture_inplace_state(agent)
+    try:
+        _apply_state_to_agent(agent, state)
+    except BaseException as error:
+        try:
+            _restore_inplace_state(agent, agent_attributes, snapshots)
+        except BaseException as rollback_error:
+            error.add_note(f"Checkpoint rollback failed: {rollback_error!r}")
+            logger.critical("Не удалось откатить состояние агента", exc_info=True)
+        raise
+
+
+def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
+    """Разобрать и применить checkpoint; вызывается под транзакционной обёрткой."""
     from src.core.checkpoint_validation import validate_checkpoint_state
 
     # ================================================================

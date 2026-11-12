@@ -147,6 +147,46 @@ def test_submit_is_idempotent_and_executes_once(tmp_path: Path) -> None:
         sub.teardown()
 
 
+def test_concurrent_submit_creates_only_one_goal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    first = make_sub(tmp_path)
+    second = make_sub(tmp_path)
+    first.setup({})
+    second.setup({})
+    barrier = Barrier(2)
+    try:
+        for sub in (first, second):
+            original_find = sub.effector._find_goal
+            # Синхронизируем только первый поиск; повторный поиск после
+            # SQLite IntegrityError не должен снова ждать барьер.
+            state = {"first": True}
+
+            def find_once(request_id, *, open_runtime, _find=original_find, _state=state):
+                result = _find(request_id, open_runtime=open_runtime)
+                if result is None and _state["first"]:
+                    _state["first"] = False
+                    barrier.wait(timeout=5)
+                return result
+
+            monkeypatch.setattr(sub.effector, "_find_goal", find_once)
+
+        request = write_request("concurrent-request")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(sub.effector.submit, request) for sub in (first, second)]
+            results = [future.result(timeout=10) for future in futures]
+
+        assert len(first.list_goals()) == 1
+        assert len(second.list_goals()) == 1
+        assert results[0].goal_id == results[1].goal_id
+    finally:
+        first.teardown()
+        second.teardown()
+
+
 def test_duplicate_id_with_different_payload_is_a_conflict(tmp_path: Path) -> None:
     sub = make_sub(tmp_path)
     try:

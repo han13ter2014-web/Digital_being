@@ -117,3 +117,33 @@ def test_missing_life_memory_fails_before_mutation():
         apply_state_to_agent(fresh, state)
 
     _assert_untouched(fresh, before)
+
+
+def test_inplace_failure_restores_full_agent_and_aliases(monkeypatch):
+    agent, state = _make_agent_and_state()
+    before = _snapshot(agent)
+    original_kb = agent.knowledge_base
+    original_node_key = next(iter(agent.mental_models.concepts))
+    original_node = agent.mental_models.concepts[original_node_key]
+    original_identity = agent.soul.get("self")
+    original_body_state = agent.interoception.state
+    original_restore = agent.loop_closer.restore_from_checkpoint
+
+    def fail_after_mutation(saved):
+        original_restore(saved)
+        raise RuntimeError("injected full-agent restore failure")
+
+    monkeypatch.setattr(
+        agent.loop_closer, "restore_from_checkpoint", fail_after_mutation
+    )
+    state["energy"] = 7
+    state["knowledge_base"] = {"replacement": "new"}
+
+    with pytest.raises(RuntimeError, match="injected full-agent restore failure"):
+        apply_state_to_agent(agent, state)
+
+    _assert_untouched(agent, before)
+    assert agent.knowledge_base is original_kb
+    assert agent.mental_models.concepts[original_node_key] is original_node
+    assert agent.soul.get("self") is original_identity
+    assert agent.interoception.state is original_body_state
