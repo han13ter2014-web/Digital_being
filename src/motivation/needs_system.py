@@ -28,6 +28,8 @@ class Need:
         self.satisfaction_events.append(
             {"timestamp": datetime.now().isoformat(), "amount": amount}
         )
+        # Детали нужны для недавнего контекста; общий опыт сохраняет счётчик.
+        self.satisfaction_events = self.satisfaction_events[-100:]
 
     def grow(self, amount: float = 0.1):
         """Потребность растет со временем (возвращается к базовому уровню)."""

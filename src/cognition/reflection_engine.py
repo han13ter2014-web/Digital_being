@@ -12,7 +12,9 @@ class ReflectionEngine:
     """Анализирует собственную производительность и адаптирует поведение"""
 
     def __init__(self):
+        # Рабочее окно для анализа; полное число наблюдений не забывается.
         self.performance_history = []
+        self.recorded_cycles = 0
         self.learning_patterns = defaultdict(list)
         self.effectiveness_metrics = {
             "success_rate": 0,
@@ -35,6 +37,8 @@ class ReflectionEngine:
             "timestamp": datetime.now().isoformat(),
         }
         self.performance_history.append(cycle_data)
+        self.performance_history = self.performance_history[-100:]
+        self.recorded_cycles += 1
         return cycle_data
 
     def analyze_performance(self, window_size=10):
@@ -247,6 +251,8 @@ class ReflectionEngine:
                 reports = []
 
             reports.append(report)
+            # На диске тоже остаётся только недавняя операционная история.
+            reports = reports[-100:]
 
             with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(reports, f, indent=2, ensure_ascii=False)

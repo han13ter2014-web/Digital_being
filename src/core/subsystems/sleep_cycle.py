@@ -96,6 +96,8 @@ class SleepCycle:
             "patterns": patterns[:3],  # топ-3
         }
         self.sleep_history.append(sleep_record)
+        # Это операционный журнал; продолжительность жизни хранит total_sleeps.
+        self.sleep_history = self.sleep_history[-100:]
         self.last_consolidated_count = consolidated
         self.last_patterns_found = patterns
         self.total_sleeps += 1

@@ -83,8 +83,12 @@ class InternalDialogueEngine:
         # Класс хранит шаблоны; изменяемое состояние принадлежит экземпляру.
         self.voices = deepcopy(self.BASE_VOICES)
         self.active_voice: Optional[InternalVoice] = None
+        # Сырые записи — только недавнее рабочее окно. Накопленные итоги
+        # хранятся отдельно и не зависят от вытеснения старых событий.
         self.voice_history: List[dict] = []
         self.conflict_events: List[dict] = []
+        self.dialogue_count = 0
+        self.conflict_summary = {"total": 0, "ecosystem_impact_sum": 0.0}
 
         # Состояние системы
         self.harmony_level: float = 0.5  # Уровень согласия между голосами (0-1)
@@ -135,6 +139,8 @@ class InternalDialogueEngine:
                 "timestamp": datetime.now().isoformat(),
             }
         )
+        self.voice_history = self.voice_history[-100:]
+        self.dialogue_count += 1
 
         return {
             "topic": topic,
@@ -218,6 +224,9 @@ class InternalDialogueEngine:
         }
 
         self.conflict_events.append(conflict)
+        self.conflict_events = self.conflict_events[-100:]
+        self.conflict_summary["total"] += 1
+        self.conflict_summary["ecosystem_impact_sum"] += conflict["ecosystem_impact"]
 
         return conflict
 
@@ -311,7 +320,9 @@ class InternalDialogueEngine:
             "harmony_level": round(self.harmony_level, 3),
             "entropic_pressure": round(self.entropic_pressure, 3),
             "ecosystem_health": self.ecosystem_health,
+            "dialogue_count": self.dialogue_count,
             "recent_conflicts": len(self.conflict_events[-5:]),
+            "total_conflicts": self.conflict_summary["total"],
             "voices_status": {
                 name: {"strength": v.strength, "tone": v.current_tone}
                 for name, v in self.voices.items()
