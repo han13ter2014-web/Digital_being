@@ -259,7 +259,14 @@ class PersistentMessageQueue(asyncio.Queue):
 
     def put_nowait(self, item):
         super().put_nowait(item)
-        self._sync()
+        try:
+            self._sync()
+        except BaseException:
+            # Откатываем именно новый правый элемент: одинаковые тексты и
+            # уже ожидающие сообщения не должны быть затронты.
+            self._queue.pop()
+            self.agent._pending_message_texts = list(self._queue)
+            raise
 
     def get_nowait(self):
         item = super().get_nowait()

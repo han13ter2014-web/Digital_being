@@ -39,6 +39,12 @@ class ReflectionEngine:
 
     def analyze_performance(self, window_size=10):
         """Анализирует производительность за последние N циклов"""
+        if (
+            not isinstance(window_size, int)
+            or isinstance(window_size, bool)
+            or window_size <= 0
+        ):
+            raise ValueError("window_size должен быть положительным целым")
         if len(self.performance_history) < window_size:
             return None
 

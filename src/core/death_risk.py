@@ -8,6 +8,7 @@ import time
 import json
 import gzip
 import os
+import zlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import Enum
@@ -243,6 +244,8 @@ class StructuralIntegrity:
             gzip.BadGzipFile,
             OSError,
             UnicodeDecodeError,
+            EOFError,
+            zlib.error,
         ) as e:
             return {"file_corrupted": True, "reason": str(e), "path": checkpoint_path}
 

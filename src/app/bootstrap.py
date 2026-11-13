@@ -324,6 +324,36 @@ def create_agent(
         (агент, отчёт) — отчёт описывает, откуда взялось состояние:
         новая жизнь, чекпоинт или семя.
     """
+    created_agent: list[Any] = []
+    try:
+        return _create_agent(
+            env,
+            name,
+            new=new,
+            restore=restore,
+            seed=seed,
+            expected_life_id=expected_life_id,
+            created_agent=created_agent,
+        )
+    except BaseException:
+        if created_agent:
+            try:
+                created_agent[0].plugin_registry.teardown_all()
+            except BaseException:
+                logger.exception("Не удалось завершить подсистемы после ошибки запуска")
+        raise
+
+
+def _create_agent(
+    env: AppEnv,
+    name: str,
+    *,
+    new: bool,
+    restore: bool,
+    seed: Optional[str],
+    expected_life_id: Optional[str],
+    created_agent: list[Any],
+) -> Tuple[Any, Dict[str, Any]]:
     from src.core.agent import DigitalBeing
 
     logger.info("Создаю агента '%s'...", name)
@@ -331,6 +361,7 @@ def create_agent(
     # Выбранная жизнь должна владеть managed-хранилищами с самого
     # конструктора: поздний rebind оставляет пустую БД временного UUID.
     agent = DigitalBeing(name, life_id=expected_life_id, profile_managed=True)
+    created_agent.append(agent)
 
     # Упакованный сид загружается только в память. Живой knowledge_base.json
     # не создаётся и не читается: источник истины — следующий Core snapshot.

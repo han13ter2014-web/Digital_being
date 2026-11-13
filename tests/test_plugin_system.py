@@ -166,6 +166,67 @@ def test_registry_register_duplicate_returns_false():
     assert reg.register(Bar(), replace=True) is True
 
 
+def test_registry_replace_instance_tears_down_only_previous_instance():
+    from src.core.subsystem_base import Subsystem, PluginRegistry
+
+    torn_down = []
+
+    class Tracked(Subsystem):
+        name = "tracked"
+
+        def teardown(self):
+            torn_down.append(self)
+            super().teardown()
+
+    reg = PluginRegistry()
+    old = Tracked()
+    new = Tracked()
+    reg.register(old)
+
+    assert reg.register(new, replace=True) is True
+    assert reg.get("tracked") is new
+    assert torn_down == [old]
+
+    # Замена на тот же объект не должна отключать действующую подсистему.
+    assert reg.register(new, replace=True) is True
+    assert torn_down == [old]
+    assert reg.teardown_all() == 1
+    assert torn_down == [old, new]
+
+
+def test_registry_replace_class_invalidates_materialized_instance():
+    from src.core.subsystem_base import Subsystem, PluginRegistry
+
+    torn_down = []
+
+    class Tracked(Subsystem):
+        name = "replaceable"
+
+        def teardown(self):
+            torn_down.append(type(self).__name__)
+            super().teardown()
+
+    class Old(Tracked):
+        pass
+
+    class New(Tracked):
+        pass
+
+    reg = PluginRegistry()
+    reg.register_class(Old, agent_name="OldAgent")
+    old = reg.get("replaceable")
+    assert isinstance(old, Old)
+
+    assert reg.register_class(New, agent_name="NewAgent", replace=True) is True
+    new = reg.get("replaceable")
+    assert isinstance(new, New)
+    assert new is not old
+    assert new.agent_name == "NewAgent"
+    assert torn_down == ["Old"]
+    assert reg.teardown_all() == 1
+    assert torn_down == ["Old", "New"]
+
+
 def test_registry_register_class_lazy():
     """register_class() — инстанциируется при первом get()."""
     from src.core.subsystem_base import Subsystem, PluginRegistry

@@ -65,10 +65,18 @@ def _write_saved(root, values: Dict[str, bool]) -> None:
     path = _path(root)
     temporary = path.with_suffix(".tmp")
     payload = {key: bool(values[key]) for key in _KEYS if key in values}
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    except BaseException:
+        # Ошибка очистки не должна заменять исходную ошибку записи.
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def current_state(agent: Any) -> Dict[str, bool]:

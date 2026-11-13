@@ -242,10 +242,16 @@ class PluginRegistry:
             )
         with self._lock:
             name = instance.name
-            if name in self._items and not replace:
+            previous = self._items.get(name)
+            if previous is not None and not replace:
                 logger.debug(f"[registry] '{name}' уже зарегистрирована, пропускаю")
                 return False
             self._items[name] = instance
+            if previous is not None and previous is not instance:
+                try:
+                    previous.teardown()
+                except Exception as e:
+                    logger.warning(f"[registry] ошибка teardown {name}: {e}")
             if not replace:
                 self._emit("registered", {"name": name, "version": instance.version})
                 logger.debug(
@@ -275,9 +281,15 @@ class PluginRegistry:
             name = getattr(cls, "name", "") or cls.__name__.lower()
             if name in self._classes and not replace:
                 return False
+            previous = self._items.pop(name, None) if replace else None
             self._classes[name] = cls
             # Сохраняем agent_name — пригодится при инстанциировании.
             self._class_agent_names[name] = agent_name
+            if previous is not None:
+                try:
+                    previous.teardown()
+                except Exception as e:
+                    logger.warning(f"[registry] ошибка teardown {name}: {e}")
             logger.debug(f"[registry] зарегистрирован класс: {name}")
             return True
 

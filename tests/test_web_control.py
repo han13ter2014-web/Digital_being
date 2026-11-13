@@ -340,3 +340,81 @@ def test_web_surface_has_no_core_or_direct_save_path():
     assert not hasattr(dash, "agent") and not hasattr(dash.state, "agent")
     assert hasattr(dash, "bus")
     assert not hasattr(dash, "think") and not hasattr(dash, "save_state")
+
+
+def _cross_site_post(
+    port: int,
+    path: str,
+    *,
+    as_json: bool,
+    origin: str = "https://attacker.example",
+    fetch_site: str = "cross-site",
+    host: str | None = None,
+) -> tuple[int, dict]:
+    body = b"{}" if as_json else b"source=foreign"
+    content_type = (
+        "application/json" if as_json else "application/x-www-form-urlencoded"
+    )
+    headers = {
+        "Content-Type": content_type,
+        "Origin": origin,
+        "Sec-Fetch-Site": fetch_site,
+    }
+    if host is not None:
+        headers["Host"] = host
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/control/pause",
+        "/api/control/resume",
+        "/api/control/save",
+        "/api/control/life/wake",
+    ],
+)
+def test_cross_site_form_commands_never_reach_bus(controlled_dashboard, path):
+    _, port, _, bus = controlled_dashboard
+
+    status, response = _cross_site_post(port, path, as_json=False)
+
+    assert status == 403 and response["status"] == "rejected"
+    assert bus.published == []
+
+
+def test_cross_site_json_command_never_reaches_bus(controlled_dashboard):
+    _, port, _, bus = controlled_dashboard
+
+    status, response = _cross_site_post(port, "/api/control/speed", as_json=True)
+
+    assert status == 403 and response["status"] == "rejected"
+    assert bus.published == []
+
+
+def test_external_host_cannot_bypass_origin_check_by_dns_rebinding(
+    controlled_dashboard,
+):
+    _, port, _, bus = controlled_dashboard
+
+    status, response = _cross_site_post(
+        port,
+        "/api/control/speed",
+        as_json=True,
+        origin="http://attacker.example",
+        fetch_site="same-origin",
+        host="attacker.example",
+    )
+
+    assert status == 403 and response["status"] == "rejected"
+    assert bus.published == []

@@ -196,10 +196,11 @@ class InternalMotivationSystem:
 
         drive_levels = {}
         for drive_name, drive in self.drives.items():
+            was_active = drive.is_active()
             intensity = drive.calculate_intensity(needs_state)
             drive_levels[drive_name] = intensity
 
-            if drive.is_active():
+            if drive.is_active() and not was_active:
                 drive.active_count += 1
 
         return drive_levels
@@ -407,11 +408,12 @@ class InternalMotivationSystem:
 
     def get_status(self) -> dict:
         """Возвращает статус системы мотивации."""
+        motivation_profile = self.get_motivation_profile()
         return {
             "agent_name": self.agent_name,
             "needs": {name: n.to_dict() for name, n in self.needs.items()},
             "drives": {name: d.to_dict() for name, d in self.drives.items()},
-            "motivation_profile": self.get_motivation_profile(),
+            "motivation_profile": motivation_profile,
         }
 
     def to_dict(self) -> dict:

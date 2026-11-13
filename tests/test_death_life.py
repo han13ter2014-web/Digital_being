@@ -178,6 +178,36 @@ class TestDeathLifeRegression:
         )
         assert verification["file_corrupted"] is True
 
+    def test_gzip_stream_corruption_detected(self, temp_checkpoint_dir):
+        import gzip
+        import json
+
+        from src.core.death_risk import StructuralIntegrity
+
+        checkpoint_path = os.path.join(temp_checkpoint_dir, "broken.json.gz")
+        with gzip.open(checkpoint_path, "wt", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "name": "broken",
+                    "cycle_count": 1,
+                    "energy": 100,
+                },
+                handle,
+            )
+        with open(checkpoint_path, "rb") as handle:
+            raw = bytearray(handle.read())
+        for index in range(10, min(len(raw) - 8, 40)):
+            raw[index] ^= 0xFF
+        with open(checkpoint_path, "wb") as handle:
+            handle.write(raw)
+
+        integrity = StructuralIntegrity.__new__(StructuralIntegrity)
+        verification = integrity.verify_checkpoint_file_integrity(checkpoint_path)
+
+        assert verification["file_corrupted"] is True
+        assert verification["path"] == checkpoint_path
+
     def test_structural_drift_not_corruption(self, temp_checkpoint_dir):
         """
         P0.5 Test 5: Структурный дрифт (обучение/рост) НЕ считается коррупцией.

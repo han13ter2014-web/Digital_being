@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import threading
+import zlib
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -1253,7 +1254,13 @@ class CheckpointSerializer:
             else:
                 with open(checkpoint_file, "r", encoding="utf-8") as f:
                     state = json.load(f)
-        except (json.JSONDecodeError, OSError, gzip.BadGzipFile) as e:
+        except (
+            json.JSONDecodeError,
+            OSError,
+            gzip.BadGzipFile,
+            EOFError,
+            zlib.error,
+        ) as e:
             # Should not happen since we verified above, but defense in depth
             logger.exception(f"Ошибка чтения чекпоинта {checkpoint_file}: {e}")
             raise CheckpointCorruptedError(f"Failed to parse checkpoint: {e}")
@@ -1292,6 +1299,8 @@ class CheckpointSerializer:
             gzip.BadGzipFile,
             OSError,
             UnicodeDecodeError,
+            EOFError,
+            zlib.error,
         ) as e:
             return {"file_corrupted": True, "reason": str(e), "path": checkpoint_file}
 

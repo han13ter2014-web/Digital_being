@@ -491,7 +491,12 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
         )
     except BaseException:
         if profile_lock is not None:
-            profile_lock.release()
+            try:
+                profile_lock.release()
+            except BaseException:
+                logger.exception(
+                    "Не удалось освободить блокировку после ошибки запуска"
+                )
         raise
     if profile_lock is None:
         # У новой жизни UUID появляется в конструкторе; конкурентного
@@ -584,8 +589,14 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             start_naming_dialogue(agent, bus)
         return runtime
     except BaseException:
-        profile_lock.release()
-        agent.plugin_registry.teardown_all()
+        try:
+            agent.plugin_registry.teardown_all()
+        except BaseException:
+            logger.exception("Не удалось завершить подсистемы после ошибки запуска")
+        try:
+            profile_lock.release()
+        except BaseException:
+            logger.exception("Не удалось освободить блокировку после ошибки запуска")
         raise
 
 

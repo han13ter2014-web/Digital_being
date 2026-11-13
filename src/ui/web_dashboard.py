@@ -242,8 +242,8 @@ function graphPointerEnd(event){if(!graphPointers.has(event.pointerId))return;co
 }
 $('graph').addEventListener('pointerup',graphPointerEnd);$('graph').addEventListener('pointercancel',graphPointerEnd);
 if(window.ResizeObserver){const observer=new ResizeObserver(()=>{if(!$('page-graph').classList.contains('active'))return;const w=Math.round($('graph').clientWidth),h=Math.round($('graph').clientHeight);if(w&&h&&(w!==graphSize.w||h!==graphSize.h))graphRender()});observer.observe($('graph'))}
-function addDialogue(item){if(!item||item.sequence<=lastSequence)return;lastSequence=Math.max(lastSequence,item.sequence);if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${item.kind}`),node('p',item.text||JSON.stringify(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
-async function startDialogue(){try{const d=await getJSON('/api/dialogue?limit=50');for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
+function addDialogue(item){if(!item||item.sequence<=lastSequence)return;if(item.sequence>lastSequence+1){startDialogue();return}lastSequence=item.sequence;if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${item.kind}`),node('p',item.text||JSON.stringify(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
+async function startDialogue(){try{if(eventSource){eventSource.close();eventSource=null}const d=await getJSON('/api/dialogue?limit=50');$('dialogue-feed').replaceChildren();lastSequence=d.events.length?d.events[0].sequence-1:0;for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
 function connectDialogue(){if(eventSource)eventSource.close();eventSource=new EventSource(`/stream/dialogue?after=${lastSequence}`);eventSource.onmessage=e=>{try{addDialogue(JSON.parse(e.data))}catch(err){console.warn(err)}};eventSource.onerror=()=>{/* EventSource reconnects with Last-Event-ID; sequence also deduplicates. */}}
 $('nav').addEventListener('click',e=>{const button=e.target.closest('button[data-page]');if(!button)return;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===`page-${button.dataset.page}`));if(button.dataset.page==='diary')refreshDiary();if(button.dataset.page==='graph')refreshGraph();if(button.dataset.page==='control')refreshControl()});
 $('diary-prev').onclick=()=>{diaryOffset=Math.max(0,diaryOffset-diaryLimit);refreshDiary()};$('diary-next').onclick=()=>{diaryOffset+=diaryLimit;refreshDiary()};
@@ -613,7 +613,28 @@ class CommandError(ValueError):
         self.status = status
 
 
+def _command_boundary_error(request: Any) -> Optional[CommandError]:
+    """Отклонить browser-to-local команду с другого происхождения."""
+    try:
+        request_host = request.url.host
+    except ValueError:
+        request_host = None
+    fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()
+    origin = request.headers.get("Origin", "").strip().rstrip("/")
+    expected_origin = f"{request.scheme}://{request.host}"
+    if (
+        request_host not in {"127.0.0.1", "localhost", "::1"}
+        or fetch_site == "cross-site"
+        or (origin and origin != expected_origin)
+    ):
+        return CommandError("cross-site команда запрещена", status=403)
+    return None
+
+
 async def _read_json_object(request: Any) -> Dict[str, Any]:
+    boundary_error = _command_boundary_error(request)
+    if boundary_error is not None:
+        raise boundary_error
     if request.content_type != "application/json":
         raise CommandError("ожидается application/json", status=415)
     if request.content_length is not None and request.content_length > MAX_JSON_BYTES:
@@ -632,6 +653,17 @@ async def _read_json_object(request: Any) -> Dict[str, Any]:
 
 def _publish_event(request: Any, name: str, data: Dict[str, Any]) -> Any:
     """Единственная мутация веба: опубликовать существующее событие Tk."""
+    boundary_error = _command_boundary_error(request)
+    if boundary_error is not None:
+        return _json_response(
+            {"status": "rejected", "message": str(boundary_error)},
+            status=boundary_error.status,
+        )
+    if request.content_type != "application/json":
+        return _json_response(
+            {"status": "rejected", "message": "ожидается application/json"},
+            status=415,
+        )
     bus = request.app[BUS_KEY]
     if bus is None:
         return _json_response(
@@ -951,8 +983,26 @@ async def handle_sse(request: Any) -> Any:
                 item = await asyncio.wait_for(queue.get(), timeout=5.0)
                 if item["sequence"] <= last_sent:
                     continue
-                await _write_sse(response, item)
-                last_sent = item["sequence"]
+                # Очередь подписчика может потерять событие под нагрузкой.
+                # Восполняем разрыв из общей ограниченной истории до текущего
+                # события; безвозвратно вытесненный префикс восстановит клиент
+                # через полный resync при обнаружении оставшегося разрыва.
+                while item["sequence"] > last_sent + 1:
+                    recovered = [
+                        event
+                        for event in state.dialogue_history(after=last_sent, limit=200)[
+                            "events"
+                        ]
+                        if last_sent < event["sequence"] < item["sequence"]
+                    ]
+                    if not recovered:
+                        break
+                    for event in recovered:
+                        await _write_sse(response, event)
+                        last_sent = event["sequence"]
+                if item["sequence"] > last_sent:
+                    await _write_sse(response, item)
+                    last_sent = item["sequence"]
             except asyncio.TimeoutError:
                 if time.monotonic() - heartbeat >= 15:
                     await response.write(b": heartbeat\n\n")
@@ -1006,6 +1056,8 @@ class WebDashboard:
         )
 
     def start(self, *, in_thread: bool = True) -> None:
+        if self.running:
+            return
         self._start_error = None
         self._started.clear()
         if in_thread:

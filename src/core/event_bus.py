@@ -91,6 +91,8 @@ class EventBus:
         """
         if max_queue_size <= 0 or publish_timeout <= 0:
             raise ValueError("Лимиты EventBus должны быть положительными")
+        if history_size < 0:
+            raise ValueError("history_size не может быть отрицательным")
         self._subscribers: Dict[str, List[Subscriber]] = defaultdict(list)
         self._queue: asyncio.Queue = None  # создаётся в start()
         self._max_queue_size = max_queue_size
@@ -165,6 +167,7 @@ class EventBus:
             )
             return False
         self._stats[name] += 1
+        self._add_to_history(event)
         return True
 
     def publish_sync(
@@ -194,10 +197,18 @@ class EventBus:
         except RuntimeError:
             running_loop = None
 
-        if running_loop is not None and running_loop.is_running():
+        global_loop = getattr(self, "_global_loop", None)
+        if (
+            running_loop is not None
+            and running_loop.is_running()
+            and (
+                global_loop is None
+                or global_loop is running_loop
+                or global_loop.is_closed()
+            )
+        ):
             return finish(self._enqueue_event_sync(event))
 
-        global_loop = getattr(self, "_global_loop", None)
         if global_loop is not None and not global_loop.is_closed():
             future = Future()
             callback_lock = threading.Lock()
@@ -235,15 +246,20 @@ class EventBus:
 
         return finish(self._enqueue_event_sync(event))
 
-    def _enqueue_event_sync(self, event: Event) -> bool:
-        """Принять событие без ожидания; ``False`` означает отказ без enqueue."""
+    def _enqueue_event_sync(self, event: Event, *, count_stats: bool = True) -> bool:
+        """Принять событие без ожидания; ``False`` означает отказ без enqueue.
+
+        ``count_stats=False`` используется только при переносе уже принятого
+        pre-start события в основную очередь.
+        """
         if self._queue is None:
             if len(self._pending_pre_start) >= self._max_queue_size:
                 self._dropped_count += 1
                 logger.warning("Pre-start буфер EventBus полон, отброшено: %s", event)
                 return False
             self._pending_pre_start.append(event)
-            self._stats[event.name] += 1
+            if count_stats:
+                self._stats[event.name] += 1
             return True
         try:
             self._queue.put_nowait(event)
@@ -251,7 +267,8 @@ class EventBus:
             self._dropped_count += 1
             logger.warning("EventBus не принял событие %s: %s", event, exc)
             return False
-        self._stats[event.name] += 1
+        if count_stats:
+            self._stats[event.name] += 1
         return True
 
     def attach_loop(self, loop) -> None:
@@ -270,7 +287,7 @@ class EventBus:
                     len(self._pending_pre_start) - delivered,
                 )
                 break
-            if not self._enqueue_event_sync(event):
+            if not self._enqueue_event_sync(event, count_stats=False):
                 break
             delivered += 1
         if delivered:
@@ -359,7 +376,6 @@ class EventBus:
 
     async def _dispatch(self, event: Event) -> None:
         """Доставить событие всем подписчикам. Ошибки одного не роняют остальных."""
-        self._add_to_history(event)
         subscribers = list(self._subscribers.get(event.name, []))
         # wildcard подписчики получают всё
         subscribers.extend(self._subscribers.get("*", []))
@@ -383,7 +399,9 @@ class EventBus:
             )
 
     def _add_to_history(self, event: Event) -> None:
-        """Сохранить событие в историю (с ограничением размера)."""
+        """Сохранить событие в историю; нулевой лимит отключает хранение."""
+        if self._history_max == 0:
+            return
         self._history.append(event)
         if len(self._history) > self._history_max:
             self._history = self._history[-self._history_max :]

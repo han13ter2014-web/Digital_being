@@ -10,6 +10,7 @@ test_checkpoint_serializer.py — тесты для src.core.checkpoint_serializ
 - Обработка отсутствующих/повреждённых файлов.
 """
 
+import gzip
 import json
 import os
 import tempfile
@@ -560,6 +561,34 @@ def test_gzip_load_corrupted_raises_error():
             f.write(
                 b"\x1f\x8b not really gzip data"
             )  # магические байты есть, но дальше мусор
+        with pytest.raises(CheckpointCorruptedError):
+            ser.load(path)
+
+
+def test_gzip_stream_corruption_has_corruption_contract():
+    with tempfile.TemporaryDirectory() as tmp:
+        ser = CheckpointSerializer(checkpoint_dir=tmp, compress=True)
+        path = os.path.join(tmp, "Test_cycle_2.json.gz")
+        with gzip.open(path, "wt", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "name": "Test",
+                    "cycle_count": 2,
+                    "energy": 100,
+                },
+                handle,
+            )
+        with open(path, "rb") as handle:
+            raw = bytearray(handle.read())
+        for index in range(10, min(len(raw) - 8, 40)):
+            raw[index] ^= 0xFF
+        with open(path, "wb") as handle:
+            handle.write(raw)
+
+        verification = ser._verify_checkpoint_file_integrity(path)
+        assert verification["file_corrupted"] is True
+        assert verification["path"] == path
         with pytest.raises(CheckpointCorruptedError):
             ser.load(path)
 

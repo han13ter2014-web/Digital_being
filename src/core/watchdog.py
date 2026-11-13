@@ -64,16 +64,17 @@ class Watchdog:
         """Вызывается в начале каждого цикла."""
         self._cycle_count += 1
         self._last_cycle_started = time.monotonic()
-        self._skip_heavy_this_cycle = False
+        # Skip предыдущего медленного цикла действует весь текущий цикл.
 
     def on_cycle_end(self) -> None:
         """Вызывается в конце каждого цикла. Проверяет зависания."""
         if self._last_cycle_started is None:
             return
         elapsed = time.monotonic() - self._last_cycle_started
-        if elapsed > self.max_cycle_seconds:
+        slow_cycle = elapsed > self.max_cycle_seconds
+        self._skip_heavy_this_cycle = slow_cycle
+        if slow_cycle:
             # Цикл был слишком долгим — следующий пропускаем тяжёлое.
-            self._skip_heavy_this_cycle = True
             self._emit_alert(
                 "slow_cycle",
                 f"Цикл #{self._cycle_count} занял {elapsed:.1f}с "

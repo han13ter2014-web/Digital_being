@@ -266,6 +266,45 @@ async def test_sse_reconnect_replays_without_duplicates(dashboard):
     assert second[0]["text"] == "третье"
 
 
+@pytest.mark.asyncio
+async def test_sse_live_gap_replays_missing_event_from_history(dashboard, monkeypatch):
+    _, port, state = dashboard
+    state.push_event("agent_message", {"content": "первое", "cycle": 1})
+
+    async with ClientSession(timeout=ClientTimeout(total=4)) as session:
+        async with session.get(
+            f"http://127.0.0.1:{port}/stream/dialogue",
+            headers={"Last-Event-ID": "0"},
+        ) as response:
+            lines = response.content.__aiter__()
+
+            async def next_event():
+                while True:
+                    line = await asyncio.wait_for(lines.__anext__(), timeout=2)
+                    text = line.decode("utf-8").strip()
+                    if text.startswith("data:"):
+                        return json.loads(text[5:].strip())
+
+            first = await next_event()
+            assert first["sequence"] == 1
+
+            original_put = state._safe_put_nowait
+
+            def drop_second(queue, item):
+                if item["sequence"] == 2:
+                    return
+                original_put(queue, item)
+
+            monkeypatch.setattr(state, "_safe_put_nowait", drop_second)
+            state.push_event("agent_message", {"content": "второе", "cycle": 2})
+            state.push_event("agent_message", {"content": "третье", "cycle": 3})
+
+            second = await next_event()
+            assert second["sequence"] == 2
+            third = await next_event()
+            assert third["sequence"] == 3
+
+
 def test_dashboard_stops_cleanly():
     port = _free_port()
     dash = WebDashboard(host="127.0.0.1", port=port)
@@ -273,6 +312,48 @@ def test_dashboard_stops_cleanly():
     assert _wait_for_url(f"http://127.0.0.1:{port}/health")
     dash.stop()
     time.sleep(0.1)
+    with pytest.raises(OSError):
+        socket.create_connection(("127.0.0.1", port), timeout=0.3).close()
+
+
+def test_repeated_start_preserves_original_owner_and_stop():
+    port = _free_port()
+    dash = WebDashboard(host="127.0.0.1", port=port)
+    dash.start(in_thread=True)
+    assert _wait_for_url(f"http://127.0.0.1:{port}/health")
+    first_thread = dash._thread
+    first_loop = dash._loop
+    first_runner = dash._runner
+    first_site = dash._site
+
+    try:
+        dash.start(in_thread=True)
+        assert dash._thread is first_thread
+        assert dash._loop is first_loop
+        assert dash._runner is first_runner
+        assert dash._site is first_site
+    finally:
+        dash.stop()
+        if first_loop.is_running():
+
+            async def cleanup_original_server():
+                if first_site is not None:
+                    await first_site.stop()
+                await dash.state.close_sse_tasks()
+                if first_runner is not None:
+                    await first_runner.cleanup()
+
+            cleanup = asyncio.run_coroutine_threadsafe(
+                cleanup_original_server(), first_loop
+            )
+            cleanup.result(timeout=3)
+            first_loop.call_soon_threadsafe(first_loop.stop)
+        first_thread.join(timeout=2)
+        if not first_loop.is_closed():
+            first_loop.close()
+
+    assert not first_thread.is_alive()
+    assert first_loop.is_closed()
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=0.3).close()
 

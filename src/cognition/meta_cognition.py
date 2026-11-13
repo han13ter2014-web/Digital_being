@@ -162,17 +162,24 @@ class MetaCognitiveControl:
         self.default_depth = 1
 
     def adjust_depth(self, task_complexity: float, current_success: float) -> int:
-        """Регулирует глубину обработки."""
-        if current_success < 0.3:
-            # Низкий успех → увеличиваем глубину
-            new_depth = min(5, self.depth_adaptation + 1)
-        elif current_success > 0.8:
-            # Высокий успех → уменьшаем (не нужно углубляться)
-            new_depth = max(1, self.depth_adaptation - 1)
-        else:
-            new_depth = self.depth_adaptation
+        """Регулирует числовую глубину по сложности задачи и успеху."""
+        if not self.depth_adaptation:
+            return max(
+                self.min_processing_depth,
+                min(self.max_processing_depth, self.default_depth),
+            )
 
-        return new_depth
+        complexity = max(0.0, min(1.0, task_complexity))
+        depth_span = self.max_processing_depth - self.min_processing_depth
+        new_depth = self.default_depth + round(complexity * depth_span)
+        if current_success < 0.3:
+            # Низкий успех → увеличиваем глубину.
+            new_depth += 1
+        elif current_success > 0.8:
+            # Высокий успех → не углубляемся без необходимости.
+            new_depth -= 1
+
+        return max(self.min_processing_depth, min(self.max_processing_depth, new_depth))
 
     def select_strategy(self, task_type: str, available_strategies: list[str]) -> str:
         """Выбирает стратегию обработки."""

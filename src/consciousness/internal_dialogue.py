@@ -1,5 +1,6 @@
 """Внутренний голос — кишечник цифровой жизни (внутренняя экосистема)."""
 
+from copy import deepcopy
 from datetime import datetime
 from typing import List, Optional
 from dataclasses import dataclass
@@ -79,6 +80,8 @@ class InternalDialogueEngine:
     }
 
     def __init__(self):
+        # Класс хранит шаблоны; изменяемое состояние принадлежит экземпляру.
+        self.voices = deepcopy(self.BASE_VOICES)
         self.active_voice: Optional[InternalVoice] = None
         self.voice_history: List[dict] = []
         self.conflict_events: List[dict] = []
@@ -98,12 +101,12 @@ class InternalDialogueEngine:
         """Инициирует внутренний диалог по теме."""
 
         voices = [
-            self.BASE_VOICES["skeptic"],
-            self.BASE_VOICES["optimist"],
-            self.BASE_VOICES["objective"],
-            self.BASE_VOICES["experience"],
-            self.BASE_VOICES["heart"],
-            self.BASE_VOICES["will"],
+            self.voices["skeptic"],
+            self.voices["optimist"],
+            self.voices["objective"],
+            self.voices["experience"],
+            self.voices["heart"],
+            self.voices["will"],
         ]
 
         # Генерирует мнения каждого голоса
@@ -218,44 +221,45 @@ class InternalDialogueEngine:
 
         return conflict
 
+    def _calculate_ecosystem_impact(self) -> float:
+        """Оценивает уязвимость экосистемы по текущему дефициту консенсуса."""
+        return round(1.0 - self.ecosystem_health["consensus"], 3)
+
     def _choose_winner(
         self, voice1: InternalVoice, voice2: InternalVoice, topic: str
     ) -> dict:
         """Выбирает победителя в конфликте голосов."""
+        ids_by_role = {
+            voice.role_name: voice_id for voice_id, voice in self.voices.items()
+        }
+        voice1_id = ids_by_role.get(voice1.role_name, voice1.role_name.lower())
+        voice2_id = ids_by_role.get(voice2.role_name, voice2.role_name.lower())
 
-        # Правила доминирования
+        # Ключи и фактическая пара отсортированы одинаково и не зависят от
+        # локализованных отображаемых имён или порядка аргументов.
         dominance_rules = {
-            ("skeptic", "optimist"): "objective",  # Наблюдатель решает споры
-            (
-                "experience",
-                "heart",
-            ): "experience",  # Опыт против желания — опыт побеждает
-            ("will", "heart"): "will",  # Воля против желания — воля побеждает
-            ("objective", "skeptic"): "objective",  # Объективность всегда важна
+            ("optimist", "skeptic"): "objective",  # Наблюдатель решает споры
+            ("experience", "heart"): "experience",  # Опыт важнее желания
+            ("heart", "will"): "will",  # Воля важнее желания
+            ("objective", "skeptic"): "objective",
             ("objective", "optimist"): "objective",
         }
-
-        # Проверяет правила
-        pair = tuple(sorted([voice1.role_name.lower(), voice2.role_name.lower()]))
+        pair = tuple(sorted([voice1_id, voice2_id]))
 
         if pair in dominance_rules:
             winner_name = dominance_rules[pair]
             return {
                 "winner": winner_name,
-                "reason": f"Правила доминирования: {dominance_rules[pair]} побеждает",
+                "reason": f"Правила доминирования: {winner_name} побеждает",
                 "confidence": 0.95,
             }
 
-        # Иначе — по силе голоса и теме
+        # Иначе — по силе голоса и теме.
         topic_sensitivity = 1.0
         if "опасность" in topic.lower() or "риск" in topic.lower():
-            topic_sensitivity = (
-                voice1.strength if "skeptic" in voice1.role_name.lower() else 0.5
-            )
+            topic_sensitivity = voice1.strength if voice1_id == "skeptic" else 0.5
         elif "возможность" in topic.lower():
-            topic_sensitivity = (
-                voice2.strength if "optimist" in voice2.role_name.lower() else 0.5
-            )
+            topic_sensitivity = voice2.strength if voice2_id == "optimist" else 0.5
 
         if voice1.strength * topic_sensitivity > voice2.strength:
             return {
@@ -274,7 +278,7 @@ class InternalDialogueEngine:
         """Оценивает интуицию (гут-фелинг)."""
 
         # Интуиция — это голос опыта + сердца + гармонии между голосами
-        experience_opinion = self.BASE_VOICES["experience"]
+        experience_opinion = self.voices["experience"]
 
         intuition_score = (
             experience_opinion.strength * 0.5
@@ -310,17 +314,17 @@ class InternalDialogueEngine:
             "recent_conflicts": len(self.conflict_events[-5:]),
             "voices_status": {
                 name: {"strength": v.strength, "tone": v.current_tone}
-                for name, v in self.BASE_VOICES.items()
+                for name, v in self.voices.items()
             },
         }
 
     def adjust_ecosystem(self, influence_voice: str, increase: float):
         """Влияет на экосистему — усиливает или ослабляет голос."""
 
-        if influence_voice not in self.BASE_VOICES:
+        if influence_voice not in self.voices:
             return False
 
-        voice = self.BASE_VOICES[influence_voice]
+        voice = self.voices[influence_voice]
         old_strength = voice.strength
 
         if increase > 0:

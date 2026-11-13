@@ -65,6 +65,29 @@ def test_watchdog_detects_slow_cycle():
     print(f"  ✅ Медленный цикл обнаружен ({len(alerts)} алертов)")
 
 
+def test_watchdog_slow_cycle_skips_heavy_only_in_next_cycle(monkeypatch):
+    from src.core.watchdog import Watchdog
+
+    timestamps = iter((10.0, 11.0, 20.0, 20.1, 30.0, 30.1))
+    monkeypatch.setattr("src.core.watchdog.time.monotonic", lambda: next(timestamps))
+    wd = Watchdog(max_cycle_seconds=0.5)
+
+    wd.on_cycle_start()
+    assert wd.should_run_heavy_tick() is True
+    wd.on_cycle_end()
+    assert wd.should_run_heavy_tick() is False
+
+    # Флаг из медленного цикла должен действовать весь следующий цикл.
+    wd.on_cycle_start()
+    assert wd.should_run_heavy_tick() is False
+    wd.on_cycle_end()
+
+    # После нормального следующего цикла backpressure снимается.
+    wd.on_cycle_start()
+    assert wd.should_run_heavy_tick() is True
+    wd.on_cycle_end()
+
+
 def test_health_dashboard_runs():
     """Health dashboard собирает данные (даже без агента)."""
     from src.core.health_dashboard import collect_health, format_health_report

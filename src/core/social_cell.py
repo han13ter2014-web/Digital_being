@@ -58,7 +58,7 @@ class SocialCell:
         )
 
     def register_agent(self, agent_id: str, initial_beliefs: Dict = None) -> AgentModel:
-        model = AgentModel(agent_id=agent_id)
+        model = AgentModel(agent_id=agent_id, tom_level=self.current_tom_level)
 
         if initial_beliefs:
             model.believed_goals = initial_beliefs.get("goals", {})
@@ -241,6 +241,8 @@ class SocialCell:
         return {"predicted_reaction": "neutral", "confidence": 0.3}
 
     def choose_action_social(self, agent_id: str, available_actions: List[str]) -> str:
+        if not available_actions:
+            return "wait"
         if agent_id not in self.agent_models:
             return available_actions[0] if available_actions else "wait"
 

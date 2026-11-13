@@ -343,3 +343,29 @@ def test_outgoing_trace_restore_skips_corrupt_entries_and_legacy_payload():
             "context": "test",
         }
     ]
+
+
+def test_acknowledged_messages_leave_queue_and_live_history_is_bounded(monkeypatch):
+    from src.perception.user_interaction import UserInteraction
+
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: None)
+    ui = UserInteraction("BoundedDialogue")
+    ui.MESSAGE_HISTORY_MAX = 20
+    ids = [ui.send_message(f"Сообщение {index}", cycle=7) for index in range(30)]
+    assert len(set(ids)) == len(ids)
+
+    for msg_id in ids:
+        assert ui.acknowledge_message(msg_id) is True
+    assert ui.message_queue == []
+    assert ui.get_pending_messages() == []
+    assert len(ui.message_history) == 20
+    assert all(item["acknowledged"] for item in ui.message_history)
+
+    for index in range(30):
+        ui.receive_user_message(f"Ответ {index}", cycle=8)
+    assert len(ui.message_history) == 20
+    assert ui.message_history[-1]["content"] == "Ответ 29"
+
+    # Удаление из очереди и обрезка history не должны приводить к повторному ID.
+    assert ui.send_message("Новое", cycle=7) not in ids
+    assert len(ui.to_checkpoint_dict()["outgoing_messages"]) <= ui.OUTGOING_TRACE_MAX

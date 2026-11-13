@@ -12,6 +12,7 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 """
 
 from typing import Dict
+from uuid import uuid4
 
 
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
@@ -74,6 +75,7 @@ class UserInteraction:
     # Кольцевой след исходящих публикаций в чекпоинте. Это не очередь UI:
     # восстановленная история не показывается повторно после рестарта.
     OUTGOING_TRACE_MAX = 100
+    MESSAGE_HISTORY_MAX = 2 * OUTGOING_TRACE_MAX
 
     # Стандартные приложения, в которых не нужно беспокоить
     DEFAULT_QUIET_APPS = [
@@ -532,7 +534,7 @@ class UserInteraction:
         Returns:
             ID сообщения
         """
-        msg_id = f"msg_{cycle}_{len(self.message_queue) + 1}"
+        msg_id = f"msg_{cycle}_{uuid4().hex}"
         message = {
             "id": msg_id,
             "sender": "agent",
@@ -548,6 +550,8 @@ class UserInteraction:
 
         self.message_queue.append(message)
         self.message_history.append(message)
+        if len(self.message_history) > self.MESSAGE_HISTORY_MAX:
+            del self.message_history[: -self.MESSAGE_HISTORY_MAX]
 
         # Печатаем сообщение
         prefix_map = {
@@ -617,10 +621,11 @@ class UserInteraction:
         return [m for m in self.message_queue if not m.get("acknowledged", False)]
 
     def acknowledge_message(self, msg_id: str) -> bool:
-        """Пользователь прочитал сообщение."""
-        for m in self.message_queue:
-            if m["id"] == msg_id:
-                m["acknowledged"] = True
+        """Пользователь прочитал сообщение: снять его с очереди ожидания."""
+        for index, message in enumerate(self.message_queue):
+            if message["id"] == msg_id:
+                message["acknowledged"] = True
+                del self.message_queue[index]
                 return True
         return False
 
@@ -658,7 +663,7 @@ class UserInteraction:
         self._last_user_message_cycle = cycle
         self.message_history.append(
             {
-                "id": f"user_{cycle}_{len(self.message_history)}",
+                "id": f"user_{cycle}_{uuid4().hex}",
                 "sender": "user",
                 "content": content,
                 "msg_type": "user_message",
@@ -668,6 +673,8 @@ class UserInteraction:
                 "acknowledged": True,
             }
         )
+        if len(self.message_history) > self.MESSAGE_HISTORY_MAX:
+            del self.message_history[: -self.MESSAGE_HISTORY_MAX]
         return {"status": "received", "cycle": cycle}
 
     # ============================================================
