@@ -264,17 +264,31 @@ class MindDream:
                     "reason": "Запрос не подтверждён или истёк.",
                 }
 
-        # Создаём папку Ясли
-        nursery_dir = data_path("nursery")
-        os.makedirs(nursery_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        seed_folder = f"{nursery_dir}/{self.agent_name}_seed_{timestamp}"
-        os.makedirs(seed_folder, exist_ok=True)
-        self._seed_folder = seed_folder
+        # Собираем и публикуем семя атомарно: watcher игнорирует dot-каталоги,
+        # поэтому видит только полный набор файлов. UUID исключает перезапись
+        # прежнего семени при повторном уходе в пределах одной секунды.
+        import shutil
+        from pathlib import Path
+        from uuid import uuid4
 
-        # Собираем данные для семени
-        seed_data = self._collect_seed_data(agent)
-        self._save_seed_files(seed_folder, agent, seed_data, reason)
+        nursery_dir = Path(data_path("nursery")).resolve()
+        nursery_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        folder_name = f"{self.agent_name}_seed_{timestamp}_{uuid4().hex}"
+        seed_path = nursery_dir / folder_name
+        if seed_path.resolve().parent != nursery_dir:
+            raise ValueError("Каталог семени должен находиться внутри каталога Яслей")
+        staging = nursery_dir / f".{folder_name}.{uuid4().hex}.tmp"
+        staging.mkdir()
+        try:
+            seed_data = self._collect_seed_data(agent)
+            self._save_seed_files(str(staging), agent, seed_data, reason)
+            os.rename(staging, seed_path)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        seed_folder = str(seed_path)
+        self._seed_folder = seed_folder
 
         # Регистрируем волевой акт
         self.registry.record(

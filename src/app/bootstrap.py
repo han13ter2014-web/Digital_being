@@ -172,10 +172,23 @@ def awaken_from_seed(
     (``save_state``). Раньше скрипт печатал «РЕБЁНОК ПРОБУЖДЁН» и
     завершался — ребёнок существовал только внутри процесса.
     """
-    root = nursery_dir or data_path("nursery")
-    seed_path = os.path.join(root, seed_name)
-    if not os.path.isdir(seed_path):
-        available = sorted(os.listdir(root)) if os.path.isdir(root) else []
+    from pathlib import Path
+
+    root = Path(nursery_dir or data_path("nursery")).resolve()
+    relative = Path(seed_name)
+    if (
+        relative.is_absolute()
+        or relative.drive
+        or len(relative.parts) != 1
+        or relative.name != os.fspath(seed_name)
+        or relative.parts[0] in (".", "..")
+    ):
+        raise ValueError("Имя семени должно быть внутри каталога Яслей")
+    seed_path = (root / relative).resolve()
+    if seed_path.parent != root:
+        raise ValueError("Каталог семени должен быть внутри каталога Яслей")
+    if not seed_path.is_dir():
+        available = sorted(os.listdir(root)) if root.is_dir() else []
         raise FileNotFoundError(f"Семя не найдено: {seed_path}. Доступные: {available}")
 
     report: Dict[str, Any] = {
