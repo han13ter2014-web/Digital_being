@@ -9,6 +9,13 @@ from copy import deepcopy
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
+from src.motivation.goal_memory import (
+    GOAL_HISTORY_LIMIT,
+    collect_pending_goal_origins,
+    count_goal,
+    empty_goal_summary,
+    restore_goal_summary,
+)
 
 logger = get_logger()
 
@@ -698,6 +705,8 @@ class UnifiedMotivationSystem:
         self.needs: Dict[str, Need] = deepcopy(DEFAULT_NEEDS)
         self.drives: Dict[str, Drive] = deepcopy(DEFAULT_DRIVES)
         self.goal_history: List[dict] = []
+        self.goal_summary = empty_goal_summary()
+        self._pending_goal_origins: Dict[str, dict] = {}
         self.last_generated_cycle: int = 0
         # Цикл, в котором потребности уже «прожили» свой тик. Нужен,
         # чтобы два вызова tick() за один цикл (autonomous_tick и
@@ -936,6 +945,7 @@ class UnifiedMotivationSystem:
                 and entry.get("drive") == goal.get("drive")
             ):
                 entry["goal_id"] = goal_id
+                self._pending_goal_origins[str(goal_id)] = deepcopy(entry)
                 return
 
     def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
@@ -945,21 +955,44 @@ class UnifiedMotivationSystem:
         превращаться в поиск по тексту: иначе повторное название снова
         удовлетворит чужую потребность.
         """
-        for entry in reversed(self.goal_history):
-            matches = (
-                entry.get("goal_id") == goal_id
-                if goal_id is not None
-                else entry.get("goal") == goal_title
-            )
-            if not matches:
-                continue
-            need_name = entry.get("need")
-            drive_name = entry.get("drive")
-            if need_name and need_name in self.needs:
-                self.needs[need_name].satisfy(0.4)
-            if drive_name and drive_name in self.drives:
-                self.drives[drive_name].activation_count += 1
-            break
+        entry = next(
+            (
+                item
+                for item in reversed(self.goal_history)
+                if (
+                    item.get("goal_id") == goal_id
+                    if goal_id is not None
+                    else item.get("goal") == goal_title
+                )
+            ),
+            None,
+        )
+        if entry is None and goal_id is not None:
+            origin = self._pending_goal_origins.get(str(goal_id))
+            if origin is not None:
+                entry = deepcopy(origin)
+                self.goal_history.append(entry)
+        if entry is None or entry.get("status") == "achieved":
+            return
+
+        entry["status"] = "achieved"
+        entry["achieved_cycle"] = self.agent.cycle_count
+        self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+        if goal_id is not None:
+            self._pending_goal_origins.pop(str(goal_id), None)
+        need_name = entry.get("need")
+        drive_name = entry.get("drive")
+        if need_name and need_name in self.needs:
+            self.needs[need_name].satisfy(0.4)
+        if drive_name and drive_name in self.drives:
+            self.drives[drive_name].activation_count += 1
+        count_goal(
+            self.goal_summary,
+            entry,
+            "achieved",
+            needs=self.needs,
+            drives=self.drives,
+        )
 
     def generate_goals(
         self, pressing_needs: List[Need] = None, active_drives: List[Drive] = None
@@ -981,16 +1014,26 @@ class UnifiedMotivationSystem:
                 goals.append(goal)
         goals.sort(key=lambda g: g.get("priority", 0), reverse=True)
         for goal in goals:
-            self.goal_history.append(
-                {
-                    "cycle": self.agent.cycle_count,
-                    "need": goal.get("need"),
-                    "drive": goal.get("drive"),
-                    "goal": goal["title"],
-                    "priority": goal.get("priority", 0),
-                    "goal_id": goal.get("goal_id"),
-                }
+            entry = {
+                "cycle": self.agent.cycle_count,
+                "need": goal.get("need"),
+                "drive": goal.get("drive"),
+                "goal": goal["title"],
+                "priority": goal.get("priority", 0),
+                "goal_id": goal.get("goal_id"),
+                "status": "generated",
+            }
+            self.goal_history.append(entry)
+            self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+            count_goal(
+                self.goal_summary,
+                entry,
+                "generated",
+                needs=self.needs,
+                drives=self.drives,
             )
+            if entry["goal_id"] is not None:
+                self._pending_goal_origins[str(entry["goal_id"])] = deepcopy(entry)
             logger.log(
                 f"[MOTIVATION] 🎯 Goal: {goal['title']} (need={goal.get('need')}, drive={goal.get('drive')}, priority={goal.get('priority', 0):.2f})"
             )
@@ -1198,7 +1241,9 @@ class UnifiedMotivationSystem:
             else None,
             "active_drives": [d.name for d in active],
             "pressing_needs": [n.name for n in pressing],
-            "goals_generated": len(self.goal_history),
+            "goals_generated": max(
+                self.goal_summary["generated"], len(self.goal_history)
+            ),
             "last_generated_cycle": self.last_generated_cycle,
         }
 
@@ -1212,6 +1257,7 @@ class UnifiedMotivationSystem:
         return [d for d in self.drives.values() if d.is_active()]
 
     def to_checkpoint_dict(self) -> Dict:
+        history = deepcopy(self.goal_history[-GOAL_HISTORY_LIMIT:])
         return {
             "needs": {
                 name: {
@@ -1239,7 +1285,16 @@ class UnifiedMotivationSystem:
                 }
                 for name, drive in self.drives.items()
             },
-            "goal_history": self.goal_history[-50:],
+            "goal_history": history,
+            "goal_summary": restore_goal_summary(
+                self.goal_summary,
+                history,
+                needs=self.needs,
+                drives=self.drives,
+            ),
+            "pending_goal_origins": collect_pending_goal_origins(
+                history, self._pending_goal_origins
+            ),
             "last_generated_cycle": self.last_generated_cycle,
         }
 
@@ -1256,7 +1311,18 @@ class UnifiedMotivationSystem:
                 drive = system.drives[name]
                 drive.current_level = drive_data.get("current_level", 0.0)
                 drive.activation_count = drive_data.get("activation_count", 0)
-        system.goal_history = data.get("goal_history", [])
+        system.goal_history = deepcopy(list(data.get("goal_history", [])))[
+            -GOAL_HISTORY_LIMIT:
+        ]
+        system.goal_summary = restore_goal_summary(
+            data.get("goal_summary"),
+            system.goal_history,
+            needs=system.needs,
+            drives=system.drives,
+        )
+        system._pending_goal_origins = collect_pending_goal_origins(
+            system.goal_history, data.get("pending_goal_origins")
+        )
         system.last_generated_cycle = data.get("last_generated_cycle", 0)
         return system
 

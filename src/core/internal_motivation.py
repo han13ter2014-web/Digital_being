@@ -16,6 +16,13 @@ from copy import deepcopy
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
+from src.motivation.goal_memory import (
+    GOAL_HISTORY_LIMIT,
+    collect_pending_goal_origins,
+    count_goal,
+    empty_goal_summary,
+    restore_goal_summary,
+)
 
 logger = get_logger()
 
@@ -213,6 +220,8 @@ class InternalMotivation:
         # Каждая жизнь владеет собственными потребностями и их списками.
         self.needs: Dict[str, Need] = deepcopy(DEFAULT_NEEDS)
         self.goal_history: List[dict] = []
+        self.goal_summary = empty_goal_summary()
+        self._pending_goal_origins: Dict[str, dict] = {}
         self.last_generated_cycle = 0
         self.min_cycles_between_goals = 10
 
@@ -404,15 +413,19 @@ class InternalMotivation:
             f"(потребность: {need.label}, срочность: {need.urgency():.2f})"
         )
 
-        self.goal_history.append(
-            {
-                "cycle": self.agent.cycle_count,
-                "need": need.name,
-                "goal": goal["title"],
-                "urgency": need.urgency(),
-                "goal_id": goal_id,
-            }
-        )
+        entry = {
+            "cycle": self.agent.cycle_count,
+            "need": need.name,
+            "goal": goal["title"],
+            "urgency": need.urgency(),
+            "goal_id": goal_id,
+            "status": "generated",
+        }
+        self.goal_history.append(entry)
+        self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+        count_goal(self.goal_summary, entry, "generated", needs=self.needs)
+        if goal_id is not None:
+            self._pending_goal_origins[str(goal_id)] = deepcopy(entry)
 
     def on_action_result(self, action: str, success: bool, valence: float):
         for need in self.needs.values():
@@ -442,21 +455,39 @@ class InternalMotivation:
         self.needs["autonomy"].satisfy(0.1 * novelty)
 
     def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
-        for entry in reversed(self.goal_history):
-            matches = (
-                entry.get("goal_id") == goal_id
-                if goal_id is not None
-                else entry.get("goal") == goal_title
-            )
-            if not matches:
-                continue
-            need = self.needs.get(entry["need"])
-            if need:
-                need.satisfy(0.4)
-            break
+        entry = next(
+            (
+                item
+                for item in reversed(self.goal_history)
+                if (
+                    item.get("goal_id") == goal_id
+                    if goal_id is not None
+                    else item.get("goal") == goal_title
+                )
+            ),
+            None,
+        )
+        if entry is None and goal_id is not None:
+            origin = self._pending_goal_origins.get(str(goal_id))
+            if origin is not None:
+                entry = deepcopy(origin)
+                self.goal_history.append(entry)
+        if entry is None or entry.get("status") == "achieved":
+            return
+
+        entry["status"] = "achieved"
+        entry["achieved_cycle"] = self.agent.cycle_count
+        self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+        if goal_id is not None:
+            self._pending_goal_origins.pop(str(goal_id), None)
+        need = self.needs.get(entry.get("need"))
+        if need:
+            need.satisfy(0.4)
+        count_goal(self.goal_summary, entry, "achieved", needs=self.needs)
 
     def to_checkpoint_dict(self) -> dict:
         """Сохранить состояние потребностей и происхождение их целей."""
+        history = deepcopy(self.goal_history[-GOAL_HISTORY_LIMIT:])
         return {
             "needs": {
                 name: {
@@ -465,7 +496,13 @@ class InternalMotivation:
                 }
                 for name, need in self.needs.items()
             },
-            "goal_history": self.goal_history[-50:],
+            "goal_history": history,
+            "goal_summary": restore_goal_summary(
+                self.goal_summary, history, needs=self.needs
+            ),
+            "pending_goal_origins": collect_pending_goal_origins(
+                history, self._pending_goal_origins
+            ),
             "last_generated_cycle": self.last_generated_cycle,
         }
 
@@ -475,7 +512,15 @@ class InternalMotivation:
             if need is not None:
                 need.current_level = need_data.get("current_level", need.current_level)
                 need.base_level = need_data.get("base_level", need.base_level)
-        self.goal_history = list(state.get("goal_history", []))
+        self.goal_history = deepcopy(list(state.get("goal_history", [])))[
+            -GOAL_HISTORY_LIMIT:
+        ]
+        self.goal_summary = restore_goal_summary(
+            state.get("goal_summary"), self.goal_history, needs=self.needs
+        )
+        self._pending_goal_origins = collect_pending_goal_origins(
+            self.goal_history, state.get("pending_goal_origins")
+        )
         self.last_generated_cycle = state.get("last_generated_cycle", 0)
 
     def get_status(self) -> dict:
@@ -484,7 +529,9 @@ class InternalMotivation:
             "most_pressing": max(self.needs.values(), key=lambda n: n.urgency()).name
             if self.needs
             else None,
-            "goals_generated": len(self.goal_history),
+            "goals_generated": max(
+                self.goal_summary["generated"], len(self.goal_history)
+            ),
             "last_generated_cycle": self.last_generated_cycle,
         }
 

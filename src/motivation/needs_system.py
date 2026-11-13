@@ -7,6 +7,12 @@
 
 from datetime import datetime
 
+from src.motivation.goal_memory import (
+    GOAL_HISTORY_LIMIT,
+    count_goal,
+    empty_goal_summary,
+)
+
 
 class Need:
     """Базовая потребность - внутренний мотиватор поведения."""
@@ -182,7 +188,8 @@ class InternalMotivationSystem:
                 drive_config["threshold"],
             )
 
-        self.goal_history = []  # История сгенерированных целей
+        self.goal_history = []  # Недавние сгенерированные цели
+        self.goal_summary = empty_goal_summary()
         self.last_motivated_goals = []
 
     def get_dominant_need(self) -> tuple[str, float]:
@@ -244,6 +251,14 @@ class InternalMotivationSystem:
             goal["generated_at"] = datetime.now().isoformat()
             goal["internal_drive"] = goal.get("drive", dominant_need_name)
             self.goal_history.append(goal)
+            self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+            count_goal(
+                self.goal_summary,
+                goal,
+                "generated",
+                needs=self.needs,
+                drives=self.drives,
+            )
 
         return goals
 
@@ -425,6 +440,7 @@ class InternalMotivationSystem:
             "agent_name": self.agent_name,
             "needs": {name: n.to_dict() for name, n in self.needs.items()},
             "drives": {name: d.to_dict() for name, d in self.drives.items()},
-            "goal_history_count": len(self.goal_history),
+            "goal_history_count": self.goal_summary["generated"],
+            "goal_summary": self.goal_summary,
             "last_goals": self.last_motivated_goals[-5:],
         }
