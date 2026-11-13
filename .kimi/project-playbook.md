@@ -4,7 +4,7 @@
 
 ## Commands
 
-Все команды выполняются из `C:\digital_being` в проектной `.venv`.
+Все команды выполняются из `C:\Users\GamePK\digital_being` в проектной `.venv`.
 
 - Один тест: `.venv/Scripts/python.exe -m pytest tests/<file>.py::<test> -q`
 - Полный regression: `.venv/Scripts/python.exe -m pytest -q`
@@ -13,7 +13,7 @@
 - Mypy: `.venv/Scripts/python.exe -m mypy --config-file pyproject.toml --explicit-package-bases --no-site-packages --follow-imports=skip main.py main_tray.py`
 - Bandit: `.venv/Scripts/python.exe -m bandit -q -r src/ config/ main.py main_tray.py -ll --skip B101,B601`
 - Syntax: `.venv/Scripts/python.exe -m compileall -q src/ config/ tests/ main.py main_tray.py`
-- Evidence: verified locally, 2026-11-13; последний полный regression — 2445 passed, 2 skipped.
+- Evidence: verified locally, 2026-11-13; последний полный regression — 2446 passed, 2 skipped.
 
 ## Conventions
 
@@ -44,6 +44,6 @@
 
 ## Environment and recovery
 
-- Baseline Git: `f988bfd` — 43 коммиченных исправления багхантинга. Исправление 44 усиливает SSRF-гард `WebSearcher.open_page()` и пока не закоммичено. Полный regression после него: 2445 passed, 2 skipped; локальные static gates зелёные. Предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
+- Baseline Git: `b5acc75` — 44 коммиченных исправления багхантинга. Исправление 45 очищает внутрипроцессный ключ `ProfileWriterLock` при ошибке освобождения и пока не закоммичено. Полный regression после него: 2446 passed, 2 skipped; локальные static gates зелёные. Предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
 - Новые изменения после baseline коммитить и отправлять только по явному разрешению владельца.
 - Evidence: verified, 2026-11-13.

@@ -285,7 +285,7 @@ def main() -> str:
         fill=MUTED,
     )
 
-    out = r"C:\digital_being\docs\mockups\life_map_hybrid.png"
+    out = r"C:\Users\GamePK\digital_being\docs\mockups\life_map_hybrid.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     base.save(out)
     return out

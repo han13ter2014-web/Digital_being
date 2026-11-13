@@ -95,11 +95,13 @@ class ProfileWriterLock:
         key = self._key
         self._handle = None
         self._key = None
-        if handle is not None:
-            self._unlock_and_close(handle)
-        if key is not None:
-            with _HELD_PATHS_GUARD:
-                _HELD_PATHS.discard(key)
+        try:
+            if handle is not None:
+                self._unlock_and_close(handle)
+        finally:
+            if key is not None:
+                with _HELD_PATHS_GUARD:
+                    _HELD_PATHS.discard(key)
 
     def __enter__(self) -> "ProfileWriterLock":
         self.acquire()

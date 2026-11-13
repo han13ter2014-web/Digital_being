@@ -7,6 +7,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
+import src.app.profile_lock as profile_lock_module
 from src.app.profile_lock import ProfileWriterLock
 
 
@@ -53,3 +56,34 @@ def test_lock_rejects_other_process_and_releases(tmp_path: Path) -> None:
 
     acquired_after_release = _try_child(profile)
     assert acquired_after_release.returncode == 0, acquired_after_release.stderr
+
+
+def test_release_failure_does_not_leave_stale_process_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    holder = ProfileWriterLock(tmp_path / "profile")
+    holder.acquire()
+    handle = holder._handle
+    key = holder._key
+    original_unlock = ProfileWriterLock._unlock_and_close
+
+    def fail_unlock(_handle) -> None:
+        raise OSError("injected close failure")
+
+    try:
+        monkeypatch.setattr(
+            ProfileWriterLock, "_unlock_and_close", staticmethod(fail_unlock)
+        )
+        with pytest.raises(OSError, match="injected close failure"):
+            holder.release()
+
+        with profile_lock_module._HELD_PATHS_GUARD:
+            assert key not in profile_lock_module._HELD_PATHS
+    finally:
+        monkeypatch.setattr(
+            ProfileWriterLock, "_unlock_and_close", staticmethod(original_unlock)
+        )
+        if handle is not None:
+            original_unlock(handle)
+        with profile_lock_module._HELD_PATHS_GUARD:
+            profile_lock_module._HELD_PATHS.discard(key)
