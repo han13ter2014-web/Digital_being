@@ -141,6 +141,19 @@ def complete_goal_impl(self, goal_id=None):
             self.active_goal = None
             self._set_next_goal()
 
+    # Исход принадлежит конкретной цели, а не последнему совпавшему названию.
+    # Сбой побочной обратной связи не должен отменять уже завершённую цель.
+    for attr_name in ("motivation_system", "internal_motivation"):
+        motivation = getattr(self, attr_name, None)
+        if motivation is None or not hasattr(motivation, "on_goal_achieved"):
+            continue
+        try:
+            motivation.on_goal_achieved(goal["title"], goal_id=target_goal)
+        except Exception as exc:
+            get_logger().log(
+                f"[MOTIVATION] Ошибка обратной связи по цели {target_goal}: {exc}"
+            )
+
     difficulty = int(goal.get("difficulty", 1) or 1)
     if goal.get("activity") is None:
         self.success_streak += difficulty

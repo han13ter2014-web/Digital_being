@@ -381,6 +381,7 @@ class InternalMotivation:
             "created_at_cycle": self.agent.cycle_count,
         }
 
+        goal_id = None
         if hasattr(self.agent, "set_goal"):
             # Важно: цель должна попасть в agent.goals и получить id.
             # Раньше active_goal подменялся словарём без id — прогресс
@@ -407,6 +408,7 @@ class InternalMotivation:
                 "need": need.name,
                 "goal": goal["title"],
                 "urgency": need.urgency(),
+                "goal_id": goal_id,
             }
         )
 
@@ -437,13 +439,30 @@ class InternalMotivation:
         self.needs["play"].satisfy(0.3 * novelty)
         self.needs["autonomy"].satisfy(0.1 * novelty)
 
-    def on_goal_achieved(self, goal_title: str):
+    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
         for entry in reversed(self.goal_history):
-            if entry["goal"] == goal_title:
-                need = self.needs.get(entry["need"])
-                if need:
-                    need.satisfy(0.4)
-                break
+            matches = (
+                entry.get("goal_id") == goal_id
+                if goal_id is not None
+                else entry.get("goal") == goal_title
+            )
+            if not matches:
+                continue
+            need = self.needs.get(entry["need"])
+            if need:
+                need.satisfy(0.4)
+            break
+
+    def to_checkpoint_dict(self) -> dict:
+        """Сохранить происхождение целей для обратной связи после рестарта."""
+        return {
+            "goal_history": self.goal_history[-50:],
+            "last_generated_cycle": self.last_generated_cycle,
+        }
+
+    def restore_from_checkpoint(self, state: dict) -> None:
+        self.goal_history = list(state.get("goal_history", []))
+        self.last_generated_cycle = state.get("last_generated_cycle", 0)
 
     def get_status(self) -> dict:
         return {

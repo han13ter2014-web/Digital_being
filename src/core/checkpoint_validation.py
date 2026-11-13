@@ -188,8 +188,7 @@ def _social(data):
             _dict(model, f"{path}.self_model_as_seen_by_others.{key}")
 
 
-def _motivation(data):
-    path = "motivation"
+def _motivation(data, path="motivation"):
     for section in ("needs", "drives"):
         for key, item in _dict(data.get(section, {}), f"{path}.{section}").items():
             item_path = f"{path}.{section}.{key}"
@@ -311,6 +310,13 @@ def validate_checkpoint_state(state) -> None:
             and not any(goal["title"] == active for goal in state["goals"])
         ):
             _fail("active_goal", "title does not match any saved goal")
+    active_id = state.get("active_goal_id")
+    if active_id is not None:
+        _convertible_int(active_id, "active_goal_id")
+        if "goals" in state and not any(
+            int(goal["id"]) == int(active_id) for goal in state["goals"]
+        ):
+            _fail("active_goal_id", "id does not match any saved goal")
     for key, progress in _dict(
         state.get("_goal_progress", {}), "_goal_progress"
     ).items():
@@ -589,3 +595,8 @@ def validate_checkpoint_state(state) -> None:
         _social(_dict(state["social_cell"], "social_cell"))
     if "motivation" in state:
         _motivation(_dict(state["motivation"], "motivation"))
+    if "internal_motivation" in state:
+        _motivation(
+            _dict(state["internal_motivation"], "internal_motivation"),
+            path="internal_motivation",
+        )

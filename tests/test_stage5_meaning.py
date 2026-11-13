@@ -272,6 +272,37 @@ def test_intrinsic_goal_has_id_and_is_synced(agent):
     # прогресс не начисляют. Берём предмет цели из её названия.
     topic = active["title"].split(":", 1)[-1].strip() or active["title"]
     assert agent._check_goal_progress(topic)["pct"] > 0
+    assert agent.internal_motivation.goal_history[-1]["goal_id"] == active["id"]
+
+    satisfaction_before = agent.internal_motivation.needs["curiosity"].current_level
+    agent.complete_goal(active["id"])
+    assert agent.internal_motivation.needs["curiosity"].current_level > (
+        satisfaction_before
+    )
+
+
+def test_intrinsic_goal_completion_survives_agent_restart(agent):
+    from src.core.agent import DigitalBeing
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    assert agent.internal_motivation.force_generate_goal("curiosity") is not None
+    goal_id = agent.active_goal["id"]
+    snapshot = build_state_from_agent(agent)
+
+    restored = DigitalBeing("Stage5Restarted")
+    restored.thinking.web_searcher = None
+    apply_state_to_agent(restored, snapshot)
+
+    assert restored.active_goal["id"] == goal_id
+    assert restored.internal_motivation.goal_history[-1]["goal_id"] == goal_id
+    satisfaction_before = restored.internal_motivation.needs["curiosity"].current_level
+    restored.complete_goal(goal_id)
+    assert restored.internal_motivation.needs["curiosity"].current_level > (
+        satisfaction_before
+    )
 
 
 # ============================================================

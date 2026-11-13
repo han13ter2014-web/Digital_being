@@ -17,7 +17,8 @@ checkpoint_serializer.py — сериализация/десериализаци
       "intelligence": <int>,
       "completed_goals": <int>,
       "goals": <list>,
-      "active_goal": <str | None>,       # title активной цели
+      "active_goal": <str | None>,       # title активной цели (legacy)
+      "active_goal_id": <int | None>,    # каноническая идентичность цели
       "success_streak": <int>,
       "saved_at": <iso datetime>,
       "_goal_progress": <dict>,
@@ -133,6 +134,7 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "completed_goals": agent.completed_goals,
         "goals": agent.goals,
         "active_goal": agent.active_goal["title"] if agent.active_goal else None,
+        "active_goal_id": agent.active_goal["id"] if agent.active_goal else None,
         "success_streak": agent.success_streak,
         "saved_at": datetime.now().isoformat(),
         # Цели и самоконтроль
@@ -290,6 +292,10 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         # NEW: Unified Motivation (needs + drives)
         "motivation": getattr(agent, "motivation_system", None)
         and agent.motivation_system.to_checkpoint_dict()
+        or {},
+        # Внутренняя мотивация хранит отдельную историю происхождения целей.
+        "internal_motivation": getattr(agent, "internal_motivation", None)
+        and agent.internal_motivation.to_checkpoint_dict()
         or {},
         # Замыкание петли: тупики не должны исчезать после рестарта,
         # иначе агент снова начнёт повторять бесполезное действие.
@@ -657,6 +663,7 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         staged_motivation = UnifiedMotivationSystem.from_checkpoint_dict(
             agent, mot_state
         )
+    staged_internal_motivation = deepcopy(state.get("internal_motivation") or {})
 
     # ================================================================
     # Фаза 2: применение. Только присваивания и in-place restore.
@@ -731,8 +738,15 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent.goals = state.get("goals", agent.goals)
     agent.success_streak = state.get("success_streak", 0)
 
+    active_goal_id = state.get("active_goal_id")
     active_goal_title = state.get("active_goal")
-    if active_goal_title:
+    if active_goal_id is not None:
+        agent.active_goal = next(
+            (goal for goal in agent.goals if int(goal["id"]) == int(active_goal_id)),
+            agent.active_goal,
+        )
+    elif active_goal_title:
+        # Совместимость со старыми снимками, где сохранялось только название.
         for goal in agent.goals:
             if goal["title"] == active_goal_title:
                 agent.active_goal = goal
@@ -996,6 +1010,8 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # NEW: Unified Motivation (needs + drives) — объект собран в фазе 1
     if staged_motivation is not None:
         agent.motivation_system = staged_motivation
+    if staged_internal_motivation and getattr(agent, "internal_motivation", None):
+        agent.internal_motivation.restore_from_checkpoint(staged_internal_motivation)
 
     if inference_data is not None:
         from src.cognition.inference_continuity import restore_inference

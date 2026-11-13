@@ -432,6 +432,7 @@ class GoalSubsystem:
         return {
             "goals": self.goals,
             "active_goal": self.active_goal["title"] if self.active_goal else None,
+            "active_goal_id": self.active_goal["id"] if self.active_goal else None,
             "completed_goals": self.completed_goals,
             "_goal_progress": {
                 k: list(v.get("matched_concepts", []))
@@ -444,8 +445,15 @@ class GoalSubsystem:
         self.goals = state.get("goals", self.goals)
         self.completed_goals = state.get("completed_goals", 0)
 
+        active_id = state.get("active_goal_id")
         active_title = state.get("active_goal")
-        if active_title:
+        if active_id is not None:
+            self.active_goal = next(
+                (goal for goal in self.goals if goal.get("id") == active_id),
+                self.active_goal,
+            )
+        elif active_title:
+            # Старые чекпоинты хранили только неуникальное название.
             for goal in self.goals:
                 if goal["title"] == active_title:
                     self.active_goal = goal

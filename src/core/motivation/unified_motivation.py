@@ -920,16 +920,48 @@ class UnifiedMotivationSystem:
         self.needs["play"].satisfy(0.3 * novelty)
         self.needs["autonomy"].satisfy(0.1 * novelty)
 
-    def on_goal_achieved(self, goal_title: str):
+    def bind_goal(self, goal: Dict, goal_id: int) -> None:
+        """Связать принятый кандидат с канонической целью GoalSubsystem.
+
+        До принятия у кандидата нет ID. После ``set_goal()`` связываем только
+        ещё не привязанную запись того же цикла и происхождения; название само
+        по себе не является идентичностью цели.
+        """
+        goal["goal_id"] = goal_id
+        cycle = getattr(self.agent, "cycle_count", None)
         for entry in reversed(self.goal_history):
-            if entry["goal"] == goal_title:
-                need_name = entry.get("need")
-                drive_name = entry.get("drive")
-                if need_name and need_name in self.needs:
-                    self.needs[need_name].satisfy(0.4)
-                if drive_name and drive_name in self.drives:
-                    self.drives[drive_name].activation_count += 1
-                break
+            if entry.get("goal_id") is not None or entry.get("cycle") != cycle:
+                continue
+            if (
+                entry.get("goal") == goal.get("title")
+                and entry.get("need") == goal.get("need")
+                and entry.get("drive") == goal.get("drive")
+            ):
+                entry["goal_id"] = goal_id
+                return
+
+    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
+        """Учесть достижение по ID; старый вызов по названию сохраняется.
+
+        Если вызывающий код уже знает ID, неизвестный ID не должен молча
+        превращаться в поиск по тексту: иначе повторное название снова
+        удовлетворит чужую потребность.
+        """
+        for entry in reversed(self.goal_history):
+            matches = (
+                entry.get("goal_id") == goal_id
+                if goal_id is not None
+                else entry.get("goal") == goal_title
+            )
+            if not matches:
+                continue
+            need_name = entry.get("need")
+            drive_name = entry.get("drive")
+            if need_name and need_name in self.needs:
+                self.needs[need_name].satisfy(0.4)
+            if drive_name and drive_name in self.drives:
+                self.drives[drive_name].activation_count += 1
+            break
 
     def generate_goals(
         self, pressing_needs: List[Need] = None, active_drives: List[Drive] = None
@@ -958,6 +990,7 @@ class UnifiedMotivationSystem:
                     "drive": goal.get("drive"),
                     "goal": goal["title"],
                     "priority": goal.get("priority", 0),
+                    "goal_id": goal.get("goal_id"),
                 }
             )
             logger.log(

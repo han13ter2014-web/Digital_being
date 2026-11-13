@@ -58,6 +58,8 @@ def test_legacy_omissions_and_sentinels_are_valid(state):
         ({"goals": [{"title": "missing id"}]}, "goals[0].id"),
         ({"goals": [{"id": 1}]}, "goals[0].title"),
         ({"goals": [], "active_goal": "absent"}, "active_goal"),
+        ({"goals": [], "active_goal_id": 1}, "active_goal_id"),
+        ({"active_goal_id": False}, "active_goal_id"),
         ({"_goal_progress": {"bad": []}}, "_goal_progress.bad"),
         (
             {"_goal_progress": {"1": {"percentage": "bad"}}},
@@ -152,6 +154,10 @@ def test_legacy_omissions_and_sentinels_are_valid(state):
             "motivation.drives.exploration.activation_count",
         ),
         ({"motivation": {"goal_history": {}}}, "motivation.goal_history"),
+        (
+            {"internal_motivation": {"goal_history": {}}},
+            "internal_motivation.goal_history",
+        ),
         ({"open_questions": [None]}, "open_questions[0]"),
         (
             {

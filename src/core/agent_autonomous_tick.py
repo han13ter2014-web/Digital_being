@@ -69,6 +69,9 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
                 difficulty=int(g.get("difficulty") or 1),
                 success_predicate=str(g.get("success_predicate") or ""),
             )
+            # ID появляется только при принятии в канонический GoalSubsystem.
+            # Сохраняем его и в кандидате, и в записи мотивационной истории.
+            self.motivation_system.bind_goal(g, gid)
             attach_activity(self, gid, g)
             existing_titles.add(title.casefold())
             existing_work.add(work_key)

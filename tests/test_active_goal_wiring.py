@@ -196,3 +196,92 @@ def test_old_duplicate_is_skipped_without_reward_and_survives_checkpoint():
     assert restored.active_goal["id"] == different["id"]
     assert restored.goals[1]["status"] == "duplicate"
     assert restored.goals[1]["duplicate_of"] == completed["id"]
+
+
+def test_ingested_goal_binds_history_and_completion_by_id(agent):
+    """Канонический ID связывает кандидата, историю и результат завершения."""
+    motivation = agent.motivation_system
+    curiosity = motivation.needs["curiosity"]
+    curiosity.current_level = 0.1
+    for drive in motivation.drives.values():
+        drive.current_level = 0.0
+    generated = motivation.generate_goals(pressing_needs=[curiosity])
+    assert len(generated) == 1
+    candidate = generated[0]
+
+    agent._ingest_motivation_goals(generated)
+
+    goal_id = candidate["goal_id"]
+    assert agent.motivation_system.goal_history[-1]["goal_id"] == goal_id
+    assert agent.goal_subsystem.get_goal(goal_id)["motivation_origin"]["need"] == (
+        "curiosity"
+    )
+
+    agent.complete_goal(goal_id)
+
+    assert agent.motivation_system.needs["curiosity"].current_level > 0.1
+    checkpoint = agent.motivation_system.to_checkpoint_dict()
+    assert checkpoint["goal_history"][-1]["goal_id"] == goal_id
+
+
+def test_active_goal_id_and_motivation_survive_agent_restart(agent):
+    """После перезапуска одинаковый текст не подменяет активную цель."""
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    motivation = agent.motivation_system
+    curiosity = motivation.needs["curiosity"]
+    curiosity.current_level = 0.1
+    for drive in motivation.drives.values():
+        drive.current_level = 0.0
+    generated = motivation.generate_goals(pressing_needs=[curiosity])
+    assert len(generated) == 1
+    candidate = generated[0]
+    agent._ingest_motivation_goals(generated)
+    first_id = candidate["goal_id"]
+
+    second_id = agent.set_goal(candidate["title"], activate=True)
+    motivation.goal_history.append(
+        {
+            "cycle": agent.cycle_count,
+            "need": "meaning",
+            "drive": None,
+            "goal": candidate["title"],
+            "priority": 0.5,
+            "goal_id": second_id,
+        }
+    )
+    motivation.needs["meaning"].current_level = 0.1
+    snapshot = build_state_from_agent(agent)
+
+    restored = DigitalBeing(name="ActiveGoalRestarted")
+    searcher = getattr(restored, "web_searcher", None)
+    if searcher is not None:
+        searcher.toggle(False)
+    apply_state_to_agent(restored, snapshot)
+
+    assert first_id != second_id
+    assert restored.active_goal["id"] == second_id
+    assert restored.motivation_system.goal_history[-1]["goal_id"] == second_id
+
+    restored.complete_goal()
+
+    assert restored.motivation_system.needs["meaning"].current_level > 0.1
+    assert restored.motivation_system.needs["curiosity"].current_level == 0.1
+
+
+def test_goal_subsystem_restores_duplicate_active_goal_by_id():
+    goals = [
+        {"id": 1, "title": "Одинаковая цель", "status": "pending"},
+        {"id": 2, "title": "Одинаковая цель", "status": "active"},
+    ]
+    subsystem = GoalSubsystem("GoalIdentity")
+    subsystem.goals = goals
+    subsystem.active_goal = goals[1]
+
+    restored = GoalSubsystem("GoalIdentityRestored")
+    restored.restore_from_checkpoint(subsystem.to_checkpoint_dict())
+
+    assert restored.active_goal["id"] == 2

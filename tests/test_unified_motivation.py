@@ -581,3 +581,89 @@ def test_negative_valence_frustrates_executed_action():
     system.on_action_result("search_miss", True, -0.2)
 
     assert need.current_level < 0.5
+
+
+def test_goal_completion_uses_id_instead_of_duplicate_title():
+    """Одинаковый текст не должен связывать исход с чужой потребностью."""
+    system = create_motivation_system(MockAgent())
+    system.goal_history = [
+        {
+            "cycle": 1,
+            "need": "curiosity",
+            "drive": None,
+            "goal": "Повторяющаяся цель",
+            "priority": 0.5,
+            "goal_id": 11,
+        },
+        {
+            "cycle": 2,
+            "need": "meaning",
+            "drive": None,
+            "goal": "Повторяющаяся цель",
+            "priority": 0.5,
+            "goal_id": 22,
+        },
+    ]
+    system.needs["curiosity"].current_level = 0.1
+    system.needs["meaning"].current_level = 0.1
+
+    system.on_goal_achieved("Повторяющаяся цель", goal_id=11)
+
+    assert system.needs["curiosity"].current_level > 0.1
+    assert system.needs["meaning"].current_level == 0.1
+
+
+def test_goal_id_survives_checkpoint_history_window():
+    """Существующее 50-записное окно сохраняет ID актуальной цели."""
+    system = create_motivation_system(MockAgent())
+    system.goal_history = [
+        {
+            "cycle": cycle,
+            "need": "curiosity",
+            "drive": None,
+            "goal": f"Старый кандидат {cycle}",
+            "priority": 0.1,
+            "goal_id": cycle,
+        }
+        for cycle in range(60)
+    ]
+    system.goal_history.append(
+        {
+            "cycle": 60,
+            "need": "meaning",
+            "drive": None,
+            "goal": "Актуальная цель",
+            "priority": 0.8,
+            "goal_id": 77,
+        }
+    )
+
+    restored = UnifiedMotivationSystem.from_checkpoint_dict(
+        MockAgent(), system.to_checkpoint_dict()
+    )
+
+    assert len(restored.goal_history) == 50
+    assert restored.goal_history[-1]["goal_id"] == 77
+    restored.needs["meaning"].current_level = 0.1
+    restored.on_goal_achieved("Актуальная цель", goal_id=77)
+    assert restored.needs["meaning"].current_level > 0.1
+
+
+def test_unknown_goal_id_does_not_fall_back_to_title():
+    """Явный неправильный ID не должен завершать чужую цель по тексту."""
+    system = create_motivation_system(MockAgent())
+    system.goal_history = [
+        {
+            "cycle": 1,
+            "need": "curiosity",
+            "drive": None,
+            "goal": "Одинаковая цель",
+            "priority": 0.5,
+            "goal_id": 11,
+        }
+    ]
+    system.needs["curiosity"].current_level = 0.1
+
+    system.on_goal_achieved("Одинаковая цель", goal_id=999)
+
+    assert system.needs["curiosity"].current_level == 0.1
