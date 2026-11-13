@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -790,7 +791,11 @@ class LifeGuard:
         return sorted(entries)
 
     def _prune_snapshots(self) -> None:
-        snapshots = self.list_snapshots()
+        snapshots = [
+            path
+            for path in self.list_snapshots()
+            if re.fullmatch(r"[0-9]{8}-[0-9]{6}_[0-9a-f]{8}_.*", os.path.basename(path))
+        ]
         excess = len(snapshots) - max(1, int(self.max_snapshots))
         for path in snapshots[: max(0, excess)]:
             try:

@@ -258,6 +258,26 @@ def test_execute_requires_confirmation(guard):
         g.execute_confirmed(req.request_id)
 
 
+def test_snapshot_pruning_preserves_unrelated_directories(guard, tmp_path):
+    g, clock = guard
+    root = tmp_path / "snapshots"
+    unrelated = root / "000_operator_files"
+    unrelated.mkdir(parents=True)
+    sentinel = unrelated / "keep.txt"
+    sentinel.write_text("operator data", encoding="utf-8")
+    oldest = root / "20260101-000000_abcdef12_manual"
+    newest = root / "20260102-000000_1234abcd_manual"
+    oldest.mkdir()
+    newest.mkdir()
+    g.max_snapshots = 1
+
+    g._prune_snapshots()
+
+    assert sentinel.read_text(encoding="utf-8") == "operator data"
+    assert not oldest.exists()
+    assert newest.exists()
+
+
 # ============================================================
 # 8. Журнал решений
 # ============================================================
