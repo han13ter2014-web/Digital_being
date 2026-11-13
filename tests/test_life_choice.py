@@ -154,3 +154,38 @@ def test_second_writer_on_selected_profile_is_rejected(tmp_path, monkeypatch):
                 lock.release()
             runtime.agent.plugin_registry.teardown_all()
         PluginRegistry.reset_global()
+
+
+def test_build_runtime_releases_profile_lock_when_setup_fails(tmp_path, monkeypatch):
+    import main
+    import src.app.profile_lock as profile_lock_module
+    from src.app.paths import setup_environment
+    from src.core.subsystem_base import PluginRegistry
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    env = setup_environment(chdir=False, console=False)
+    args = main.parse_args(["--ui", "headless", "--name", "Alpha", "--new"])
+    created_locks = []
+    real_lock = profile_lock_module.ProfileWriterLock
+
+    def tracked_lock(profile_dir):
+        lock = real_lock(profile_dir)
+        created_locks.append(lock)
+        return lock
+
+    def fail_controller(*_args):
+        raise RuntimeError("injected post-lock setup failure")
+
+    monkeypatch.setattr(profile_lock_module, "ProfileWriterLock", tracked_lock)
+    monkeypatch.setattr("src.app.life_controller.LifeController", fail_controller)
+    PluginRegistry.reset_global()
+    try:
+        with pytest.raises(RuntimeError, match="injected post-lock setup failure"):
+            main.build_runtime(args, env)
+
+        assert len(created_locks) == 1
+        assert not created_locks[0].acquired
+    finally:
+        for lock in created_locks:
+            lock.release()
+        PluginRegistry.reset_global()

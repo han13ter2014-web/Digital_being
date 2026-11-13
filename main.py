@@ -508,76 +508,85 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
     # Для maturity-отчёта фоновой Runtime не запускается: блокировку снимет
     # atexit. В обычном режиме её раньше освободит Runtime._run().
 
-    # Биография фиксирует сам запуск процесса. Первая версия журнала не
-    # дорисовывает разрывы прошлого; следующий запуск увидит этот run_id.
     try:
-        from src.delamain.biography import begin_biography_run
-
-        report["process_run"] = begin_biography_run(agent)
-    except Exception as exc:
-        logger.warning("Журнал запуска биографии недоступен: %s", exc)
-        report["process_run"] = {"status": "error", "error": str(exc)}
-    # Указатель пишется сразу, а не через минуты до первого сохранения:
-    # иначе следующий запуск снова искал бы жизнь по изменяемому имени.
-    try:
-        remember_active_name(env.data_root, agent.name, getattr(agent, "life_id", None))
-    except OSError as exc:
-        logger.warning("Не удалось записать выбранную жизнь: %s", exc)
-
-    bus = EventBus(max_queue_size=500, history_size=300)
-    runner = AgentRunner(agent, bus)
-    runner.set_stimulus_mode(getattr(args, "stimuli", "quiet"))
-    # Контроллер жизни нужен во всех режимах: он же обрабатывает
-    # команды /dream и /terminate из чата.
-    LifeController(agent, bus)
-
-    # Подсистемы должны публиковать события в шину, иначе окно их не видит.
-    user_interaction = getattr(agent, "user_interaction", None)
-    if user_interaction is not None:
-        user_interaction.attach_bus(bus)
-    for attr in ("naming_dialogue", "proactive_communication", "mind_dream"):
-        subsystem = getattr(agent, attr, None)
-        if subsystem is not None and hasattr(subsystem, "user_interaction"):
-            subsystem.user_interaction = user_interaction
-
-    window = None
-    # Отчёт о зрелости не нуждается в окне: не создаём Tk зря.
-    wants_report = getattr(args, "maturity", False) or getattr(
-        args, "maturity_json", False
-    )
-    if args.ui in ("gui", "tray") and not wants_report:
-        from src.ui.main_window import MainWindow
-
-        window = MainWindow(
-            bus,
-            agent.name,
-            # Без трея прятать окно нельзя: вернуть его нечем.
-            hide_on_close=False,
-        )
-
-    dashboard = None
-    if window is not None and not getattr(args, "no_web", False):
+        # Биография фиксирует сам запуск процесса. Первая версия журнала не
+        # дорисовывает разрывы прошлого; следующий запуск увидит этот run_id.
         try:
-            from src.ui.web_dashboard import AIOHTTP_AVAILABLE, WebDashboard
+            from src.delamain.biography import begin_biography_run
 
-            if AIOHTTP_AVAILABLE:
-                dashboard = WebDashboard(host="127.0.0.1", port=args.web_port, bus=bus)
-            else:
-                logger.warning("aiohttp не установлен; веб отключён, Tk работает")
+            report["process_run"] = begin_biography_run(agent)
         except Exception as exc:
-            # Ошибка сборки необязательного наблюдателя не мешает основному окну.
-            logger.warning("Веб отключён: %s", exc)
+            logger.warning("Журнал запуска биографии недоступен: %s", exc)
+            report["process_run"] = {"status": "error", "error": str(exc)}
+        # Указатель пишется сразу, а не через минуты до первого сохранения:
+        # иначе следующий запуск снова искал бы жизнь по изменяемому имени.
+        try:
+            remember_active_name(
+                env.data_root, agent.name, getattr(agent, "life_id", None)
+            )
+        except OSError as exc:
+            logger.warning("Не удалось записать выбранную жизнь: %s", exc)
 
-    runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
-    runtime.profile_lock = profile_lock  # type: ignore[attr-defined]
-    runtime.open_browser = not getattr(args, "no_web_open", False)  # type: ignore[attr-defined]
-    runtime.report = report  # type: ignore[attr-defined]
-    runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
+        bus = EventBus(max_queue_size=500, history_size=300)
+        runner = AgentRunner(agent, bus)
+        runner.set_stimulus_mode(getattr(args, "stimuli", "quiet"))
+        # Контроллер жизни нужен во всех режимах: он же обрабатывает
+        # команды /dream и /terminate из чата.
+        LifeController(agent, bus)
 
-    # Знакомство — после создания окна, чтобы приветствие было видно.
-    if window is not None:
-        start_naming_dialogue(agent, bus)
-    return runtime
+        # Подсистемы должны публиковать события в шину, иначе окно их не видит.
+        user_interaction = getattr(agent, "user_interaction", None)
+        if user_interaction is not None:
+            user_interaction.attach_bus(bus)
+        for attr in ("naming_dialogue", "proactive_communication", "mind_dream"):
+            subsystem = getattr(agent, attr, None)
+            if subsystem is not None and hasattr(subsystem, "user_interaction"):
+                subsystem.user_interaction = user_interaction
+
+        window = None
+        # Отчёт о зрелости не нуждается в окне: не создаём Tk зря.
+        wants_report = getattr(args, "maturity", False) or getattr(
+            args, "maturity_json", False
+        )
+        if args.ui in ("gui", "tray") and not wants_report:
+            from src.ui.main_window import MainWindow
+
+            window = MainWindow(
+                bus,
+                agent.name,
+                # Без трея прятать окно нельзя: вернуть его нечем.
+                hide_on_close=False,
+            )
+
+        dashboard = None
+        if window is not None and not getattr(args, "no_web", False):
+            try:
+                from src.ui.web_dashboard import AIOHTTP_AVAILABLE, WebDashboard
+
+                if AIOHTTP_AVAILABLE:
+                    dashboard = WebDashboard(
+                        host="127.0.0.1", port=args.web_port, bus=bus
+                    )
+                else:
+                    logger.warning("aiohttp не установлен; веб отключён, Tk работает")
+            except Exception as exc:
+                # Ошибка сборки необязательного наблюдателя не мешает основному окну.
+                logger.warning("Веб отключён: %s", exc)
+
+        runtime = Runtime(agent, bus, runner, window, dashboard=dashboard)
+        runtime.profile_lock = profile_lock  # type: ignore[attr-defined]
+        runtime.open_browser = not getattr(args, "no_web_open", False)  # type: ignore[attr-defined]
+        runtime.report = report  # type: ignore[attr-defined]
+        runtime.process_run_id = report.get("process_run", {}).get("run_id")  # type: ignore[attr-defined]
+
+        # Знакомство — после создания окна, чтобы приветствие было видно.
+        if window is not None:
+            start_naming_dialogue(agent, bus)
+        return runtime
+    except BaseException:
+        profile_lock.release()
+        agent.plugin_registry.teardown_all()
+        raise
 
 
 def _default_name() -> str:
