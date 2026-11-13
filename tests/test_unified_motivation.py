@@ -667,3 +667,23 @@ def test_unknown_goal_id_does_not_fall_back_to_title():
     system.on_goal_achieved("Одинаковая цель", goal_id=999)
 
     assert system.needs["curiosity"].current_level == 0.1
+
+
+def test_motivation_templates_do_not_share_nested_mutable_state():
+    first = create_motivation_system(MockAgent())
+    second = create_motivation_system(MockAgent())
+
+    own_need = first.needs["curiosity"]
+    other_need = second.needs["curiosity"]
+    assert own_need.related_concepts is not other_need.related_concepts
+    own_need.related_concepts.append("личный интерес")
+    assert "личный интерес" not in other_need.related_concepts
+
+    own_drive = first.drives["creativity"]
+    other_drive = second.drives["creativity"]
+    assert own_drive.contributing_needs is not other_drive.contributing_needs
+    assert own_drive.goal_types is not other_drive.goal_types
+    own_drive.contributing_needs["curiosity"] = 0.99
+    own_drive.goal_types.append("personal_growth")
+    assert other_drive.contributing_needs["curiosity"] != 0.99
+    assert "personal_growth" not in other_drive.goal_types

@@ -5,6 +5,7 @@ UnifiedMotivationSystem — единая система мотивации с б
 
 import random
 import string
+from copy import deepcopy
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
@@ -693,12 +694,9 @@ def _executable_action(action) -> bool:
 class UnifiedMotivationSystem:
     def __init__(self, agent):
         self.agent = agent
-        self.needs: Dict[str, Need] = {
-            name: Need(**vars(template)) for name, template in DEFAULT_NEEDS.items()
-        }
-        self.drives: Dict[str, Drive] = {
-            name: Drive(**vars(template)) for name, template in DEFAULT_DRIVES.items()
-        }
+        # Объекты и их вложенные коллекции принадлежат только этой жизни.
+        self.needs: Dict[str, Need] = deepcopy(DEFAULT_NEEDS)
+        self.drives: Dict[str, Drive] = deepcopy(DEFAULT_DRIVES)
         self.goal_history: List[dict] = []
         self.last_generated_cycle: int = 0
         # Цикл, в котором потребности уже «прожили» свой тик. Нужен,

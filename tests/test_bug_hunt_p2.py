@@ -155,3 +155,15 @@ def test_drive_activation_count_tracks_only_inactive_to_active_transition():
     system.calculate_drive_levels()
     assert drive.is_active()
     assert drive.active_count == 2
+
+
+def test_legacy_motivation_drives_do_not_share_contributing_needs():
+    first = InternalMotivationSystem("FirstLife")
+    second = InternalMotivationSystem("SecondLife")
+    own_drive = first.drives["purposeful_learning"]
+    other_drive = second.drives["purposeful_learning"]
+
+    assert own_drive.contributing_needs is not other_drive.contributing_needs
+    own_drive.contributing_needs["knowledge_acquisition"] = 0.99
+
+    assert other_drive.contributing_needs["knowledge_acquisition"] != 0.99

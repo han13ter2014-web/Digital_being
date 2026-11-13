@@ -68,7 +68,8 @@ class Drive:
             activation_threshold: Порог активации драйва
         """
         self.name = name
-        self.contributing_needs = contributing_needs
+        # Конфигурация класса — шаблон, а не общее состояние жизней.
+        self.contributing_needs = dict(contributing_needs)
         self.activation_threshold = activation_threshold
         self.current_level = 0.0  # Текущая сила драйва (0.0 - 1.0)
         self.active_count = 0  # Сколько раз был активен
