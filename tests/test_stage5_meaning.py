@@ -290,15 +290,23 @@ def test_intrinsic_goal_completion_survives_agent_restart(agent):
 
     assert agent.internal_motivation.force_generate_goal("curiosity") is not None
     goal_id = agent.active_goal["id"]
+    saved_need = agent.internal_motivation.needs["curiosity"]
+    saved_need.current_level = 0.123
+    saved_need.base_level = 0.77
     snapshot = build_state_from_agent(agent)
 
     restored = DigitalBeing("Stage5Restarted")
     restored.thinking.web_searcher = None
+    restored.internal_motivation.needs["curiosity"].current_level = 0.91
+    restored.internal_motivation.needs["curiosity"].base_level = 0.91
     apply_state_to_agent(restored, snapshot)
 
     assert restored.active_goal["id"] == goal_id
     assert restored.internal_motivation.goal_history[-1]["goal_id"] == goal_id
-    satisfaction_before = restored.internal_motivation.needs["curiosity"].current_level
+    restored_need = restored.internal_motivation.needs["curiosity"]
+    assert restored_need.current_level == pytest.approx(0.123)
+    assert restored_need.base_level == pytest.approx(0.77)
+    satisfaction_before = restored_need.current_level
     restored.complete_goal(goal_id)
     assert restored.internal_motivation.needs["curiosity"].current_level > (
         satisfaction_before

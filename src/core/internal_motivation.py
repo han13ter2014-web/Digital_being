@@ -454,13 +454,25 @@ class InternalMotivation:
             break
 
     def to_checkpoint_dict(self) -> dict:
-        """Сохранить происхождение целей для обратной связи после рестарта."""
+        """Сохранить состояние потребностей и происхождение их целей."""
         return {
+            "needs": {
+                name: {
+                    "current_level": need.current_level,
+                    "base_level": need.base_level,
+                }
+                for name, need in self.needs.items()
+            },
             "goal_history": self.goal_history[-50:],
             "last_generated_cycle": self.last_generated_cycle,
         }
 
     def restore_from_checkpoint(self, state: dict) -> None:
+        for name, need_data in state.get("needs", {}).items():
+            need = self.needs.get(name)
+            if need is not None:
+                need.current_level = need_data.get("current_level", need.current_level)
+                need.base_level = need_data.get("base_level", need.base_level)
         self.goal_history = list(state.get("goal_history", []))
         self.last_generated_cycle = state.get("last_generated_cycle", 0)
 
