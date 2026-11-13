@@ -629,8 +629,9 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             )
 
     # Социальная клеточка: ToMLevel может не принять мусорное значение —
-    # строим все модели до мутаций.
-    sc_state = state.get("social_cell", {})
+    # строим все модели до мутаций. Копия разрывает связь восстановленного
+    # агента с исходным состоянием, включая вложенные наблюдения.
+    sc_state = deepcopy(state.get("social_cell", {}))
     staged_social_models = None
     staged_social_tom = None
     if sc_state and hasattr(agent, "social_cell") and agent.social_cell:

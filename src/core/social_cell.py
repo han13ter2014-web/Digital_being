@@ -1,14 +1,67 @@
-"""
-Социальная клеточка — рекурсивное взаимное моделирование.
+"""Социальная клеточка — рекурсивное взаимное моделирование.
 
 "Я моделирую, как ты моделируешь меня, моделируя тебя..."
+
+Минимальный контракт социального познания
+=========================================
+
+``SocialCell`` хранит не внутреннее состояние другого существа, а локальную,
+неполную и ошибочную интерпретацию его наблюдаемого поведения. Модели разных
+``agent_id`` и модель собственного существа не должны разделять изменяемое
+состояние. Единственный источник обновления — переданное наблюдение; чтение
+чужих потребностей, эмоций, убеждений или ``SocialCell`` запрещено.
+
+Рабочие уровни первой реализации:
+
+* ``ZERO`` — сохраняется наблюдение, но не строятся внутренние объяснения.
+* ``FIRST`` — обновляются предположения о целях, убеждениях и намерениях.
+* ``SECOND`` — дополнительно обновляется ``believed_model_of_self``: моя
+  гипотеза о том, как другой воспринимает меня. Это рабочая рекурсивная модель
+  первой реализации, а не копия чужой самомодели.
+* ``THIRD`` и ``META`` остаются зарезервированными расширениями и не входят в
+  минимальный контракт. Эффективная глубина обработки наблюдения ограничена
+  ``min(model.tom_level, max_recursion_depth, ToMLevel.SECOND)``. Реализация
+  должна задавать ``max_recursion_depth`` в диапазоне 0–2, по умолчанию 2.
+
+Контракт ``_update_beliefs``:
+
+* входные ``expressed_beliefs`` — это высказанные другим существом позиции, а
+  не подтверждённые факты; произвольный текст не превращается в убеждение без
+  отдельного семантического источника;
+* значения ``believed_beliefs`` — субъективная уверенность в позиции другого в
+  диапазоне 0–1, а не истинность самой позиции;
+* новое и противоречащее свидетельство изменяет гипотезу постепенно через
+  ``learning_rate``; отсутствие новых свидетельств не доказывает сохранение
+  позиции, а применяет ``forgetting_rate``;
+* исходные наблюдения остаются в ограниченной ``interaction_history``. Это
+  недавний опыт, а не неограниченный архив доказательств; долговременная
+  консолидация значимых отношений принадлежит общему контуру памяти.
+
+Контракт рекурсивного обновления:
+
+* ``_update_model_of_self`` использует только наблюдаемую реакцию другого и не
+  утверждает, что эта реакция раскрывает его действительное состояние;
+* ``_update_recursive_model`` не реализует третий уровень, пока для него нет
+  отдельного продуктового контракта; он не должен обходить ограничение глубины
+  или создавать рекурсивные вызовы;
+* изменения модели должны иметь наблюдаемое поведенческое следствие через
+  прогноз реакции, доверие или выбор социального действия, иначе это только
+  декоративная диагностика.
+
+Минимальные приёмочные проверки: изоляция моделей, отсутствие доступа к чужому
+состоянию, ограничение глубины 0–2, постепенное изменение и забывание гипотез,
+обработка противоречий, влияние на социальный выбор и сохранение совместимого
+состояния после restart.
 """
 
-import numpy as np
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+import math
 from collections import deque
+from dataclasses import dataclass, field
 from enum import IntEnum
+from numbers import Real
+from typing import Dict, List, Optional
+
+import numpy as np
 from src.core.buffered_logger import get_logger
 
 logger = get_logger()
@@ -37,7 +90,13 @@ class AgentModel:
 
 
 class SocialCell:
-    def __init__(self, agent, max_recursion_depth: int = 3):
+    def __init__(self, agent, max_recursion_depth: int = 2):
+        if isinstance(max_recursion_depth, bool) or not isinstance(
+            max_recursion_depth, int
+        ):
+            raise TypeError("max_recursion_depth must be an integer")
+        if not 0 <= max_recursion_depth <= 2:
+            raise ValueError("max_recursion_depth must be between 0 and 2")
         self.agent = agent
         self.max_recursion_depth = max_recursion_depth
         self.agent_models: Dict[str, AgentModel] = {}
@@ -61,10 +120,10 @@ class SocialCell:
         model = AgentModel(agent_id=agent_id, tom_level=self.current_tom_level)
 
         if initial_beliefs:
-            model.believed_goals = initial_beliefs.get("goals", {})
-            model.believed_beliefs = initial_beliefs.get("beliefs", {})
-            model.believed_intentions = initial_beliefs.get("intentions", {})
-            model.believed_emotional_state = initial_beliefs.get("emotions", {})
+            model.believed_goals = dict(initial_beliefs.get("goals", {}))
+            model.believed_beliefs = dict(initial_beliefs.get("beliefs", {}))
+            model.believed_intentions = dict(initial_beliefs.get("intentions", {}))
+            model.believed_emotional_state = dict(initial_beliefs.get("emotions", {}))
 
         model.believed_model_of_self = {
             "competence": 0.5,
@@ -86,16 +145,19 @@ class SocialCell:
             {"timestamp": observation.get("timestamp", 0), "observation": observation}
         )
 
-        if model.tom_level >= ToMLevel.FIRST:
+        effective_depth = min(
+            int(model.tom_level), self.max_recursion_depth, int(ToMLevel.SECOND)
+        )
+        if effective_depth == ToMLevel.ZERO:
+            return
+
+        if effective_depth >= ToMLevel.FIRST:
             self._update_goals(model, observation)
             self._update_beliefs(model, observation)
             self._update_intentions(model, observation)
 
-        if model.tom_level >= ToMLevel.SECOND:
+        if effective_depth >= ToMLevel.SECOND:
             self._update_model_of_self(model, observation)
-
-        if model.tom_level >= ToMLevel.THIRD:
-            self._update_recursive_model(model, observation)
 
         self._update_model_precision(model, observation)
         self._update_behavior_predictor(model, observation)
@@ -112,7 +174,32 @@ class SocialCell:
                 del model.believed_goals[k]
 
     def _update_beliefs(self, model: AgentModel, obs: Dict):
-        pass
+        """Обновить гипотезы только из явно выраженных позиций другого."""
+        expressed = obs.get("expressed_beliefs", {})
+        if not isinstance(expressed, dict):
+            expressed = {}
+        validated = {}
+        for key, value in expressed.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            if isinstance(value, bool) or not isinstance(value, Real):
+                continue
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                continue
+            validated[key] = float(value)
+
+        keys = list(model.believed_beliefs)
+        keys.extend(key for key in validated if key not in model.believed_beliefs)
+        for key in keys:
+            current = model.believed_beliefs.get(key, 0.5)
+            if key in validated:
+                updated = current + self.learning_rate * (validated[key] - current)
+            else:
+                updated = current * (1.0 - self.forgetting_rate)
+            if updated < 0.05:
+                model.believed_beliefs.pop(key, None)
+            else:
+                model.believed_beliefs[key] = float(np.clip(updated, 0.0, 1.0))
 
     def _update_intentions(self, model: AgentModel, obs: Dict):
         action = obs.get("action", "")
@@ -280,6 +367,10 @@ class SocialCell:
         }
 
         base = values.get(action, 0.0)
+        if action in {"cooperate", "help", "share"}:
+            # Убеждение другого в ценности сотрудничества меняет мой выбор,
+            # но не трактуется как доказательство его будущей честности.
+            base *= 1.0 + model.believed_beliefs.get("cooperation", 0.0)
 
         reaction_mod = {
             "positive_reciprocity": 1.5,
@@ -333,5 +424,5 @@ class SocialCell:
         logger.log(f"[SOCIAL_CELL] ToM level set to {level.name}")
 
 
-def create_social_cell(agent, max_recursion_depth: int = 3) -> SocialCell:
+def create_social_cell(agent, max_recursion_depth: int = 2) -> SocialCell:
     return SocialCell(agent, max_recursion_depth)
