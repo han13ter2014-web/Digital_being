@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import tempfile
 
 from src.app.legacy_profile import discover_legacy_name
 
@@ -10,14 +11,22 @@ from src.app.legacy_profile import discover_legacy_name
 def remember_active_name(root, name, life_id=None):
     """Атомарно запомнить имя после успешного сохранения чекпоинта."""
     destination = Path(root) / "active_profile.json"
-    temporary = destination.with_suffix(".tmp")
     payload = {"name": name}
     if life_id is not None:
         from src.core.life_identity import validate_life_id
 
         payload["life_id"] = validate_life_id(life_id)
-    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, destination)
+    serialized = json.dumps(payload, ensure_ascii=False)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".active_profile-", suffix=".tmp", dir=destination.parent
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(serialized, encoding="utf-8")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def active_name(root, default):
