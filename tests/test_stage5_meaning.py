@@ -254,6 +254,28 @@ def test_action_types_are_counted(agent):
 # ============================================================
 # 5. Внутренняя мотивация не создаёт «цель без id»
 # ============================================================
+def test_agents_do_not_share_needs_or_emotional_state(agent):
+    from src.core.agent import DigitalBeing
+
+    other = DigitalBeing("Stage5Independent")
+    other.thinking.web_searcher = None
+
+    own_need = agent.internal_motivation.needs["curiosity"]
+    other_need = other.internal_motivation.needs["curiosity"]
+    assert own_need is not other_need
+    other_level = other_need.current_level
+    own_need.current_level = 0.123
+    own_need.related_concepts.append("личный интерес")
+    assert other_need.current_level == other_level
+    assert "личный интерес" not in other_need.related_concepts
+
+    agent.motivation_system.needs["curiosity"].current_level = 0.234
+    assert other.motivation_system.needs["curiosity"].current_level != 0.234
+
+    agent.emotional_state.levels["calm"] = 0.111
+    assert other.emotional_state.levels["calm"] != 0.111
+
+
 def test_intrinsic_goal_has_id_and_is_synced(agent):
     goal = agent.internal_motivation.force_generate_goal("curiosity")
     assert goal is not None

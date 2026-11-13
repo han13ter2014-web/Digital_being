@@ -12,6 +12,7 @@
 """
 
 import random
+from copy import deepcopy
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
@@ -209,7 +210,8 @@ class InternalMotivation:
 
     def __init__(self, agent):
         self.agent = agent
-        self.needs: Dict[str, Need] = dict(DEFAULT_NEEDS)
+        # Каждая жизнь владеет собственными потребностями и их списками.
+        self.needs: Dict[str, Need] = deepcopy(DEFAULT_NEEDS)
         self.goal_history: List[dict] = []
         self.last_generated_cycle = 0
         self.min_cycles_between_goals = 10
