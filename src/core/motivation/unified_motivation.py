@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
 from src.motivation.goal_memory import (
     GOAL_HISTORY_LIMIT,
+    TERMINAL_GOAL_STATUSES,
     collect_pending_goal_origins,
     count_goal,
     empty_goal_summary,
@@ -948,12 +949,17 @@ class UnifiedMotivationSystem:
                 self._pending_goal_origins[str(goal_id)] = deepcopy(entry)
                 return
 
-    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
-        """Учесть достижение по ID; старый вызов по названию сохраняется.
+    def _record_goal_outcome(
+        self,
+        goal_title: str,
+        outcome: str,
+        goal_id: Optional[int] = None,
+        reason: str = "",
+    ):
+        """Учесть исход по ID; старый вызов по названию сохраняется.
 
-        Если вызывающий код уже знает ID, неизвестный ID не должен молча
-        превращаться в поиск по тексту: иначе повторное название снова
-        удовлетворит чужую потребность.
+        Неизвестный явный ID не превращается в поиск по тексту, а любой
+        терминальный исход окончателен и не может быть перезаписан.
         """
         entry = next(
             (
@@ -972,27 +978,45 @@ class UnifiedMotivationSystem:
             if origin is not None:
                 entry = deepcopy(origin)
                 self.goal_history.append(entry)
-        if entry is None or entry.get("status") == "achieved":
+        if entry is None or entry.get("status") in TERMINAL_GOAL_STATUSES:
             return
 
-        entry["status"] = "achieved"
-        entry["achieved_cycle"] = self.agent.cycle_count
+        entry["status"] = outcome
+        entry[f"{outcome}_cycle"] = self.agent.cycle_count
+        if outcome == "failed":
+            entry["failure_reason"] = str(reason or "")
+        elif outcome == "cancelled":
+            entry["cancellation_reason"] = str(reason or "")
         self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
         if goal_id is not None:
             self._pending_goal_origins.pop(str(goal_id), None)
-        need_name = entry.get("need")
-        drive_name = entry.get("drive")
-        if need_name and need_name in self.needs:
-            self.needs[need_name].satisfy(0.4)
-        if drive_name and drive_name in self.drives:
-            self.drives[drive_name].activation_count += 1
+        if outcome == "achieved":
+            need_name = entry.get("need")
+            drive_name = entry.get("drive")
+            if need_name and need_name in self.needs:
+                self.needs[need_name].satisfy(0.4)
+            if drive_name and drive_name in self.drives:
+                self.drives[drive_name].activation_count += 1
         count_goal(
             self.goal_summary,
             entry,
-            "achieved",
+            outcome,
             needs=self.needs,
             drives=self.drives,
         )
+
+    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
+        self._record_goal_outcome(goal_title, "achieved", goal_id)
+
+    def on_goal_failed(
+        self, goal_title: str, goal_id: Optional[int] = None, reason: str = ""
+    ):
+        self._record_goal_outcome(goal_title, "failed", goal_id, reason)
+
+    def on_goal_cancelled(
+        self, goal_title: str, goal_id: Optional[int] = None, reason: str = ""
+    ):
+        self._record_goal_outcome(goal_title, "cancelled", goal_id, reason)
 
     def generate_goals(
         self, pressing_needs: List[Need] = None, active_drives: List[Drive] = None

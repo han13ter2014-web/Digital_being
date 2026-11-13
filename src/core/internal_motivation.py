@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from src.core.buffered_logger import get_logger
 from src.motivation.goal_memory import (
     GOAL_HISTORY_LIMIT,
+    TERMINAL_GOAL_STATUSES,
     collect_pending_goal_origins,
     count_goal,
     empty_goal_summary,
@@ -454,7 +455,13 @@ class InternalMotivation:
         self.needs["play"].satisfy(0.3 * novelty)
         self.needs["autonomy"].satisfy(0.1 * novelty)
 
-    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
+    def _record_goal_outcome(
+        self,
+        goal_title: str,
+        outcome: str,
+        goal_id: Optional[int] = None,
+        reason: str = "",
+    ):
         entry = next(
             (
                 item
@@ -472,18 +479,36 @@ class InternalMotivation:
             if origin is not None:
                 entry = deepcopy(origin)
                 self.goal_history.append(entry)
-        if entry is None or entry.get("status") == "achieved":
+        if entry is None or entry.get("status") in TERMINAL_GOAL_STATUSES:
             return
 
-        entry["status"] = "achieved"
-        entry["achieved_cycle"] = self.agent.cycle_count
+        entry["status"] = outcome
+        entry[f"{outcome}_cycle"] = self.agent.cycle_count
+        if outcome == "failed":
+            entry["failure_reason"] = str(reason or "")
+        elif outcome == "cancelled":
+            entry["cancellation_reason"] = str(reason or "")
         self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
         if goal_id is not None:
             self._pending_goal_origins.pop(str(goal_id), None)
-        need = self.needs.get(entry.get("need"))
-        if need:
-            need.satisfy(0.4)
-        count_goal(self.goal_summary, entry, "achieved", needs=self.needs)
+        if outcome == "achieved":
+            need = self.needs.get(entry.get("need"))
+            if need:
+                need.satisfy(0.4)
+        count_goal(self.goal_summary, entry, outcome, needs=self.needs)
+
+    def on_goal_achieved(self, goal_title: str, goal_id: Optional[int] = None):
+        self._record_goal_outcome(goal_title, "achieved", goal_id)
+
+    def on_goal_failed(
+        self, goal_title: str, goal_id: Optional[int] = None, reason: str = ""
+    ):
+        self._record_goal_outcome(goal_title, "failed", goal_id, reason)
+
+    def on_goal_cancelled(
+        self, goal_title: str, goal_id: Optional[int] = None, reason: str = ""
+    ):
+        self._record_goal_outcome(goal_title, "cancelled", goal_id, reason)
 
     def to_checkpoint_dict(self) -> dict:
         """Сохранить состояние потребностей и происхождение их целей."""

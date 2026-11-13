@@ -285,3 +285,29 @@ def test_goal_subsystem_restores_duplicate_active_goal_by_id():
     restored.restore_from_checkpoint(subsystem.to_checkpoint_dict())
 
     assert restored.active_goal["id"] == 2
+
+
+@pytest.mark.parametrize("outcome", ["failed", "cancelled"])
+def test_agent_failure_and_cancellation_reach_current_motivation(agent, outcome):
+    motivation = agent.motivation_system
+    curiosity = motivation.needs["curiosity"]
+    curiosity.current_level = 0.1
+    for drive in motivation.drives.values():
+        drive.current_level = 0.0
+    generated = motivation.generate_goals(pressing_needs=[curiosity])
+    agent._ingest_motivation_goals(generated)
+    goal_id = generated[0]["goal_id"]
+
+    if outcome == "failed":
+        assert agent.fail_goal(goal_id, "исполнение не удалось") is True
+    else:
+        assert agent.cancel_goal(goal_id, "больше не актуальна") is True
+
+    assert motivation.goal_summary[outcome] == 1
+    assert str(goal_id) not in motivation._pending_goal_origins
+    entry = next(
+        item for item in motivation.goal_history if item.get("goal_id") == goal_id
+    )
+    assert entry["status"] == outcome
+    assert agent.complete_goal(goal_id) == 0
+    assert motivation.goal_summary["achieved"] == 0

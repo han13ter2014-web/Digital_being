@@ -104,6 +104,9 @@ class MotivationController:
                                 "type": g.get("type", "general"),
                             }
                         )
+                        bind_goal = getattr(self._system, "bind_goal", None)
+                        if callable(bind_goal):
+                            bind_goal(g, start_id)
 
         return {
             "needs_state": profile.get("needs", {}),

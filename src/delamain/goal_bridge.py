@@ -604,7 +604,7 @@ class GoalBridge:
         goal_subsystem: Any,
         goal: Mapping[str, Any],
     ) -> None:
-        if goal.get("status") == "completed":
+        if goal.get("status") in ("completed", "failed", "cancelled"):
             return
         goal_id = _as_int(goal.get("id"))
         if goal_id is None:
@@ -623,12 +623,16 @@ class GoalBridge:
         goal: Mapping[str, Any],
         reason: str,
     ) -> None:
-        if goal.get("status") in ("completed", "failed"):
+        if goal.get("status") in ("completed", "failed", "cancelled"):
             return
         goal_id = _as_int(goal.get("id"))
         if goal_id is None:
             return
-        goal_subsystem.fail_goal(goal_id, reason)
+        fail = getattr(agent, "fail_goal", None)
+        if callable(fail):
+            fail(goal_id, reason)
+        else:
+            goal_subsystem.fail_goal(goal_id, reason)
         self._sync_agent_aliases(agent, goal_subsystem)
 
     @staticmethod

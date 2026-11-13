@@ -6,6 +6,7 @@ import math
 
 from src.core.checkpoint_migrations import SCHEMA_VERSION
 from src.core.emotional_state import EMOTIONS
+from src.motivation.goal_memory import GOAL_OUTCOMES
 
 
 def _fail(path, message):
@@ -222,7 +223,7 @@ def _motivation(data, path="motivation"):
         _list(data["goal_history"], f"{path}.goal_history")
     if "goal_summary" in data:
         summary = _dict(data["goal_summary"], f"{path}.goal_summary")
-        for outcome in ("generated", "achieved"):
+        for outcome in GOAL_OUTCOMES:
             if outcome in summary:
                 _integer(
                     summary[outcome],
@@ -236,7 +237,7 @@ def _motivation(data, path="motivation"):
             for name, item in counts.items():
                 item_path = f"{path}.goal_summary.{section}.{name}"
                 _dict(item, item_path)
-                for outcome in ("generated", "achieved"):
+                for outcome in GOAL_OUTCOMES:
                     if outcome in item:
                         _integer(
                             item[outcome],

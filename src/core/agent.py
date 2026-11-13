@@ -55,6 +55,8 @@ from src.core.agent_goals import (
     _generate_initial_goals_impl,
     set_goal_impl,
     complete_goal_impl,
+    fail_goal_impl,
+    cancel_goal_impl,
     _set_next_goal_impl,
     get_goals_status_impl,
     get_all_goals_with_progress_impl,
@@ -1044,6 +1046,12 @@ class DigitalBeing:
 
     def complete_goal(self, goal_id=None):
         return complete_goal_impl(self, goal_id)
+
+    def fail_goal(self, goal_id=None, reason=""):
+        return fail_goal_impl(self, goal_id, reason)
+
+    def cancel_goal(self, goal_id=None, reason=""):
+        return cancel_goal_impl(self, goal_id, reason)
 
     def _set_next_goal(self):
         return _set_next_goal_impl(self)

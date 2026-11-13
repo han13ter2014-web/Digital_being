@@ -112,18 +112,33 @@ def set_goal_impl(
     return goal_id
 
 
-def complete_goal_impl(self, goal_id=None):
-    """Завершает активную цель или цель по ID.
+def _notify_goal_outcome(self, outcome, goal, reason=""):
+    """Передать исход текущим мотивационным системам конкретной жизни."""
+    callback_name = f"on_goal_{outcome}"
+    for attr_name in ("motivation_system", "internal_motivation"):
+        motivation = getattr(self, attr_name, None)
+        callback = getattr(motivation, callback_name, None)
+        if not callable(callback):
+            continue
+        try:
+            if outcome == "achieved":
+                callback(goal["title"], goal_id=goal["id"])
+            else:
+                callback(goal["title"], goal_id=goal["id"], reason=reason)
+        except Exception as exc:
+            get_logger().log(
+                f"[MOTIVATION] Ошибка обратной связи по цели {goal['id']}: {exc}"
+            )
 
-    Идемпотентен: повторный вызов для уже завершённой цели возвращает 0
-    и не увеличивает счётчик. Источник правды по счётчику — GoalSubsystem.
-    """
+
+def complete_goal_impl(self, goal_id=None):
+    """Завершает активную цель или цель по ID ровно один раз."""
     target_goal = goal_id or (self.active_goal["id"] if self.active_goal else None)
     if target_goal is None:
         return 0
 
     goal = next((g for g in self.goals if g.get("id") == target_goal), None)
-    if goal is None or goal.get("status") == "completed":
+    if goal is None or goal.get("status") in ("completed", "failed", "cancelled"):
         return 0
 
     if hasattr(self, "goal_subsystem"):
@@ -141,25 +156,58 @@ def complete_goal_impl(self, goal_id=None):
             self.active_goal = None
             self._set_next_goal()
 
-    # Исход принадлежит конкретной цели, а не последнему совпавшему названию.
-    # Сбой побочной обратной связи не должен отменять уже завершённую цель.
-    for attr_name in ("motivation_system", "internal_motivation"):
-        motivation = getattr(self, attr_name, None)
-        if motivation is None or not hasattr(motivation, "on_goal_achieved"):
-            continue
-        try:
-            motivation.on_goal_achieved(goal["title"], goal_id=target_goal)
-        except Exception as exc:
-            get_logger().log(
-                f"[MOTIVATION] Ошибка обратной связи по цели {target_goal}: {exc}"
-            )
-
+    _notify_goal_outcome(self, "achieved", goal)
     difficulty = int(goal.get("difficulty", 1) or 1)
     if goal.get("activity") is None:
         self.success_streak += difficulty
         self.energy = min(LR_CONFIG.ENERGY_MAX, self.energy + reward // 2)
     get_logger().flush_immediate(f"Цель завершена: {goal['title']}")
     return reward
+
+
+def fail_goal_impl(self, goal_id=None, reason=""):
+    """Зафиксировать неудачу цели без награды и удовлетворения потребности."""
+    return _set_agent_goal_outcome(self, "failed", goal_id, reason)
+
+
+def cancel_goal_impl(self, goal_id=None, reason=""):
+    """Отменить цель, сохранив её происхождение и причину отмены."""
+    return _set_agent_goal_outcome(self, "cancelled", goal_id, reason)
+
+
+def _set_agent_goal_outcome(self, outcome, goal_id, reason):
+    target_goal = goal_id or (self.active_goal["id"] if self.active_goal else None)
+    if target_goal is None:
+        return False
+    goal = next((g for g in self.goals if g.get("id") == target_goal), None)
+    if goal is None or goal.get("status") in ("completed", "failed", "cancelled"):
+        return False
+
+    if hasattr(self, "goal_subsystem"):
+        method_name = "fail_goal" if outcome == "failed" else "cancel_goal"
+        callback = getattr(self.goal_subsystem, method_name)
+        changed = callback(target_goal, reason)
+        self.completed_goals = self.goal_subsystem.completed_goals
+        self.active_goal = self.goal_subsystem.active_goal
+    else:
+        goal["status"] = outcome
+        goal[f"{outcome}_at"] = datetime.now().isoformat()
+        reason_field = (
+            "failure_reason" if outcome == "failed" else "cancellation_reason"
+        )
+        goal[reason_field] = str(reason or "")
+        changed = True
+        if goal == self.active_goal:
+            self.active_goal = None
+            self._set_next_goal()
+    if not changed:
+        return False
+
+    _notify_goal_outcome(self, outcome, goal, reason)
+    get_logger().flush_immediate(
+        f"Цель {'не выполнена' if outcome == 'failed' else 'отменена'}: {goal['title']}"
+    )
+    return True
 
 
 def _set_next_goal_impl(self):
@@ -187,6 +235,8 @@ def get_goals_status_impl(self):
         if self.active_goal
         else "Нет активных целей",
         "pending": sum(1 for g in self.goals if g["status"] == "pending"),
+        "failed": sum(1 for g in self.goals if g["status"] == "failed"),
+        "cancelled": sum(1 for g in self.goals if g["status"] == "cancelled"),
     }
 
     # Добавляем прогресс для активной цели

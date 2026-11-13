@@ -5,6 +5,7 @@ import pytest
 from src.core.checkpoint_validation import validate_checkpoint_state
 from src.core.internal_motivation import InternalMotivation
 from src.core.motivation.unified_motivation import UnifiedMotivationSystem
+from src.core.subsystems.goal_manager import GoalSubsystem
 from src.motivation.needs_system import InternalMotivationSystem
 
 
@@ -68,6 +69,8 @@ def test_internal_goal_origin_survives_history_window_and_restart(restart):
     assert system.goal_summary["by_need"]["curiosity"] == {
         "generated": 55,
         "achieved": 1,
+        "failed": 0,
+        "cancelled": 0,
     }
     assert "1" not in system._pending_goal_origins
     achieved = next(entry for entry in system.goal_history if entry.get("goal_id") == 1)
@@ -114,6 +117,8 @@ def test_unified_goal_origin_survives_history_window_and_restart(restart):
     assert system.goal_summary["by_need"]["curiosity"] == {
         "generated": 55,
         "achieved": 1,
+        "failed": 0,
+        "cancelled": 0,
     }
     assert "1" not in system._pending_goal_origins
 
@@ -152,6 +157,8 @@ def test_legacy_goal_history_has_bounded_window_and_cumulative_origins():
     assert system.goal_summary["by_drive"]["purposeful_learning"] == {
         "generated": 55,
         "achieved": 0,
+        "failed": 0,
+        "cancelled": 0,
     }
     assert system.to_dict()["goal_history_count"] == 55
 
@@ -198,6 +205,10 @@ def test_goal_memory_is_not_shared_between_systems():
             "motivation.goal_summary.generated",
         ),
         (
+            {"motivation": {"goal_summary": {"failed": -1}}},
+            "motivation.goal_summary.failed",
+        ),
+        (
             {"internal_motivation": {"pending_goal_origins": []}},
             "internal_motivation.pending_goal_origins",
         ),
@@ -206,3 +217,107 @@ def test_goal_memory_is_not_shared_between_systems():
 def test_goal_memory_checkpoint_fields_are_validated(state, path):
     with pytest.raises(ValueError, match=path):
         validate_checkpoint_state(state)
+
+
+@pytest.mark.parametrize("system_type", ["internal", "unified"])
+@pytest.mark.parametrize("outcome", ["failed", "cancelled"])
+def test_goal_failure_and_cancellation_survive_window_and_restart(system_type, outcome):
+    if system_type == "internal":
+        system = InternalMotivation(GoalAgent())
+        _generate_internal_goals(system, 55)
+        first_title = "Внутренняя цель 0"
+    else:
+        system = UnifiedMotivationSystem(GoalAgent())
+        _generate_unified_goals(system, 55)
+        first_title = system._pending_goal_origins["1"]["goal"]
+
+    if system_type == "internal":
+        restored = InternalMotivation(GoalAgent())
+        restored.restore_from_checkpoint(system.to_checkpoint_dict())
+        system = restored
+    else:
+        system = UnifiedMotivationSystem.from_checkpoint_dict(
+            GoalAgent(), system.to_checkpoint_dict()
+        )
+
+    system.needs["curiosity"].current_level = 0.1
+    callback = getattr(system, f"on_goal_{outcome}")
+    callback(first_title, goal_id=1, reason="подтверждённый исход")
+
+    assert system.needs["curiosity"].current_level == 0.1
+    assert system.goal_summary[outcome] == 1
+    assert system.goal_summary["by_need"]["curiosity"][outcome] == 1
+    assert "1" not in system._pending_goal_origins
+    entry = next(item for item in system.goal_history if item.get("goal_id") == 1)
+    assert entry["status"] == outcome
+    assert entry[f"{outcome}_cycle"] == system.agent.cycle_count
+    reason_field = "failure_reason" if outcome == "failed" else "cancellation_reason"
+    assert entry[reason_field] == "подтверждённый исход"
+
+    callback(first_title, goal_id=1, reason="повтор")
+    assert system.goal_summary[outcome] == 1
+
+    if system_type == "internal":
+        restored = InternalMotivation(GoalAgent())
+        restored.restore_from_checkpoint(system.to_checkpoint_dict())
+    else:
+        restored = UnifiedMotivationSystem.from_checkpoint_dict(
+            GoalAgent(), system.to_checkpoint_dict()
+        )
+    assert restored.goal_summary[outcome] == 1
+    assert "1" not in restored._pending_goal_origins
+
+
+def _legacy_goal_subsystem():
+    system = InternalMotivationSystem("GoalOutcomes")
+    for name, need in system.needs.items():
+        need.level = 1.0 if name in {"knowledge_acquisition", "competence"} else 0.0
+    generated = system.generate_motivated_goals({"unknown_concepts": ["память"]})
+    goal = generated[0]
+    system.bind_goal(goal, 1)
+
+    subsystem = GoalSubsystem("GoalOutcomes")
+    subsystem.attach_motivation(system)
+    subsystem.goals = [
+        {
+            "id": 1,
+            "title": goal["title"],
+            "status": "active",
+            "difficulty": 1,
+            "drive": goal["drive"],
+        },
+        {
+            "id": 2,
+            "title": "Следующая цель",
+            "status": "pending",
+            "difficulty": 1,
+        },
+    ]
+    subsystem.active_goal = subsystem.goals[0]
+    return system, subsystem
+
+
+@pytest.mark.parametrize("outcome", ["achieved", "failed", "cancelled"])
+def test_legacy_goal_subsystem_records_every_terminal_outcome(outcome):
+    system, subsystem = _legacy_goal_subsystem()
+
+    if outcome == "achieved":
+        subsystem.complete_goal(1)
+    elif outcome == "failed":
+        assert subsystem.fail_goal(1, "ошибка исполнения") is True
+    else:
+        assert subsystem.cancel_goal(1, "цель отменена") is True
+
+    entry = system.goal_history[-1]
+    assert entry["status"] == outcome
+    assert system.goal_summary[outcome] == 1
+    assert "1" not in system._pending_goal_origins
+    assert subsystem.goals[1]["status"] == "active"
+
+    if outcome == "achieved":
+        subsystem.complete_goal(1)
+    elif outcome == "failed":
+        assert subsystem.fail_goal(1, "повтор") is False
+    else:
+        assert subsystem.cancel_goal(1, "повтор") is False
+    assert system.goal_summary[outcome] == 1

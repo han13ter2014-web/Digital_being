@@ -96,10 +96,11 @@ class GoalSubsystem:
                 motivated = self._motivation.generate_motivated_goals(context)
                 start_id = len(initial) + 1
                 for i, g in enumerate(motivated):
+                    goal_id = start_id + i
                     initial.append(
                         {
-                            "id": start_id + i,
-                            "title": g.get("title", f"Цель #{start_id + i}"),
+                            "id": goal_id,
+                            "title": g.get("title", f"Цель #{goal_id}"),
                             "status": "pending",
                             "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
                             "source": "motivation",
@@ -107,6 +108,9 @@ class GoalSubsystem:
                             "type": g.get("type", "general"),
                         }
                     )
+                    bind_goal = getattr(self._motivation, "bind_goal", None)
+                    if callable(bind_goal):
+                        bind_goal(g, goal_id)
             except Exception:
                 # Мотивация недоступна или не инициализирована — продолжаем без неё
                 pass
@@ -275,7 +279,8 @@ class GoalSubsystem:
     def complete_goal(self, goal_id: Optional[int] = None) -> int:
         """Завершает активную цель (или по id). Возвращает награду.
 
-        Идемпотентен: уже завершённая цель не увеличивает счётчик повторно.
+        Любой терминальный исход окончателен: повторное завершение не даёт
+        награды, а проваленную или отменённую цель нельзя записать как успех.
         """
         target_id = goal_id or (self.active_goal["id"] if self.active_goal else None)
         if target_id is None:
@@ -284,7 +289,7 @@ class GoalSubsystem:
         reward = 0
         for goal in self.goals:
             if goal["id"] == target_id:
-                if goal.get("status") == "completed":
+                if goal.get("status") in ("completed", "failed", "cancelled"):
                     return 0
                 goal["status"] = "completed"
                 goal["completed_at"] = datetime.now().isoformat()
@@ -299,37 +304,60 @@ class GoalSubsystem:
                         self._motivation.satisfy_need(goal["drive"], amount=0.3)
                     except Exception:
                         pass
-
-                if goal == self.active_goal:
-                    self.active_goal = None
-                    self._set_next_goal()
+                self._record_motivation_outcome("achieved", goal)
+                self._activate_next_if_current(goal)
                 break
         return reward
 
     def fail_goal(self, goal_id: Optional[int] = None, reason: str = "") -> bool:
-        """Помечает цель проваленной и активирует следующую pending-цель.
+        """Помечает цель проваленной и активирует следующую pending-цель."""
+        return self._set_terminal_outcome("failed", goal_id, reason)
 
-        Используется мостом Delamain, когда исполняемая цель не была
-        выполнена (reject, ошибка действия или невыполненный success
-        predicate). В отличие от ``complete_goal`` счётчик завершённых целей
-        не меняется.
-        """
+    def cancel_goal(self, goal_id: Optional[int] = None, reason: str = "") -> bool:
+        """Отменяет цель без награды и сохраняет причину отмены."""
+        return self._set_terminal_outcome("cancelled", goal_id, reason)
+
+    def _set_terminal_outcome(
+        self, outcome: str, goal_id: Optional[int], reason: str
+    ) -> bool:
         target_id = goal_id or (self.active_goal["id"] if self.active_goal else None)
         if target_id is None:
             return False
-        for goal in self.goals:
-            if goal.get("id") != target_id:
-                continue
-            if goal.get("status") in ("completed", "failed"):
-                return False
-            goal["status"] = "failed"
-            goal["failed_at"] = datetime.now().isoformat()
-            goal["failure_reason"] = str(reason or "")
-            if goal == self.active_goal:
-                self.active_goal = None
-                self._set_next_goal()
-            return True
-        return False
+        goal = self.get_goal(target_id)
+        if goal is None or goal.get("status") in ("completed", "failed", "cancelled"):
+            return False
+        goal["status"] = outcome
+        goal[f"{outcome}_at"] = datetime.now().isoformat()
+        reason_field = (
+            "failure_reason" if outcome == "failed" else "cancellation_reason"
+        )
+        goal[reason_field] = str(reason or "")
+        self._record_motivation_outcome(outcome, goal, reason)
+        self._activate_next_if_current(goal)
+        return True
+
+    def _activate_next_if_current(self, goal: dict) -> None:
+        if goal == self.active_goal:
+            self.active_goal = None
+            self._set_next_goal()
+
+    def _record_motivation_outcome(
+        self, outcome: str, goal: dict, reason: str = ""
+    ) -> None:
+        if self._motivation is None:
+            return
+        callback = getattr(self._motivation, f"on_goal_{outcome}", None)
+        if not callable(callback):
+            return
+        try:
+            if outcome == "achieved":
+                callback(goal["title"], goal_id=goal["id"])
+            else:
+                callback(goal["title"], goal_id=goal["id"], reason=reason)
+        except Exception:
+            # Терминальный переход уже состоялся; побочная обратная связь
+            # не должна откатить его или оставить активную цель висеть.
+            pass
 
     def _set_next_goal(self) -> None:
         """Активирует следующую новую работу, пропуская дубли завершённой."""
@@ -404,6 +432,7 @@ class GoalSubsystem:
             else "Нет активных целей",
             "pending": sum(1 for g in self.goals if g["status"] == "pending"),
             "failed": sum(1 for g in self.goals if g["status"] == "failed"),
+            "cancelled": sum(1 for g in self.goals if g["status"] == "cancelled"),
         }
         if self.active_goal:
             progress = self._goal_progress.get(self.active_goal["id"], {})

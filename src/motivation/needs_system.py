@@ -5,10 +5,12 @@
 Агент развивается от базовых нужд к сложным драйвам.
 """
 
+from copy import deepcopy
 from datetime import datetime
 
 from src.motivation.goal_memory import (
     GOAL_HISTORY_LIMIT,
+    TERMINAL_GOAL_STATUSES,
     count_goal,
     empty_goal_summary,
 )
@@ -190,7 +192,70 @@ class InternalMotivationSystem:
 
         self.goal_history = []  # Недавние сгенерированные цели
         self.goal_summary = empty_goal_summary()
+        self._pending_goal_origins: dict[str, dict] = {}
         self.last_motivated_goals = []
+
+    def bind_goal(self, goal: dict, goal_id: int) -> None:
+        """Связать сгенерированную цель с её каноническим ID."""
+        entry = next((item for item in self.goal_history if item is goal), None)
+        if entry is None:
+            return
+        entry["goal_id"] = goal_id
+        entry.setdefault("status", "generated")
+        goal["goal_id"] = goal_id
+        self._pending_goal_origins[str(goal_id)] = deepcopy(entry)
+
+    def _record_goal_outcome(
+        self, goal_title: str, outcome: str, goal_id=None, reason: str = ""
+    ) -> None:
+        entry = next(
+            (
+                item
+                for item in reversed(self.goal_history)
+                if (
+                    item.get("goal_id") == goal_id
+                    if goal_id is not None
+                    else item.get("title") == goal_title
+                )
+            ),
+            None,
+        )
+        if entry is None and goal_id is not None:
+            origin = self._pending_goal_origins.get(str(goal_id))
+            if origin is not None:
+                entry = deepcopy(origin)
+                self.goal_history.append(entry)
+        if entry is None or entry.get("status") in TERMINAL_GOAL_STATUSES:
+            return
+
+        entry["status"] = outcome
+        entry[f"{outcome}_at"] = datetime.now().isoformat()
+        if outcome == "failed":
+            entry["failure_reason"] = str(reason or "")
+        elif outcome == "cancelled":
+            entry["cancellation_reason"] = str(reason or "")
+        self.goal_history = self.goal_history[-GOAL_HISTORY_LIMIT:]
+        if goal_id is not None:
+            self._pending_goal_origins.pop(str(goal_id), None)
+        # GoalSubsystem уже удовлетворил потребность при достижении.
+        count_goal(
+            self.goal_summary,
+            entry,
+            outcome,
+            needs=self.needs,
+            drives=self.drives,
+        )
+
+    def on_goal_achieved(self, goal_title: str, goal_id=None) -> None:
+        self._record_goal_outcome(goal_title, "achieved", goal_id)
+
+    def on_goal_failed(self, goal_title: str, goal_id=None, reason: str = "") -> None:
+        self._record_goal_outcome(goal_title, "failed", goal_id, reason)
+
+    def on_goal_cancelled(
+        self, goal_title: str, goal_id=None, reason: str = ""
+    ) -> None:
+        self._record_goal_outcome(goal_title, "cancelled", goal_id, reason)
 
     def get_dominant_need(self) -> tuple[str, float]:
         """Возвращает самую острую потребность."""
