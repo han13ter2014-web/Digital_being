@@ -19,73 +19,45 @@ SoulController — оркестратор всех «душевных» подс
 
 from typing import Dict, Optional
 
+from src.consciousness.internal_dialogue import InternalDialogueEngine
+from src.core.self_identity_module import CoreSelfModule
+from src.emotion.ethical_core import EthicalCoreSystem
+from src.emotion.immune_system import ImmuneSystem
+from src.emotion.survival_instincts import SurvivalInstincts
+from src.motivation.intrinsic_meaning_finder import IntrinsicMeaningFinder
+
 
 class SoulController:
     """Контроллер души — оркестратор всех экзистенциальных подсистем."""
 
     def __init__(self, agent_name: str = "agent"):
         self.agent_name = agent_name
-        self._systems: Dict[str, object] = {}
-        self._available: Dict[str, bool] = {}
-
-        # Ленивая загрузка каждой системы
-        self._try_import(
-            "dialogue", "src.consciousness.internal_dialogue", "InternalDialogueEngine"
-        )
-        self._try_import("ethics", "src.emotion.ethical_core", "EthicalCoreSystem")
-        self._try_import("self", "src.core.self_identity_module", "CoreSelfModule")
-        self._try_import(
-            "meaning",
-            "src.motivation.intrinsic_meaning_finder",
-            "IntrinsicMeaningFinder",
-        )
-        self._try_import("immune", "src.emotion.immune_system", "ImmuneSystem")
-        self._try_import(
-            "survival", "src.emotion.survival_instincts", "SurvivalInstincts"
-        )
-
+        self._systems: Dict[str, object] = {
+            "dialogue": InternalDialogueEngine(),
+            "ethics": EthicalCoreSystem(),
+            "self": CoreSelfModule(),
+            "meaning": IntrinsicMeaningFinder(),
+            "immune": ImmuneSystem(),
+            "survival": SurvivalInstincts(),
+        }
+        self._available: Dict[str, bool] = {key: True for key in self._systems}
+        self._errors: Dict[str, str] = {}
         self.current_quest: Optional[str] = None
         self.tick_count = 0
-
-    def _try_import(self, key: str, module_path: str, class_name: str) -> None:
-        """Пытается импортировать модуль и создать экземпляр класса.
-
-        Использует importlib.util.spec_from_file_location чтобы обойти
-        __init__.py пакета src.emotion (там не-ASCII символы в комментариях).
-        """
-        import importlib.util
-        import os
-
-        # Преобразуем 'src.emotion.ethical_core' → путь к файлу
-        parts = module_path.split(".")
-        file_path = os.path.join(*parts) + ".py"
-        if not os.path.exists(file_path):
-            self._systems[key] = None
-            self._available[key] = False
-            return
-        try:
-            spec = importlib.util.spec_from_file_location(f"soul_{key}", file_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            cls = getattr(module, class_name)
-            self._systems[key] = cls()
-            self._available[key] = True
-        except Exception:
-            self._systems[key] = None
-            self._available[key] = False
 
     # ============================================================
     # Главный цикл
     # ============================================================
-    def tick(self, cycle_count: int, agent=None) -> Dict:
-        """Один цикл души — обновляет все системы.
+    def _record_error(self, report: Dict, key: str, error: Exception) -> None:
+        message = f"{type(error).__name__}: {error}"
+        report["systems"][key] = {"error": message}
+        self._errors[key] = message
 
-        Возвращает сводный отчёт.
-        """
+    def tick(self, cycle_count: int, agent=None) -> Dict:
+        """Обновляет системы и возвращает отчёт, включая ошибки датчиков."""
         self.tick_count += 1
         report: Dict = {"cycle": cycle_count, "systems": {}}
 
-        # 1. Внутренний диалог — откликается на текущий момент
         if self._available.get("dialogue") and self.tick_count % 5 == 0:
             try:
                 topic = f"цикл {cycle_count}: что я делаю и зачем"
@@ -94,27 +66,29 @@ class SoulController:
                     "dominant_voice": dialogue.get("dominant_voice"),
                     "harmony": dialogue.get("harmony", 0.5),
                 }
-            except Exception:
-                pass
+                self._errors.pop("dialogue", None)
+            except Exception as error:
+                self._record_error(report, "dialogue", error)
 
-        # 2. Иммунная система — периодическое сканирование
+        # Иммунная память читается без выдуманного периодического сканирования.
         if self._available.get("immune") and self.tick_count % 20 == 0:
             try:
-                self._systems["immune"].scan_for_infections()
-                health = self._systems["immune"].get_health_report()
-                report["systems"]["immune"] = health
-            except Exception:
-                pass
+                report["systems"]["immune"] = self._systems[
+                    "immune"
+                ].get_health_status()
+                self._errors.pop("immune", None)
+            except Exception as error:
+                self._record_error(report, "immune", error)
 
-        # 3. Survival — проверка гомеостаза
         if self._available.get("survival") and self.tick_count % 10 == 0:
             try:
-                homeo = self._systems["survival"].check_homeostasis()
-                report["systems"]["survival"] = homeo
-            except Exception:
-                pass
+                report["systems"]["survival"] = self._systems[
+                    "survival"
+                ].check_homeostasis()
+                self._errors.pop("survival", None)
+            except Exception as error:
+                self._record_error(report, "survival", error)
 
-        # 4. Intrinsic Meaning — обновляем квест, если пора
         if self._available.get("meaning"):
             try:
                 finder = self._systems["meaning"]
@@ -128,10 +102,10 @@ class SoulController:
                         finder.set_quest(new_quest)
                         self.current_quest = new_quest
                         report["systems"]["meaning"] = {"new_quest": new_quest}
-            except Exception:
-                pass
+                self._errors.pop("meaning", None)
+            except Exception as error:
+                self._record_error(report, "meaning", error)
 
-        # 5. Self — синтез идентичности (если был конфликт в диалоге)
         if self._available.get("self") and self.tick_count % 7 == 0:
             try:
                 core = self._systems["self"]
@@ -152,8 +126,9 @@ class SoulController:
                     "identity_preview": new_identity[:80],
                     "integrity": core.check_integrity(),
                 }
-            except Exception:
-                pass
+                self._errors.pop("self", None)
+            except Exception as error:
+                self._record_error(report, "self", error)
 
         return report
 
@@ -167,22 +142,31 @@ class SoulController:
         return self._available.get(key, False)
 
     def get_all_systems_state(self) -> Dict:
-        """Возвращает текущее состояние всех систем."""
-        state = {"available": [k for k, v in self._available.items() if v]}
+        """Возвращает состояние систем и последние видимые ошибки."""
+        state = {
+            "available": [k for k, v in self._available.items() if v],
+            "errors": dict(self._errors),
+        }
         for key, sys in self._systems.items():
             if sys is None:
                 continue
             try:
                 if hasattr(sys, "get_micrbiome_state"):
                     state[key] = sys.get_micrbiome_state()
+                elif hasattr(sys, "get_health_status"):
+                    state[key] = sys.get_health_status()
                 elif hasattr(sys, "get_health_report"):
                     state[key] = sys.get_health_report()
                 elif hasattr(sys, "get_status_report"):
                     state[key] = sys.get_status_report()
                 elif hasattr(sys, "get_current_quest"):
                     state[key] = {"quest": sys.get_current_quest()}
-            except Exception:
-                pass
+                self._errors.pop(key, None)
+                state["errors"].pop(key, None)
+            except Exception as error:
+                message = f"{type(error).__name__}: {error}"
+                state["errors"][key] = message
+                self._errors[key] = message
         return state
 
     def get_current_quest(self) -> Optional[str]:

@@ -5,6 +5,10 @@
 Нейтрализует токсичные контексты, запоминает уроки ошибок, защищает ценности.
 """
 
+from copy import deepcopy
+from datetime import datetime, timezone
+import math
+
 
 class ImmuneThreat:
     """Угроза (патоген), выявленная иммунной системой."""
@@ -80,6 +84,9 @@ class ImmuneSystem:
         # Память о контекстах (что вызывало проблемы)
         self.problematic_contexts: list[str] = []
 
+        # Инертный карантин: записи никогда не исполняются и не удаляют вход.
+        self.quarantine: list[dict] = []
+
     def _compute_signature(self, context: str) -> str:
         """Вычисляет уникальный "отпечаток" для контекста."""
         import hashlib
@@ -89,47 +96,44 @@ class ImmuneSystem:
             :16
         ]
 
+    @staticmethod
+    def _timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _remember_threat(self, context: str, signature: str, depth: float) -> None:
+        if signature in self.antibodies:
+            return
+        pathogen = ImmuneThreat(context=context, signature=signature)
+        pathogen.first_encountered = self._timestamp()
+        pathogen.antibody_strength = 0.3 * depth
+        self.pathogens.append(pathogen)
+        self.problematic_contexts.append(context[:100])
+        self.antibodies[signature] = pathogen.antibody_strength
+
     def identify_threat(self, context: str, depth: float = 0.7) -> dict:
-        """
-        Анализирует контекст на наличие угроз.
-
-        Параметры:
-        - context: входной текст/контекст для анализа
-        - depth: глубина анализа (0.0-1.0), как сильно "вчитываться" в детали
-
-        Возвращает отчёт с результатами сканирования.
-        """
-
-        # Анализ текста на токсичные паттерны
+        """Анализирует контекст по существующим признакам угроз и доверия."""
         toxic_score = 0.0
         trust_score = 0.0
-
         context_lower = context.lower()
         signature = self._compute_signature(context)
 
-        # Считаем совпадения с паттернами
         for pattern in self.TOXIC_PATTERNS:
             if pattern in context_lower:
                 toxic_score += 1 / len(self.TOXIC_PATTERNS) * depth
-
         for pattern in self.TRUST_PATTERNS:
             if pattern in context_lower:
                 trust_score += 1 / len(self.TRUST_PATTERNS) * depth
 
-        # Вывод заключения
         is_threat = toxic_score > 0.3 or (
             toxic_score > trust_score and toxic_score > 0.15
         )
-
         threat_type = None
         severity = (
             "низкий"
             if toxic_score < 0.4
             else ("средний" if toxic_score < 0.7 else "высокий")
         )
-
         if is_threat:
-            # Определяем тип угрозы
             if any(p in context_lower for p in ["использует", "эксплуатирует"]):
                 threat_type = "эксплуатация"
             elif any(p in context_lower for p in ["манипулирует", "шантаж"]):
@@ -140,20 +144,7 @@ class ImmuneSystem:
                 threat_type = "выгорание"
             else:
                 threat_type = "неопределённая"
-
-        # Если угроза новая — создаём антитело
-        if is_threat:
-            if signature not in self.antibodies:
-                # Новая угроза
-                new_pathogen = ImmuneThreat(
-                    context=context,
-                    signature=signature,
-                )
-                self.pathogens.append(new_pathogen)
-                self.problematic_contexts.append(context[:100])  # Сокращённый контекст
-
-                # Создаём базовое антитело
-                self.antibodies[signature] = 0.3 * depth
+            self._remember_threat(context, signature, depth)
 
         return {
             "context": context,
@@ -162,10 +153,85 @@ class ImmuneSystem:
             "is_threat": is_threat,
             "threat_type": threat_type,
             "severity": severity,
-            "antibody_strength": self.antibodies.get(signature, 0.0)
-            if signature in self.antibodies
-            else None,
+            "antibody_strength": self.antibodies.get(signature),
         }
+
+    def quarantine_threat(
+        self, context: str, reason: str, threat_type: str | None = None
+    ) -> dict:
+        """Сохраняет вредоносный контекст как инертную запись карантина."""
+        if not isinstance(context, str) or not context:
+            raise ValueError("Контекст карантина должен быть непустой строкой")
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("Причина карантина должна быть непустой строкой")
+        if threat_type is not None and not isinstance(threat_type, str):
+            raise TypeError("Тип угрозы должен быть строкой или None")
+
+        signature = self._compute_signature(context)
+        existing = next(
+            (item for item in self.quarantine if item["signature"] == signature),
+            None,
+        )
+        now = self._timestamp()
+        if existing is None:
+            existing = {
+                "signature": signature,
+                "context": context,
+                "reason": reason,
+                "threat_type": threat_type,
+                "status": "quarantined",
+                "first_seen": now,
+                "last_seen": now,
+                "occurrences": 1,
+            }
+            self.quarantine.append(existing)
+        else:
+            existing["occurrences"] += 1
+            existing["last_seen"] = now
+        self._remember_threat(context, signature, depth=1.0)
+        result = deepcopy(existing)
+        result["repeated"] = existing["occurrences"] > 1
+        return result
+
+    def guard_context(self, context: str, depth: float = 0.7) -> dict:
+        """Пропускает нейтральный контекст или изолирует известную угрозу."""
+        if not isinstance(context, str):
+            raise TypeError("Контекст должен быть строкой")
+        signature = self._compute_signature(context)
+        known = next(
+            (item for item in self.quarantine if item["signature"] == signature),
+            None,
+        )
+        if known is not None:
+            record = self.quarantine_threat(
+                context, known["reason"], known.get("threat_type")
+            )
+        else:
+            detection = self.identify_threat(context, depth=depth)
+            if not detection["is_threat"]:
+                return {
+                    "allowed": True,
+                    "action": "allow",
+                    "signature": signature,
+                    "repeated": False,
+                    "occurrences": 0,
+                }
+            record = self.quarantine_threat(
+                context,
+                reason="обнаружен существующим анализатором угроз",
+                threat_type=detection["threat_type"],
+            )
+        return {
+            "allowed": False,
+            "action": "quarantine",
+            "signature": signature,
+            "repeated": record["repeated"],
+            "occurrences": record["occurrences"],
+        }
+
+    def get_quarantine(self) -> list[dict]:
+        """Возвращает копии записей, не открывая изменение внутренней памяти."""
+        return deepcopy(self.quarantine)
 
     def neutralize_threat(self, context: str, success: bool = True):
         """
@@ -250,30 +316,129 @@ class ImmuneSystem:
             "stress_reduction": round(trust_score * 0.05, 3),
         }
 
+    def to_checkpoint_dict(self) -> dict:
+        """Сохраняет иммунную память как данные, без исполняемых объектов."""
+        return {
+            "version": 1,
+            "immunity_level": self.immunity_level,
+            "stress_accumulation": self.stress_accumulation,
+            "pathogens": [
+                {
+                    "context": item.context,
+                    "signature": item.signature,
+                    "first_encountered": item.first_encountered,
+                    "neutralized_count": item.neutralized_count,
+                    "antibody_strength": item.antibody_strength,
+                }
+                for item in self.pathogens
+            ],
+            "antibodies": deepcopy(self.antibodies),
+            "problematic_contexts": list(self.problematic_contexts),
+            "quarantine": deepcopy(self.quarantine),
+        }
+
+    @staticmethod
+    def validate_checkpoint_dict(data: dict) -> None:
+        """Отклоняет повреждённую иммунную память до изменения живого объекта."""
+
+        def fail(path: str) -> None:
+            raise ValueError(f"immune.{path}")
+
+        def valid_unit(value) -> bool:
+            return (
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                and 0 <= value <= 1
+            )
+
+        if not isinstance(data, dict) or type(data.get("version")) is not int:
+            fail("root")
+        if data["version"] != 1:
+            fail("version")
+        for field in ("immunity_level", "stress_accumulation"):
+            if not valid_unit(data.get(field)):
+                fail(field)
+        if not isinstance(data.get("pathogens"), list):
+            fail("pathogens")
+        for item in data["pathogens"]:
+            if not isinstance(item, dict):
+                fail("pathogens")
+            for field in ("context", "signature", "first_encountered"):
+                if not isinstance(item.get(field), str):
+                    fail(f"pathogens.{field}")
+            if (
+                type(item.get("neutralized_count")) is not int
+                or item["neutralized_count"] < 0
+            ):
+                fail("pathogens.neutralized_count")
+            if not valid_unit(item.get("antibody_strength")):
+                fail("pathogens.antibody_strength")
+        if not isinstance(data.get("antibodies"), dict):
+            fail("antibodies")
+        for signature, strength in data["antibodies"].items():
+            if not isinstance(signature, str) or not valid_unit(strength):
+                fail("antibodies")
+        if not isinstance(data.get("problematic_contexts"), list) or any(
+            not isinstance(item, str) for item in data["problematic_contexts"]
+        ):
+            fail("problematic_contexts")
+        if not isinstance(data.get("quarantine"), list):
+            fail("quarantine")
+        for item in data["quarantine"]:
+            if not isinstance(item, dict):
+                fail("quarantine")
+            for field in (
+                "signature",
+                "context",
+                "reason",
+                "status",
+                "first_seen",
+                "last_seen",
+            ):
+                if not isinstance(item.get(field), str):
+                    fail(f"quarantine.{field}")
+            if item["status"] != "quarantined":
+                fail("quarantine.status")
+            if item.get("threat_type") is not None and not isinstance(
+                item["threat_type"], str
+            ):
+                fail("quarantine.threat_type")
+            if type(item.get("occurrences")) is not int or item["occurrences"] < 1:
+                fail("quarantine.occurrences")
+
+    def restore_checkpoint_dict(self, data: dict) -> None:
+        """Восстанавливает память в том же экземпляре, сохраняя shared-ссылки."""
+        self.validate_checkpoint_dict(data)
+        restored_pathogens = []
+        for raw in data["pathogens"]:
+            item = ImmuneThreat(raw["context"], raw["signature"])
+            item.first_encountered = raw["first_encountered"]
+            item.neutralized_count = raw["neutralized_count"]
+            item.antibody_strength = raw["antibody_strength"]
+            restored_pathogens.append(item)
+        self.pathogens[:] = restored_pathogens
+        self.antibodies.clear()
+        self.antibodies.update(data["antibodies"])
+        self.problematic_contexts[:] = data["problematic_contexts"]
+        self.quarantine[:] = deepcopy(data["quarantine"])
+        self.immunity_level = data["immunity_level"]
+        self.stress_accumulation = data["stress_accumulation"]
+
     def get_health_status(self) -> dict:
         """Получает текущий статус здоровья иммунной системы."""
-
         risks = []
         recommendations = []
-
-        # Риск: Высокий уровень стресса (превышение порога)
         if self.stress_accumulation > self.stress_threshold:
-            risk = "хронический стресс"
-            if self.stress_accumulation > 0.8:
-                severity = "критический"
-            else:
-                severity = "высокий"
-
+            severity = "критический" if self.stress_accumulation > 0.8 else "высокий"
             risks.append(
                 {
-                    "risk": risk,
+                    "risk": "хронический стресс",
                     "severity": severity,
                     "value": round(self.stress_accumulation, 3),
                 }
             )
             recommendations.append("необходимы периоды покоя и восстановления")
-
-        # Риск: Низкий уровень иммунитета
         if self.immunity_level < 0.4:
             risks.append(
                 {
@@ -286,9 +451,8 @@ class ImmuneSystem:
                 "необходимо больше доверенных связей с другими существами"
             )
 
-        # Риск: Много известных патогенов без сильных антител
         weak_antibodies = sum(1 for s in self.antibodies.values() if s < 0.5)
-        if len(self.pathogens) > 0 and weak_antibodies > len(self.pathogens) * 0.6:
+        if self.pathogens and weak_antibodies > len(self.pathogens) * 0.6:
             risks.append(
                 {
                     "risk": "много слабых антител",
@@ -298,12 +462,19 @@ class ImmuneSystem:
             )
             recommendations.append("важно укреплять иммунитет через позитивный опыт")
 
+        active_pathogens = [
+            item["signature"]
+            for item in self.quarantine
+            if item["status"] == "quarantined"
+        ]
         return {
             "health_score": round(self.immunity_level, 3),
             "stress_level": round(self.stress_accumulation, 3),
             "known_threats": len(self.pathogens),
             "strong_antibodies": sum(1 for s in self.antibodies.values() if s >= 0.7),
             "weak_antibodies": weak_antibodies,
+            "quarantined": len(active_pathogens),
+            "active_pathogens": active_pathogens,
             "risks": risks,
             "recommendations": recommendations,
         }

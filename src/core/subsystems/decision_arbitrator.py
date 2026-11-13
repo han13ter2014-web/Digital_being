@@ -17,66 +17,55 @@ DecisionArbitrator — единая точка принятия решений.
 
 from typing import Dict, List, Any
 
+from src.consciousness.internal_dialogue import InternalDialogueEngine
+from src.core.self_identity_module import CoreSelfModule
+from src.emotion.ethical_core import EthicalCoreSystem
+
 
 class DecisionArbitrator:
     """Арбитр решений — интегратор всех подсистем."""
 
     def __init__(self, agent_name: str = "agent"):
-        # Ленивые импорты через importlib.util (обход __init__.py пакета src.emotion)
-        import importlib.util
-        import os
-
-        self._systems: Dict[str, object] = {}
-        self._available = {}
-
-        def _try_load(key, module_path, class_name):
-            parts = module_path.split(".")
-            file_path = os.path.join(*parts) + ".py"
-            if not os.path.exists(file_path):
-                self._available[key] = False
-                return
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    f"arbitrator_{key}", file_path
-                )
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                cls = getattr(module, class_name)
-                self._systems[key] = cls()
-                self._available[key] = True
-            except Exception:
-                self._available[key] = False
-
-        _try_load(
-            "dialogue", "src.consciousness.internal_dialogue", "InternalDialogueEngine"
-        )
-        _try_load("ethics", "src.emotion.ethical_core", "EthicalCoreSystem")
-        _try_load("self", "src.core.self_identity_module", "CoreSelfModule")
-
+        # Все модули входят в установленный пакет: обычные импорты не зависят
+        # от CWD, а ошибка загрузки не маскируется под недоступную подсистему.
+        self._systems: Dict[str, object] = {
+            "dialogue": InternalDialogueEngine(),
+            "ethics": EthicalCoreSystem(),
+            "self": CoreSelfModule(),
+        }
+        self._available = {key: True for key in self._systems}
         self.agent_name = agent_name
 
     # ============================================================
     # Связывание с иммунной системой (создаётся извне)
     # ============================================================
+    def attach_dialogue(self, dialogue) -> None:
+        self._systems["dialogue"] = dialogue
+        self._available["dialogue"] = dialogue is not None
+
+    def attach_ethics(self, ethics) -> None:
+        self._systems["ethics"] = ethics
+        self._available["ethics"] = ethics is not None
+
     def attach_identity(self, identity) -> None:
         self._systems["self"] = identity
         self._available["self"] = identity is not None
 
     def attach_immune_system(self, immune_system) -> None:
         self._systems["immune"] = immune_system
-        self._available["immune"] = True
+        self._available["immune"] = immune_system is not None
 
     def attach_meaning_finder(self, meaning_finder) -> None:
         self._systems["meaning"] = meaning_finder
-        self._available["meaning"] = True
+        self._available["meaning"] = meaning_finder is not None
 
     def attach_survival_instincts(self, survival) -> None:
         self._systems["survival"] = survival
-        self._available["survival"] = True
+        self._available["survival"] = survival is not None
 
     def attach_embodiment(self, embodiment) -> None:
         self._systems["embodiment"] = embodiment
-        self._available["embodiment"] = True
+        self._available["embodiment"] = embodiment is not None
 
     # ============================================================
     # Главный метод: арбитраж
@@ -103,8 +92,11 @@ class DecisionArbitrator:
                     "harmony": dialogue_result.get("harmony", 0.5),
                     "weight": 0.25,
                 }
-            except Exception:
-                opinions["dialogue"] = {"error": True, "weight": 0}
+            except Exception as error:
+                opinions["dialogue"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # 2. Этика
         if self._available.get("ethics"):
@@ -120,8 +112,11 @@ class DecisionArbitrator:
                     "verdict": ethics_result,
                     "weight": 0.30,  # Этика — самый высокий вес
                 }
-            except Exception:
-                opinions["ethics"] = {"weight": 0}
+            except Exception as error:
+                opinions["ethics"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # 3. Самоидентичность
         if self._available.get("self"):
@@ -135,8 +130,11 @@ class DecisionArbitrator:
                     "identity": new_identity[:120],
                     "weight": 0.20,
                 }
-            except Exception:
-                opinions["self"] = {"weight": 0}
+            except Exception as error:
+                opinions["self"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # 4. Интуиция (гут-фелинг)
         intuition = None
@@ -147,20 +145,28 @@ class DecisionArbitrator:
                     **intuition,
                     "weight": 0.10,
                 }
-            except Exception:
-                pass
+            except Exception as error:
+                opinions["intuition"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # 5. Иммунный статус
         if self._available.get("immune"):
             try:
-                health = self._systems["immune"].get_health_report()
+                health = self._systems["immune"].get_health_status()
                 opinions["immune"] = {
-                    "health": health.get("health_percentage", 100),
-                    "active_pathogens": health.get("active_pathogens", []),
+                    "health": float(health.get("health_score", 1.0)) * 100,
+                    "active_pathogens": list(health.get("active_pathogens", [])),
+                    "known_threats": health.get("known_threats", 0),
+                    "risks": list(health.get("risks", [])),
                     "weight": 0.10,
                 }
-            except Exception:
-                opinions["immune"] = {"weight": 0}
+            except Exception as error:
+                opinions["immune"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # 6. Выживание / гомеостаз
         if self._available.get("survival"):
@@ -171,8 +177,11 @@ class DecisionArbitrator:
                     "alarms": homeo.get("alarms", []),
                     "weight": 0.05,
                 }
-            except Exception:
-                opinions["survival"] = {"weight": 0}
+            except Exception as error:
+                opinions["survival"] = {
+                    "error": f"{type(error).__name__}: {error}",
+                    "weight": 0,
+                }
 
         # ============================================================
         # Синтез финального вердикта

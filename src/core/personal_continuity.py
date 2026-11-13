@@ -25,6 +25,9 @@ def capture_personal_state(agent):
     identity = soul.get("self") if soul is not None else None
     if identity is not None:
         result["identity"] = deepcopy(identity.to_dict())
+    immune = soul.get("immune") if soul is not None else None
+    if immune is not None:
+        result["immune"] = immune.to_checkpoint_dict()
     return result
 
 
@@ -127,13 +130,20 @@ def validate_personal_state(data):
                 record["last_interaction"], str
             ):
                 fail("attachments.last_interaction")
+    if "immune" in data:
+        from src.emotion.immune_system import ImmuneSystem
+
+        try:
+            ImmuneSystem.validate_checkpoint_dict(data["immune"])
+        except ValueError as error:
+            fail(str(error))
 
 
 def restore_personal_state(agent, data):
     validate_personal_state(data)
     # Сохраняем сами экземпляры: адаптеры/модули держат общие ссылки на них.
+    soul = getattr(agent, "soul", None)
     if "identity" in data:
-        soul = getattr(agent, "soul", None)
         identity = soul.get("self") if soul is not None else None
         if identity is not None:
             saved = data["identity"]
@@ -144,6 +154,13 @@ def restore_personal_state(agent, data):
             arbitrator = getattr(agent, "decision_arbitrator", None)
             if arbitrator is not None:
                 arbitrator.attach_identity(identity)
+    if "immune" in data:
+        immune = soul.get("immune") if soul is not None else None
+        if immune is not None:
+            immune.restore_checkpoint_dict(data["immune"])
+            arbitrator = getattr(agent, "decision_arbitrator", None)
+            if arbitrator is not None:
+                arbitrator.attach_immune_system(immune)
     registry = getattr(agent, "will_registry", None)
     if "will_registry" in data and registry is not None:
         saved = data["will_registry"]

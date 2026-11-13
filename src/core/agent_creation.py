@@ -523,8 +523,12 @@ def _run_post_init_hooks_impl(self) -> None:
     if hasattr(self, "naming_dialogue"):
         self.naming_dialogue.user_interaction = self.user_interaction
 
-    # DecisionArbitrator: привязываем soul-системы.
+    # DecisionArbitrator: привязываем те же живые экземпляры soul-систем.
     if hasattr(self, "decision_arbitrator") and hasattr(self, "soul"):
+        if self.soul.is_available("dialogue"):
+            self.decision_arbitrator.attach_dialogue(self.soul.get("dialogue"))
+        if self.soul.is_available("ethics"):
+            self.decision_arbitrator.attach_ethics(self.soul.get("ethics"))
         if self.soul.is_available("self"):
             self.decision_arbitrator.attach_identity(self.soul.get("self"))
         if self.soul.is_available("immune"):
