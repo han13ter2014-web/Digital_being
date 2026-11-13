@@ -1335,6 +1335,19 @@ class CheckpointSerializer:
 
     # ---------------- Поиск/служебные ----------------
 
+    @staticmethod
+    def _is_checkpoint_name(filename: str, prefix: str) -> bool:
+        """Только файлы текущего формата участвуют в выборе и ротации."""
+        if not filename.startswith(prefix) or not filename.endswith(
+            (".json", ".json.gz")
+        ):
+            return False
+        try:
+            int(_extract_cycle_number(filename, prefix))
+        except (TypeError, ValueError):
+            return False
+        return True
+
     def get_latest_path(self, agent_name: str) -> Optional[str]:
         """Путь к самому свежему чекпоинту агента. None если нет.
 
@@ -1346,7 +1359,7 @@ class CheckpointSerializer:
         checkpoints = [
             f
             for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix) and (f.endswith(".json") or f.endswith(".json.gz"))
+            if CheckpointSerializer._is_checkpoint_name(f, prefix)
         ]
         if not checkpoints:
             return None
@@ -1364,7 +1377,7 @@ class CheckpointSerializer:
         files = [
             f
             for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix) and (f.endswith(".json") or f.endswith(".json.gz"))
+            if CheckpointSerializer._is_checkpoint_name(f, prefix)
         ]
         files.sort(key=lambda x: int(_extract_cycle_number(x, prefix)))
         return [os.path.join(self.checkpoint_dir, f) for f in files]
@@ -1375,10 +1388,14 @@ class CheckpointSerializer:
         Если ``self.compress=True`` — расширение ``.json.gz``, иначе ``.json``.
         """
         ext = ".json.gz" if self.compress else ".json"
-        return os.path.join(
+        filename = os.path.join(
             self.checkpoint_dir,
             f"{agent_name}_cycle_{cycle_count}{ext}",
         )
+        root = os.path.realpath(self.checkpoint_dir)
+        if os.path.dirname(os.path.realpath(filename)) != root:
+            raise ValueError("Чекпойнт должен находиться внутри каталога чекпойнтов")
+        return filename
 
     def _prune_old_checkpoints(self, agent_name: str, keep_after_save: int = 0) -> int:
         """Удалить старые чекпоинты сверх лимита.

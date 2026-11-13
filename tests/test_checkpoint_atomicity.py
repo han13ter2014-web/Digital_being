@@ -125,3 +125,25 @@ def test_single_checkpoint_limit_retains_new_publication(serializer):
     assert not first.exists()
     assert read_checkpoint(second, serializer.compress) == {"cycle": 2}
     assert list(second.parent.iterdir()) == [second]
+
+
+def test_non_numeric_checkpoint_name_does_not_break_save_or_discovery(serializer):
+    first = Path(serializer.save({"cycle": 1}, "agent", 1))
+    unrelated = first.parent / "agent_cycle_notes.json"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    second = Path(serializer.save({"cycle": 2}, "agent", 2))
+
+    assert serializer.get_latest_path("agent") == str(second)
+    assert serializer.list_checkpoints("agent") == [str(first), str(second)]
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+
+
+def test_standalone_checkpoint_path_cannot_escape_checkpoint_directory(tmp_path):
+    directory = tmp_path / "checkpoints"
+    serializer = CheckpointSerializer(str(directory))
+
+    with pytest.raises(ValueError, match="внутри каталога"):
+        serializer.save({"cycle": 1}, "../escaped", 1)
+
+    assert list(tmp_path.glob("escaped_cycle_*")) == []

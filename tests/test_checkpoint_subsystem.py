@@ -53,3 +53,29 @@ def test_successful_save_rotates_old_checkpoints(tmp_path: Path) -> None:
     assert not oldest.exists()
     assert not latest.exists()
     assert subsystem.find_latest("Probe") == result
+
+
+def test_non_numeric_checkpoint_name_does_not_break_legacy_save(tmp_path: Path) -> None:
+    _seed_checkpoint(tmp_path, 1)
+    unrelated = tmp_path / "Probe_cycle_notes.json"
+    unrelated.write_text("keep me", encoding="utf-8")
+    subsystem = CheckpointSubsystem(str(tmp_path), interval=10, max_checkpoints=2)
+
+    result = subsystem.save(_Agent())
+
+    assert result == str(tmp_path / "Probe_cycle_2.json")
+    assert Path(result).is_file()
+    assert subsystem.find_latest("Probe") == result
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+
+
+def test_legacy_checkpoint_path_cannot_escape_checkpoint_directory(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "checkpoints"
+    subsystem = CheckpointSubsystem(str(directory), interval=10)
+    agent = _Agent()
+    agent.name = "../escaped"
+
+    assert subsystem.save(agent) is None
+    assert list(tmp_path.glob("escaped_cycle_*")) == []

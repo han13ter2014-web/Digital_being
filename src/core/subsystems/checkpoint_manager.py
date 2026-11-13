@@ -80,6 +80,10 @@ class CheckpointSubsystem:
         filename = os.path.join(
             self.checkpoint_dir, f"{agent.name}_cycle_{agent.cycle_count}.json"
         )
+        if os.path.dirname(os.path.realpath(filename)) != os.path.realpath(
+            self.checkpoint_dir
+        ):
+            return None
         temporary = filename + ".tmp"
         try:
             with open(temporary, "w", encoding="utf-8") as f:
@@ -139,7 +143,9 @@ class CheckpointSubsystem:
         checkpoints = [
             f
             for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix) and f.endswith(".json")
+            if f.startswith(prefix)
+            and f.endswith(".json")
+            and f[len(prefix) : -len(".json")].isdigit()
         ]
 
         if len(checkpoints) <= self.max_checkpoints:
@@ -164,7 +170,9 @@ class CheckpointSubsystem:
         checkpoints = [
             f
             for f in os.listdir(self.checkpoint_dir)
-            if f.startswith(prefix) and f.endswith(".json")
+            if f.startswith(prefix)
+            and f.endswith(".json")
+            and f[len(prefix) : -len(".json")].isdigit()
         ]
         if not checkpoints:
             return None
