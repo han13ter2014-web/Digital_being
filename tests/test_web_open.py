@@ -112,7 +112,7 @@ class OpenPageTests(unittest.TestCase):
 
     def test_page_is_read_as_clean_text(self):
         with patch(
-            "urllib.request.urlopen",
+            "src.perception.web_search.WebSearcher._open_page_url",
             return_value=_FakeResponse(_PAGE_HTML.encode("utf-8")),
         ):
             result = self.searcher.open_page("https://example.com/gardens")
@@ -141,14 +141,100 @@ class OpenPageTests(unittest.TestCase):
         resp = _FakeResponse(
             _PAGE_HTML.encode("utf-8"), final_url="http://169.254.1.1/meta"
         )
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch(
+            "src.perception.web_search.WebSearcher._open_page_url", return_value=resp
+        ):
             result = self.searcher.open_page("https://example.com/start")
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "private_host")
 
+    def test_open_page_uses_guarded_opener(self):
+        response = _FakeResponse(_PAGE_HTML.encode("utf-8"))
+        with patch("src.perception.web_search.urllib.request.build_opener") as build:
+            build.return_value.open.return_value = response
+            result = self.searcher.open_page("https://example.com/start")
+
+        self.assertTrue(result["found"])
+        build.assert_called_once()
+        build.return_value.open.assert_called_once()
+
+    def test_redirect_handler_rejects_private_before_request(self):
+        import urllib.error
+        import urllib.request
+
+        from src.perception.web_search import _GuardedRedirectHandler
+
+        handler = _GuardedRedirectHandler(
+            lambda url: "private_host" if "127.0.0.1" in url else None
+        )
+        request = urllib.request.Request("https://example.com/start")
+
+        with self.assertRaises(urllib.error.URLError) as caught:
+            handler.redirect_request(
+                request, None, 302, "Found", {}, "http://127.0.0.1/admin"
+            )
+
+        self.assertEqual(caught.exception.reason, "private_host")
+
+    def test_redirect_handler_allows_public_target(self):
+        import urllib.request
+
+        from src.perception.web_search import _GuardedRedirectHandler
+
+        handler = _GuardedRedirectHandler(lambda url: None)
+        request = urllib.request.Request("https://example.com/start")
+        redirected = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://example.com/next"
+        )
+
+        self.assertEqual(redirected.full_url, "https://example.com/next")
+
+    def test_pinned_connection_rejects_private_before_socket(self):
+        import socket
+        import urllib.error
+
+        from src.perception.web_search import _PublicHTTPConnection
+
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+        connection = _PublicHTTPConnection("example.com", 80)
+        with (
+            patch("socket.getaddrinfo", return_value=addresses),
+            patch("socket.create_connection") as create,
+        ):
+            with self.assertRaises(urllib.error.URLError) as caught:
+                connection.connect()
+
+        self.assertEqual(caught.exception.reason, "private_host")
+        create.assert_not_called()
+
+    def test_pinned_https_uses_checked_ip_and_original_hostname(self):
+        import socket
+        from unittest.mock import Mock
+
+        from src.perception.web_search import _PublicHTTPSConnection
+
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        raw_socket = Mock()
+        tls_socket = Mock()
+        connection = _PublicHTTPSConnection("example.com", 443)
+        connection._context.wrap_socket = Mock(return_value=tls_socket)
+        with (
+            patch("socket.getaddrinfo", return_value=addresses),
+            patch("socket.create_connection", return_value=raw_socket) as create,
+        ):
+            connection.connect()
+
+        self.assertEqual(create.call_args.args[0], ("93.184.216.34", 443))
+        connection._context.wrap_socket.assert_called_once_with(
+            raw_socket, server_hostname="example.com"
+        )
+        self.assertIs(connection.sock, tls_socket)
+
     def test_non_text_is_refused(self):
         resp = _FakeResponse(b"%PDF-1.4 ...", content_type="application/pdf")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch(
+            "src.perception.web_search.WebSearcher._open_page_url", return_value=resp
+        ):
             result = self.searcher.open_page("https://example.com/doc.pdf")
         self.assertFalse(result["found"])
         self.assertEqual(result["error"], "not_text")
@@ -156,7 +242,8 @@ class OpenPageTests(unittest.TestCase):
     def test_thin_page_is_refused(self):
         thin = "<html><body><p>ок</p></body></html>"
         with patch(
-            "urllib.request.urlopen", return_value=_FakeResponse(thin.encode("utf-8"))
+            "src.perception.web_search.WebSearcher._open_page_url",
+            return_value=_FakeResponse(thin.encode("utf-8")),
         ):
             result = self.searcher.open_page("https://example.com/thin")
         self.assertFalse(result["found"])
@@ -170,7 +257,10 @@ class OpenPageTests(unittest.TestCase):
             captured["url"] = req.full_url
             return _FakeResponse(_PAGE_HTML.encode("utf-8"))
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch(
+            "src.perception.web_search.WebSearcher._open_page_url",
+            side_effect=fake_urlopen,
+        ):
             result = self.searcher.open_page(
                 "https://ru.wikipedia.org/wiki/Нейронная_сеть"
             )
@@ -182,7 +272,8 @@ class OpenPageTests(unittest.TestCase):
     def test_long_page_is_capped(self):
         big = "<html><body><p>" + ("слово " * 3000) + "</p></body></html>"
         with patch(
-            "urllib.request.urlopen", return_value=_FakeResponse(big.encode("utf-8"))
+            "src.perception.web_search.WebSearcher._open_page_url",
+            return_value=_FakeResponse(big.encode("utf-8")),
         ):
             result = self.searcher.open_page("https://example.com/big")
         self.assertTrue(result["found"])

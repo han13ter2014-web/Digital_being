@@ -32,6 +32,7 @@ WebSearcher — поиск информации в Wikipedia API.
 """
 
 import html
+import http.client
 import ipaddress
 import json
 import logging
@@ -53,6 +54,93 @@ from src.memory.knowledge_quality import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_public_addresses(host, port):
+    """Разрешить host и вернуть только публичные числовые адреса."""
+
+    try:
+        resolved = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return [], "dns_error"
+    addresses = []
+    try:
+        for family, _type, _proto, _canon, sockaddr in resolved:
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                continue
+            ip = ipaddress.ip_address(sockaddr[0])
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_reserved
+                or ip.is_unspecified
+            ):
+                return [], "private_host"
+            addresses.append(str(ip))
+    except ValueError:
+        return [], "dns_error"
+    if not addresses:
+        return [], "dns_error"
+    return addresses, None
+
+
+def _create_public_connection(address, timeout, source_address):
+    """Подключиться к числовому IP из проверенного DNS-ответа.
+
+    HTTPConnection вызывает эту фабрику вместо socket.create_connection.
+    Повторное разрешение имени при подключении не происходит: DNS rebinding
+    не может подменить адрес между проверкой и отправкой HTTP-запроса.
+    """
+
+    host, port = address
+    addresses, error = _resolve_public_addresses(host, port)
+    if error is not None:
+        raise urllib.error.URLError(error)
+    last_error = None
+    for ip in addresses:
+        try:
+            return socket.create_connection((ip, port), timeout, source_address)
+        except OSError as exc:
+            last_error = exc
+    raise last_error
+
+
+class _PublicHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _create_public_connection
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # TLS по-прежнему получает self.host для SNI и проверки сертификата.
+        self._create_connection = _create_public_connection
+
+
+class _PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_PublicHTTPConnection, req)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Проверить каждый redirect до того, как opener перейдёт по нему."""
+
+    def __init__(self, guard):
+        self._guard = guard
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        error = self._guard(newurl)
+        if error is not None:
+            raise urllib.error.URLError(error)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class WebSearcher:
@@ -727,6 +815,13 @@ class WebSearcher:
             "error": None,
         }
 
+    def _open_page_url(self, request):
+        return urllib.request.build_opener(
+            _GuardedRedirectHandler(self._url_guard),
+            _PublicHTTPHandler(),
+            _PublicHTTPSHandler(),
+        ).open(request, timeout=self.timeout)
+
     def open_page(self, url: str) -> dict:
         """Прочитать произвольную страницу интернета — впечатление, не знание.
 
@@ -734,8 +829,8 @@ class WebSearcher:
         закрыты):
         * только http/https;
         * хост не должен быть localhost, приватным, служебным или
-          link-local адресом — проверяется и до запроса, и после
-          редиректов (SSRF-гард);
+          link-local адресом — проверяется до каждого запроса, на каждом
+          редиректе и при подключении к проверенному числовому IP;
         * читаются только текстовые ответы (html/plain/xhtml);
         * потолки: WEB_PAGE_MAX_BYTES на сырой ответ, WEB_PAGE_MAX_CHARS
           на извлечённый текст;
@@ -765,13 +860,11 @@ class WebSearcher:
                     "Accept-Language": f"{self.lang},en;q=0.5",
                 },
             )
-            with urllib.request.urlopen(  # nosec B310
-                req, timeout=self.timeout
-            ) as resp:
+            with self._open_page_url(req) as resp:
                 if resp.status != 200:
                     self._stats["errors"] += 1
                     return self._empty(f"http_{resp.status}")
-                # Редирект мог увести внутрь — гард повторяется на финале.
+                # Дополнительная проверка финального URL после всех переходов.
                 final_error = self._url_guard(resp.geturl())
                 if final_error is not None:
                     self._stats["errors"] += 1
@@ -792,6 +885,8 @@ class WebSearcher:
         except urllib.error.URLError as e:
             self._stats["errors"] += 1
             logger.warning(f"[WebSearcher] URL error для страницы: {e.reason}")
+            if e.reason in ("private_host", "dns_error", "bad_url", "bad_scheme"):
+                return self._empty(e.reason)
             return self._empty("network_error")
         except (TimeoutError, OSError) as e:
             self._stats["errors"] += 1
@@ -838,32 +933,16 @@ class WebSearcher:
 
         try:
             parts = urllib.parse.urlsplit(url)
+            if parts.scheme not in ("http", "https"):
+                return "bad_scheme"
+            host = parts.hostname
+            if not host:
+                return "bad_url"
+            port = parts.port
         except ValueError:
             return "bad_url"
-        if parts.scheme not in ("http", "https"):
-            return "bad_scheme"
-        host = parts.hostname
-        if not host:
-            return "bad_url"
-        try:
-            for family, _type, _proto, _canon, sockaddr in socket.getaddrinfo(
-                host, None
-            ):
-                if family not in (socket.AF_INET, socket.AF_INET6):
-                    continue
-                ip = ipaddress.ip_address(sockaddr[0])
-                if (
-                    ip.is_private
-                    or ip.is_loopback
-                    or ip.is_link_local
-                    or ip.is_multicast
-                    or ip.is_reserved
-                    or ip.is_unspecified
-                ):
-                    return "private_host"
-        except OSError:
-            return "dns_error"
-        return None
+        _addresses, error = _resolve_public_addresses(host, port)
+        return error
 
     @staticmethod
     def _quote_url(url: str) -> str:
