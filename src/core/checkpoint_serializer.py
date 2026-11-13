@@ -242,6 +242,14 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             ),
             "population": agent.meta_learner.population,
             "cycle_counter": agent.meta_learner.cycle_counter,
+            "resource_recovery_cycles": agent.meta_learner.resource_recovery_cycles,
+            "resource_low_pressure_cycles": (
+                agent.meta_learner.resource_low_pressure_cycles
+            ),
+            "resource_adaptation_history": deepcopy(
+                list(agent.meta_learner.resource_adaptation_history)
+            ),
+            "last_resource_status": deepcopy(agent.meta_learner.last_resource_status),
         }
         or {},
         # NEW: Социальная клеточка
@@ -973,6 +981,23 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.meta_learner.cycle_counter = ml_state.get(
             "cycle_counter", agent.meta_learner.cycle_counter
         )
+        agent.meta_learner.resource_recovery_cycles = ml_state.get(
+            "resource_recovery_cycles", agent.meta_learner.resource_recovery_cycles
+        )
+        agent.meta_learner.resource_low_pressure_cycles = ml_state.get(
+            "resource_low_pressure_cycles",
+            agent.meta_learner.resource_low_pressure_cycles,
+        )
+        agent.meta_learner.resource_adaptation_history = deque(
+            deepcopy(ml_state.get("resource_adaptation_history", [])),
+            maxlen=agent.meta_learner.resource_adaptation_history.maxlen,
+        )
+        agent.meta_learner.last_resource_status = deepcopy(
+            ml_state.get("last_resource_status", {})
+        )
+        # Восстановленные значения должны реально действовать, а не только
+        # числиться в конфигурации MetaLearner.
+        agent.meta_learner._push_to_subsystems()
 
     # NEW: Восстанавливаем Социальную клеточку (модели собраны в фазе 1)
     if staged_social_models is not None:

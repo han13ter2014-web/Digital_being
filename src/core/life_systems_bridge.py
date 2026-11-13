@@ -1,7 +1,8 @@
 """Проводка уже созданных систем времени, метаобучения и социальной модели.
 
-Мост только передаёт реальные события основного контура. Он не выбирает
-действия, не создаёт цели и не разрешает MetaLearner менять параметры жизни.
+Мост передаёт реальные события основного контура и метрики ресурсов. Он не
+выбирает действия и не создаёт цели; MetaLearner меняет только ограниченный
+ресурсный масштаб темпа, не мутируя случайно все подсистемы.
 """
 
 from typing import Dict, Optional
@@ -29,21 +30,29 @@ def tick_continuous_time(agent, cycle: int) -> Optional[Dict]:
         return {"error": str(exc)}
 
 
-def step_meta_learning(agent) -> Optional[Dict]:
-    """Накопить fitness каждого цикла без автономной мутации конфигурации."""
+def step_meta_learning(agent, resource_status: Optional[Dict] = None) -> Optional[Dict]:
+    """Накопить fitness и адаптировать темп к реальным ресурсам хоста."""
     learner = getattr(agent, "meta_learner", None)
     if learner is None:
         return None
     try:
+        if resource_status is None:
+            from src.core.watchdog import get_watchdog
+
+            resource_status = get_watchdog().get_resource_status()
         fitness = learner._compute_fitness()
-        learner.step(fitness_signal=fitness, adapt=False)
+        learner.step(
+            fitness_signal=fitness, adapt=True, resource_status=resource_status
+        )
         return {
-            "mode": "shadow",
+            "mode": "resource_adaptive",
             "cycle_counter": learner.cycle_counter,
             "current_fitness": fitness,
             "best_fitness": (
                 learner.best_fitness if learner.best_fitness != float("-inf") else None
             ),
+            "cycle_interval_scale": learner.hyperparams["cycle_interval_scale"].value,
+            "resource_status": dict(learner.last_resource_status),
         }
     except Exception as exc:
         get_logger().log(f"[META_LEARNING] tick error: {exc}")

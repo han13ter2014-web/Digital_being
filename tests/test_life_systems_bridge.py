@@ -72,7 +72,7 @@ def test_time_tick_links_intention_prediction_and_actual_outcome():
     assert events[-1].payload["had_effect"] is True
 
 
-def test_meta_learning_main_contour_observes_without_mutating_parameters():
+def test_meta_learning_main_contour_conserves_resources_without_random_evolution():
     needs = {
         "curiosity": SimpleNamespace(current_level=0.8),
         "connection": SimpleNamespace(current_level=0.6),
@@ -86,19 +86,20 @@ def test_meta_learning_main_contour_observes_without_mutating_parameters():
     )
     agent.meta_learner = MetaLearner(agent)
     agent.meta_learner.eval_window = 2
-    config_before = agent.meta_learner._get_current_config()
     population_before = deepcopy(agent.meta_learner.population)
+    high_pressure = {"available": True, "score": 0.9}
 
-    first = step_meta_learning(agent)
-    second = step_meta_learning(agent)
+    first = step_meta_learning(agent, resource_status=high_pressure)
+    second = step_meta_learning(agent, resource_status=high_pressure)
 
-    assert first["mode"] == second["mode"] == "shadow"
+    assert first["mode"] == second["mode"] == "resource_adaptive"
     assert agent.meta_learner.cycle_counter == 2
     assert list(agent.meta_learner.fitness_history) == [
         first["current_fitness"],
         second["current_fitness"],
     ]
-    assert agent.meta_learner._get_current_config() == config_before
+    assert agent.meta_learner.hyperparams["cycle_interval_scale"].value == 4.0
+    assert agent.meta_learner.resource_adaptation_history[-1]["response"] == "conserve"
     assert agent.meta_learner.population == population_before
     assert second["best_fitness"] is not None
 
@@ -143,14 +144,14 @@ def test_checkpoint_preserves_meta_fitness_and_observed_social_history():
     assert restored.interaction_history[0]["observation"]["action"] == "social"
 
 
-def test_autonomous_tick_steps_time_and_shadow_meta_learning():
+def test_autonomous_tick_steps_time_and_resource_adaptive_meta_learning():
     agent = DigitalBeing(name="RegularLifeSystems")
     config_before = agent.meta_learner._get_current_config()
 
     report = agent.autonomous_tick()
 
     assert report["continuous_time"]["objective_time"] == 1.0
-    assert report["meta_learning"]["mode"] == "shadow"
+    assert report["meta_learning"]["mode"] == "resource_adaptive"
     assert agent.meta_learner.cycle_counter == 1
     assert len(agent.meta_learner.fitness_history) == 1
     assert agent.meta_learner._get_current_config() == config_before

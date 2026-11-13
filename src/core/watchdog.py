@@ -21,6 +21,7 @@ try:
 
     _HAS_PSUTIL = True
 except ImportError:
+    psutil = None
     _HAS_PSUTIL = False
 
 
@@ -55,6 +56,7 @@ class Watchdog:
         self._peak_rss_mb: float = 0.0
         self._current_rss_mb: float = 0.0
         self._forced_forget_count: int = 0
+        self._process = None
 
     # ============================================================
     # Цикл
@@ -106,13 +108,18 @@ class Watchdog:
     # Мониторинг ресурсов
     # ============================================================
 
+    def _get_process(self):
+        """Сохранить дескриптор, чтобы psutil видел CPU между измерениями."""
+        if self._process is None:
+            self._process = psutil.Process(os.getpid())
+        return self._process
+
     def get_rss_mb(self) -> float:
         """Возвращает RSS текущего процесса в МБ (0 если psutil недоступен)."""
         if not _HAS_PSUTIL:
             return 0.0
         try:
-            process = psutil.Process(os.getpid())
-            rss_bytes = process.memory_info().rss
+            rss_bytes = self._get_process().memory_info().rss
             rss_mb = rss_bytes / (1024 * 1024)
             self._current_rss_mb = rss_mb
             if rss_mb > self._peak_rss_mb:
@@ -126,10 +133,44 @@ class Watchdog:
         if not _HAS_PSUTIL:
             return 0.0
         try:
-            process = psutil.Process(os.getpid())
-            return float(process.cpu_percent(interval=None))
+            return float(self._get_process().cpu_percent(interval=None))
         except Exception:
             return 0.0
+
+    def get_resource_status(self) -> Dict:
+        """Разделить давление хоста и собственное потребление процесса.
+
+        Системные CPU/RSS других программ не позволяют судить, кто создал
+        нагрузку, но являются реальным условием среды. Собственные RSS, CPU и
+        медленный цикл сохраняются отдельно для последующей диагностики.
+        """
+        if not _HAS_PSUTIL or psutil is None:
+            return {"available": False, "reason": "psutil_unavailable"}
+        try:
+            host_cpu = float(psutil.cpu_percent(interval=None))
+            host_memory = float(psutil.virtual_memory().percent)
+            process_cpu = self.get_cpu_percent()
+            process_rss = self.get_rss_mb()
+            rss_ratio = process_rss / max(self.max_rss_mb, 1e-6)
+            score = max(
+                host_cpu / 100.0,
+                host_memory / 100.0,
+                process_cpu / 100.0,
+                rss_ratio,
+                1.0 if self._skip_heavy_this_cycle else 0.0,
+            )
+            return {
+                "available": True,
+                "host_cpu_percent": host_cpu,
+                "host_memory_percent": host_memory,
+                "process_cpu_percent": process_cpu,
+                "process_rss_mb": process_rss,
+                "process_rss_ratio": rss_ratio,
+                "slow_cycle": self._skip_heavy_this_cycle,
+                "score": float(min(1.0, max(0.0, score))),
+            }
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
 
     def should_force_forget(self) -> bool:
         """Решает, нужно ли принудительное забывание (RSS > max_rss_mb)."""

@@ -1410,9 +1410,8 @@ class AgentRunner:
         base = self.base_interval_sec()
 
         if self._speed_mode in ("max", "step"):
-            return 0.0
-
-        if self._speed_mode == "fast":
+            interval = 0.0
+        elif self._speed_mode == "fast":
             interval = base
         else:  # live
             energy_interval = float(self.energy_policy.current_tick_interval_sec())
@@ -1421,7 +1420,16 @@ class AgentRunner:
         ethical_throttle = float(
             getattr(LR_CONFIG, "MIN_CYCLE_INTERVAL_SEC", 0.0) or 0.0
         )
-        return max(interval, ethical_throttle)
+        learner = getattr(self.agent, "meta_learner", None)
+        hyperparams = getattr(learner, "hyperparams", {})
+        scale_param = hyperparams.get("cycle_interval_scale")
+        resource_scale = float(getattr(scale_param, "value", 1.0))
+        resource_throttle = 0.0
+        if resource_scale > 1.0:
+            # Даже лабораторный max не должен игнорировать реальную нехватку
+            # ресурсов хоста. При обычном масштабе 1 поведение не меняется.
+            resource_throttle = max(0.5, base) * resource_scale
+        return max(interval, ethical_throttle, resource_throttle)
 
     def get_speed_status(self) -> Dict:
         """Состояние темпа для окна и логов."""

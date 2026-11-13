@@ -591,6 +591,52 @@ def validate_checkpoint_state(state) -> None:
             _integer(
                 meta["cycle_counter"], "meta_learning.cycle_counter", nonnegative=True
             )
+        if "resource_recovery_cycles" in meta:
+            _integer(
+                meta["resource_recovery_cycles"],
+                "meta_learning.resource_recovery_cycles",
+            )
+            if meta["resource_recovery_cycles"] <= 0:
+                _fail(
+                    "meta_learning.resource_recovery_cycles",
+                    "expected a positive integer",
+                )
+        if "resource_low_pressure_cycles" in meta:
+            _integer(
+                meta["resource_low_pressure_cycles"],
+                "meta_learning.resource_low_pressure_cycles",
+                nonnegative=True,
+            )
+        if "resource_adaptation_history" in meta:
+            events = _list(
+                meta["resource_adaptation_history"],
+                "meta_learning.resource_adaptation_history",
+            )
+            for index, event in enumerate(events):
+                path = f"meta_learning.resource_adaptation_history[{index}]"
+                event = _dict(event, path)
+                if event.get("response") not in ("conserve", "recover"):
+                    _fail(f"{path}.response", "unknown resource response")
+                _integer(event.get("cycle"), f"{path}.cycle", nonnegative=True)
+                _numbers(event, ("pressure", "previous_scale", "new_scale"), path)
+        if "last_resource_status" in meta:
+            resource = _dict(
+                meta["last_resource_status"], "meta_learning.last_resource_status"
+            )
+            if "available" in resource and not isinstance(resource["available"], bool):
+                _fail("meta_learning.last_resource_status.available", "expected a bool")
+            _numbers(
+                resource,
+                (
+                    "score",
+                    "host_cpu_percent",
+                    "host_memory_percent",
+                    "process_cpu_percent",
+                    "process_rss_mb",
+                    "process_rss_ratio",
+                ),
+                "meta_learning.last_resource_status",
+            )
     if "social_cell" in state:
         _social(_dict(state["social_cell"], "social_cell"))
     if "motivation" in state:

@@ -44,6 +44,19 @@ class HyperParameter:
 
 
 class MetaLearner:
+    """Саморазвитие и гомеостаз в реальных условиях хоста.
+
+    Ресурсное давление — самостоятельный драйвер адаптации, а не компонент
+    абстрактного fitness. При высокой загрузке хоста или собственном росте RSS
+    существо увеличивает ``cycle_interval_scale`` и реже выполняет жизненный
+    цикл. Пока давление сохраняется, экономный режим не откатывается: общий CPU
+    может оставаться занятым внешней программой. Возврат к более активной жизни
+    происходит постепенно и только после устойчивого окна низкого давления.
+
+    Это первый контур адаптации к среде. Он не доказывает причинную эффективность
+    других гиперпараметров и не запускает их случайную мутацию в основном цикле.
+    """
+
     def __init__(self, agent):
         self.agent = agent
         self.hyperparams: Dict[str, HyperParameter] = {}
@@ -56,6 +69,12 @@ class MetaLearner:
         self.best_config: Optional[Dict] = None
         self.best_fitness = -float("inf")
         self.fitness_history: deque = deque(maxlen=50)
+        self.resource_high_threshold = 0.85
+        self.resource_low_threshold = 0.6
+        self.resource_recovery_cycles = 100
+        self.resource_low_pressure_cycles = 0
+        self.resource_adaptation_history: deque = deque(maxlen=50)
+        self.last_resource_status: Dict = {}
 
         self._register_default_hyperparams()
         self._init_population()
@@ -67,7 +86,6 @@ class MetaLearner:
     def _register_default_hyperparams(self):
         self.register("need_decay_base", 0.01, 0.001, 0.05)
         self.register("need_growth_base", 0.02, 0.005, 0.1)
-        self.register("need_coupling_strength", 0.1, 0.001, 0.5)
         self.register("ai_learning_rate", 0.05, 0.005, 0.2)
         self.register("ai_temperature", 1.0, 0.1, 3.0)
         self.register("ai_temperature_decay", 0.9995, 0.99, 0.9999)
@@ -78,8 +96,7 @@ class MetaLearner:
         self.register("retention_compression", 0.95, 0.8, 0.99)
         self.register("protension_horizon", 30.0, 5.0, 120.0)
         self.register("time_dilation_novelty", 0.8, 0.2, 2.0)
-        self.register("energy_cost_base", 1.0, 0.5, 3.0)
-        self.register("rest_recovery_rate", 0.1, 0.02, 0.3)
+        self.register("cycle_interval_scale", 1.0, 1.0, 8.0)
 
     def register(
         self,
@@ -165,25 +182,84 @@ class MetaLearner:
                 "time_dilation_novelty", HyperParameter("", 0.8, 0, 0)
             ).value
 
-    def step(self, fitness_signal: float = None, *, adapt: bool = True):
-        """Записать наблюдение; изменять параметры только при ``adapt=True``.
+    def step(
+        self,
+        fitness_signal: float = None,
+        *,
+        adapt: bool = True,
+        resource_status: Optional[Dict] = None,
+    ):
+        """Сохранить опыт и адаптировать темп к наблюдаемым ресурсам.
 
-        Основной жизненный контур вызывает shadow-режим (``adapt=False``):
-        обучающий сигнал и лучший результат сохраняются, но случайная мутация
-        работающих подсистем без решения человека не запускается.
-        Прямой вызов без нового аргумента сохраняет прежнее поведение класса.
+        ``adapt=False`` остаётся режимом наблюдения. При ``adapt=True`` основной
+        контур выполняет только ограниченную ресурсную регуляцию, а не случайную
+        эволюцию всех подсистем. Отсутствие метрик не означает ни опасность, ни
+        безопасность и потому не меняет конфигурацию.
         """
         self.cycle_counter += 1
         if fitness_signal is not None:
             self.fitness_history.append(float(fitness_signal))
+        if adapt and resource_status is not None:
+            self._adapt_to_resources(resource_status)
         if self.cycle_counter % self.eval_window == 0:
-            if adapt:
-                self._evaluate_and_evolve()
-            else:
-                current_fitness = self._compute_fitness()
-                if current_fitness > self.best_fitness:
-                    self.best_fitness = current_fitness
-                    self.best_config = self._get_current_config().copy()
+            current_fitness = self._compute_fitness()
+            if current_fitness > self.best_fitness:
+                self.best_fitness = current_fitness
+                self.best_config = self._get_current_config().copy()
+
+    def _adapt_to_resources(self, status: Dict) -> None:
+        if not isinstance(status, dict) or not status.get("available", False):
+            return
+        score = status.get("score")
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            return
+        if not np.isfinite(score) or not 0.0 <= score <= 1.0:
+            return
+        score = float(score)
+        self.last_resource_status = dict(status, score=score)
+
+        hp = self.hyperparams["cycle_interval_scale"]
+        current = float(hp.value)
+        if score >= self.resource_high_threshold:
+            self.resource_low_pressure_cycles = 0
+            if current < hp.max_val:
+                self._change_cycle_interval_scale(
+                    min(hp.max_val, max(hp.min_val, current) * 2.0),
+                    score,
+                    "conserve",
+                )
+            return
+
+        if score > self.resource_low_threshold or current <= hp.min_val:
+            self.resource_low_pressure_cycles = 0
+            return
+
+        self.resource_low_pressure_cycles += 1
+        if self.resource_low_pressure_cycles >= self.resource_recovery_cycles:
+            self._change_cycle_interval_scale(
+                max(hp.min_val, current / 2.0), score, "recover"
+            )
+            self.resource_low_pressure_cycles = 0
+
+    def _change_cycle_interval_scale(
+        self, value: float, pressure: float, response: str
+    ) -> None:
+        hp = self.hyperparams["cycle_interval_scale"]
+        previous = float(hp.value)
+        hp.value = float(np.clip(value, hp.min_val, hp.max_val))
+        hp.history.append(hp.value)
+        event = {
+            "cycle": self.cycle_counter,
+            "response": response,
+            "pressure": pressure,
+            "previous_scale": previous,
+            "new_scale": hp.value,
+        }
+        self.resource_adaptation_history.append(event)
+        logger.log(
+            f"[META_LEARNING] Resource {response}: cycle scale "
+            f"{previous:.2f} -> {hp.value:.2f}, pressure={pressure:.2f}"
+        )
 
     def _evaluate_and_evolve(self):
         current_fitness = self._compute_fitness()
@@ -324,6 +400,10 @@ class MetaLearner:
             "eval_window": self.eval_window,
             "fitness_history": list(self.fitness_history)[-10:],
             "population_diversity": self._population_diversity(),
+            "resource_status": dict(self.last_resource_status),
+            "cycle_interval_scale": self.hyperparams["cycle_interval_scale"].value,
+            "resource_low_pressure_cycles": self.resource_low_pressure_cycles,
+            "resource_adaptation_history": list(self.resource_adaptation_history)[-10:],
         }
 
     def force_exploration(self):

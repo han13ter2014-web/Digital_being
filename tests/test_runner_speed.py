@@ -89,6 +89,16 @@ def test_fast_mode_ignores_energy_dilation(runtime):
     assert runner.current_interval_sec() == 0.5
 
 
+def test_resource_pressure_scale_also_limits_max_mode(runtime):
+    agent, _, runner = runtime
+    runner.set_speed("max")
+    assert runner.current_interval_sec() == 0.0
+
+    agent.meta_learner.hyperparams["cycle_interval_scale"].value = 4.0
+
+    assert runner.current_interval_sec() == 2.0
+
+
 def test_live_mode_still_respects_energy(runtime):
     """В live усталость по-прежнему замедляет — это и есть жизнь."""
     _, _, runner = runtime

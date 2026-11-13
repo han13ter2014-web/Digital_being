@@ -102,9 +102,8 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         "auxiliary_adapters": None,
     }
 
-    # Эти системы уже принадлежат Core, но раньше только создавались.
-    # Время получает один логический такт; MetaLearner работает в shadow:
-    # fitness сохраняется, автономная мутация активных параметров запрещена.
+    # Время получает один логический такт; MetaLearner сохраняет fitness и
+    # регулирует темп по ресурсам хоста без случайной мутации всех подсистем.
     from src.core.life_systems_bridge import (
         step_meta_learning,
         tick_continuous_time,
