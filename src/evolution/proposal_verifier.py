@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,10 +44,10 @@ def verify_config_change(
     """
     spec = {"attr": attr, "value": value, "cycles": cycles}
     tmp = tempfile.mkdtemp(prefix="evolve_verify_")
-    env = dict(os.environ)
-    env[DATA_DIR_ENV] = tmp
-    env[SPEC_ENV] = json.dumps(spec, ensure_ascii=False)
     try:
+        env = dict(os.environ)
+        env[DATA_DIR_ENV] = tmp
+        env[SPEC_ENV] = json.dumps(spec, ensure_ascii=False)
         proc = subprocess.run(
             [sys.executable, "-m", "src.evolution._verify_worker"],
             cwd=project_root(),
@@ -71,6 +72,15 @@ def verify_config_change(
             "cycles": 0,
             "log_tail": f"пробу не удалось запустить: {exc}",
         }
+    except (TypeError, ValueError) as exc:
+        return {
+            "ran": False,
+            "passed": False,
+            "cycles": 0,
+            "log_tail": f"пробу не удалось подготовить: {exc}",
+        }
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     tail = (proc.stdout or "") + (proc.stderr or "")
     return {
