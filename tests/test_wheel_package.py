@@ -30,7 +30,6 @@ def test_wheel_contains_runtime_packages_and_bootstrap_resources(tmp_path):
             "pip",
             "wheel",
             "--no-deps",
-            "--no-build-isolation",
             "--wheel-dir",
             str(dist),
             str(source),
