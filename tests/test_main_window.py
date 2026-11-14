@@ -226,6 +226,14 @@ def test_status_tracks_life_state(window):
     assert win._last_life_state == "dormant"
 
 
+def test_controls_are_reserved_before_expanding_body():
+    """Нижняя панель не должна вытесняться высокой страницей «Доступы»."""
+    import inspect
+
+    source = inspect.getsource(MainWindow._build_ui)
+    assert source.index("self._build_controls(root") < source.index("body = tk.Frame")
+
+
 # ============================================================
 # Крестик: спрятать (трей) или выйти (без трея)
 # ============================================================

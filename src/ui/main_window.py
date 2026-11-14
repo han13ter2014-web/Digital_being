@@ -484,6 +484,10 @@ class MainWindow(ChatWindow):
         )
         self._state_pill.pack(side=tk.LEFT)
 
+        # Сначала резервируем нижнюю панель: иначе высокая страница
+        # «Доступы» вытесняет её за пределы окна через expand у body.
+        self._build_controls(root, self._mono_font)
+
         body = tk.Frame(root, bg=theme.BG_DEEP)
         body.pack(fill=tk.BOTH, expand=True)
 
@@ -584,8 +588,6 @@ class MainWindow(ChatWindow):
             "dialog": self._build_page_dialog(content),
         }
         self._show_page("now")
-
-        self._build_controls(root, self._mono_font)
 
     # ------------------------------------------------------------------
     # Страницы каркаса
