@@ -17,18 +17,21 @@ if str(ROOT) not in sys.path:
 from src.memory.checkpoint_verifier import verify_checkpoint_batch  # noqa: E402
 
 
-def _inventory(root: Path) -> dict:
+def _inventory(root: Path, *, excluded: set[str] | None = None) -> dict:
     files = {}
     combined = hashlib.sha256()
     total_bytes = 0
+    excluded = excluded or set()
     for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative in excluded:
+            continue
         if path.is_symlink() or not path.is_file():
             continue
         digest = hashlib.sha256()
         with path.open("rb") as handle:
             for block in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(block)
-        relative = path.relative_to(root).as_posix()
         content_hash = digest.hexdigest()
         files[relative] = content_hash
         combined.update(relative.encode("utf-8"))

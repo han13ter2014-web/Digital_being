@@ -42,12 +42,16 @@ def _summary(inventory: dict) -> dict:
     return {key: value for key, value in inventory.items() if key != "files"}
 
 
+def _active_database_sidecars(life_id: str) -> set[str]:
+    database = f"lives/{life_id}/life.sqlite3"
+    return {database + "-wal", database + "-shm"}
+
+
 def _fingerprint_without_sidecars(
     inventory: dict, data_root: Path, life_id: str,
 ) -> dict:
     """Исключить только transient WAL/SHM активной БД из сравнения манифестов."""
-    database = f"lives/{life_id}/life.sqlite3"
-    excluded = {database + "-wal", database + "-shm"}
+    excluded = _active_database_sidecars(life_id)
     files = {
         path: digest for path, digest in inventory["files"].items()
         if path not in excluded
@@ -340,7 +344,7 @@ def _preflight(
         item["source_relative_path"]: item["sha256"] for item in expected_artifacts
     })
     # Только после закрытия SQLite-соединений: пустые WAL/SHM могут исчезнуть.
-    inventory = _inventory(data_root)
+    inventory = _inventory(data_root, excluded=_active_database_sidecars(life_id))
     wal = Path(str(life_dir / "life.sqlite3") + "-wal")
     if wal.is_file() and wal.stat().st_size:
         errors.append("WAL стал непустым во время preflight; execution запрещён")
@@ -543,7 +547,7 @@ def _execute(
         else:
             os.environ["DIGITAL_BEING_DATA_DIR"] = previous_data
 
-    after_inventory = _inventory(data_root)
+    after_inventory = _inventory(data_root, excluded=_active_database_sidecars(life_id))
     changed = _changed_paths(before_inventory, after_inventory)
     database_relative = f"lives/{life_id}/life.sqlite3"
     expected_paths = {

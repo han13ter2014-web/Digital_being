@@ -8,7 +8,7 @@ import pytest
 
 tk = pytest.importorskip("tkinter")
 
-from src.ui import diary_view  # noqa: E402
+from src.ui import diary_view, i18n  # noqa: E402
 from src.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -27,6 +27,12 @@ class RecordingBus:
 
     def publish_sync(self, event, data=None, **kwargs):
         self.published.append((event, data))
+
+
+@pytest.fixture(autouse=True)
+def russian_ui(monkeypatch):
+    monkeypatch.setattr(i18n, "load_saved_language", lambda: "ru")
+    monkeypatch.setattr(i18n, "save_language", lambda language: None)
 
 
 @pytest.fixture()
@@ -88,6 +94,23 @@ def test_shell_builds_and_switches_pages(root):
     assert win._text is not None
     assert win._input_var is not None
     assert win._status_text is not None
+
+
+def test_language_switch_retranslates_static_and_empty_states(root):
+    win = _window(root)
+
+    win._set_language("English")
+    assert str(win._nav_buttons["diary"].cget("text")).endswith("Diary")
+    assert win._diary_detail.cget("text") == "Select an entry on the left."
+    assert "nodes: 0" in win._graph_counter.cget("text")
+
+    win._set_language("中文")
+    assert str(win._nav_buttons["diary"].cget("text")).endswith("日记")
+    assert win._activity_detail.cget("text") == "请选择左侧的记录。"
+
+    win._set_language("Русский")
+    assert str(win._nav_buttons["diary"].cget("text")).endswith("Дневник")
+    assert win._display_name_label.cget("text") == "Alpha"
 
 
 def test_now_screen_renders_real_snapshot(root):

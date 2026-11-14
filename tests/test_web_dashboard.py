@@ -221,6 +221,41 @@ def test_action_is_always_403_and_state_is_unchanged(dashboard):
     assert state.life_snapshot() == before
 
 
+def test_html_supports_three_languages_without_changing_event_codes(dashboard):
+    _, port, _ = dashboard
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert 'id="dialogue-send"' in body and ">Отправить</button>" in body
+    assert 'id="language-select"' in body
+    assert '<option value="ru">Русский</option>' in body
+    assert '<option value="en">English</option>' in body
+    assert '<option value="zh">中文</option>' in body
+    assert "Отправить через" not in body
+    assert "после reconnect" not in body
+    static_html = body.split("<script>")[0]
+    assert "READ-ONLY" not in static_html and "USER_MESSAGE" not in static_html
+    assert "__I18N_JSON__" not in body
+    assert "localStorage.setItem('digital-being-language',language)" in body
+    assert "item.raw.replace(item.original,t(item.original))" in body
+    assert "graphNodeLabel(n)" in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["values"]["en"]["nostalgia"] == "Nostalgia"
+    assert payload["values"]["zh"]["fear"] == "恐惧"
+    assert payload["values"]["en"]["set_own_goal"] == "own goal"
+    assert payload["texts"]["en"]["Отправить"] == "Send"
+    assert payload["texts"]["zh"]["Отправить"] == "发送"
+    assert (
+        payload["texts"]["en"]["Digital Being · обсерватория"]
+        == "Digital Being · observatory"
+    )
+    assert (
+        payload["texts"]["zh"]["Digital Being · обсерватория"]
+        == "Digital Being · 观察台"
+    )
+
+
 def test_html_exposes_only_narrow_event_based_controls(dashboard):
     _, port, _ = dashboard
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:

@@ -120,19 +120,24 @@ def test_choice_rows_include_recorded_reason_only():
             "activity": {
                 "action": "play",
                 "target": "партия",
-                "source": "activity",
+                "source": "intrinsic",
                 "reason": "интерес к партии выше",
                 "cycle": 12,
             },
-            "loop": {"last_action": "explore", "last_effect": False},
+            "loop": {"last_action": "set_own_goal", "last_effect": False},
         },
         preferences={"play": {"attempts": 5, "effects": 3, "failures": 1, "leaves": 0}},
     )
     rows = dict(view.choice_rows(snap))
     assert rows["Причина"] == "интерес к партии выше"
-    assert rows["Источник"] == "activity"
+    assert rows["Источник"] == "внутренняя мотивация"
     assert "3" in rows["Опыт способа"]
+    assert "Выбираю собственную цель" in rows["Прошлый исход"]
     assert "без эффекта" in rows["Прошлый исход"]
+
+
+def test_unknown_action_is_preserved_for_display():
+    assert view.action_phrase("new_protocol") == "new_protocol"
 
 
 def test_choice_rows_do_not_invent_alternatives():
@@ -169,8 +174,9 @@ def test_influence_rows_show_needs_and_waiting():
         intentions={"waiting": [{"target": "память"}]},
     )
     rows = dict(view.influence_rows(snap))
-    assert rows["Сильнее всего"] == "curiosity"
-    assert "curiosity" in rows["Настойчивые потребности"]
+    assert rows["Сильнее всего"] == "любопытство"
+    assert rows["Настойчивые потребности"] == "любопытство, отдых"
+    assert rows["Активные влечения"] == "исследование"
     assert rows["Ждут условий"] == "память"
 
 
@@ -186,6 +192,25 @@ def test_access_rows_show_real_switches():
     rows = dict(view.access_rows(_snapshot()))
     assert rows["Интернет-поиск"] == "включено"
     assert rows["Delamain (эффектор)"] == "выключено"
+
+
+def test_access_rows_use_russian_fallback_labels():
+    snap = _snapshot(
+        access={
+            "network": {"enabled": True},
+            "delamain": {"enabled": False},
+            "effector": {"enabled": False},
+            "presence": {"enabled": True},
+            "workspace": None,
+        }
+    )
+    rows = dict(view.access_rows(snap))
+    assert set(rows) == {
+        "Интернет-поиск",
+        "Планирование задач",
+        "Выполнение действий",
+        "Присутствие",
+    }
 
 
 # ---------------------------------------------------------------- effector
@@ -223,3 +248,14 @@ def test_pending_note_only_when_something_is_unfinished():
         effector={"available": True, "counts": {"queued": 1, "succeeded": 9}}
     )
     assert "Не завершено" in view.pending_effector_note(snap)
+
+
+def test_formatters_localize_labels_but_keep_user_content():
+    snap = _snapshot(now={"activity": {"action": "explore", "target": "память"}})
+
+    english = dict(view.activity_rows(snap, "en"))
+    chinese = dict(view.activity_rows(snap, "zh"))
+
+    assert english["Action"] == "Exploring a topic «память»"
+    assert chinese["动作"] == "探索主题 «память»"
+    assert view.now_headline(snap) == "Исследую тему «память»"

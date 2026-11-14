@@ -191,73 +191,78 @@ def build_status_snapshot(
     return snapshot
 
 
-def format_status_lines(snapshot: Dict[str, Any], width: int = 10) -> List[str]:
-    """Строки для панели показателей. Чистая функция — удобно тестировать."""
+def format_status_lines(
+    snapshot: Dict[str, Any], width: int = 10, language: str = "ru"
+) -> List[str]:
+    """Строки панели показателей; переводятся только известные подписи."""
+    from src.ui import i18n
+
+    def T(value: str) -> str:
+        return i18n.text(value, language)
+
+    def line(label: str, value: Any) -> str:
+        return f"{T(label):<12} {value}"
+
     energy = float(snapshot.get("energy") or 0.0)
     maximum = float(snapshot.get("max_energy") or 200.0)
     lines = [
-        f"Имя          {snapshot.get('name')}",
-        f"Цикл         {snapshot.get('cycle')}",
-        f"Энергия      {energy_bar(energy, maximum, width)}  "
-        f"{energy:.0f}/{maximum:.0f}",
-        f"Интеллект    {snapshot.get('intelligence')}",
-        f"Концепций    {snapshot.get('concepts')}",
-        f"Цели         {snapshot.get('goals_completed')}/"
-        f"{snapshot.get('goals_total')}",
+        line("Имя", snapshot.get("name")),
+        line("Цикл", snapshot.get("cycle")),
+        line(
+            "Энергия",
+            f"{energy_bar(energy, maximum, width)}  {energy:.0f}/{maximum:.0f}",
+        ),
+        line("Интеллект", snapshot.get("intelligence")),
+        line("Концепций", snapshot.get("concepts")),
+        line(
+            "Цели", f"{snapshot.get('goals_completed')}/{snapshot.get('goals_total')}"
+        ),
     ]
 
     uptime = snapshot.get("uptime_sec")
-    lines.append(
-        f"Живёт        {format_duration(uptime) if uptime is not None else '—'}"
-    )
-
+    lines.append(line("Живёт", format_duration(uptime) if uptime is not None else "—"))
     rss = snapshot.get("rss_mb")
-    lines.append(f"Память       {rss:.0f} МБ" if rss else "Память       —")
+    lines.append(line("Память", f"{rss:.0f} {T('МБ')}" if rss else "—"))
 
     mode = snapshot.get("speed_mode")
     interval = snapshot.get("speed_interval_sec")
     if mode:
-        label = {
-            "live": "Жизнь",
-            "fast": "Ускорение",
-            "max": "Лаборатория",
-            "step": "Шаг",
-        }.get(str(mode), str(mode))
-        time_part = f"{interval}с" if interval else ""
-        paused = " · пауза" if snapshot.get("paused") else ""
-        lines.append(f"Режим        {label} {time_part}{paused}".rstrip())
+        mode_labels = {
+            "live": T("Жизнь"),
+            "fast": T("Ускорение"),
+            "max": T("Лаборатория"),
+        }
+        label = mode_labels.get(mode) or i18n.value_label(mode, language)
+        time_part = f"{interval}{T('с')}" if interval else ""
+        paused = f" · {T('пауза')}" if snapshot.get("paused") else ""
+        lines.append(line("Режим", f"{label} {time_part}{paused}".rstrip()))
     else:
-        lines.append("Режим        —")
+        lines.append(line("Режим", "—"))
 
     life = str(snapshot.get("life_state", "unknown"))
-    life_label = {
-        "alive": "жив",
-        "dormant": "спит (семя в Яслях)",
-        "terminated": "ушёл",
-    }.get(life, life)
-    lines.append(f"Состояние    {life_label}")
-
+    life_label = (
+        T("спит (семя в Яслях)")
+        if life == "dormant"
+        else i18n.value_label(life, language)
+    )
+    lines.append(line("Состояние", life_label))
     parent = snapshot.get("parent_name")
     if parent:
-        lines.append(f"Родитель     {parent}")
+        lines.append(line("Родитель", parent))
 
-    # Контур: видно, работает ли петля «действие → результат».
     last_action = snapshot.get("last_action")
     if last_action:
-        effect = snapshot.get("last_effect")
-        mark = "✓ есть" if effect else "— нет"
-        lines.append(f"Действие     {last_action} ({mark})")
+        mark = T("✓ есть") if snapshot.get("last_effect") else T("— нет")
+        lines.append(line("Действие", f"{last_action} ({mark})"))
         stuck = snapshot.get("stuck_actions") or []
         if stuck:
-            lines.append(f"Тупики       {', '.join(stuck[:3])}")
+            lines.append(line("Тупики", ", ".join(stuck[:3])))
 
-    # Зрелость: измеряемый порог «семя стоит раздавать».
     met = snapshot.get("maturity_met")
     total = snapshot.get("maturity_total")
     if met is not None and total:
-        if snapshot.get("maturity_is_mature"):
-            lines.append(f"Зрелость     {met}/{total} ✓ можно раздавать")
-        else:
-            lines.append(f"Зрелость     {met}/{total}")
-
+        suffix = (
+            f" {T('✓ можно раздавать')}" if snapshot.get("maturity_is_mature") else ""
+        )
+        lines.append(line("Зрелость", f"{met}/{total}{suffix}"))
     return lines

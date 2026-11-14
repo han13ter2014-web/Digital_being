@@ -2,55 +2,43 @@
 
 Здесь нет Tk и нет доступа к агенту. На вход приходят только глубокие копии
 из ``build_life_snapshot``; незаписанные причины и результаты не дополняются
-догадками.
+догадками. Локализация меняет только отображаемые подписи, не исходные DTO.
 """
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Dict, List, Tuple
+
+from src.ui import i18n
 
 Row = Tuple[str, str]
 
-_ACTIONS = {
-    "play": "партия",
-    "create_draft": "творческий черновик",
-    "explore": "исследование",
-    "communicate": "общение",
-    "rest": "отдых",
-    "reflect": "размышление",
-    "wait": "ожидание",
-}
-_STATUS = {
-    "started": "начато",
-    "performed": "выполнено",
-    "denied": "отклонено",
-    "error": "ошибка",
-    "interrupted": "прервано",
-    "unobserved": "исход не наблюдался",
-}
-_RESULT = {"X": "победа", "O": "поражение", "draw": "ничья", None: "идёт"}
+
+def action_label(action: Any, language: str = "ru") -> str:
+    value = str(action or i18n.text("занятие", language))
+    if value == "play" and i18n.normalize_language(language) == "ru":
+        return "партия"
+    return i18n.value_label(value, language)
 
 
-def action_label(action: Any) -> str:
-    value = str(action or "занятие")
-    return _ACTIONS.get(value, value)
+def status_label(status: Any, language: str = "ru") -> str:
+    value = str(status or i18n.text("неизвестно", language))
+    return i18n.value_label(value, language)
 
 
-def status_label(status: Any) -> str:
-    value = str(status or "неизвестно")
-    return _STATUS.get(value, value)
-
-
-def episode_status(episode: Dict[str, Any]) -> str:
+def episode_status(episode: Dict[str, Any], language: str = "ru") -> str:
     metadata = episode.get("metadata") or {}
     if isinstance(metadata, dict) and metadata.get("status"):
-        return status_label(metadata["status"])
+        return status_label(metadata["status"], language)
     if episode.get("error"):
-        return "ошибка"
-    return "выполнено" if episode.get("ok") else "не выполнено"
+        return i18n.value_label("error", language)
+    if episode.get("ok"):
+        return i18n.value_label("performed", language)
+    return i18n.text("не выполнено", language)
 
 
-def episode_title(episode: Dict[str, Any]) -> str:
+def episode_title(episode: Dict[str, Any], language: str = "ru") -> str:
     """Короткий заголовок события только из записанных полей эпизода."""
     metadata = episode.get("metadata") or {}
     output = episode.get("output") or {}
@@ -61,7 +49,7 @@ def episode_title(episode: Dict[str, Any]) -> str:
         and output.get("text")
     ):
         return str(output["text"])
-    action = action_label(episode.get("action"))
+    action = action_label(episode.get("action"), language)
     args = episode.get("args") or {}
     target = args.get("target") if isinstance(args, dict) else None
     return f"{action} «{target}»" if target else action
@@ -91,12 +79,7 @@ def action_color_key(action: Any) -> str:
 
 
 def group_key(episode: Dict[str, Any]) -> Tuple[Any, ...]:
-    """Ключ сходства эпизодов: действие, тема, статус, исход и ошибка.
-
-    Серия узнаётся по содержанию, а не по номерам строк: окно истории
-    сдвигается с каждым тиком, и привязка к конкретным записям теряла
-    раскрытие серии.
-    """
+    """Ключ сходства эпизодов: действие, тема, статус, исход и ошибка."""
     args = episode.get("args")
     target = args.get("target") if isinstance(args, dict) else None
     metadata = episode.get("metadata")
@@ -113,12 +96,7 @@ def group_key(episode: Dict[str, Any]) -> Tuple[Any, ...]:
 def group_diary_episodes(
     episodes: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Свернуть подряд идущие одинаковые эпизоды в серии.
-
-    Одинаковость — только по записанным полям: действие, тема, статус,
-    исход и ошибка. Склеиваются только соседние записи: серия — это
-    повтор подряд, а не «похожие события за день».
-    """
+    """Свернуть подряд идущие одинаковые эпизоды в серии."""
     groups: List[Dict[str, Any]] = []
     for episode in episodes:
         key = group_key(episode)
@@ -129,26 +107,27 @@ def group_diary_episodes(
     return groups
 
 
-def episode_rows(episode: Dict[str, Any]) -> List[Row]:
+def episode_rows(episode: Dict[str, Any], language: str = "ru") -> List[Row]:
     """Детали одного эпизода для карточки дневника."""
+    T = partial(i18n.text, language=language)
     rows: List[Row] = [
-        ("Событие", episode_title(episode)),
-        ("Статус", episode_status(episode)),
+        (T("Событие"), episode_title(episode, language)),
+        (T("Статус"), episode_status(episode, language)),
     ]
     timestamp = episode.get("ts")
     if timestamp:
-        rows.append(("Время", str(timestamp)))
+        rows.append((T("Время"), str(timestamp)))
     task_id = episode.get("task_id")
     if task_id:
-        rows.append(("ID намерения", str(task_id)))
+        rows.append((T("ID намерения"), str(task_id)))
     error = episode.get("error")
     if error:
-        rows.append(("Ошибка", str(error)))
+        rows.append((T("Ошибка"), str(error)))
     output = episode.get("output")
     if isinstance(output, dict) and output:
         result = output.get("result") or output.get("status")
         if result is not None:
-            rows.append(("Результат", str(result)))
+            rows.append((T("Результат"), str(result)))
     return rows
 
 
@@ -164,52 +143,60 @@ def draft_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [draft for draft in drafts if isinstance(draft, dict)]
 
 
-_DRAFT_STATUS = {
-    "active": "продолжается",
-    "left": "оставлен",
-}
-
-
-def draft_detail(draft: Dict[str, Any]) -> List[Row]:
+def draft_detail(draft: Dict[str, Any], language: str = "ru") -> List[Row]:
     """Объяснение работы человеческими словами, без служебного хеша."""
-    theme = str(draft.get("theme") or "без названия")
+    T = partial(i18n.text, language=language)
+    theme = str(draft.get("theme") or T("без названия"))
     status = str(draft.get("status") or "active")
     revision = int(draft.get("revision", 1) or 1)
     rows: List[Row] = [
-        ("Что это", f"Творческий текстовый черновик на тему «{theme}»"),
         (
-            "О состоянии",
-            "Работа, к которой Core может вернуться и продолжить её"
-            if status == "active"
-            else "Работа оставлена; сохранённая версия остаётся в каталоге",
+            T("Что это"),
+            T("Творческий текстовый черновик на тему «{theme}»").format(theme=theme),
         ),
-        ("Состояние", _DRAFT_STATUS.get(status, status)),
-        ("Редакция", f"{revision} из 8"),
+        (
+            T("О состоянии"),
+            T("Работа, к которой Core может вернуться и продолжить её")
+            if status == "active"
+            else T("Работа оставлена; сохранённая версия остаётся в каталоге"),
+        ),
+        (
+            T("Состояние"),
+            T("продолжается")
+            if status == "active"
+            else i18n.value_label(status, language),
+        ),
+        (T("Редакция"), T("{revision} из 8").format(revision=revision)),
     ]
     if draft.get("leave_reason"):
         reason = str(draft["leave_reason"])
         if "лимит" in reason.lower():
-            reason = (
-                f"Core достиг предела в {revision} редакций и сохранил текст как есть"
-            )
-        rows.append(("Почему", reason))
+            reason = T(
+                "Core достиг предела в {revision} редакций и сохранил текст как есть"
+            ).format(revision=revision)
+        rows.append((T("Почему"), reason))
     if draft.get("sha256"):
-        rows.append(("Файл", "сохранён; отпечаток файла записан"))
+        rows.append((T("Файл"), T("сохранён; отпечаток файла записан")))
     return rows
 
 
-def game_detail(snapshot: Dict[str, Any]) -> List[Row]:
+def game_detail(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
+    T = partial(i18n.text, language=language)
     game = (snapshot.get("activities") or {}).get("game")
     if not isinstance(game, dict):
-        return [("Партия", "ещё не начиналась")]
+        return [(T("Партия"), T("ещё не начиналась"))]
     board = game.get("board")
+    result = game.get("result")
+    result_label = {"X": "победа", "O": "поражение", "draw": "ничья"}.get(
+        result, result
+    )
     rows = [
-        ("Партия", str(game.get("round", 1))),
-        ("Ходов", str(game.get("turns", 0))),
-        ("Результат", _RESULT.get(game.get("result"), "идёт")),
+        (T("Партия"), str(game.get("round", 1))),
+        (T("Ходов"), str(game.get("turns", 0))),
+        (T("Результат"), T(result_label) if result else T("идёт")),
     ]
     if isinstance(board, list) and len(board) == 9:
-        rows.append(("Поле", " ".join(str(cell) for cell in board)))
+        rows.append((T("Поле"), " ".join(str(cell) for cell in board)))
     return rows
 
 

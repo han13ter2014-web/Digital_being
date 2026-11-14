@@ -128,6 +128,19 @@ def test_forgotten_intention_is_marked_not_hidden():
     assert kinds[f"intention:{entry['id']}"] == "forgotten"
 
 
+def test_graph_translates_actions_and_statuses_only_for_display():
+    agent = _agent()
+    entry = {"id": "g" * 8, "action": "set_own_goal", "status": "started"}
+
+    graph = build_life_graph(agent, {"intentions": {"recent": [entry]}})
+
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert nodes["activity:set_own_goal"]["label"] == "собственная цель"
+    assert nodes["activity:set_own_goal"]["detail"]["действие"] == "set_own_goal"
+    assert nodes[f"intention:{entry['id']}"]["detail"]["статус"] == "started"
+    assert "activity:собственная цель" not in nodes
+
+
 # ---------------------------------------------------------------- границы
 
 

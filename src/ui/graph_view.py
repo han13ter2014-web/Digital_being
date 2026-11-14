@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.ui import life_view
+from src.ui import diary_view, life_view
 from src.ui.concept_filter import split_service_concepts
 
 MAX_NODES = 200
@@ -222,7 +222,7 @@ def build_life_graph(
             add_node(
                 activity_id,
                 "activity",
-                _ACTIVITY_LABELS.get(action, action),
+                diary_view.action_label(action),
                 0.5,
                 {"действие": action},
             )
@@ -318,17 +318,6 @@ _GROUP_RINGS = {
     "intention": (0.68, 0.78),
     "activity": (0.82, 0.90),
     "value": (0.96, 1.0),
-}
-
-# Короткие подписи занятий: в узком месте карты длинная фраза не читается.
-_ACTIVITY_LABELS = {
-    "play": "партия",
-    "create_draft": "черновик",
-    "explore": "исследование",
-    "communicate": "общение",
-    "rest": "отдых",
-    "reflect": "размышление",
-    "wait": "ожидание",
 }
 
 # Подписи длиннее не помещаются между узлами: лучше укоротить, чем рисовать кашу.

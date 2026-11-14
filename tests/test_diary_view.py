@@ -41,6 +41,12 @@ def _snapshot():
     }
 
 
+def test_action_labels_cover_core_actions_and_preserve_unknown_values():
+    assert diary_view.action_label("set_own_goal") == "собственная цель"
+    assert diary_view.action_label("web_search") == "поиск в интернете"
+    assert diary_view.action_label("new_protocol") == "new_protocol"
+
+
 def test_episode_uses_only_recorded_action_and_target():
     episode = diary_view.diary_rows(_snapshot())[0]
     assert diary_view.episode_title(episode) == "творческий черновик «тишина»"
@@ -116,3 +122,24 @@ def test_group_diary_keeps_different_outcomes_apart():
     }
     groups = diary_view.group_diary_episodes([done, failed, dict(done)])
     assert [len(group["episodes"]) for group in groups] == [1, 1, 1]
+
+
+def test_diary_localizes_service_fields_without_translating_content():
+    episode = diary_view.diary_rows(_snapshot())[0]
+
+    english = dict(diary_view.episode_rows(episode, "en"))
+    chinese = dict(diary_view.episode_rows(episode, "zh"))
+
+    assert english["Status"] == "completed"
+    assert english["Result"] == "revision 3"
+    assert chinese["状态"] == "已完成"
+    assert diary_view.episode_title(episode, "en") == "creative draft «тишина»"
+
+
+def test_game_draw_is_not_confused_with_drawing_action():
+    snapshot = _snapshot()
+    snapshot["activities"]["game"]["result"] = "draw"
+
+    assert dict(diary_view.game_detail(snapshot))["Результат"] == "ничья"
+    assert dict(diary_view.game_detail(snapshot, "en"))["Result"] == "draw"
+    assert diary_view.action_label("draw", "en") == "drawing"

@@ -38,7 +38,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from src.core.event_bus import Events
-from src.ui import diary_view, graph_view, life_view, theme
+from src.ui import diary_view, graph_view, i18n, life_view, theme
 from src.ui.chat_window import _HAS_TK, ChatWindow
 
 if _HAS_TK:
@@ -80,6 +80,10 @@ class MainWindow(ChatWindow):
         """
         super().__init__(bus, agent_name, hide_on_close=hide_on_close)
         self._enabled_controls = bool(enabled_controls)
+        self._language = i18n.load_saved_language()
+        self._language_var = None
+        self._language_menu = None
+        self._static_texts: Dict[Any, str] = {}
 
         self._status_text = None
         self._status_snapshot: Dict[str, Any] = {}
@@ -129,6 +133,8 @@ class MainWindow(ChatWindow):
         self._diary_expanded: set = set()
         self._diary_canvas = None
         self._diary_inner = None
+        self._diary_rendered_language: Optional[str] = None
+        self._activity_rendered_language: Optional[str] = None
 
         # Карточки источников в диалоге и их состояние «развёрнуто».
         self._web_cards: Dict[str, Dict[str, Any]] = {}
@@ -157,6 +163,121 @@ class MainWindow(ChatWindow):
         }
 
         self._subscribe_life_events()
+
+    # ============================================================
+    # Язык представления (DTO и содержимое событий не меняются)
+    # ============================================================
+
+    def _t(self, value: Any) -> str:
+        return i18n.text(value, self._language)
+
+    def _translate_static_text(self, value: Any) -> str:
+        raw = str(value)
+        translated = self._t(raw)
+        if translated != raw or raw in i18n.TEXTS["en"]:
+            return translated
+        # Кнопки навигации содержат непереводимый символ-marcер и подпись.
+        if "  " in raw:
+            prefix, label = raw.rsplit("  ", 1)
+            return f"{prefix}  {self._t(label)}"
+        return raw
+
+    def _translate_static_widgets(self, widget=None) -> None:
+        """Перевести только статические Label/Button, не очищая ленту диалога."""
+        if self._root is None:
+            return
+        dynamic = {
+            self._display_name_label,
+            self._state_pill,
+            self._now_headline,
+            self._now_sub,
+            self._now_activity,
+            self._now_choice,
+            self._now_influence,
+            self._access_card,
+            self._effector_card,
+            self._graph_detail,
+            self._graph_counter,
+            self._diary_detail,
+            self._activity_detail,
+            self._pause_button,
+        }
+        for child in (
+            widget.winfo_children()
+            if widget is not None
+            else self._root.winfo_children()
+        ):
+            if isinstance(child, (tk.Label, tk.Button)) and child not in dynamic:
+                if child not in self._static_texts:
+                    self._static_texts[child] = str(child.cget("text"))
+                child.configure(
+                    text=self._translate_static_text(self._static_texts[child])
+                )
+            self._translate_static_widgets(child)
+
+    def _set_language(self, display_name: str) -> None:
+        selected = next(
+            (code for code, label in i18n.LANGUAGES.items() if label == display_name),
+            i18n.normalize_language(display_name),
+        )
+        self._language = selected
+        try:
+            i18n.save_language(selected)
+        except OSError as exc:
+            logger.warning("[MainWindow] language save: %s", exc)
+            self._append_error(f"{self._t('Не удалось сохранить язык')}: {exc}")
+        self._translate_static_widgets()
+        self._apply_status(self._status_snapshot)
+        self._apply_life_data(self._life_snapshot)
+        if self._diary_selected is None and self._diary_detail is not None:
+            self._diary_detail.configure(text=self._t("Выберите запись слева."))
+        if self._activity_list is not None and self._activity_detail is not None:
+            if not self._activity_list.curselection():
+                self._activity_detail.configure(text=self._t("Выберите запись слева."))
+        self._refresh_pause_button(bool(self._status_snapshot.get("paused")))
+        self._update_graph_counter()
+        self._render_graph()
+        selected_node = next(
+            (
+                node
+                for node in self._graph_data.get("nodes") or []
+                if node.get("id") == self._graph_selected
+            ),
+            None,
+        )
+        if selected_node is not None:
+            self._show_node_detail(selected_node)
+        elif self._graph_selected is None and self._graph_detail is not None:
+            self._graph_detail.configure(
+                text=self._t(
+                    "Выберите узел на карте — покажу только то,\n"
+                    "что ядро действительно записало."
+                )
+            )
+        if self._activity_list is not None:
+            selection = self._activity_list.curselection()
+            if selection:
+                self._on_activity_select()
+
+    def _graph_node_label(self, node: Dict[str, Any]) -> str:
+        """Локализовать подпись по стабильному ID, не меняя узел графа."""
+        node_id = str(node.get("id") or "")
+        kind = str(node.get("kind") or "")
+        if kind == "activity" and node_id.startswith("activity:"):
+            return i18n.value_label(node_id.split(":", 1)[1], self._language)
+        if kind == "value" and node_id.startswith("value:"):
+            return i18n.value_label(node_id.split(":", 1)[1], self._language)
+        if kind in {"intention", "forgotten"}:
+            detail = node.get("detail") or {}
+            action = detail.get("действие")
+            if action:
+                label = life_view.action_phrase(
+                    str(action), detail.get("тема"), self._language
+                )
+                if detail.get("статус") == "started":
+                    label += f" · {self._t('сейчас')}"
+                return label
+        return str(node.get("label") or node_id)
 
     # ============================================================
     # Подписки на события жизни
@@ -232,10 +353,25 @@ class MainWindow(ChatWindow):
             from src.app.status import format_status_lines
 
             try:
+                display_snapshot = {
+                    **snapshot,
+                    "last_action": (
+                        diary_view.action_label(snapshot["last_action"], self._language)
+                        if snapshot.get("last_action")
+                        else snapshot.get("last_action")
+                    ),
+                    "stuck_actions": [
+                        diary_view.action_label(action, self._language)
+                        for action in snapshot.get("stuck_actions") or []
+                    ],
+                }
                 self._status_text.configure(state=tk.NORMAL)
                 self._status_text.delete("1.0", tk.END)
                 self._status_text.insert(
-                    tk.END, "\n".join(format_status_lines(snapshot))
+                    tk.END,
+                    "\n".join(
+                        format_status_lines(display_snapshot, language=self._language)
+                    ),
                 )
                 self._status_text.configure(state=tk.DISABLED)
             except Exception as exc:
@@ -270,7 +406,7 @@ class MainWindow(ChatWindow):
         }
         try:
             self._state_pill.configure(
-                text=life_view.life_state_label(life_state),
+                text=life_view.life_state_label(life_state, self._language),
                 fg=colors.get(str(life_state), theme.MUTED),
             )
         except Exception:
@@ -367,29 +503,33 @@ class MainWindow(ChatWindow):
                 self._handle_incoming("__name_changed__", new_name)
             if self._display_name_label is not None:
                 self._display_name_label.configure(text=self.agent_name)
-            self._now_headline.configure(text=life_view.now_headline(snap))
+            self._now_headline.configure(
+                text=life_view.now_headline(snap, self._language)
+            )
             if self._now_sub is not None:
-                self._now_sub.configure(text=life_view.body_summary(snap))
+                self._now_sub.configure(
+                    text=life_view.body_summary(snap, self._language)
+                )
             self._now_activity.configure(
-                text=self._rows_text(life_view.activity_rows(snap))
+                text=self._rows_text(life_view.activity_rows(snap, self._language))
             )
             self._now_choice.configure(
-                text=self._rows_text(life_view.choice_rows(snap))
+                text=self._rows_text(life_view.choice_rows(snap, self._language))
             )
             if self._now_influence is not None:
                 self._now_influence.configure(
-                    text=self._rows_text(life_view.influence_rows(snap))
+                    text=self._rows_text(life_view.influence_rows(snap, self._language))
                 )
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
             self._refresh_access_switches(snap)
             if self._access_card is not None:
                 self._access_card.configure(
-                    text=self._rows_text(life_view.access_rows(snap))
+                    text=self._rows_text(life_view.access_rows(snap, self._language))
                 )
             if self._effector_card is not None:
-                text = self._rows_text(life_view.effector_rows(snap))
-                note = life_view.pending_effector_note(snap)
+                text = self._rows_text(life_view.effector_rows(snap, self._language))
+                note = life_view.pending_effector_note(snap, self._language)
                 if note:
                     text = f"{text}\n{note}"
                 self._effector_card.configure(text=text)
@@ -403,7 +543,9 @@ class MainWindow(ChatWindow):
         if self._pause_button is None:
             return
         try:
-            self._pause_button.configure(text="▶ Продолжить" if paused else "⏸ Пауза")
+            self._pause_button.configure(
+                text=self._t("▶ Продолжить" if paused else "⏸ Пауза")
+            )
         except Exception:
             pass
 
@@ -483,6 +625,32 @@ class MainWindow(ChatWindow):
             pady=3,
         )
         self._state_pill.pack(side=tk.LEFT)
+        self._language_var = tk.StringVar(value=i18n.LANGUAGES[self._language])
+        self._language_menu = tk.OptionMenu(
+            header,
+            self._language_var,
+            *i18n.LANGUAGES.values(),
+            command=self._set_language,
+        )
+        self._language_menu.configure(
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            activebackground=theme.GLOW_CYAN,
+            activeforeground=theme.TEXT,
+            highlightthickness=0,
+            bd=0,
+            font=self._card_title_font,
+        )
+        self._language_menu.pack(
+            side=tk.RIGHT, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"]
+        )
+        tk.Label(
+            header,
+            text=self._t("Язык"),
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+        ).pack(side=tk.RIGHT)
 
         # Сначала резервируем нижнюю панель: иначе высокая страница
         # «Доступы» вытесняет её за пределы окна через expand у body.
@@ -588,6 +756,16 @@ class MainWindow(ChatWindow):
             "dialog": self._build_page_dialog(content),
         }
         self._show_page("now")
+        self._translate_static_widgets()
+        self._refresh_pause_button(bool(self._status_snapshot.get("paused")))
+        self._graph_detail.configure(
+            text=self._t(
+                "Выберите узел на карте — покажу только то,\n"
+                "что ядро действительно записало."
+            )
+        )
+        self._diary_detail.configure(text=self._t("Выберите запись слева."))
+        self._activity_detail.configure(text=self._t("Выберите запись слева."))
 
     # ------------------------------------------------------------------
     # Страницы каркаса
@@ -1089,14 +1267,17 @@ class MainWindow(ChatWindow):
         target = nodes.get(edge.get("target")) or {}
         kind = str(edge.get("kind") or "")
         lines = [
-            f"{source.get('label', '—')} → {target.get('label', '—')}",
-            "связь",
+            f"{self._graph_node_label(source)} → {self._graph_node_label(target)}",
+            self._t("связь"),
             "",
-            f"тип: {edge.get('label') or kind or '—'}",
-            f"основание: {self._EDGE_BASIS.get(kind, 'записано в Core')}",
+            f"{self._t('тип')}: {self._t(edge.get('label') or kind or '—')}",
+            f"{self._t('основание')}: "
+            f"{self._t(self._EDGE_BASIS.get(kind, 'записано в Core'))}",
         ]
         if kind == "association":
-            lines.append(f"вес связи: {float(edge.get('weight') or 0.0):.2f}")
+            lines.append(
+                f"{self._t('вес связи')}: {float(edge.get('weight') or 0.0):.2f}"
+            )
         self._graph_detail.configure(text="\n".join(lines))
 
     def _show_node_detail(self, node: Dict[str, Any]) -> None:
@@ -1105,21 +1286,23 @@ class MainWindow(ChatWindow):
             return
         kind = str(node.get("kind") or "")
         lines = [
-            str(node.get("label") or "—"),
-            self._NODE_TYPE_LABELS.get(kind, "узел"),
+            self._graph_node_label(node),
+            self._t(self._NODE_TYPE_LABELS.get(kind, "узел")),
             "",
         ]
         detail = node.get("detail") or {}
         for key, value in detail.items():
             if isinstance(value, bool):
-                value = "да" if value else "нет"
+                value = self._t("да") if value else self._t("нет")
             elif value is None or value == "":
                 value = "—"
-            lines.append(f"{key}: {value}")
+            elif key in {"действие", "статус"}:
+                value = i18n.value_label(value, self._language)
+            lines.append(f"{self._t(key)}: {value}")
         if not detail:
-            lines.append("Подробностей ядро пока не записало.")
+            lines.append(self._t("Подробностей ядро пока не записало."))
         elif kind == "concept":
-            lines.extend(["", "уверенность — мера доверия модели, а не факт."])
+            lines.extend(["", self._t("уверенность — мера доверия модели, а не факт.")])
         self._graph_detail.configure(text="\n".join(lines))
 
     def _visible_nodes(self) -> List[Dict[str, Any]]:
@@ -1147,8 +1330,10 @@ class MainWindow(ChatWindow):
                 canvas.create_text(
                     width / 2,
                     height / 2,
-                    text="Пока нечего показать: ядро ещё не накопило\n"
-                    "знаний, намерений и занятий для карты.",
+                    text=self._t(
+                        "Пока нечего показать: ядро ещё не накопило\n"
+                        "знаний, намерений и занятий для карты."
+                    ),
                     fill=theme.MUTED,
                     font=self._ui_font,
                     width=max(160, width - 80),
@@ -1224,7 +1409,7 @@ class MainWindow(ChatWindow):
                 canvas.create_text(
                     label_x,
                     label_y,
-                    text=graph_view.short_label(node.get("label")),
+                    text=graph_view.short_label(self._graph_node_label(node)),
                     anchor=anchor,
                     fill=theme.MUTED if node.get("kind") == "forgotten" else theme.TEXT,
                     font=self._ui_font,
@@ -1240,24 +1425,27 @@ class MainWindow(ChatWindow):
         nodes = self._graph_data.get("nodes") or []
         edges = self._graph_data.get("edges") or []
         if self._graph_filter is None:
-            text = f"узлов: {len(nodes)} · связей: {len(edges)}"
+            text = self._t("узлов: {nodes} · связей: {edges}").format(
+                nodes=len(nodes), edges=len(edges)
+            )
         else:
             shown = self._visible_nodes()
             labels = sorted(
-                self._NODE_TYPE_LABELS.get(str(kind), str(kind))
+                self._t(self._NODE_TYPE_LABELS.get(str(kind), str(kind)))
                 for kind in self._graph_filter
             )
-            text = (
-                f"узлов: {len(shown)} из {len(nodes)}"
-                f" · фильтр: {' + '.join(labels)}"
+            text = self._t("узлов: {shown} из {total} · фильтр: {filters}").format(
+                shown=len(shown), total=len(nodes), filters=" + ".join(labels)
             )
         hidden = int(self._graph_data.get("hidden_service") or 0)
         if hidden > 0:
             # Узкая колонка подробностей: счётчик скрытых записей
             # переносим на отдельную строку, иначе он обрезается.
-            text += f"\nслужебных записей скрыто: {hidden}"
+            text += "\n" + self._t("служебных записей скрыто: {count}").format(
+                count=hidden
+            )
         if self._graph_data.get("truncated"):
-            text += "\nпоказаны не все"
+            text += "\n" + self._t("показаны не все")
         try:
             self._graph_counter.configure(text=text)
         except Exception:
@@ -1418,10 +1606,14 @@ class MainWindow(ChatWindow):
         if self._diary_inner is None:
             return
         entries = diary_view.diary_rows(snapshot)
-        if entries == self._diary_entries:
+        if (
+            entries == self._diary_entries
+            and self._diary_rendered_language == self._language
+        ):
             # Снимок приходит дважды в секунду: без этой проверки список
             # пересобирается, моргает и сбрасывает раскрытие серий.
             return
+        self._diary_rendered_language = self._language
         selected_episode = None
         if self._diary_selected is not None and 0 <= self._diary_selected < len(
             self._diary_rows_view
@@ -1476,14 +1668,14 @@ class MainWindow(ChatWindow):
         """Пустой дневник — явное состояние, а не пустая серость."""
         tk.Label(
             self._diary_inner,
-            text="Записей пока нет",
+            text=self._t("Записей пока нет"),
             font=self._ui_font,
             bg=theme.BG_CENTER,
             fg=theme.MUTED,
         ).pack(pady=(theme.SPACING["lg"], theme.SPACING["xs"]))
         tk.Label(
             self._diary_inner,
-            text="здесь появятся события,\nкоторые ядро записало в дневник",
+            text=self._t("здесь появятся события,\nкоторые ядро записало в дневник"),
             font=self._card_title_font,
             bg=theme.BG_CENTER,
             fg=theme.DIMMED,
@@ -1500,7 +1692,7 @@ class MainWindow(ChatWindow):
         group_key: Any = None,
     ) -> None:
         """Одна строка дневника: время, плашка действия, тема и исход."""
-        title = diary_view.episode_title(episode)
+        title = diary_view.episode_title(episode, self._language)
         row = tk.Frame(
             self._diary_inner, bg=theme.BG_CENTER, highlightthickness=0, bd=0
         )
@@ -1516,7 +1708,7 @@ class MainWindow(ChatWindow):
         ).pack(side=tk.LEFT)
         pill = tk.Label(
             header,
-            text=diary_view.action_label(episode.get("action")),
+            text=diary_view.action_label(episode.get("action"), self._language),
             font=self._card_title_font,
             bg=theme.BG_CENTER,
             fg=self._DIARY_COLORS.get(
@@ -1529,7 +1721,7 @@ class MainWindow(ChatWindow):
         if group_count > 1:
             tk.Label(
                 header,
-                text=f"×{group_count} · показать",
+                text=self._t("×{count} · показать").format(count=group_count),
                 font=self._card_title_font,
                 bg=theme.BG_CENTER,
                 fg=theme.CYAN,
@@ -1538,7 +1730,7 @@ class MainWindow(ChatWindow):
             # Головная строка развёрнутой серии: явная кнопка «свернуть».
             collapse_link = tk.Label(
                 header,
-                text=f"×{group_size} · свернуть",
+                text=self._t("×{count} · свернуть").format(count=group_size),
                 font=self._card_title_font,
                 bg=theme.BG_CENTER,
                 fg=theme.CYAN,
@@ -1557,7 +1749,11 @@ class MainWindow(ChatWindow):
         error = episode.get("error")
         tk.Label(
             row,
-            text=str(error) if error else diary_view.episode_status(episode),
+            text=(
+                str(error)
+                if error
+                else diary_view.episode_status(episode, self._language)
+            ),
             font=self._card_title_font,
             bg=theme.BG_CENTER,
             fg=theme.DANGER if error else theme.MUTED,
@@ -1616,7 +1812,9 @@ class MainWindow(ChatWindow):
                 self._highlight_diary_row(index)
                 if self._diary_detail is not None:
                     self._diary_detail.configure(
-                        text=diary_view.rows_text(diary_view.episode_rows(episode))
+                        text=diary_view.rows_text(
+                            diary_view.episode_rows(episode, self._language)
+                        )
                     )
                 return
 
@@ -1631,7 +1829,9 @@ class MainWindow(ChatWindow):
         self._highlight_diary_row(index)
         if self._diary_detail is not None:
             self._diary_detail.configure(
-                text=diary_view.rows_text(diary_view.episode_rows(view_row["episode"]))
+                text=diary_view.rows_text(
+                    diary_view.episode_rows(view_row["episode"], self._language)
+                )
             )
 
     def _highlight_diary_row(self, index: int) -> None:
@@ -1663,22 +1863,34 @@ class MainWindow(ChatWindow):
         drafts = diary_view.draft_rows(snapshot)
         game = (snapshot.get("activities") or {}).get("game")
         game = game if isinstance(game, dict) else None
-        if drafts == self._activity_entries and game == self._activity_game:
+        if (
+            drafts == self._activity_entries
+            and game == self._activity_game
+            and self._activity_rendered_language == self._language
+        ):
             return
+        selection = self._activity_list.curselection()
+        self._activity_rendered_language = self._language
         self._activity_entries = drafts
         self._activity_list.delete(0, tk.END)
         for draft in self._activity_entries:
             self._activity_list.insert(
-                tk.END, f"Черновик · {draft.get('theme', 'без темы')}"
+                tk.END,
+                self._t("Черновик · {theme}").format(
+                    theme=draft.get("theme") or self._t("без темы")
+                ),
             )
         self._activity_game = game
         if self._activity_game is not None:
-            self._activity_list.insert(tk.END, "Партия · крестики-нолики")
+            self._activity_list.insert(tk.END, self._t("Партия · крестики-нолики"))
         if not self._activity_entries and self._activity_game is None:
-            self._activity_list.insert(tk.END, "Занятий пока нет")
+            self._activity_list.insert(tk.END, self._t("Занятий пока нет"))
             self._activity_list.configure(state=tk.DISABLED)
         else:
             self._activity_list.configure(state=tk.NORMAL)
+            if selection:
+                index = min(selection[0], self._activity_list.size() - 1)
+                self._activity_list.selection_set(index)
 
     def _on_activity_select(self, _event=None):
         if self._activity_detail is None:
@@ -1688,9 +1900,11 @@ class MainWindow(ChatWindow):
             return
         index = selection[0]
         if index < len(self._activity_entries):
-            rows = diary_view.draft_detail(self._activity_entries[index])
+            rows = diary_view.draft_detail(
+                self._activity_entries[index], self._language
+            )
         elif self._activity_game is not None and index == len(self._activity_entries):
-            rows = diary_view.game_detail(self._life_snapshot)
+            rows = diary_view.game_detail(self._life_snapshot, self._language)
         else:
             return
         self._activity_detail.configure(text=diary_view.rows_text(rows))
@@ -2031,19 +2245,22 @@ class MainWindow(ChatWindow):
         paused = bool(self._status_snapshot.get("paused"))
         event = Events.RESUME_REQUESTED if paused else Events.PAUSE_REQUESTED
         self._publish(event, {})
-        self._append_system("Возобновляю жизнь." if paused else "Ставлю на паузу.")
+        self._append_system(
+            self._t("Возобновляю жизнь." if paused else "Ставлю на паузу.")
+        )
 
     def _action_set_speed(self, mode: str) -> None:
         self._publish(Events.SPEED_CHANGED, {"mode": mode})
-        self._append_system(f"Темп жизни: {SPEED_LABELS.get(mode, mode)}.")
+        label = self._t(SPEED_LABELS.get(mode, mode))
+        self._append_system(self._t("Темп жизни: {mode}.").format(mode=label))
 
     def _action_step(self) -> None:
         self._publish(Events.STEP_REQUESTED, {})
-        self._append_system("Один цикл по кнопке «Шаг».")
+        self._append_system(self._t("Один цикл по кнопке «Шаг»."))
 
     def _action_save(self) -> None:
         self._publish(Events.SAVE_REQUESTED, {})
-        self._append_system("Прошу сохранить состояние.")
+        self._append_system(self._t("Прошу сохранить состояние."))
 
     def _action_wake(self) -> None:
         self._publish(Events.LIFE_WAKE, {})
@@ -2071,7 +2288,11 @@ class MainWindow(ChatWindow):
             self.bus.publish_sync(event, payload, source="main_window")
         except Exception as exc:
             logger.warning("[MainWindow] publish %s: %s", event, exc)
-            self._append_error(f"Не удалось передать событие {event}: {exc}")
+            self._append_error(
+                self._t("Не удалось передать событие {event}: {error}").format(
+                    event=event, error=exc
+                )
+            )
 
     # ============================================================
     # Подтверждение ухода
@@ -2086,12 +2307,14 @@ class MainWindow(ChatWindow):
         self._life_prompt = data
         self._life_deadline = time.time() + cooldown if cooldown else None
 
+        request_kind = self._t("сон" if kind == "dream" else "уход без семени")
+        instructions = self._t(
+            "Чтобы подтвердить, подождите {seconds} с и введите точно:"
+        ).format(seconds=f"{cooldown:.0f}")
         self._append_life(
-            f"ЗАПРОС: {'сон' if kind == 'dream' else 'уход без семени'}\n"
-            f"{description}\n\n"
-            f"Чтобы подтвердить, подождите {cooldown:.0f} с и введите "
-            f"точно:\n    {phrase}\n"
-            f"Или нажмите «Отменить запрос»."
+            f"{self._t('ЗАПРОС: {kind}').format(kind=request_kind)}\n"
+            f"{description}\n\n{instructions}\n    {phrase}\n"
+            f"{self._t('Или нажмите «Отменить запрос».')}"
         )
         if self._cancel_life_button is not None:
             self._cancel_life_button.pack(side=tk.LEFT, padx=3, pady=6)
@@ -2105,7 +2328,9 @@ class MainWindow(ChatWindow):
             self._clear_life_prompt()
         else:
             # Отказ — не ошибка программы: показываем спокойно.
-            self._append_system(f"Уход не выполнен: {message}")
+            self._append_system(
+                self._t("Уход не выполнен: {message}").format(message=message)
+            )
 
     def _clear_life_prompt(self) -> None:
         self._life_prompt = None
@@ -2139,7 +2364,7 @@ class MainWindow(ChatWindow):
             return
         remaining = self._life_deadline - time.time()
         if remaining <= 0:
-            self._append_system("Пауза выдержана. Введите фразу в поле ниже.")
+            self._append_system(self._t("Пауза выдержана. Введите фразу в поле ниже."))
             self._life_deadline = None
             return
         self._life_tick_job = self._root.after(1000, self._life_tick)
@@ -2177,7 +2402,11 @@ class MainWindow(ChatWindow):
 
         if self._life_deadline is not None and time.time() < self._life_deadline:
             remaining = self._life_deadline - time.time()
-            self._append_system(f"Рано: подождите ещё {remaining:.0f} с.")
+            self._append_system(
+                self._t("Рано: подождите ещё {seconds} с.").format(
+                    seconds=f"{remaining:.0f}"
+                )
+            )
             return True
 
         self._append_user(text)

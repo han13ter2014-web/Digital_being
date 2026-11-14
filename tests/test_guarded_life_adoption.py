@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -20,7 +21,9 @@ def _hash(path: Path) -> str:
 
 
 def _schema(path: Path):
-    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+    with closing(
+        sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    ) as connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         tables = {
             row[0]
@@ -52,7 +55,7 @@ def _life(tmp_path: Path):
         "goals": [{"id": "goal-1", "title": "Сохраниться"}],
     }
     snapshot_id = store.save(state, life_id, 7, saved_at="2026-11-11T00:00:00+00:00")
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         connection.execute(
             "CREATE TABLE meta("
             "key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
@@ -236,11 +239,33 @@ def test_empty_active_database_sidecars_do_not_invalidate_manifest(tmp_path, cap
     assert report["unexpected_changed_paths"] == []
 
 
+def test_active_sidecar_may_disappear_before_inventory_read(
+    tmp_path, monkeypatch, capsys
+):
+    data, life_id, backup = _life(tmp_path)
+    database = data / "lives" / life_id / "life.sqlite3"
+    Path(str(database) + "-wal").write_bytes(b"")
+    shm = Path(str(database) + "-shm")
+    if not shm.exists():
+        shm.write_bytes(b"")
+    original_open = Path.open
+
+    def remove_before_read(path, *args, **kwargs):
+        if path == shm:
+            raise FileNotFoundError(path)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", remove_before_read)
+
+    _dry_run(tmp_path, data, life_id, backup)
+    capsys.readouterr()
+
+
 def test_nonempty_wal_after_dry_run_blocks_execution(tmp_path, capsys):
     data, life_id, backup = _life(tmp_path)
     manifest, _report, digest = _dry_run(tmp_path, data, life_id, backup)
     database = data / "lives" / life_id / "life.sqlite3"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA wal_autocheckpoint=0")
         connection.execute(
@@ -318,7 +343,7 @@ def test_existing_target_and_invalid_proposal_fail_dry_run_without_migration(tmp
 def test_nonempty_wal_blocks_dry_run(tmp_path):
     data, life_id, backup = _life(tmp_path)
     database = data / "lives" / life_id / "life.sqlite3"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA wal_autocheckpoint=0")
         connection.execute(

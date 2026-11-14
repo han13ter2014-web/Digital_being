@@ -227,3 +227,14 @@ def test_status_lines_mark_mature_agent():
     snapshot["maturity_is_mature"] = True
     text = "\n".join(format_status_lines(snapshot))
     assert "можно раздавать" in text
+
+
+def test_status_lines_support_english_and_chinese():
+    snapshot = build_status_snapshot(FakeAgent(), None)
+
+    english = "\n".join(format_status_lines(snapshot, language="en"))
+    chinese = "\n".join(format_status_lines(snapshot, language="zh"))
+
+    assert "Name" in english and "Cycle" in english
+    assert "名称" in chinese and "周期" in chinese
+    assert "Alpha" in english and "Alpha" in chinese

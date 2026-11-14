@@ -41,7 +41,9 @@ class RecordingBus:
 
 
 @pytest.fixture()
-def window():
+def window(monkeypatch):
+    monkeypatch.setattr("src.ui.main_window.i18n.load_saved_language", lambda: "ru")
+    monkeypatch.setattr("src.ui.main_window.i18n.save_language", lambda language: None)
     bus = RecordingBus()
     win = MainWindow(bus, "Alpha")
     return win, bus
@@ -258,3 +260,28 @@ def test_close_shuts_down_without_tray():
 
     assert bus.last(Events.SHUTDOWN_REQUESTED) == {}
     assert win._poll_running is False
+
+
+def test_language_switch_changes_only_display_and_saves_choice(window, monkeypatch):
+    win, bus = window
+    saved = []
+    monkeypatch.setattr("src.ui.main_window.i18n.save_language", saved.append)
+    node = {
+        "id": "intention:1",
+        "kind": "intention",
+        "label": "Исследую тему «память» · сейчас",
+        "detail": {"действие": "explore", "тема": "память", "статус": "started"},
+    }
+
+    win._set_language("English")
+
+    assert win._language == "en"
+    assert saved == ["en"]
+    assert win._t("Дневник") == "Diary"
+    assert win._graph_node_label(node) == "Exploring a topic «память» · now"
+    assert node["label"] == "Исследую тему «память» · сейчас"
+    assert bus.published == []
+
+    win._set_language("中文")
+    assert win._t("Дневник") == "日记"
+    assert win._graph_node_label(node) == "探索主题 «память» · 现在"

@@ -1,5 +1,6 @@
 """One-to-many сверка одного legacy cycle и нескольких SQL snapshots."""
 
+from contextlib import closing
 import hashlib
 import json
 from uuid import uuid4
@@ -47,7 +48,7 @@ def _case(tmp_path):
     (checkpoints / f"{life_id}_cycle_10553.json").write_text(
         json.dumps(states[0]), encoding="utf-8"
     )
-    with database.connect(readonly=True) as connection:
+    with closing(database.connect(readonly=True)) as connection:
         root = json.loads(
             connection.execute(
                 "SELECT manifest FROM snapshots WHERE id=?", (snapshot_ids[0],)
@@ -62,7 +63,7 @@ def _case(tmp_path):
             (json.dumps({str(snapshot_ids[0]): root}),),
         )
     # Подготовка тестовой базы завершена: read-only verifier допускает только пустой WAL.
-    with database.connect() as connection:
+    with closing(database.connect()) as connection:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return data, life_id, states, snapshot_ids
 
