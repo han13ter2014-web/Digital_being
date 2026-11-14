@@ -8,6 +8,7 @@ from src.cognition.activity_goals import active_goal_candidate, attach_activity
 from src.core.agent import DigitalBeing
 from src.core.subsystems.goal_manager import GoalSubsystem
 from src.core.world_delta import WorldDelta
+from src.motivation.goal_memory import format_goal_outcome
 
 
 @pytest.fixture()
@@ -311,3 +312,61 @@ def test_agent_failure_and_cancellation_reach_current_motivation(agent, outcome)
     assert entry["status"] == outcome
     assert agent.complete_goal(goal_id) == 0
     assert motivation.goal_summary["achieved"] == 0
+
+
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+def test_ingest_blocks_terminal_repeat_but_accepts_reasoned_retry(agent, outcome):
+    title = f"Понять: повтор после {outcome}"
+    goal_id = agent.set_goal(title, activate=True)
+    if outcome == "completed":
+        agent.complete_goal(goal_id)
+    elif outcome == "failed":
+        agent.fail_goal(goal_id, "проверенная неудача")
+    else:
+        agent.cancel_goal(goal_id, "проверенная отмена")
+    before = len(agent.goals)
+    candidate = {"title": title, "source": "need", "need": "curiosity"}
+
+    agent._ingest_motivation_goals([candidate])
+    assert len(agent.goals) == before
+
+    retry = {
+        **candidate,
+        "retry_reason": "Получены принципиально новые свидетельства",
+    }
+    agent._ingest_motivation_goals([retry])
+    assert len(agent.goals) == before + 1
+    assert agent.goals[-1]["motivation_origin"]["retry_reason"] == (
+        "Получены принципиально новые свидетельства"
+    )
+
+
+def test_ingest_does_not_retry_live_goal_even_with_reason(agent):
+    title = "Понять: текущую работу"
+    agent.set_goal(title, activate=True)
+    before = len(agent.goals)
+
+    agent._ingest_motivation_goals(
+        [{"title": title, "retry_reason": "Дополнительная причина"}]
+    )
+
+    assert len(agent.goals) == before
+
+
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+def test_ingest_uses_consolidated_outcome_without_current_goal(agent, outcome):
+    title = f"Понять: старую цель {outcome}"
+    agent.long_term_memory.store(
+        content=format_goal_outcome({"title": title}, outcome),
+        importance=0.9,
+        context="goal_outcome:old",
+        memory_type="episodic",
+    )
+    agent.goals = []
+    agent.goal_subsystem.goals = agent.goals
+    agent.active_goal = None
+    agent.goal_subsystem.active_goal = None
+
+    agent._ingest_motivation_goals([{"title": title}])
+
+    assert agent.goals == []

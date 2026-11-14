@@ -48,20 +48,12 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
     """
     if not new_goals:
         return
-    from src.cognition.activity_goals import attach_activity, goal_work_key
+    from src.cognition.activity_goals import attach_activity
+    from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
 
-    existing_titles = {
-        str(g.get("title")).casefold() for g in self.goals if g.get("title")
-    }
-    existing_work = {goal_work_key(g) for g in self.goals}
     for g in new_goals:
         title = str(g.get("title") or "").strip()
-        work_key = goal_work_key(g)
-        if (
-            not title
-            or title.casefold() in existing_titles
-            or work_key in existing_work
-        ):
+        if not title or is_automatic_goal_repeat_blocked(self, g):
             continue
         try:
             gid = self.set_goal(
@@ -73,8 +65,6 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
             # Сохраняем его и в кандидате, и в записи мотивационной истории.
             self.motivation_system.bind_goal(g, gid)
             attach_activity(self, gid, g)
-            existing_titles.add(title.casefold())
-            existing_work.add(work_key)
             get_logger().log(f"[MOTIVATION] Goal ingested: {title} (id={gid})")
         except Exception as e:
             get_logger().log(f"[MOTIVATION] Goal ingestion failed: {e}")

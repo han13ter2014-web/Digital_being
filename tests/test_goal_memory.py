@@ -6,7 +6,12 @@ from src.core.checkpoint_validation import validate_checkpoint_state
 from src.core.internal_motivation import InternalMotivation
 from src.core.motivation.unified_motivation import UnifiedMotivationSystem
 from src.core.subsystems.goal_manager import GoalSubsystem
+from src.core.subsystems.motivation_controller import MotivationController
 from src.core.subsystems.sleep_cycle import SleepCycle
+from src.motivation.goal_memory import (
+    format_goal_outcome,
+    is_automatic_goal_repeat_blocked,
+)
 from src.motivation.needs_system import InternalMotivationSystem
 
 
@@ -452,3 +457,116 @@ def test_goal_outcome_consolidation_retries_failed_write():
     assert "ltm_trace_id" not in subsystem.goals[0]
     assert sleep.sleep(2)["goal_outcomes_consolidated"] == 1
     assert subsystem.goals[0]["ltm_trace_id"] == "goal-memory-1"
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_automatic_terminal_goal_repeat_requires_new_reason(status):
+    agent = GoalAgent()
+    agent.goals = [
+        {"id": 1, "title": "Понять: память", "status": status},
+    ]
+
+    assert is_automatic_goal_repeat_blocked(agent, {"title": "  Понять:   память  "})
+    assert not is_automatic_goal_repeat_blocked(
+        agent,
+        {
+            "title": "Понять: память",
+            "retry_reason": "Появились новые наблюдения",
+        },
+    )
+
+
+def test_automatic_live_goal_repeat_is_blocked_even_with_new_reason():
+    agent = GoalAgent()
+    agent.goals = [{"id": 1, "title": "Понять: память", "status": "active"}]
+
+    assert is_automatic_goal_repeat_blocked(
+        agent,
+        {"title": "Понять: память", "retry_reason": "Новая причина"},
+    )
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_automatic_goal_repeat_uses_ltm_after_current_history_is_gone(status):
+    memory = RecordingLongTermMemory()
+    title = "Понять: долговременную память"
+    memory.store(
+        content=format_goal_outcome({"title": title}, status),
+        importance=0.9,
+        context="goal_outcome:1",
+        memory_type="episodic",
+    )
+    memory.recall = lambda *_args, **_kwargs: memory.stored
+    agent = GoalAgent()
+    agent.long_term_memory = memory
+
+    assert is_automatic_goal_repeat_blocked(agent, {"title": title.casefold()})
+    assert not is_automatic_goal_repeat_blocked(agent, {"title": "Понять: другую тему"})
+    assert not is_automatic_goal_repeat_blocked(
+        agent,
+        {"title": title, "retry_reason": "Изменились условия"},
+    )
+
+
+def test_intrinsic_goal_repeat_is_blocked_and_reasoned_retry_is_recorded():
+    agent = GoalAgent()
+    system = InternalMotivation(agent)
+    goal = {
+        "title": "Понять: память",
+        "priority": 0.8,
+        "urgency": 0.7,
+        "context": "тестовое происхождение",
+    }
+    need = system.needs["curiosity"]
+
+    assert system._set_intrinsic_goal(goal, need) is True
+    agent.goals[0]["status"] = "failed"
+    agent.active_goal = None
+    generated_before = system.goal_summary["generated"]
+
+    assert system._set_intrinsic_goal(goal, need) is False
+    assert system.goal_summary["generated"] == generated_before
+
+    retry = {**goal, "retry_reason": "Найден новый способ проверки"}
+    assert system._set_intrinsic_goal(retry, need) is True
+    assert len(agent.goals) == 2
+    assert agent.goals[-1]["retry_reason"] == "Найден новый способ проверки"
+    assert system.goal_summary["generated"] == generated_before + 1
+
+
+def test_legacy_motivation_controller_uses_same_repeat_rule():
+    class LegacySystem:
+        candidates = []
+
+        def time_progression(self):
+            pass
+
+        def get_motivation_profile(self):
+            return {}
+
+        def generate_motivated_goals(self, _context):
+            return [dict(candidate) for candidate in self.candidates]
+
+        def bind_goal(self, _goal, _goal_id):
+            pass
+
+    controller = MotivationController("LegacyRepeat")
+    legacy_system = LegacySystem()
+    controller._system = legacy_system
+    controller._available = True
+    subsystem = GoalSubsystem("LegacyRepeat")
+    subsystem.goals = [
+        {"id": 1, "title": "Понять: память", "status": "cancelled"},
+    ]
+    controller.attach_goal_subsystem(subsystem)
+    candidate = {"title": "Понять: память", "drive": "curiosity"}
+
+    legacy_system.candidates = [candidate]
+    assert controller.tick()["new_goals"] == []
+    assert len(subsystem.goals) == 1
+
+    retry = {**candidate, "retry_reason": "Новые обстоятельства"}
+    legacy_system.candidates = [retry]
+    assert controller.tick()["new_goals"] == [retry]
+    assert len(subsystem.goals) == 2
+    assert subsystem.goals[-1]["retry_reason"] == "Новые обстоятельства"

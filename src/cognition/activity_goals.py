@@ -80,6 +80,7 @@ def attach_activity(agent, goal_id, generated):
                 "action_hint",
                 "type",
                 "metadata",
+                "retry_reason",
             )
             if key in generated
         }

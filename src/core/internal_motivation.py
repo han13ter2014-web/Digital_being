@@ -280,8 +280,7 @@ class InternalMotivation:
         top_need = pressing_needs[0]
 
         goal = self._generate_goal_for_need(top_need)
-        if goal:
-            self._set_intrinsic_goal(goal, top_need)
+        if goal and self._set_intrinsic_goal(goal, top_need):
             self.last_generated_cycle = self.agent.cycle_count
 
     def _generate_goal_for_need(self, need: Need) -> Optional[dict]:
@@ -383,6 +382,12 @@ class InternalMotivation:
         }
 
     def _set_intrinsic_goal(self, goal: dict, need: Need):
+        from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+
+        if is_automatic_goal_repeat_blocked(self.agent, goal):
+            logger.log(f"[MOTIVATION] Повтор цели пропущен: {goal['title']}")
+            return False
+
         metadata = {
             "type": "intrinsic",
             "source": "intrinsic",
@@ -392,6 +397,9 @@ class InternalMotivation:
             "context": goal["context"],
             "created_at_cycle": self.agent.cycle_count,
         }
+        retry_reason = str(goal.get("retry_reason") or "").strip()
+        if retry_reason:
+            metadata["retry_reason"] = retry_reason
 
         goal_id = None
         if hasattr(self.agent, "set_goal"):
@@ -427,6 +435,7 @@ class InternalMotivation:
         count_goal(self.goal_summary, entry, "generated", needs=self.needs)
         if goal_id is not None:
             self._pending_goal_origins[str(goal_id)] = deepcopy(entry)
+        return True
 
     def on_action_result(self, action: str, success: bool, valence: float):
         for need in self.needs.values():
@@ -576,8 +585,7 @@ class InternalMotivation:
             need = max(pressing, key=lambda n: n.urgency())
 
         goal = self._generate_goal_for_need(need)
-        if goal:
-            self._set_intrinsic_goal(goal, need)
+        if goal and self._set_intrinsic_goal(goal, need):
             self.last_generated_cycle = self.agent.cycle_count
             return goal
         return None

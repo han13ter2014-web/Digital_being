@@ -781,6 +781,8 @@ def _act_set_own_goal_impl(self) -> Dict:
     действие ничего не делало. Цель — наблюдаемое изменение: она
     появляется в списке и начинает влиять на жизнь.
     """
+    from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+
     motivation = getattr(self, "motivation_system", None)
     play_need = motivation.needs.get("play") if motivation is not None else None
     if play_need is not None and play_need.is_pressing():
@@ -791,9 +793,8 @@ def _act_set_own_goal_impl(self) -> Dict:
             "draw": "Нарисовать картину",
             "compose_music": "Сочинить мелодию",
         }[activity]
-        if any(
-            g.get("title") == title and g.get("status") != "completed"
-            for g in self.goals
+        if is_automatic_goal_repeat_blocked(
+            self, {"title": title, "action_hint": activity}
         ):
             return {"text": f"Ответ: дело '{title}' уже есть"}
         goal_id = self.set_goal(title, difficulty=1)
@@ -809,17 +810,11 @@ def _act_set_own_goal_impl(self) -> Dict:
         return {"text": "Ответ: свою цель ставить не из чего"}
 
     title = f"Понять: {target}"
-    # Не дублируем уже существующую цель: сравнение по
-    # нормализованному тексту (нижний регистр, сжатые пробелы) —
-    # «Понять:  истина» и «Понять: истина» — одна цель.
-    normalized_title = " ".join(title.lower().split())
-    for goal in getattr(self, "goals", []) or []:
-        existing = " ".join(str(goal.get("title", "")).lower().split())
-        if existing == normalized_title:
-            return {
-                "target": target,
-                "text": f"Ответ: цель '{title}' уже есть",
-            }
+    if is_automatic_goal_repeat_blocked(self, {"title": title}):
+        return {
+            "target": target,
+            "text": f"Ответ: цель '{title}' уже есть",
+        }
 
     try:
         goal_id = self.set_goal(title, difficulty=1)

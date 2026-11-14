@@ -81,10 +81,10 @@ class MotivationController:
             )
             if active_count < 3:
                 generated = self._system.generate_motivated_goals(agent_context or {})
-                # Импортируем как цели в GoalSubsystem (только если их ещё нет)
-                existing_titles = {g["title"] for g in self._goal_subsystem.goals}
+                from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+
                 for g in generated:
-                    if g.get("title") not in existing_titles:
+                    if not is_automatic_goal_repeat_blocked(self._goal_subsystem, g):
                         new_goals.append(g)
                         start_id = (
                             max(
@@ -102,6 +102,9 @@ class MotivationController:
                                 "source": "motivation",
                                 "drive": g.get("drive", "knowledge_acquisition"),
                                 "type": g.get("type", "general"),
+                                "retry_reason": str(
+                                    g.get("retry_reason") or ""
+                                ).strip(),
                             }
                         )
                         bind_goal = getattr(self._system, "bind_goal", None)
