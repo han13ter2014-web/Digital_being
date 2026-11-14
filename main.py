@@ -676,11 +676,15 @@ def run_headless(runtime: Runtime, args: argparse.Namespace) -> int:
         logger.info("Получен сигнал %s", signum)
         stop.set()
 
-    try:
-        signal.signal(signal.SIGINT, on_signal)
-        signal.signal(signal.SIGTERM, on_signal)
-    except (ValueError, OSError):
-        pass
+    termination_signals = [signal.SIGINT, signal.SIGTERM]
+    sigbreak = getattr(signal, "SIGBREAK", None)
+    if sigbreak is not None:
+        termination_signals.append(sigbreak)
+    for signum in termination_signals:
+        try:
+            signal.signal(signum, on_signal)
+        except (ValueError, OSError):
+            pass
 
     logger.info("🤖 %s живёт без UI (темп: %s)", runtime.agent.name, speed)
     while not stop.is_set() and not runtime.finished.is_set():
