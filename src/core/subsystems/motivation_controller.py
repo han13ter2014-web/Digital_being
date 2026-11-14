@@ -81,9 +81,13 @@ class MotivationController:
             )
             if active_count < 3:
                 generated = self._system.generate_motivated_goals(agent_context or {})
-                from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+                from src.motivation.goal_memory import (
+                    is_automatic_goal_repeat_blocked,
+                    prepare_automatic_goal_retry,
+                )
 
                 for g in generated:
+                    prepare_automatic_goal_retry(self._goal_subsystem, g)
                     if not is_automatic_goal_repeat_blocked(self._goal_subsystem, g):
                         new_goals.append(g)
                         start_id = (
@@ -93,20 +97,19 @@ class MotivationController:
                             )
                             + 1
                         )
-                        self._goal_subsystem.goals.append(
-                            {
-                                "id": start_id,
-                                "title": g.get("title", "Новая цель"),
-                                "status": "pending",
-                                "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
-                                "source": "motivation",
-                                "drive": g.get("drive", "knowledge_acquisition"),
-                                "type": g.get("type", "general"),
-                                "retry_reason": str(
-                                    g.get("retry_reason") or ""
-                                ).strip(),
-                            }
-                        )
+                        stored_goal = {
+                            "id": start_id,
+                            "title": g.get("title", "Новая цель"),
+                            "status": "pending",
+                            "difficulty": int(g.get("urgency", 0.5) * 3) or 1,
+                            "source": "motivation",
+                            "drive": g.get("drive", "knowledge_acquisition"),
+                            "type": g.get("type", "general"),
+                            "retry_reason": str(g.get("retry_reason") or "").strip(),
+                        }
+                        if g.get("retry_of") is not None:
+                            stored_goal["retry_of"] = g["retry_of"]
+                        self._goal_subsystem.goals.append(stored_goal)
                         bind_goal = getattr(self._system, "bind_goal", None)
                         if callable(bind_goal):
                             bind_goal(g, start_id)

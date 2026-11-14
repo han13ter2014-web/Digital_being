@@ -570,3 +570,158 @@ def test_legacy_motivation_controller_uses_same_repeat_rule():
     assert controller.tick()["new_goals"] == [retry]
     assert len(subsystem.goals) == 2
     assert subsystem.goals[-1]["retry_reason"] == "Новые обстоятельства"
+
+
+def _outcome_agent(status="failed", action="hypothesis", *, with_signature=True):
+    from types import SimpleNamespace
+
+    from src.motivation.goal_memory import capture_goal_evidence
+
+    agent = GoalAgent()
+    agent.mental_models = SimpleNamespace(concepts={})
+    goal = {
+        "id": 1,
+        "title": "Понять: память",
+        "status": status,
+        "motivation_origin": {"action_hint": action},
+    }
+    agent.goals = [goal]
+    if with_signature:
+        goal["evidence_at_outcome"] = capture_goal_evidence(agent, goal["title"])
+    return agent, goal
+
+
+def _add_evidence(agent, concept="память", kind="observation"):
+    from src.cognition.mental_models import ConceptNode
+
+    node = agent.mental_models.concepts.get(concept)
+    if node is None:
+        node = ConceptNode(concept)
+        agent.mental_models.concepts[concept] = node
+    node.add_experience(
+        "новый контекст",
+        "новое наблюдение",
+        evidence_strength=0.5,
+        evidence_kind=kind,
+        source="test:evidence",
+    )
+
+
+def test_failed_goal_retry_uses_recorded_alternative_strategy():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent()
+    candidate = {"title": "Понять: память", "action_hint": "explore"}
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert not is_automatic_goal_repeat_blocked(agent, candidate)
+    assert "hypothesis" in candidate["retry_reason"]
+    assert "explore" in candidate["retry_reason"]
+    assert candidate["retry_of"] == 1
+
+
+def test_failed_goal_retry_does_not_ping_pong_between_failed_strategies():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, first = _outcome_agent()
+    second = {
+        "id": 2,
+        "title": "Исследовать: память",
+        "status": "failed",
+        "motivation_origin": {"action_hint": "explore"},
+        "evidence_at_outcome": dict(first["evidence_at_outcome"]),
+    }
+    agent.goals.append(second)
+    candidate = {"title": "Исследовать: память", "action_hint": "explore"}
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert "retry_reason" not in candidate
+    assert is_automatic_goal_repeat_blocked(agent, candidate)
+
+
+@pytest.mark.parametrize("evidence_kind", ["observation", "testimony"])
+def test_new_relevant_evidence_reasons_about_goal_retry(evidence_kind):
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent()
+    candidate = {"title": "Понять: память", "action_hint": "hypothesis"}
+    _add_evidence(agent, kind=evidence_kind)
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert not is_automatic_goal_repeat_blocked(agent, candidate)
+    assert "0 → 1" in candidate["retry_reason"]
+    assert candidate["retry_of"] == 1
+
+
+def test_unrelated_evidence_does_not_reason_about_goal_retry():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent()
+    candidate = {"title": "Понять: память", "action_hint": "hypothesis"}
+    _add_evidence(agent, concept="кухня")
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert "retry_reason" not in candidate
+    assert is_automatic_goal_repeat_blocked(agent, candidate)
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_non_failure_retry_requires_evidence_not_only_another_strategy(status):
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent(status=status)
+    candidate = {"title": "Исследовать: память", "action_hint": "explore"}
+
+    prepare_automatic_goal_retry(agent, candidate)
+    assert "retry_reason" not in candidate
+    assert is_automatic_goal_repeat_blocked(agent, candidate)
+
+    _add_evidence(agent, kind="testimony")
+    prepare_automatic_goal_retry(agent, candidate)
+    assert not is_automatic_goal_repeat_blocked(agent, candidate)
+    assert candidate["retry_of"] == 1
+
+
+def test_legacy_outcome_without_signature_does_not_invent_evidence_retry():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent(with_signature=False)
+    candidate = {"title": "Понять: память", "action_hint": "hypothesis"}
+    _add_evidence(agent)
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert "retry_reason" not in candidate
+    assert is_automatic_goal_repeat_blocked(agent, candidate)
+
+
+def test_direct_knowledge_entry_is_new_relevant_evidence():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent(status="completed")
+    candidate = {"title": "Понять: память", "action_hint": "hypothesis"}
+    agent.knowledge_base["память"] = "Новое проверенное определение"
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert not is_automatic_goal_repeat_blocked(agent, candidate)
+    assert "запись в базе знаний" in candidate["retry_reason"]
+
+
+def test_explicit_retry_reason_is_not_overwritten():
+    from src.motivation.goal_memory import prepare_automatic_goal_retry
+
+    agent, _goal = _outcome_agent()
+    candidate = {
+        "title": "Понять: память",
+        "action_hint": "explore",
+        "retry_reason": "Явно указанная причина",
+    }
+
+    prepare_automatic_goal_retry(agent, candidate)
+
+    assert candidate["retry_reason"] == "Явно указанная причина"

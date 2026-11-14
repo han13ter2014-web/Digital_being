@@ -408,6 +408,50 @@ def test_all_drive_goal_templates_render():
         ), f"в заголовке остался плейсхолдер: {goal['title']}"
 
 
+def test_need_generator_prefers_strategy_not_failed_for_same_subject():
+    from unittest.mock import patch
+
+    agent = MockAgent()
+    agent.goals = [
+        {
+            "id": 1,
+            "title": "Понять: вопрос",
+            "status": "failed",
+            "motivation_origin": {"action_hint": "hypothesis"},
+        }
+    ]
+    system = create_motivation_system(agent)
+
+    with patch("random.choice", side_effect=lambda items: items[0]):
+        goal = system._generate_goal_for_need(system.needs["curiosity"])
+
+    assert goal is not None
+    assert goal["title"] == "Исследовать: вопрос"
+    assert goal["action_hint"] == "explore"
+
+
+def test_drive_generator_prefers_strategy_not_failed_for_same_subject():
+    from unittest.mock import patch
+
+    agent = MockAgent()
+    agent.goals = [
+        {
+            "id": 1,
+            "title": "Достичь мастерства в: competence",
+            "status": "failed",
+            "motivation_origin": {"action_hint": "synthesize_understanding"},
+        }
+    ]
+    system = create_motivation_system(agent)
+
+    with patch("random.choice", side_effect=lambda items: items[0]):
+        goal = system._generate_goal_for_drive(system.drives["mastery"])
+
+    assert goal is not None
+    assert goal["title"] == "Глубокое погружение в: competence"
+    assert goal["action_hint"] == "explore"
+
+
 def test_fill_template_handles_any_placeholder():
     from src.core.motivation.unified_motivation import fill_template
 

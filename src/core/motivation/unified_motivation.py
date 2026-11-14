@@ -1198,8 +1198,11 @@ class UnifiedMotivationSystem:
         templates = NEED_GOAL_TEMPLATES.get(need.name, [])
         if not templates:
             return None
-        template = random.choice(templates)
         concept = self._pick_relevant_concept(need.related_concepts)
+        from src.motivation.goal_memory import prefer_alternative_goal_templates
+
+        templates = prefer_alternative_goal_templates(self.agent, templates, concept)
+        template = random.choice(templates)
         title = fill_template(template["title"], concept)
         priority = need.urgency()
         return {
@@ -1220,8 +1223,11 @@ class UnifiedMotivationSystem:
         templates = DRIVE_GOAL_TEMPLATES.get(drive.name, [])
         if not templates:
             return None
-        template = random.choice(templates)
         concept = self._pick_relevant_concept(list(drive.contributing_needs.keys()))
+        from src.motivation.goal_memory import prefer_alternative_goal_templates
+
+        templates = prefer_alternative_goal_templates(self.agent, templates, concept)
+        template = random.choice(templates)
         title = fill_template(template["title"], concept)
         priority = drive.current_level * 0.8
         return {

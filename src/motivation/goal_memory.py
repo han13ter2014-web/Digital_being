@@ -163,6 +163,208 @@ def recall_goal_outcome(long_term_memory, title):
     return None
 
 
+def _goal_subject(title):
+    """Точно нормализованный предмет цели, без нечёткого совпадения тем."""
+    text = str(title or "")
+    if ":" not in text:
+        return ""
+    from src.memory.knowledge_quality import normalize_concept_name
+
+    return normalize_concept_name(text.split(":", 1)[1].strip())
+
+
+def _goal_action(goal):
+    origin = goal.get("motivation_origin")
+    if not isinstance(origin, dict):
+        origin = goal
+    return str(origin.get("action_hint") or "").strip()
+
+
+def capture_goal_evidence(agent, title):
+    """Снять только доказанные данные по точному предмету цели.
+
+    Гипотезы, сам факт встречи и глобальный рост счётчиков мира не являются
+    новым основанием для повтора. Прямая запись в KB учитывается отдельно от
+    наблюдений и сообщений в ментальной модели.
+    """
+    subject = _goal_subject(title)
+    if not subject:
+        return None
+
+    from src.cognition.mental_models import EVIDENCE_MIN
+    from src.memory.knowledge_quality import normalize_concept_name
+
+    evidence_count = 0
+    concepts = getattr(getattr(agent, "mental_models", None), "concepts", {})
+    if isinstance(concepts, dict):
+        for name, node in concepts.items():
+            if normalize_concept_name(str(name)) != subject:
+                continue
+            experiences = getattr(node, "experiences", [])
+            if not isinstance(experiences, (list, tuple)):
+                continue
+            for experience in experiences:
+                if not isinstance(experience, dict):
+                    continue
+                if experience.get("evidence_kind") not in {
+                    "observation",
+                    "testimony",
+                    "innate",
+                }:
+                    continue
+                if not str(experience.get("source") or "").strip():
+                    continue
+                try:
+                    strength = float(experience.get("evidence_strength", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if isfinite(strength) and strength >= EVIDENCE_MIN:
+                    evidence_count += 1
+
+    knowledge_present = False
+    knowledge_base = getattr(agent, "knowledge_base", {})
+    if isinstance(knowledge_base, dict):
+        knowledge_present = any(
+            normalize_concept_name(str(name)) == subject
+            and value is not None
+            and bool(str(value).strip())
+            for name, value in knowledge_base.items()
+        )
+    return {
+        "subject": subject,
+        "evidence_count": evidence_count,
+        "knowledge_present": knowledge_present,
+    }
+
+
+def record_goal_evidence_at_outcome(agent, goal):
+    """Сохранить на терминальной цели основание для будущего сравнения."""
+    signature = capture_goal_evidence(agent, goal.get("title"))
+    if signature is not None:
+        goal["evidence_at_outcome"] = signature
+
+
+def prefer_alternative_goal_templates(agent, templates, subject):
+    """Не выбирать снова способ, который уже провалился на этом предмете."""
+    from src.core.agent_act import classify_decision, executable_action
+    from src.memory.knowledge_quality import normalize_concept_name
+
+    normalized_subject = normalize_concept_name(str(subject or ""))
+    failed_actions = {
+        classify_decision(_goal_action(goal))
+        for goal in getattr(agent, "goals", []) or []
+        if isinstance(goal, dict)
+        and goal.get("status") == "failed"
+        and _goal_subject(goal.get("title")) == normalized_subject
+        and _goal_action(goal)
+    }
+    if not failed_actions:
+        return list(templates)
+    alternatives = [
+        template
+        for template in templates
+        if executable_action(template.get("action"))
+        and classify_decision(template.get("action")) not in failed_actions
+    ]
+    return alternatives or list(templates)
+
+
+def _evidence_retry_reason(previous, current):
+    before = previous.get("evidence_at_outcome")
+    if not isinstance(before, dict) or before.get("subject") != current["subject"]:
+        return ""
+    changes = []
+    before_count = before.get("evidence_count")
+    if isinstance(before_count, int) and not isinstance(before_count, bool):
+        current_count = current["evidence_count"]
+        if current_count > before_count:
+            changes.append(
+                f"подтверждённых свидетельств: {before_count} → {current_count}"
+            )
+    if current["knowledge_present"] and not before.get("knowledge_present", False):
+        changes.append("появилась прямая запись в базе знаний")
+    if not changes:
+        return ""
+    return (
+        f"После исхода цели по теме «{current['subject']}» получены новые данные: "
+        + "; ".join(changes)
+    )
+
+
+def _set_retry_reason(candidate, previous, reason):
+    candidate["retry_reason"] = reason
+    if previous.get("id") is not None:
+        candidate["retry_of"] = previous["id"]
+
+
+def prepare_automatic_goal_retry(agent, candidate):
+    """Добавить причину только из записанной смены стратегии или новых данных."""
+    if (
+        not isinstance(candidate, dict)
+        or str(candidate.get("retry_reason") or "").strip()
+    ):
+        return candidate
+
+    from src.cognition.activity_goals import goal_work_key
+    from src.core.agent_act import classify_decision, executable_action
+
+    title = str(candidate.get("title") or "").strip()
+    if not title:
+        return candidate
+    normalized_title = _normalize_goal_text(title)
+    subject = _goal_subject(title)
+    work_key = goal_work_key(candidate)
+    terminal = [
+        goal
+        for goal in getattr(agent, "goals", []) or []
+        if isinstance(goal, dict) and goal.get("status") in _REPEAT_CLOSED_STATUSES
+    ]
+
+    # Если этот же способ уже завершился, более ранняя неудача другого способа
+    # не должна реанимировать его и запускать «пинг-понг» проваленных стратегий.
+    previous = next(
+        (goal for goal in reversed(terminal) if goal_work_key(goal) == work_key),
+        None,
+    )
+    same_work = previous is not None
+    if previous is None:
+        previous = next(
+            (
+                goal
+                for goal in reversed(terminal)
+                if _normalize_goal_text(goal.get("title")) == normalized_title
+                or (subject and _goal_subject(goal.get("title")) == subject)
+            ),
+            None,
+        )
+    if previous is None:
+        return candidate
+
+    current_evidence = capture_goal_evidence(agent, title)
+    if current_evidence is not None:
+        reason = _evidence_retry_reason(previous, current_evidence)
+        if reason:
+            _set_retry_reason(candidate, previous, reason)
+            return candidate
+
+    previous_action = _goal_action(previous)
+    candidate_action = _goal_action(candidate)
+    if (
+        not same_work
+        and previous.get("status") == "failed"
+        and previous_action
+        and executable_action(candidate_action)
+        and classify_decision(previous_action) != classify_decision(candidate_action)
+    ):
+        _set_retry_reason(
+            candidate,
+            previous,
+            "После неудачи выбрана другая стратегия: "
+            f"{previous_action} → {candidate_action}",
+        )
+    return candidate
+
+
 def is_automatic_goal_repeat_blocked(agent, candidate):
     """Запретить автоматический дубль, но не осознанную новую попытку."""
     if not isinstance(candidate, dict):
@@ -171,6 +373,7 @@ def is_automatic_goal_repeat_blocked(agent, candidate):
     if not title:
         return True
     normalized_title = _normalize_goal_text(title)
+    subject = _goal_subject(title)
     retry_reason = str(candidate.get("retry_reason") or "").strip()
 
     from src.cognition.activity_goals import goal_work_key
@@ -180,11 +383,16 @@ def is_automatic_goal_repeat_blocked(agent, candidate):
         if not isinstance(goal, dict):
             continue
         same_title = _normalize_goal_text(goal.get("title")) == normalized_title
-        if not same_title and goal_work_key(goal) != work_key:
-            continue
-        if goal.get("status") not in _REPEAT_CLOSED_STATUSES:
-            return True
-        if not retry_reason:
+        same_work = goal_work_key(goal) == work_key
+        closed = goal.get("status") in _REPEAT_CLOSED_STATUSES
+        same_subject = bool(subject and _goal_subject(goal.get("title")) == subject)
+        if closed:
+            # Для завершённой работы другая формулировка или стратегия по той
+            # же теме тоже требует основания; живые разные стратегии остаются
+            # самостоятельными целями и друг друга не блокируют.
+            if (same_title or same_work or same_subject) and not retry_reason:
+                return True
+        elif same_title or same_work:
             return True
 
     if retry_reason:
@@ -198,12 +406,16 @@ __all__ = [
     "GOAL_HISTORY_LIMIT",
     "GOAL_OUTCOMES",
     "TERMINAL_GOAL_STATUSES",
+    "capture_goal_evidence",
     "collect_pending_goal_origins",
     "count_goal",
     "empty_goal_summary",
     "format_goal_outcome",
     "goal_outcome_importance",
     "is_automatic_goal_repeat_blocked",
+    "prefer_alternative_goal_templates",
+    "prepare_automatic_goal_retry",
     "recall_goal_outcome",
+    "record_goal_evidence_at_outcome",
     "restore_goal_summary",
 ]

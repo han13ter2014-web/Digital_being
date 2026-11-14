@@ -370,3 +370,38 @@ def test_ingest_uses_consolidated_outcome_without_current_goal(agent, outcome):
     agent._ingest_motivation_goals([{"title": title}])
 
     assert agent.goals == []
+
+
+def test_ingest_records_automatic_alternative_retry_and_checkpoint(agent):
+    goal_id = agent.set_goal("Понять: память", activate=True)
+    attach_activity(
+        agent,
+        goal_id,
+        {"source": "need", "need": "curiosity", "action_hint": "hypothesis"},
+    )
+    assert agent.fail_goal(goal_id, "гипотеза не подтвердилась") is True
+    original = agent.goal_subsystem.get_goal(goal_id)
+    assert original["evidence_at_outcome"]["subject"] == "память"
+
+    agent._ingest_motivation_goals(
+        [
+            {
+                "title": "Исследовать: память",
+                "source": "need",
+                "need": "curiosity",
+                "action_hint": "explore",
+            }
+        ]
+    )
+
+    retry = agent.goals[-1]
+    assert retry["id"] != goal_id
+    assert retry["motivation_origin"]["retry_of"] == goal_id
+    assert "hypothesis" in retry["motivation_origin"]["retry_reason"]
+    assert "explore" in retry["motivation_origin"]["retry_reason"]
+
+    restored = GoalSubsystem("AlternativeRetryRestored")
+    restored.restore_from_checkpoint(agent.goal_subsystem.to_checkpoint_dict())
+    restored_original = restored.get_goal(goal_id)
+    assert restored_original["evidence_at_outcome"] == original["evidence_at_outcome"]
+    assert restored.goals[-1]["motivation_origin"]["retry_of"] == goal_id

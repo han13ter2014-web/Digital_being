@@ -382,8 +382,12 @@ class InternalMotivation:
         }
 
     def _set_intrinsic_goal(self, goal: dict, need: Need):
-        from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+        from src.motivation.goal_memory import (
+            is_automatic_goal_repeat_blocked,
+            prepare_automatic_goal_retry,
+        )
 
+        prepare_automatic_goal_retry(self.agent, goal)
         if is_automatic_goal_repeat_blocked(self.agent, goal):
             logger.log(f"[MOTIVATION] Повтор цели пропущен: {goal['title']}")
             return False
@@ -400,6 +404,8 @@ class InternalMotivation:
         retry_reason = str(goal.get("retry_reason") or "").strip()
         if retry_reason:
             metadata["retry_reason"] = retry_reason
+        if goal.get("retry_of") is not None:
+            metadata["retry_of"] = goal["retry_of"]
 
         goal_id = None
         if hasattr(self.agent, "set_goal"):

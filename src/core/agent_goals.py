@@ -156,6 +156,9 @@ def complete_goal_impl(self, goal_id=None):
             self.active_goal = None
             self._set_next_goal()
 
+    from src.motivation.goal_memory import record_goal_evidence_at_outcome
+
+    record_goal_evidence_at_outcome(self, goal)
     _notify_goal_outcome(self, "achieved", goal)
     difficulty = int(goal.get("difficulty", 1) or 1)
     if goal.get("activity") is None:
@@ -203,6 +206,9 @@ def _set_agent_goal_outcome(self, outcome, goal_id, reason):
     if not changed:
         return False
 
+    from src.motivation.goal_memory import record_goal_evidence_at_outcome
+
+    record_goal_evidence_at_outcome(self, goal)
     _notify_goal_outcome(self, outcome, goal, reason)
     get_logger().flush_immediate(
         f"Цель {'не выполнена' if outcome == 'failed' else 'отменена'}: {goal['title']}"

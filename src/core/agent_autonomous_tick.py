@@ -49,10 +49,14 @@ def _ingest_motivation_goals_impl(self, new_goals: List[dict]) -> None:
     if not new_goals:
         return
     from src.cognition.activity_goals import attach_activity
-    from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+    from src.motivation.goal_memory import (
+        is_automatic_goal_repeat_blocked,
+        prepare_automatic_goal_retry,
+    )
 
     for g in new_goals:
         title = str(g.get("title") or "").strip()
+        prepare_automatic_goal_retry(self, g)
         if not title or is_automatic_goal_repeat_blocked(self, g):
             continue
         try:

@@ -781,7 +781,10 @@ def _act_set_own_goal_impl(self) -> Dict:
     действие ничего не делало. Цель — наблюдаемое изменение: она
     появляется в списке и начинает влиять на жизнь.
     """
-    from src.motivation.goal_memory import is_automatic_goal_repeat_blocked
+    from src.motivation.goal_memory import (
+        is_automatic_goal_repeat_blocked,
+        prepare_automatic_goal_retry,
+    )
 
     motivation = getattr(self, "motivation_system", None)
     play_need = motivation.needs.get("play") if motivation is not None else None
@@ -793,15 +796,17 @@ def _act_set_own_goal_impl(self) -> Dict:
             "draw": "Нарисовать картину",
             "compose_music": "Сочинить мелодию",
         }[activity]
-        if is_automatic_goal_repeat_blocked(
-            self, {"title": title, "action_hint": activity}
-        ):
+        candidate = {"title": title, "action_hint": activity}
+        prepare_automatic_goal_retry(self, candidate)
+        if is_automatic_goal_repeat_blocked(self, candidate):
             return {"text": f"Ответ: дело '{title}' уже есть"}
         goal_id = self.set_goal(title, difficulty=1)
         from src.cognition.activity_goals import attach_activity
 
         attach_activity(
-            self, goal_id, {"source": "self", "need": "play", "action_hint": activity}
+            self,
+            goal_id,
+            {**candidate, "source": "self", "need": "play"},
         )
         self._record_will("goals_set", title, f"своё дело #{goal_id}")
         return {"text": f"Ответ: выбрала дело '{title}' (#{goal_id})"}
@@ -810,7 +815,9 @@ def _act_set_own_goal_impl(self) -> Dict:
         return {"text": "Ответ: свою цель ставить не из чего"}
 
     title = f"Понять: {target}"
-    if is_automatic_goal_repeat_blocked(self, {"title": title}):
+    candidate = {"title": title}
+    prepare_automatic_goal_retry(self, candidate)
+    if is_automatic_goal_repeat_blocked(self, candidate):
         return {
             "target": target,
             "text": f"Ответ: цель '{title}' уже есть",
@@ -825,6 +832,11 @@ def _act_set_own_goal_impl(self) -> Dict:
             "text": f"Ответ: хотела поставить цель '{title}', но не смогла",
         }
 
+    new_goal = next((goal for goal in self.goals if goal.get("id") == goal_id), None)
+    if new_goal is not None:
+        for key in ("retry_reason", "retry_of"):
+            if key in candidate:
+                new_goal[key] = candidate[key]
     self._record_will("goals_set", target, f"своя цель #{goal_id}")
     return {
         "target": target,
