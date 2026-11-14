@@ -6,6 +6,7 @@ from src.core.checkpoint_validation import validate_checkpoint_state
 from src.core.internal_motivation import InternalMotivation
 from src.core.motivation.unified_motivation import UnifiedMotivationSystem
 from src.core.subsystems.goal_manager import GoalSubsystem
+from src.core.subsystems.sleep_cycle import SleepCycle
 from src.motivation.needs_system import InternalMotivationSystem
 
 
@@ -321,3 +322,133 @@ def test_legacy_goal_subsystem_records_every_terminal_outcome(outcome):
     else:
         assert subsystem.cancel_goal(1, "повтор") is False
     assert system.goal_summary[outcome] == 1
+
+
+class RecordingLongTermMemory:
+    def __init__(self, fail_writes=0):
+        self.consolidation_threshold = 0.7
+        self.fail_writes = fail_writes
+        self.stored = []
+
+    def store(self, **kwargs):
+        if self.fail_writes:
+            self.fail_writes -= 1
+            raise OSError("временный сбой записи")
+        self.stored.append(kwargs)
+        return f"goal-memory-{len(self.stored)}"
+
+
+def _terminal_goal_subsystem(status):
+    subsystem = GoalSubsystem("GoalConsolidation")
+    reason = "наблюдаемая причина"
+    goal = {
+        "id": 7,
+        "title": "Проверить долговременную память",
+        "status": status,
+        "difficulty": 2,
+    }
+    if status == "failed":
+        goal["failure_reason"] = reason
+    elif status == "cancelled":
+        goal["cancellation_reason"] = reason
+    subsystem.goals = [goal]
+    return subsystem
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [
+        ("completed", "Цель достигнута"),
+        ("failed", "Цель не выполнена"),
+        ("cancelled", "Цель отменена"),
+    ],
+)
+def test_sleep_consolidates_significant_goal_outcome_once_across_restart(status, label):
+    memory = RecordingLongTermMemory()
+    subsystem = _terminal_goal_subsystem(status)
+    sleep = SleepCycle(
+        long_term_memory=memory,
+        goal_subsystem=subsystem,
+        cycle_interval=1,
+    )
+
+    first = sleep.sleep(1)
+    second = sleep.sleep(2)
+
+    assert first["goal_outcomes_consolidated"] == 1
+    assert second["goal_outcomes_consolidated"] == 0
+    assert sleep.get_status()["last_goal_outcomes_consolidated"] == 0
+    assert len(memory.stored) == 1
+    trace = memory.stored[0]
+    assert trace["content"].startswith(f"{label}: Проверить долговременную память")
+    assert trace["importance"] == pytest.approx(0.8)
+    assert trace["context"] == "goal_outcome:7"
+    assert trace["memory_type"] == "episodic"
+    if status in {"failed", "cancelled"}:
+        assert trace["content"].endswith("Причина: наблюдаемая причина")
+
+    restored = GoalSubsystem("GoalConsolidation")
+    restored.restore_from_checkpoint(subsystem.to_checkpoint_dict())
+    restored_sleep = SleepCycle(
+        long_term_memory=memory,
+        goal_subsystem=restored,
+        cycle_interval=1,
+    )
+    assert restored_sleep.sleep(1)["goal_outcomes_consolidated"] == 0
+    assert len(memory.stored) == 1
+
+
+def test_sleep_skips_active_and_insignificant_goal_outcomes():
+    memory = RecordingLongTermMemory()
+    subsystem = GoalSubsystem("GoalConsolidation")
+    subsystem.goals = [
+        {"id": 1, "title": "Активная", "status": "active", "difficulty": 3},
+        {"id": 2, "title": "Обычная", "status": "completed", "difficulty": 1},
+        {"id": 3, "title": "Отменённая", "status": "cancelled", "priority": "low"},
+    ]
+    sleep = SleepCycle(
+        long_term_memory=memory,
+        goal_subsystem=subsystem,
+        cycle_interval=1,
+    )
+
+    assert sleep.sleep(1)["goal_outcomes_consolidated"] == 0
+    assert memory.stored == []
+    assert all("ltm_trace_id" not in goal for goal in subsystem.goals)
+
+
+@pytest.mark.parametrize(
+    "goal_patch",
+    [{"priority": "high"}, {"significance": 0.95}],
+)
+def test_sleep_respects_explicit_goal_significance(goal_patch):
+    memory = RecordingLongTermMemory()
+    subsystem = GoalSubsystem("GoalConsolidation")
+    goal = {"id": 1, "title": "Важная", "status": "completed", "difficulty": 1}
+    goal.update(goal_patch)
+    subsystem.goals = [goal]
+    sleep = SleepCycle(
+        long_term_memory=memory,
+        goal_subsystem=subsystem,
+        cycle_interval=1,
+    )
+
+    assert sleep.sleep(1)["goal_outcomes_consolidated"] == 1
+    assert memory.stored[0]["importance"] == pytest.approx(
+        goal_patch.get("significance", 0.9)
+    )
+
+
+def test_goal_outcome_consolidation_retries_failed_write():
+    memory = RecordingLongTermMemory(fail_writes=1)
+    subsystem = _terminal_goal_subsystem("failed")
+    sleep = SleepCycle(
+        long_term_memory=memory,
+        goal_subsystem=subsystem,
+        cycle_interval=1,
+    )
+
+    assert sleep.sleep(1)["goal_outcomes_consolidated"] == 0
+    assert "ltm_trace_id" not in subsystem.goals[0]
+    assert sleep.sleep(2)["goal_outcomes_consolidated"] == 1
+    assert subsystem.goals[0]["ltm_trace_id"] == "goal-memory-1"

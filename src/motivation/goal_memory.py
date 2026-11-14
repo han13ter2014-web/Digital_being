@@ -1,6 +1,7 @@
 """Общие правила ограниченной истории и накопленного опыта целей."""
 
 from copy import deepcopy
+from math import isfinite
 
 
 GOAL_HISTORY_LIMIT = 50
@@ -91,6 +92,48 @@ def collect_pending_goal_origins(history, saved=None):
     return pending
 
 
+def goal_outcome_importance(goal):
+    """Оценить значимость завершённой цели без выдумывания её свойств."""
+    significance = goal.get("significance")
+    if (
+        isinstance(significance, (int, float))
+        and not isinstance(significance, bool)
+        and isfinite(significance)
+    ):
+        return max(0.0, min(1.0, float(significance)))
+
+    try:
+        difficulty = float(goal.get("difficulty", 1))
+    except (TypeError, ValueError):
+        difficulty = 1.0
+    if not isfinite(difficulty):
+        difficulty = 1.0
+    difficulty = max(1.0, min(5.0, difficulty))
+    importance = 0.5 + 0.15 * difficulty
+
+    priority = {"low": 0.3, "normal": 0.6, "high": 0.9}.get(
+        str(goal.get("priority", "")).lower(), 0.0
+    )
+    return max(importance, priority)
+
+
+def format_goal_outcome(goal, status):
+    """Сформулировать только наблюдаемый исход и указанную причину."""
+    title = str(goal.get("title") or "Без названия")[:240]
+    label = {
+        "completed": "Цель достигнута",
+        "failed": "Цель не выполнена",
+        "cancelled": "Цель отменена",
+    }[status]
+    content = f"{label}: {title}"
+    reason_field = {
+        "failed": "failure_reason",
+        "cancelled": "cancellation_reason",
+    }.get(status)
+    reason = str(goal.get(reason_field, "") or "").strip()[:240] if reason_field else ""
+    return f"{content}. Причина: {reason}" if reason else content
+
+
 __all__ = [
     "GOAL_HISTORY_LIMIT",
     "GOAL_OUTCOMES",
@@ -98,5 +141,7 @@ __all__ = [
     "collect_pending_goal_origins",
     "count_goal",
     "empty_goal_summary",
+    "format_goal_outcome",
+    "goal_outcome_importance",
     "restore_goal_summary",
 ]

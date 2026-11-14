@@ -13,6 +13,8 @@ SleepCycle — «сон» агента.
 from datetime import datetime
 from typing import Dict, List
 
+from src.motivation.goal_memory import format_goal_outcome, goal_outcome_importance
+
 
 class SleepCycle:
     """Цикл сна — консолидация и очистка."""
@@ -24,16 +26,19 @@ class SleepCycle:
         mental_models=None,
         knowledge_subsystem=None,
         cycle_interval: int = 100,
+        goal_subsystem=None,
     ):
         self.agent_name = agent_name
         self.long_term_memory = long_term_memory
         self.mental_models = mental_models
         self.knowledge_subsystem = knowledge_subsystem
         self.cycle_interval = cycle_interval
+        self.goal_subsystem = goal_subsystem
 
         # Метрики сна
         self.total_sleeps = 0
         self.last_consolidated_count = 0
+        self.last_goal_outcomes_consolidated = 0
         self.last_patterns_found = []
         self.sleep_history: List[Dict] = []
 
@@ -46,6 +51,9 @@ class SleepCycle:
     def attach_knowledge(self, ks) -> None:
         self.knowledge_subsystem = ks
 
+    def attach_goals(self, goals) -> None:
+        self.goal_subsystem = goals
+
     # ============================================================
     # Главный метод
     # ============================================================
@@ -53,7 +61,7 @@ class SleepCycle:
         """Один цикл сна. Вызывается каждые `cycle_interval` циклов.
 
         Шаги:
-        1. Консолидация значимых концепций в LongTermMemory.
+        1. Консолидация значимых концепций и исходов целей в LongTermMemory.
         2. Очистка слабых связей в mental_models.
         3. Поиск скрытых паттернов.
         4. Прунинг knowledge_base.
@@ -82,6 +90,8 @@ class SleepCycle:
                     except Exception:
                         pass
 
+        goal_outcomes = self._consolidate_goal_outcomes()
+
         # 2. Поиск паттернов: концепции, появившиеся вместе
         if self.mental_models:
             patterns = self._find_co_occurrence_patterns()
@@ -92,6 +102,7 @@ class SleepCycle:
             "cycle": cycle_count,
             "timestamp": datetime.now().isoformat(),
             "consolidated_count": consolidated,
+            "goal_outcomes_consolidated": goal_outcomes,
             "patterns_found": len(patterns),
             "patterns": patterns[:3],  # топ-3
         }
@@ -99,10 +110,40 @@ class SleepCycle:
         # Это операционный журнал; продолжительность жизни хранит total_sleeps.
         self.sleep_history = self.sleep_history[-100:]
         self.last_consolidated_count = consolidated
+        self.last_goal_outcomes_consolidated = goal_outcomes
         self.last_patterns_found = patterns
         self.total_sleeps += 1
 
         return sleep_record
+
+    def _consolidate_goal_outcomes(self) -> int:
+        """Перенести значимые терминальные исходы ровно один раз."""
+        if self.long_term_memory is None or self.goal_subsystem is None:
+            return 0
+        threshold = getattr(self.long_term_memory, "consolidation_threshold", 0.7)
+        consolidated = 0
+        for goal in self.goal_subsystem.goals:
+            status = goal.get("status")
+            if status not in ("completed", "failed", "cancelled"):
+                continue
+            if goal.get("ltm_trace_id"):
+                continue
+            importance = goal_outcome_importance(goal)
+            if importance <= threshold:
+                continue
+            try:
+                memory_id = self.long_term_memory.store(
+                    content=format_goal_outcome(goal, status),
+                    importance=importance,
+                    context=f"goal_outcome:{goal.get('id')}",
+                    memory_type="episodic",
+                )
+            except Exception:
+                # Без маркера следующий сон повторит ещё не сохранённый исход.
+                continue
+            goal["ltm_trace_id"] = memory_id
+            consolidated += 1
+        return consolidated
 
     def _find_co_occurrence_patterns(self) -> List[Dict]:
         """Ищет паттерны: концепции, которые встречались в одном контексте."""
@@ -141,6 +182,7 @@ class SleepCycle:
         return {
             "total_sleeps": self.total_sleeps,
             "last_consolidated": self.last_consolidated_count,
+            "last_goal_outcomes_consolidated": self.last_goal_outcomes_consolidated,
             "last_patterns": len(self.last_patterns_found),
             "interval": self.cycle_interval,
         }

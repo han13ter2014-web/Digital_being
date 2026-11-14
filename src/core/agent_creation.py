@@ -500,6 +500,7 @@ def _run_post_init_hooks_impl(self) -> None:
         self.sleep_cycle.long_term_memory = self.long_term_memory
         self.sleep_cycle.mental_models = self.mental_models
         self.sleep_cycle.knowledge_subsystem = self.knowledge_subsystem
+        self.sleep_cycle.goal_subsystem = self.goal_subsystem
 
     # MindDream: привязываем зависимости.
     if hasattr(self, "mind_dream"):

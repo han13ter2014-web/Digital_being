@@ -112,6 +112,7 @@ def test_subsystem_specs_all_attached():
             if not hasattr(agent, attr)
         ]
         assert not missing, f"Не прикреплены: {missing}"
+        assert agent.sleep_cycle.goal_subsystem is agent.goal_subsystem
         # Вне декларации, но обязательные для диалогового контура:
         for attr in (
             "user_interaction",
