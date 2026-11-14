@@ -22,12 +22,10 @@ def memory_snapshot(memory):
 def test_corrupt_legacy_memory_does_not_replace_short_term_part(tmp_path, monkeypatch):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     memory = LongTermMemory("RecoveryProbe")
-    memory.store("прежнее воспоминание")
+    memory_id = memory.store("прежнее воспоминание")
     previous = memory_snapshot(memory)
 
-    new_trace = memory._short_term[
-        memory._generate_id("прежнее воспоминание")
-    ].to_dict()
+    new_trace = memory._short_term[memory_id].to_dict()
     new_trace["content"] = "новое воспоминание"
     broken = new_trace.copy()
     del broken["created_at"]

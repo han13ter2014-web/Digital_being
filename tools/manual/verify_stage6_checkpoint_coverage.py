@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.core.life_identity import validate_life_id
-from src.memory.checkpoint_verifier import _file_hash
-from tools.manual.verify_stage6_checkpoints import (
+from src.core.life_identity import validate_life_id  # noqa: E402
+from src.memory.checkpoint_verifier import _file_hash  # noqa: E402
+from tools.manual.verify_stage6_checkpoints import (  # noqa: E402
     _inventory,
     _outside_data,
     _write_manifest,

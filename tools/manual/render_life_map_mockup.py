@@ -211,7 +211,6 @@ def main() -> str:
     )
 
     # подписи узлов
-    label_font = REG(15)
     for x, y, kind, label, size in NODES:
         if kind in {"concept", "activity", "value", "intention"}:
             draw.text(

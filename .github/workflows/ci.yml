@@ -48,6 +48,9 @@ jobs:
       - name: Ruff lint
         run: python -m ruff check src/ config/ tests/ main.py main_tray.py
 
+      - name: Ruff lint auxiliary scripts
+        run: python -m ruff check examples/ tools/manual/
+
       - name: Ruff format check
         run: python -m ruff format --check src/ config/ tests/ main.py main_tray.py
 

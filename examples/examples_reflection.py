@@ -30,7 +30,7 @@ def example_reflection_analysis():
         perceived = agent.perceive(stimulus)
         thought = agent.think(perceived)
         print(f"Мысль: {thought}")
-        action = agent.act(thought)
+        agent.act(thought)
         agent.evolve()
         print(f"Статус: Интеллект {agent.intelligence} | Энергия {agent.energy}")
 
@@ -72,7 +72,7 @@ def example_strategy_recommendations():
         agent.evolve()
 
     # Генерирование полного отчёта
-    report = agent.generate_self_analysis_report()
+    agent.generate_self_analysis_report()
 
     print("\n📊 Анализ показывает:")
     performance = agent.get_performance_metrics()
@@ -106,7 +106,7 @@ def example_long_term_reflection():
         # Рефлексия каждые 5 циклов
         if (i + 1) % 5 == 0:
             print(f"\n[Цикл {i+1}] Выполняю рефлексию...")
-            reflection = agent.reflect()
+            agent.reflect()
             print(f"  Интеллект: {agent.intelligence}")
             print(f"  Энергия: {agent.energy}")
             print(f"  Количество знаний: {len(agent.knowledge_base)}")

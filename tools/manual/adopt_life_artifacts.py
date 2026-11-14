@@ -23,12 +23,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.core.life_identity import validate_life_id
-from src.core.subsystems.architecture_proposal import ArchitectureProposal
-from src.memory.checkpoint_store import SQLiteCheckpointStore
-from src.memory.checkpoint_verifier import _file_hash, _read_meta, _state_hash
-from src.memory.profile_backup import verify_backup
-from tools.manual.verify_stage6_checkpoints import _inventory
+from src.core.life_identity import validate_life_id  # noqa: E402
+from src.core.subsystems.architecture_proposal import ArchitectureProposal  # noqa: E402
+from src.memory.checkpoint_store import SQLiteCheckpointStore  # noqa: E402
+from src.memory.checkpoint_verifier import _file_hash, _read_meta, _state_hash  # noqa: E402
+from src.memory.profile_backup import verify_backup  # noqa: E402
+from tools.manual.verify_stage6_checkpoints import _inventory  # noqa: E402
 
 KIND = "life_artifact_adoption"
 VERSION = 1

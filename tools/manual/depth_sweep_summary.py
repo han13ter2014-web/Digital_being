@@ -55,7 +55,10 @@ def main() -> None:
     print("depth runs own answerable share deep encounters confidence")
     for depth, group in sorted(groups.items()):
         items = list(group.values())
-        avg = lambda key: mean(item[key] for item in items)
+
+        def avg(key):
+            return mean(item[key] for item in items)
+
         share = mean(
             item["answerable"] / item["own"] if item["own"] else 0.0 for item in items
         )

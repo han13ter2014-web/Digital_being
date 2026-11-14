@@ -866,7 +866,7 @@ def _start_tray(runtime: Runtime) -> None:
 
 def run_long_living_agent() -> int:
     """Совместимость: точка входа из pyproject.toml."""
-    return main([])
+    return main(sys.argv[1:])
 
 
 if __name__ == "__main__":

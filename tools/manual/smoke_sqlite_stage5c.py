@@ -103,7 +103,6 @@ def main() -> int:
             from src.app.bootstrap import create_agent
             from src.app.paths import setup_environment
             from src.core.activity_workspace import workspace_for
-            from src.core.agent_runner import AgentRunner
             from src.core.subsystem_base import PluginRegistry
             from src.core.subsystems.architecture_proposal import ArchitectureProposal
             from src.core.subsystems.will_registry import WillRegistry

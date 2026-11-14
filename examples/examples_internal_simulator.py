@@ -217,9 +217,6 @@ def demo_prediction_accuracy():
     for action, context in test_actions:
         sim_pred = sim.simulate_outcome(action, {}, context)
 
-        # Симулирует реальный исход (для демонстрации)
-        actual_success = action == "code_write" and "JavaScript" in context
-
         if sim_pred.predicted_outcome != "неопределенно (мало опыта...)":
             print(f"\n     Действие: {action} ({context[:20]}...)")
             print(f"       Предсказание: {sim_pred.predicted_outcome[:45]}...")

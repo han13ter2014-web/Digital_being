@@ -4,7 +4,6 @@
 только после успешного завершения этого сценария.
 """
 
-from contextlib import redirect_stdout
 from datetime import datetime
 import hashlib
 import json

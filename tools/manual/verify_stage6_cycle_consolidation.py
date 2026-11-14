@@ -14,17 +14,17 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.core.checkpoint_migrations import migrate_state
-from src.core.checkpoint_serializer import CheckpointSerializer
-from src.core.checkpoint_validation import validate_checkpoint_state
-from src.core.life_identity import validate_life_id
-from src.memory.checkpoint_store import SQLiteCheckpointStore
-from src.memory.checkpoint_verifier import _file_hash, _read_meta, _state_hash
-from tools.manual.verify_stage6_checkpoint_history import (
+from src.core.checkpoint_migrations import migrate_state  # noqa: E402
+from src.core.checkpoint_serializer import CheckpointSerializer  # noqa: E402
+from src.core.checkpoint_validation import validate_checkpoint_state  # noqa: E402
+from src.core.life_identity import validate_life_id  # noqa: E402
+from src.memory.checkpoint_store import SQLiteCheckpointStore  # noqa: E402
+from src.memory.checkpoint_verifier import _file_hash, _read_meta, _state_hash  # noqa: E402
+from tools.manual.verify_stage6_checkpoint_history import (  # noqa: E402
     _active_migration_roots,
     _connect_read_only,
 )
-from tools.manual.verify_stage6_checkpoints import (
+from tools.manual.verify_stage6_checkpoints import (  # noqa: E402
     _inventory,
     _outside_data,
     _write_manifest,

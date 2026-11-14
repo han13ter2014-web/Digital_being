@@ -144,7 +144,11 @@ def test_checkpoint_preserves_meta_fitness_and_observed_social_history():
     assert restored.interaction_history[0]["observation"]["action"] == "social"
 
 
-def test_autonomous_tick_steps_time_and_resource_adaptive_meta_learning():
+def test_autonomous_tick_steps_time_and_resource_adaptive_meta_learning(monkeypatch):
+    low_pressure = {"available": True, "score": 0.0}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status", lambda self: low_pressure
+    )
     agent = DigitalBeing(name="RegularLifeSystems")
     config_before = agent.meta_learner._get_current_config()
 
@@ -152,6 +156,7 @@ def test_autonomous_tick_steps_time_and_resource_adaptive_meta_learning():
 
     assert report["continuous_time"]["objective_time"] == 1.0
     assert report["meta_learning"]["mode"] == "resource_adaptive"
+    assert report["meta_learning"]["resource_status"] == low_pressure
     assert agent.meta_learner.cycle_counter == 1
     assert len(agent.meta_learner.fitness_history) == 1
     assert agent.meta_learner._get_current_config() == config_before

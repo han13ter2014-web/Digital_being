@@ -80,23 +80,10 @@ Issues = "https://github.com/han13ter2014-web/Digital_being/issues"
 
 [tool.setuptools]
 py-modules = ["main", "main_tray"]
-packages = [
-    "config",
-    "src",
-    "src.core",
-    "src.core.subsystems",
-    "src.cognition",
-    "src.consciousness",
-    "src.emotion",
-    "src.evolution",
-    "src.memory",
-    "src.motivation",
-    "src.perception",
-    "src.action",
-    "src.delamain",
-    "src.safety",
-    "src.ui",
-]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["config*", "src*", "data_bootstrap*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md", "*.txt", "py.typed"]

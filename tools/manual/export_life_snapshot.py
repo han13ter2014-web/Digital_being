@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.core.life_identity import validate_life_id
-from src.memory.life_database import LifeDatabase
+from src.core.life_identity import validate_life_id  # noqa: E402
+from src.memory.life_database import LifeDatabase  # noqa: E402
 
 
 def _state_hash(state):
