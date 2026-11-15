@@ -91,3 +91,85 @@ def test_light_object_without_emotional_state_does_not_crash():
     _wire_action_outcome_emotion(agent, "explore", SimpleNamespace(had_effect=True))
     _wire_action_outcome_emotion(agent, "explore", SimpleNamespace(had_effect=False))
     # Не упало — проводка с guard'ом.
+
+
+def _hunt_searcher(result):
+    searcher = SimpleNamespace(is_enabled=True, queries=[])
+
+    def search(query):
+        searcher.queries.append(query)
+        return dict(result)
+
+    searcher.search = search
+    return searcher
+
+
+def test_successful_hunt_yields_joy_through_real_action_outcome():
+    agent = DigitalBeing(name="HuntEmotionSuccess")
+    _satisfied(agent)
+    target = "электротелеграф"
+    agent.web_searcher = _hunt_searcher(
+        {
+            "found": True,
+            "title": "Электротелеграф",
+            "extract": (
+                "Электротелеграф — устройство для передачи сообщений "
+                "электрическими сигналами на расстояние."
+            ),
+        }
+    )
+    joy_before = agent.emotional_state.levels["joy"]
+
+    agent.act("web_search", intention={"params": {"target": target}})
+
+    outcome = agent._last_action_outcome
+    assert outcome.had_effect
+    assert outcome.delta.knowledge_entries == 1
+    assert agent.web_searcher.queries == [target]
+    assert agent.emotional_state.levels["joy"] > joy_before
+    episode = agent.emotional_state.episodes[-1]
+    assert episode["event"] == "intention_completed"
+    assert episode["emotion"] == "joy"
+    assert agent.emotional_state.last_causes[episode["emotion"]] == (
+        agent.cycle_count,
+        "web_search",
+    )
+
+
+def test_missed_hunt_yields_sadness_through_real_action_outcome():
+    agent = DigitalBeing(name="HuntEmotionMiss")
+    _satisfied(agent)
+    target = "несуществующая тема k16"
+    agent.web_searcher = _hunt_searcher({"found": False, "error": "no_pages"})
+    sadness_before = agent.emotional_state.levels["sadness"]
+
+    agent.act("web_search", intention={"params": {"target": target}})
+
+    outcome = agent._last_action_outcome
+    assert not outcome.had_effect
+    assert outcome.delta.is_empty
+    assert agent._hunt_misses[target] == agent.cycle_count
+    assert agent.emotional_state.levels["sadness"] > sadness_before
+    episode = agent.emotional_state.episodes[-1]
+    assert episode["event"] == "intention_failed"
+    assert episode["emotion"] == "sadness"
+    assert agent.emotional_state.last_causes[episode["emotion"]] == (
+        agent.cycle_count,
+        "web_search",
+    )
+
+
+def test_denied_hunt_has_no_search_and_no_emotional_episode():
+    agent = DigitalBeing(name="HuntEmotionDenied")
+    _satisfied(agent)
+    agent.web_searcher = _hunt_searcher({"found": False, "error": "no_pages"})
+    agent._action_costs["web_search"] = 10**6
+    episodes_before = list(agent.emotional_state.episodes)
+
+    reply = agent.act(
+        "web_search", intention={"params": {"target": "недоступная охота"}}
+    )
+
+    assert "устала" in reply
+    assert agent.web_searcher.queries == []
+    assert agent.emotional_state.episodes == episodes_before
