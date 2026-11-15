@@ -333,7 +333,9 @@ def test_diary_selection_has_amber_frame_and_preserves_action_stripe(root):
     win._apply_life_data({"diary": {"episodes": episodes}})
     first, second = win._diary_row_frames
     first_stripe = next(
-        child for child in first.winfo_children() if getattr(child, "_preserve_bg", False)
+        child
+        for child in first.winfo_children()
+        if getattr(child, "_preserve_bg", False)
     )
     second_stripe = next(
         child
@@ -544,11 +546,7 @@ def test_activity_game_board_matches_recorded_cells_and_draft_hides_it(root):
 def test_activity_invalid_board_and_empty_state_do_not_fabricate_cells(root):
     win = _window(root)
     win._apply_life_data(
-        {
-            "activities": {
-                "game": {"board": ["X", "O", "X"], "turns": 3, "round": 1}
-            }
-        }
+        {"activities": {"game": {"board": ["X", "O", "X"], "turns": 3, "round": 1}}}
     )
     win._activity_list.selection_set(0)
     win._on_activity_select()

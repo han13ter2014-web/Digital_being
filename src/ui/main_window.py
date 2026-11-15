@@ -643,9 +643,7 @@ class MainWindow(ChatWindow):
                         bd=0,
                     )
                     bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
-                    fill = bar.create_rectangle(
-                        0, 0, 0, 3, fill=theme.CYAN, outline=""
-                    )
+                    fill = bar.create_rectangle(0, 0, 0, 3, fill=theme.CYAN, outline="")
 
                     def resize_bar(event, item=fill, emotion_name=name):
                         value = self._now_emotion_values[emotion_name]
@@ -1082,9 +1080,7 @@ class MainWindow(ChatWindow):
         activity_card.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 4))
         self._now_activity = self._now_card_text(activity_card, self._ui_font, 360)
 
-        emotions_card, emotions_header = self._now_card(
-            cards, "ЭМОЦИИ", theme.VIOLET
-        )
+        emotions_card, emotions_header = self._now_card(cards, "ЭМОЦИИ", theme.VIOLET)
         emotions_card.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=(0, 4))
         self._now_dominant = tk.Label(
             emotions_header,
@@ -1122,9 +1118,7 @@ class MainWindow(ChatWindow):
         self._now_emotion_canvas.configure(yscrollcommand=emotion_scroll.set)
         emotion_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._now_emotion_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._now_emotion_inner = tk.Frame(
-            self._now_emotion_canvas, bg=theme.SURFACE
-        )
+        self._now_emotion_inner = tk.Frame(self._now_emotion_canvas, bg=theme.SURFACE)
         emotion_window = self._now_emotion_canvas.create_window(
             (0, 0), window=self._now_emotion_inner, anchor="nw"
         )
@@ -1142,9 +1136,7 @@ class MainWindow(ChatWindow):
         )
         self._bind_now_emotion_wheel(self._now_emotion_canvas)
 
-        choice_card, _header = self._now_card(
-            cards, "ПОЧЕМУ ИМЕННО ЭТО", theme.CYAN
-        )
+        choice_card, _header = self._now_card(cards, "ПОЧЕМУ ИМЕННО ЭТО", theme.CYAN)
         choice_card.grid(row=1, column=0, sticky="nsew", padx=(0, 4), pady=4)
         self._now_choice = self._now_card_text(choice_card, self._now_body_font, 360)
 
@@ -1155,9 +1147,7 @@ class MainWindow(ChatWindow):
         influence_card, _header = self._now_card(
             cards, "ЧТО ВЛИЯЕТ НА ВЫБОР", theme.VIOLET
         )
-        influence_card.grid(
-            row=2, column=0, columnspan=2, sticky="nsew", pady=(4, 0)
-        )
+        influence_card.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
         self._now_influence = self._now_card_text(
             influence_card, self._now_body_font, 760
         )
@@ -1262,7 +1252,9 @@ class MainWindow(ChatWindow):
                 padx=9,
                 pady=4,
             )
-            chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]), pady=theme.SPACING["xs"])
+            chip.pack(
+                side=tk.LEFT, padx=(0, theme.SPACING["xs"]), pady=theme.SPACING["xs"]
+            )
             self._graph_filter_buttons[kind] = chip
         self._graph_zoom_label = tk.Label(
             filters,
@@ -1393,13 +1385,9 @@ class MainWindow(ChatWindow):
         """Тихая техническая сетка и орбиты — только фон, не данные Core."""
         canvas = self._graph_canvas
         for x in range(0, width, 32):
-            canvas.create_line(
-                x, 0, x, height, fill=theme.GRID, tags=("graph-grid",)
-            )
+            canvas.create_line(x, 0, x, height, fill=theme.GRID, tags=("graph-grid",))
         for y in range(0, height, 32):
-            canvas.create_line(
-                0, y, width, y, fill=theme.GRID, tags=("graph-grid",)
-            )
+            canvas.create_line(0, y, width, y, fill=theme.GRID, tags=("graph-grid",))
         center_x, center_y = width / 2.0, height / 2.0
         size = min(width, height)
         for ratio, color in (
@@ -1595,12 +1583,16 @@ class MainWindow(ChatWindow):
                     bg=(
                         theme.AMBER
                         if all_active
-                        else theme.BG_CENTER if active else theme.SURFACE
+                        else theme.BG_CENTER
+                        if active
+                        else theme.SURFACE
                     ),
                     fg=(
                         theme.BG_DEEP
                         if all_active
-                        else color if active else theme.MUTED
+                        else color
+                        if active
+                        else theme.MUTED
                     ),
                     highlightbackground=(
                         theme.AMBER if all_active else color if active else theme.BORDER
@@ -2016,14 +2008,10 @@ class MainWindow(ChatWindow):
             pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
         )
         self._activity_list.bind("<<ListboxSelect>>", self._on_activity_select)
-        self._activity_detail = self._detail_panel(
-            body, "ЗАНЯТИЕ", accent=theme.AMBER
-        )
+        self._activity_detail = self._detail_panel(body, "ЗАНЯТИЕ", accent=theme.AMBER)
 
         # Поле строится только из записанного board[9]; для черновика оно скрыто.
-        self._activity_board = tk.Frame(
-            self._activity_detail.master, bg=theme.SURFACE
-        )
+        self._activity_board = tk.Frame(self._activity_detail.master, bg=theme.SURFACE)
         self._activity_board_cells = []
         for index in range(9):
             cell = tk.Label(
@@ -2285,7 +2273,9 @@ class MainWindow(ChatWindow):
             fg=(
                 theme.DANGER
                 if error
-                else accent if action_key != "grey" else theme.MUTED
+                else accent
+                if action_key != "grey"
+                else theme.MUTED
             ),
             anchor="w",
             justify=tk.LEFT,
@@ -2307,7 +2297,9 @@ class MainWindow(ChatWindow):
         collapse_link = None
         if group_count > 1 or group_size > 1:
             count = group_count if group_count > 1 else group_size
-            text_key = "×{count} · показать" if group_count > 1 else "×{count} · свернуть"
+            text_key = (
+                "×{count} · показать" if group_count > 1 else "×{count} · свернуть"
+            )
             collapse_link = tk.Label(
                 content,
                 text=self._t(text_key).format(count=count),
@@ -2613,7 +2605,9 @@ class MainWindow(ChatWindow):
                 anchor="w",
                 cursor="hand2",
             )
-            label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(theme.SPACING["sm"], 0))
+            label.pack(
+                side=tk.LEFT, fill=tk.X, expand=True, padx=(theme.SPACING["sm"], 0)
+            )
             label.bind(
                 "<Button-1>",
                 lambda _event, name=key: self._toggle_access_var(name),
@@ -2644,9 +2638,7 @@ class MainWindow(ChatWindow):
         effector, _header = self._now_card(right, "ДЕЙСТВИЯ", theme.AMBER)
         effector.pack(fill=tk.X, pady=(0, theme.SPACING["sm"]))
         self._effector_card = self._now_card_text(effector, self._now_body_font, 240)
-        access, _header = self._now_card(
-            right, "ЧТО РАЗРЕШЕНО СЕЙЧАС", theme.VIOLET
-        )
+        access, _header = self._now_card(right, "ЧТО РАЗРЕШЕНО СЕЙЧАС", theme.VIOLET)
         access.pack(fill=tk.X, pady=(0, theme.SPACING["sm"]))
         self._access_card = self._now_card_text(access, self._now_body_font, 240)
         right.bind(

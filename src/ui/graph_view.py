@@ -374,9 +374,11 @@ def layout_nodes(
         if ring_index == 1 and chunk:
             # На узком Canvas доля орбиты становится меньше диаметра узла.
             # Сохраняем зазор от центра, но не вылезаем на чужие внешние кольца.
-            clearance = node_radius(concepts[0].get("weight"), "concept") + max(
-                node_radius(node.get("weight"), "concept") for node in chunk
-            ) + 12.0
+            clearance = (
+                node_radius(concepts[0].get("weight"), "concept")
+                + max(node_radius(node.get("weight"), "concept") for node in chunk)
+                + 12.0
+            )
             radius = min(max_radius * 0.55, max(radius, clearance))
         _place_ring(
             positions,
