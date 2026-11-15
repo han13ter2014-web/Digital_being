@@ -26,6 +26,8 @@ def test_manifest_pins_and_corruption_targets_match_history():
     assert len(MANIFEST) == 16
     assert len({row["verifier"] for row in MANIFEST}) == 16
     assert len({(row["parent"], row["step"]) for row in MANIFEST}) == 15
+    if discover_evidence() is None:
+        pytest.skip("no complete historical verifier evidence in this checkout")
 
     for row in MANIFEST:
         actual_parent = _git("rev-parse", f"{row['step']}^")
