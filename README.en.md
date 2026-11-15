@@ -195,6 +195,13 @@ Static Tk labels support Russian, English and Chinese. Dialogue and recorded
 memory contents are not translated automatically. Deeper documentation is
 still in Russian; the README is available in English and Chinese.
 
+## Project roles
+
+| Contributor | Role |
+|---|---|
+| **Kimi (Moonshot AI)** | Lead developer, tester, bug hunter, designer, and assistant |
+| **Alice AI** | Lead analyst |
+
 ## Contributing
 
 Contributions are welcome. Architectural boundaries, the process, and check
