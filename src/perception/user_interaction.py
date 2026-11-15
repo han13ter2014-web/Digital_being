@@ -906,6 +906,13 @@ class UserInteraction:
                     break
 
 
+CONSOLE_CONTROLS_HINT = """Управление консолью:
+  help/h       — показать команды и эту памятку
+  exit/q/quit  — сохранить и выйти
+  Ctrl+C       — штатно остановить без выделения текста
+  Ctrl+Shift+C — копировать выделенный текст в Windows Terminal"""
+
+
 class UserPromptHandler:
     """Обрабатывает прямые ввод от пользователя во время работы агента."""
 
@@ -953,7 +960,8 @@ class UserPromptHandler:
         return "[Система] Непонятная команда. Введите 'help' для справки."
 
     def _cmd_help(self, agent=None) -> str:
-        return """
+        return (
+            """
 Доступные команды:
   help/h       - Показать справку
   status/s     - Статус агента
@@ -963,6 +971,8 @@ class UserPromptHandler:
   clear        - Очистить экран
   exit/q       - Сохранить и выйти
 """
+            + CONSOLE_CONTROLS_HINT
+        )
 
     def _cmd_status(self, agent=None) -> str:
         if not agent:

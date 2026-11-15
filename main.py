@@ -699,7 +699,7 @@ def run_headless(runtime: Runtime, args: argparse.Namespace) -> int:
 
 def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
     """Консольный режим: прежний main.py, но на общем раннере."""
-    from src.perception.user_interaction import UserPromptHandler
+    from src.perception.user_interaction import CONSOLE_CONTROLS_HINT, UserPromptHandler
 
     speed = resolve_speed(args.interval)
     runtime.start(speed)
@@ -711,6 +711,7 @@ def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
 
     agent = runtime.agent
     _print_banner(agent)
+    print(CONSOLE_CONTROLS_HINT)
 
     handler = UserPromptHandler()
     try:
@@ -727,6 +728,8 @@ def run_console(runtime: Runtime, args: argparse.Namespace) -> int:
             result = handler.process_command(raw, agent)
             if result == "__EXIT__":
                 break
+            if result:
+                print(result)
     except KeyboardInterrupt:
         pass
 
