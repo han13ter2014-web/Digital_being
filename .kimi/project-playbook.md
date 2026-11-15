@@ -44,6 +44,8 @@
 
 ## Environment and recovery
 
-- Baseline Git: `428e2e4` — 45 коммиченных исправлений багхантинга; проект находится в `C:\Users\GamePK\digital_being`. Исправление 46 освобождает блокировку профиля и подсистемы при ошибке сборки `Runtime` и пока не закоммичено. Полный regression после него: 2447 passed, 2 skipped; локальные static gates зелёные. Предыдущий GitHub CI run `43267712925` — success, 8/8 jobs.
+- Windows installer: `.venv/Scripts/python.exe build_installer.py --rebuild`; PyInstaller 6.22.3 и `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` доступны. Перед публикацией проверить архив на отсутствие живого `data/`, изолированный запуск и SHA-256.
+- У PyInstaller windowed-сборки (`console=False`) может не быть консоли для `AttachConsole`; неудачная отправка Ctrl+C/Ctrl+Break в таком harness не доказывает дефект приложения, но и не засчитывается как проверка graceful shutdown.
+- Baseline Git: `631e2c6`; полный regression — 2634 passed, 2 skipped, GitHub CI run `43722983480` — success, 8/8 jobs.
 - Новые изменения после baseline коммитить и отправлять только по явному разрешению владельца.
-- Evidence: verified, 2026-11-13.
+- Evidence: verified, 2026-11-15.

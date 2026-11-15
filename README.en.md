@@ -9,11 +9,10 @@
 
 ## A note on languages
 
-The application itself — its interface, its dialogue, and its whole life —
-currently speaks Russian. This English README is a look ahead: the project
-is built by one person with the help of AI assistants, and the deeper
-documentation is Russian for now. Nothing here is marketing; the facts are
-the same as in the Russian original.
+The Tk shell supports Russian, English and Chinese static labels. Dialogue
+and recorded memory keep their original language, and the deeper documentation
+is Russian for now. The project is built by one person with the help of AI
+assistants. Nothing here is marketing; the facts match the Russian original.
 
 Digital Being is an experiment in observable digital life. It is not a
 chatbot: the system has a Core, state, energy, memory, mental models,
@@ -40,8 +39,8 @@ been done and what has not worked.
 A ready Windows installer — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
 
 ```text
-DigitalBeing_Setup_v0.1.5.1.exe
-SHA-256: 5248706697B36A62AFBE6FEF6DF0A15884694DD9BF27C060772DDE79FBD44788
+DigitalBeing_Setup_v0.1.6.exe
+SHA-256: 0863B1B4B0BAB22F4E20681383D9F69F149AE59C835376A845F8E42009280543
 ```
 
 Running from source (Python 3.10+):
@@ -81,8 +80,15 @@ Run details, commands and settings: [docs/USAGE.md](docs/USAGE.md) (Russian).
 - separate activities: exploration, play, creativity, communication, rest;
 - Delamain as a limited executor, not a second subject;
 - approval, sandbox, and Effector;
-- a Tk shell with the Now, Life Map, Diary, Activities, Access and Dialogue
-  screens.
+- a cyberpunk Tk shell with the Now, Life Map, Diary, Activities, Access and
+  Dialogue screens;
+- Russian, English and Chinese static labels in the Tk shell, without changing
+  DTO codes or the recorded contents of memory;
+- a local web interface beside Tk, opening at `http://127.0.0.1:8765/` when
+  available; `--no-web-open` suppresses only the browser, `--no-web` disables
+  the web layer;
+- recorded successful, failed and cancelled goal outcomes, consolidation of
+  significant results into long-term memory, and evidence-guided retries.
 
 ## Screenshots
 
@@ -120,7 +126,7 @@ as finished work, and does not turn hypotheses into knowledge.
 - the shell receives DTOs and sends only explicit commands through the
   EventBus, without becoming a second source of truth;
 - actions toward the outside pass policy, approval, and sandbox;
-- claims are checkable: acceptance demos and 2100+ tests instead of promises.
+- claims are checkable: acceptance demos and 2600+ tests instead of promises.
 
 ## Acceptance demo
 
@@ -154,12 +160,13 @@ map of everything else.
 
 ## Status
 
-Current package version: **0.1.5.1** — [release v0.1.5.1](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.5.1).
+Current package version: **0.1.6** — [release v0.1.6](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.6).
 
-A new entity starts without an inherited name or someone else's memory. The
-installer contains only seed knowledge; live `data/` is excluded from git and
-builds. Dialogue memory, intention-targeted search, the auto-opening web UI,
-and the readable life map are preserved. The defective v0.1.5 is now a draft.
+Version 0.1.6 refreshes the cyberpunk Tk shell and local web interface, adds
+localized static labels, and strengthens goal memory, motivation, security,
+and recovery. A new entity still starts without an inherited name or someone
+else's memory: the installer contains only seed knowledge, and live `data/`
+is excluded from git and builds.
 
 The project does not claim to have proven consciousness or subjectivity. It
 builds a verifiable model of state, memory, choice, experience, and bounded
@@ -183,10 +190,10 @@ memory, choice, and bounded action.
 **Does it need the internet?**
 No. The core lives locally; network accesses are off by default.
 
-**Why are the interface and documentation in Russian?**
-One person builds the project with AI assistants; the interface, dialogue,
-and deeper documents are Russian for now. The README is translated into
-English and Chinese.
+**Which languages are available?**
+Static Tk labels support Russian, English and Chinese. Dialogue and recorded
+memory contents are not translated automatically. Deeper documentation is
+still in Russian; the README is available in English and Chinese.
 
 ## Contributing
 
