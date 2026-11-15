@@ -497,6 +497,23 @@ def validate_checkpoint_state(state) -> None:
                     _fail(f"{path}.{field}", "expected a string")
             if "cycle" in entry:
                 _integer(entry["cycle"], f"{path}.cycle", nonnegative=True)
+        for index, entry in enumerate(
+            _list(
+                interaction.get("dialogue_acts", []),
+                "user_interaction.dialogue_acts",
+            )
+        ):
+            path = f"user_interaction.dialogue_acts[{index}]"
+            _dict(entry, path)
+            for field in ("kind", "topic", "user_text", "agent_text"):
+                if not isinstance(entry.get(field), str):
+                    _fail(f"{path}.{field}", "expected a string")
+            for entity_index, entity in enumerate(
+                _list(entry.get("entities"), f"{path}.entities")
+            ):
+                if not isinstance(entity, str):
+                    _fail(f"{path}.entities[{entity_index}]", "expected a string")
+            _integer(entry.get("cycle"), f"{path}.cycle", nonnegative=True)
         for index, question in enumerate(
             _list(
                 interaction.get("pending_questions", []),

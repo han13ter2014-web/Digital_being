@@ -25,6 +25,7 @@ from typing import Optional, Tuple
 
 ACT_ANSWER = "answer"
 ACT_ASK_ABOUT_SELF = "ask_about_self"
+ACT_FOLLOW_UP = "follow_up"
 ACT_REQUEST = "request"
 ACT_SOCIAL = "social"
 ACT_UNKNOWN = "unknown"

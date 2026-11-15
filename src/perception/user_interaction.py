@@ -14,6 +14,8 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 from typing import Dict
 from uuid import uuid4
 
+from src.core.dialogue_memory import DialogueActRing
+
 
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
 def _get_events_class():
@@ -107,6 +109,8 @@ class UserInteraction:
         self.message_queue = []  # Все сообщения от агента
         self.message_history = []  # История всех сообщений
         self._last_user_message_cycle = None  # Когда пользователь последний раз писал
+        # Т5: отдельное кольцо смысловых актов, а не полная история UI.
+        self.dialogue_act_ring = DialogueActRing()
 
         # Настройки взаимодействия
         self.max_pending_questions = 3
@@ -677,6 +681,26 @@ class UserInteraction:
             del self.message_history[: -self.MESSAGE_HISTORY_MAX]
         return {"status": "received", "cycle": cycle}
 
+    def record_dialogue_act(
+        self,
+        kind,
+        *,
+        topic="",
+        entities=(),
+        cycle=0,
+        user_text="",
+        agent_text="",
+    ) -> None:
+        """Записать дескриптор завершённой реплики в рабочую память Т5."""
+        self.dialogue_act_ring.record(
+            kind,
+            topic=topic,
+            entities=entities,
+            cycle=cycle,
+            user_text=user_text,
+            agent_text=agent_text,
+        )
+
     # ============================================================
     # Персистентность: снапшот диалогового состояния для чекпоинта
     # ============================================================
@@ -690,7 +714,8 @@ class UserInteraction:
         на середине. Плюс оба маркера цикла: кулдаун вопросов и «когда
         пользователь писал последний раз» (детектор тишины). Последние
         OUTGOING_TRACE_MAX исходящих реплик сохраняются как след публикаций;
-        одинаковые тексты и id не дедуплицируются.
+        одинаковые тексты и id не дедуплицируются. Кольцо актов Т5
+        сериализуется отдельно и не возвращается в очередь UI.
         """
         outgoing = [
             dict(entry)
@@ -700,6 +725,7 @@ class UserInteraction:
         return {
             "question_history": [dict(entry) for entry in self.question_history[-50:]],
             "outgoing_messages": outgoing[-self.OUTGOING_TRACE_MAX :],
+            "dialogue_acts": self.dialogue_act_ring.snapshot(),
             "pending_questions": [
                 {
                     "id": q["id"],
@@ -729,10 +755,13 @@ class UserInteraction:
         восстанавливаются. Вопросы про метаслова диалога и идентичные
         дубликаты отбрасываются (миграция после бага с накоплением).
         История и очередь заменяются целиком:
-        восстановление идёт в свежий агент.
+        восстановление идёт в свежий агент. Старый чекпоинт без
+        ``dialogue_acts`` даёт пустое кольцо, а не падение.
         """
         if not isinstance(data, dict):
             return
+
+        self.dialogue_act_ring.restore(data.get("dialogue_acts"))
 
         saved_history = data.get("question_history")
         if isinstance(saved_history, list):

@@ -204,6 +204,44 @@ def test_legacy_omissions_and_sentinels_are_valid(state):
             "user_interaction.pending_questions[0].sub_answers",
         ),
         (
+            {"user_interaction": {"dialogue_acts": {}}},
+            "user_interaction.dialogue_acts",
+        ),
+        (
+            {
+                "user_interaction": {
+                    "dialogue_acts": [
+                        {
+                            "kind": "about_self",
+                            "topic": "",
+                            "entities": "Ring",
+                            "cycle": 1,
+                            "user_text": "Чем занимаешься?",
+                            "agent_text": "Ответ",
+                        }
+                    ]
+                }
+            },
+            "user_interaction.dialogue_acts[0].entities",
+        ),
+        (
+            {
+                "user_interaction": {
+                    "dialogue_acts": [
+                        {
+                            "kind": "about_self",
+                            "topic": "",
+                            "entities": ["Ring"],
+                            "cycle": -1,
+                            "user_text": "Чем занимаешься?",
+                            "agent_text": "Ответ",
+                        }
+                    ]
+                }
+            },
+            "user_interaction.dialogue_acts[0].cycle",
+        ),
+        (
             {"user_interaction": {"last_question_cycle": 1.5}},
             "user_interaction.last_question_cycle",
         ),

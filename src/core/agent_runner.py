@@ -56,10 +56,12 @@ from src.core.agent import AgentDeadSignal
 from src.core.dialogue_acts import (
     ACT_ANSWER,
     ACT_ASK_ABOUT_SELF,
+    ACT_FOLLOW_UP,
     ACT_REQUEST,
     ACT_SOCIAL,
     SOCIAL_KIND_GREETING,
     SOCIAL_KIND_STATE,
+    DialogueAct,
     classify_user_text,
     extract_definition,
     extract_identity_check,
@@ -69,8 +71,12 @@ from src.core.dialogue_acts import (
 )
 from src.core.dialogue_learning import DialogueLearning
 from src.core.dialogue_memory import (
+    anaphora_marker,
+    build_follow_up_clarification,
+    build_follow_up_reply,
     build_known_topic_reply,
     build_persistent_fact_reply,
+    question_topic,
 )
 from src.evolution.self_coding import parse_proposal_decision
 
@@ -530,12 +536,15 @@ class AgentRunner:
                     persistent_reply,
                     context="persistent_fact",
                     source="dialogue_memory",
+                    user_text=text,
                 )
             else:
                 await self._reply_to_user(
                     known_topic_reply,
                     context="known_topic",
                     source="dialogue_memory",
+                    user_text=text,
+                    dialogue_topic=question_topic(text),
                 )
             return
 
@@ -553,7 +562,11 @@ class AgentRunner:
                 response = self._format_about_self_reply()
             if response:
                 await self._reply_to_user(
-                    response, context="about_self", source="dialogue_acts"
+                    response,
+                    context="about_self",
+                    source="dialogue_acts",
+                    user_text=text,
+                    dialogue_entities=(self.agent.name,),
                 )
             return
 
@@ -707,6 +720,35 @@ class AgentRunner:
             await self._handle_user_definition(definition)
             return
 
+        # Т5: короткая анафора разрешается только после всех содержательных
+        # дверей и до orphan/unknown. Открытый вопрос сохраняет прежний путь.
+        follow_up = self._resolve_dialogue_follow_up(text, pending)
+        if follow_up is not None:
+            status, descriptor = follow_up
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            if status == "resolved":
+                act = DialogueAct(ACT_FOLLOW_UP, anaphora_marker(text))
+                await self._reply_to_user(
+                    build_follow_up_reply(text, descriptor),
+                    context=act.kind,
+                    source="dialogue_memory",
+                    user_text=text,
+                    dialogue_topic=descriptor.get("topic", ""),
+                    dialogue_entities=descriptor.get("entities", ()),
+                )
+            else:
+                await self._reply_to_user(
+                    build_follow_up_clarification(text, descriptor),
+                    context="follow_up_clarification",
+                    source="dialogue_memory",
+                    user_text=text,
+                )
+            return
+
         # === «Собеседник-6»: нераспознанное — честный отклик, не материал ===
         # Раньше непознанный текст падал в очередь стимулов и изучался как
         # тема («Не нашел файл для 'фраза'»): дословные реплики человека не
@@ -765,6 +807,21 @@ class AgentRunner:
             source="dialogue_acts",
         )
 
+    def _resolve_dialogue_follow_up(self, text, pending):
+        """Вернуть разрешённый акт либо кандидата для уточнения референта."""
+        if pending is not None or not anaphora_marker(text):
+            return None
+        interaction = getattr(self.agent, "user_interaction", None)
+        ring = getattr(interaction, "dialogue_act_ring", None)
+        if ring is None:
+            return "clarification", None
+        resolved = ring.resolve(text, self.agent.cycle_count)
+        if resolved is not None:
+            return "resolved", resolved
+        return "clarification", ring.clarification_candidate(
+            text, self.agent.cycle_count
+        )
+
     def _learned_markers(self):
         """Обученные маркеры для классификатора (или None)."""
         learning = getattr(self.agent, "dialogue_learning", None)
@@ -821,8 +878,17 @@ class AgentRunner:
             reply, context="dialogue_learning", source="dialogue_learning"
         )
 
-    async def _reply_to_user(self, text: str, context: str, source: str) -> None:
-        """Доставить прямую реплику пользователю через канал диалога.
+    async def _reply_to_user(
+        self,
+        text: str,
+        context: str,
+        source: str,
+        *,
+        user_text="",
+        dialogue_topic="",
+        dialogue_entities=(),
+    ) -> None:
+        """Доставить прямую реплику и сохранить её дескриптор в кольцо Т5.
 
         «Собеседник-6»: ответ на реплику человека — это AGENT_MESSAGE
         (UserInteraction.send_reply), а не AGENT_THOUGHT: реплика видна
@@ -855,6 +921,14 @@ class AgentRunner:
                 context=context,
                 cycle=self.agent.cycle_count,
             )
+            self._record_dialogue_reply(
+                interaction,
+                text,
+                context,
+                user_text,
+                dialogue_topic,
+                dialogue_entities,
+            )
             return
         if interaction is not None and hasattr(interaction, "send_message"):
             interaction.send_message(
@@ -865,12 +939,42 @@ class AgentRunner:
                 context=context,
                 cycle=self.agent.cycle_count,
             )
+            self._record_dialogue_reply(
+                interaction,
+                text,
+                context,
+                user_text,
+                dialogue_topic,
+                dialogue_entities,
+            )
             return
         await self.bus.publish(
             Events.AGENT_THOUGHT,
             {"text": text, "cycle": self.agent.cycle_count},
             source=source,
             priority=1,
+        )
+
+    def _record_dialogue_reply(
+        self,
+        interaction,
+        text,
+        context,
+        user_text,
+        dialogue_topic,
+        dialogue_entities,
+    ) -> None:
+        """Старые fake interaction без кольца остаются совместимыми."""
+        recorder = getattr(interaction, "record_dialogue_act", None)
+        if not callable(recorder):
+            return
+        recorder(
+            context,
+            topic=dialogue_topic,
+            entities=dialogue_entities,
+            cycle=self.agent.cycle_count,
+            user_text=user_text,
+            agent_text=text,
         )
 
     async def _handle_user_definition(self, definition) -> None:
@@ -892,6 +996,9 @@ class AgentRunner:
                 "Теперь я знаю это от тебя — переспрашивать не буду.",
                 context="user_definition",
                 source="dialogue_acts",
+                user_text=f"{topic} — это {body}",
+                dialogue_topic=saved,
+                dialogue_entities=(saved,),
             )
             return
         await self._reply_to_user(
