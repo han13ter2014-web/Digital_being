@@ -103,17 +103,20 @@ class SignalTracker:
         return self._streaks.get(category, 0)
 
 
-def draft_config_change(category: str) -> Optional[Dict]:
-    """Собирает честный черновик изменения конфигурации.
+def effective_config_value(owner, attr: str, default=_MISSING):
+    """Значение рычага конкретного агента без мутации глобального конфига."""
+    overrides = getattr(owner, "_safe_config_overrides", {})
+    if attr in overrides:
+        return overrides[attr]
+    return getattr(LR_CONFIG, attr, default)
 
-    Текущее значение читается из живого LR_CONFIG — diff никогда не
-    выдумывает «старое» значение. Если рычага нет, атрибут отсутствует
-    или уже равен кандидату — черновика нет.
-    """
+
+def draft_config_change(category: str, owner=None) -> Optional[Dict]:
+    """Собирает честный черновик из действующего значения конкретной жизни."""
     tunable = SAFE_TUNABLES.get(category)
     if tunable is None:
         return None
-    old = getattr(LR_CONFIG, tunable.attr, _MISSING)
+    old = effective_config_value(owner, tunable.attr)
     if old is _MISSING or old == tunable.candidate:
         return None
     diff = (

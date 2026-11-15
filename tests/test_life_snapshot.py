@@ -234,3 +234,35 @@ def test_extended_diary_uses_same_collector_without_changing_tk_window():
     assert len(web_snapshot["episodes"]) == 30
     assert web_snapshot["episodes"][:20] == tk_snapshot["diary"]["episodes"]
     assert web_snapshot["cache_limit"] == 500
+
+
+def test_snapshot_exposes_pending_proposal_as_deep_read_only_copy():
+    agent = _agent("ProposalView")
+    proposal = {
+        "id": "prop_view",
+        "type": "config_change",
+        "title": "REST_FATIGUE_THRESHOLD: 0.6 → 0.55",
+        "description": "Отдыхать чуть раньше",
+        "category": "energy_efficiency",
+        "attr": "REST_FATIGUE_THRESHOLD",
+        "old": 0.6,
+        "new": 0.55,
+        "verification": {"ran": True, "passed": True},
+        "code_snippet": "не показываем в карточке",
+    }
+    agent.architecture_proposal = SimpleNamespace(list_pending=lambda: [proposal])
+    agent._safe_config_overrides = {"FORGETTING_INTERVAL": 400}
+    keys_before = set(agent.__dict__)
+
+    snapshot = build_life_snapshot(agent)
+
+    view = snapshot["proposals"]
+    assert view["pending"][0]["id"] == "prop_view"
+    assert view["pending"][0]["verification"]["passed"] is True
+    assert "code_snippet" not in view["pending"][0]
+    assert view["effective_overrides"] == {"FORGETTING_INTERVAL": 400}
+    view["pending"][0]["verification"]["passed"] = False
+    view["effective_overrides"]["FORGETTING_INTERVAL"] = 1
+    assert proposal["verification"]["passed"] is True
+    assert agent._safe_config_overrides["FORGETTING_INTERVAL"] == 400
+    assert set(agent.__dict__) == keys_before

@@ -476,11 +476,34 @@ class AgentRunner:
                     if outcome.get("decided"):
                         verdict = "одобрено" if approved else "отклонено"
                         if approved:
-                            reply = (
-                                f"Записала твоё решение: предложение "
-                                f"«{outcome['title']}» {verdict}. "
-                                f"Внедрение — за тобой: я сама себя не меняю."
+                            overrides = getattr(
+                                self.agent, "_safe_config_overrides", None
                             )
+                            if overrides is None:
+                                overrides = {}
+                                self.agent._safe_config_overrides = overrides
+                            execution = proposal_api.apply_approved(
+                                target_id, overrides
+                            )
+                            if execution.get("applied"):
+                                reply = (
+                                    f"Готово: «{outcome['title']}» одобрено и "
+                                    f"применено. Новое значение сохранено и "
+                                    f"будет восстановлено после перезапуска."
+                                )
+                            elif not execution.get("supported", True):
+                                reply = (
+                                    f"Записала твоё одобрение: "
+                                    f"«{outcome['title']}». Такой тип изменения "
+                                    f"я пока не исполняю сама."
+                                )
+                            else:
+                                reply = (
+                                    f"Одобрение записала, но применить "
+                                    f"«{outcome['title']}» не удалось: "
+                                    f"{execution.get('reason', 'неизвестная ошибка')}. "
+                                    f"Прежнее значение сохранено."
+                                )
                         else:
                             reply = (
                                 f"Записала твоё решение: предложение "

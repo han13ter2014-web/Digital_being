@@ -411,6 +411,7 @@ def _init_subsystems_declaratively_impl(self, name: str) -> None:
             registry=self.will_registry,
             life_id=self.life_id if self._profile_managed else None,
         )
+        self._safe_config_overrides = self.architecture_proposal.load_config_overrides()
 
 
 def _run_post_init_hooks_impl(self) -> None:

@@ -199,14 +199,17 @@ def perform_forgetting_impl(self):
     if not LR_CONFIG.FORGETTING_ENABLED:
         return
 
+    from src.evolution.self_coding import effective_config_value
+
     # Проверяем, пора ли забывать
-    if self.cycle_count % LR_CONFIG.FORGETTING_INTERVAL != 0:
+    if self.cycle_count % effective_config_value(self, "FORGETTING_INTERVAL") != 0:
         return
 
     # Находим концепции для забывания (низкая уверенность + мало использования)
+    retention_threshold = effective_config_value(self, "MIN_CONFIDENCE_FOR_RETENTION")
     to_remove = []
     for concept_name, node in list(self.mental_models.concepts.items()):
-        if node.confidence < LR_CONFIG.MIN_CONFIDENCE_FOR_RETENTION:
+        if node.confidence < retention_threshold:
             usage = self._concept_usage_count.get(concept_name, 0)
             if usage <= 1:  # Использовалась 0-1 раз
                 to_remove.append(concept_name)

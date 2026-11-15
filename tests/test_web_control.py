@@ -418,3 +418,29 @@ def test_external_host_cannot_bypass_origin_check_by_dns_rebinding(
 
     assert status == 403 and response["status"] == "rejected"
     assert bus.published == []
+
+
+def test_web_proposal_decision_uses_existing_dialogue_event(controlled_dashboard):
+    _, port, _, bus = controlled_dashboard
+
+    status, response = _post(port, "/api/dialogue", {"text": "одобри prop_hidden"})
+
+    assert status == 202 and response["status"] == "accepted"
+    assert bus.published == [
+        (Events.USER_MESSAGE, {"text": "одобри prop_hidden"}, "web")
+    ]
+
+
+def test_web_proposal_card_hides_id_and_has_no_optimistic_success(controlled_dashboard):
+    _, port, _, _ = controlled_dashboard
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+
+    assert 'id="proposal-list"' in body
+    assert "function renderProposals(section)" in body
+    assert "renderProposals(life.proposals||{})" in body
+    assert "text:`${decision} ${item.id}`" in body
+    assert "sendCommand('/api/dialogue'" in body
+    assert "Одобрить" in body and "Отклонить" in body
+    assert "Предложение применено" not in body
+    assert "status='implemented'" not in body

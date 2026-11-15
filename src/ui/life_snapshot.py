@@ -145,6 +145,41 @@ def _activity_section(agent: Any) -> Dict[str, Any]:
     }
 
 
+def _proposal_section(agent: Any) -> Dict[str, Any]:
+    """Ожидающие решения и действующие per-life настройки, только для чтения."""
+    section: Dict[str, Any] = {
+        "pending": [],
+        "effective_overrides": deepcopy(
+            _own(agent, "_safe_config_overrides", {}) or {}
+        ),
+    }
+    proposals = _own(agent, "architecture_proposal", None)
+    list_pending = getattr(proposals, "list_pending", None)
+    if not callable(list_pending):
+        return section
+    try:
+        records = list_pending()
+    except Exception:  # pragma: no cover - защита UI
+        return section
+    fields = (
+        "id",
+        "type",
+        "title",
+        "description",
+        "category",
+        "attr",
+        "old",
+        "new",
+        "verification",
+    )
+    section["pending"] = [
+        {key: deepcopy(record.get(key)) for key in fields}
+        for record in records
+        if isinstance(record, dict) and record.get("id")
+    ]
+    return section
+
+
 def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, Any]:
     """Собрать снимок жизни существа для интерфейса.
 
@@ -244,6 +279,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "diary": {"episodes": diary_episodes, "count": len(diary_episodes)},
         "preferences": preferences,
         "goals": goals_view,
+        "proposals": _proposal_section(agent),
         "access": _access_section(agent),
         "effector": _effector_section(agent),
     }

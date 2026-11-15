@@ -161,7 +161,9 @@ def _body_needs_rest_impl(self) -> bool:
             fatigue = float(interoception.state.fatigue)
         except Exception:
             fatigue = 0.0
-    threshold = float(getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6))
+    from src.evolution.self_coding import effective_config_value
+
+    threshold = float(effective_config_value(self, "REST_FATIGUE_THRESHOLD", 0.6))
     if fatigue >= threshold:
         return True
 

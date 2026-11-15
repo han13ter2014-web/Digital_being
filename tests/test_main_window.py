@@ -29,6 +29,7 @@ class RecordingBus:
 
     def publish_sync(self, event, data=None, **kwargs):
         self.published.append((event, dict(data or {})))
+        return True
 
     def names(self):
         return [name for name, _ in self.published]
@@ -285,3 +286,49 @@ def test_language_switch_changes_only_display_and_saves_choice(window, monkeypat
     win._set_language("中文")
     assert win._t("Дневник") == "日记"
     assert win._graph_node_label(node) == "探索主题 «память» · 现在"
+
+
+def test_proposal_button_publishes_decision_without_exposing_id(window, monkeypatch):
+    win, bus = window
+    win._life_snapshot = {
+        "proposals": {"pending": [{"id": "prop_hidden", "status": "pending"}]}
+    }
+    shown = []
+    monkeypatch.setattr(win, "_append_user", shown.append)
+
+    assert win._decide_proposal("prop_hidden", approved=True) is True
+
+    assert bus.last(Events.USER_MESSAGE) == {"text": "одобри prop_hidden"}
+    assert shown == ["Одобрить"]
+    assert "prop_hidden" not in shown[0]
+    assert win._proposal_decision_pending is True
+    assert win._decide_proposal("prop_hidden", approved=False) is False
+    assert len(bus.published) == 1
+
+
+def test_proposal_decision_respects_read_only_mode(monkeypatch):
+    monkeypatch.setattr("src.ui.main_window.i18n.load_saved_language", lambda: "ru")
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha", enabled_controls=False)
+    win._life_snapshot = {
+        "proposals": {"pending": [{"id": "prop_read_only", "status": "pending"}]}
+    }
+
+    assert win._decide_proposal("prop_read_only", approved=True) is False
+    assert bus.published == []
+
+
+def test_rejected_proposal_decision_reports_full_queue(window, monkeypatch):
+    win, bus = window
+    win._life_snapshot = {
+        "proposals": {"pending": [{"id": "prop_full", "status": "pending"}]}
+    }
+    errors = []
+    monkeypatch.setattr(win, "_append_user", lambda text: None)
+    monkeypatch.setattr(win, "_append_error", errors.append)
+    monkeypatch.setattr(bus, "publish_sync", lambda *args, **kwargs: False)
+
+    assert win._decide_proposal("prop_full", approved=False) is False
+
+    assert "переполнена" in errors[0]
+    assert win._proposal_decision_pending is False

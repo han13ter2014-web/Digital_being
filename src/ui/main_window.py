@@ -135,6 +135,10 @@ class MainWindow(ChatWindow):
         self._access_switches: Dict[str, Any] = {}
         self._access_status_labels: Dict[str, Any] = {}
         self._mono_font = None
+        self._proposal_frame = None
+        self._proposal_signature: Optional[tuple] = None
+        self._proposal_buttons: List[Any] = []
+        self._proposal_decision_pending = False
 
         # Дневник: серии подряд одинаковых эпизодов и раскрытые группы.
         self._diary_entries: List[Dict[str, Any]] = []
@@ -519,6 +523,151 @@ class MainWindow(ChatWindow):
                 # Подпись состояния также обновляется при смене языка.
                 self._draw_access_switch(key)
 
+    def _apply_proposals(self, snapshot: Dict[str, Any]) -> None:
+        """Показать ожидающие предложения, не пересоздавая карточки каждый тик."""
+        frame = self._proposal_frame
+        if frame is None:
+            return
+        pending = (snapshot.get("proposals") or {}).get("pending") or []
+        signature = (
+            self._language,
+            tuple(
+                (str(item.get("id")), str(item.get("status", "pending")))
+                for item in pending
+                if isinstance(item, dict) and item.get("id")
+            ),
+        )
+        was_waiting = self._proposal_decision_pending
+        self._proposal_decision_pending = False
+        if not was_waiting and signature == self._proposal_signature:
+            return
+        self._proposal_signature = signature
+        self._proposal_buttons = []
+        for child in frame.winfo_children():
+            child.destroy()
+        for item in pending:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            card = tk.Frame(
+                frame,
+                bg=theme.BG_CENTER,
+                highlightbackground=theme.AMBER,
+                highlightthickness=1,
+            )
+            card.pack(fill=tk.X, pady=(0, theme.SPACING["xs"]))
+            tk.Label(
+                card,
+                text=str(item.get("title") or self._t("Предложение сущности")),
+                font=self._card_title_font,
+                bg=theme.BG_CENTER,
+                fg=theme.AMBER,
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=480,
+            ).pack(fill=tk.X, padx=10, pady=(8, 2))
+            if item.get("description"):
+                tk.Label(
+                    card,
+                    text=str(item["description"]),
+                    font=self._now_body_font,
+                    bg=theme.BG_CENTER,
+                    fg=theme.TEXT,
+                    anchor="w",
+                    justify=tk.LEFT,
+                    wraplength=480,
+                ).pack(fill=tk.X, padx=10, pady=2)
+            if item.get("attr"):
+                tk.Label(
+                    card,
+                    text=f"{item['attr']}: {item.get('old')} → {item.get('new')}",
+                    font=self._now_mono_small_font,
+                    bg=theme.BG_CENTER,
+                    fg=theme.CYAN,
+                    anchor="w",
+                ).pack(fill=tk.X, padx=10, pady=2)
+            passed = (item.get("verification") or {}).get("passed") is True
+            tk.Label(
+                card,
+                text=self._t("Проверка пройдена" if passed else "Проверка не пройдена"),
+                font=self._now_body_font,
+                bg=theme.BG_CENTER,
+                fg=theme.GREEN if passed else theme.DANGER,
+                anchor="w",
+            ).pack(fill=tk.X, padx=10, pady=2)
+            if item.get("type") == "config_change":
+                tk.Label(
+                    card,
+                    text=self._t(
+                        "После одобрения сущность сама применит проверенное изменение."
+                    ),
+                    font=self._now_body_font,
+                    bg=theme.BG_CENTER,
+                    fg=theme.MUTED,
+                    anchor="w",
+                    justify=tk.LEFT,
+                    wraplength=480,
+                ).pack(fill=tk.X, padx=10, pady=2)
+            actions = tk.Frame(card, bg=theme.BG_CENTER)
+            actions.pack(fill=tk.X, padx=10, pady=(4, 8))
+            for approved, caption, color in (
+                (True, "Одобрить", theme.AMBER),
+                (False, "Отклонить", theme.SURFACE),
+            ):
+                button = tk.Button(
+                    actions,
+                    text=self._t(caption),
+                    command=lambda pid=str(item["id"]),
+                    ok=approved: self._decide_proposal(pid, ok),
+                    font=self._now_mono_small_font,
+                    bg=color,
+                    fg=theme.BG_DEEP if approved else theme.DANGER,
+                    activebackground=theme.TEXT,
+                    activeforeground=theme.BG_DEEP,
+                    disabledforeground=theme.DIMMED,
+                    relief=tk.FLAT,
+                    bd=0,
+                    padx=12,
+                    pady=6,
+                    cursor="hand2",
+                    state=tk.NORMAL if self._enabled_controls else tk.DISABLED,
+                )
+                button.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+                self._proposal_buttons.append(button)
+
+    def _decide_proposal(self, proposal_id: str, approved: bool) -> bool:
+        """Отправить решение ядру; ID остаётся внутри действия кнопки."""
+        if not self._enabled_controls or self._proposal_decision_pending:
+            return False
+        pending = (self._life_snapshot.get("proposals") or {}).get("pending") or []
+        if proposal_id not in {
+            str(item.get("id")) for item in pending if isinstance(item, dict)
+        }:
+            return False
+        caption = self._t("Одобрить" if approved else "Отклонить")
+        self._append_user(caption)
+        try:
+            accepted = self.bus.publish_sync(
+                Events.USER_MESSAGE,
+                {"text": f"{'одобри' if approved else 'отклони'} {proposal_id}"},
+                source="main_window",
+            )
+        except Exception as exc:
+            logger.warning("[MainWindow] proposal decision: %s", exc)
+            self._append_error(str(exc))
+            return False
+        if not accepted:
+            self._append_error(
+                self._t(
+                    "Очередь сообщений переполнена. Сообщение не принято — "
+                    "подожди немного и отправь его ещё раз."
+                )
+            )
+            return False
+        self._proposal_decision_pending = True
+        for button in self._proposal_buttons:
+            button.configure(state=tk.DISABLED)
+        return True
+
     def _apply_life_data(self, snapshot: Dict[str, Any]) -> None:
         """Перерисовать карточки «Сейчас» и «Доступы» из снимка жизни.
 
@@ -529,6 +678,7 @@ class MainWindow(ChatWindow):
             return
         snap = self._life_snapshot
         try:
+            self._apply_proposals(snap)
             new_name = snap.get("name")
             if isinstance(new_name, str) and new_name and new_name != self.agent_name:
                 self._handle_incoming("__name_changed__", new_name)
@@ -2745,6 +2895,13 @@ class MainWindow(ChatWindow):
             pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
         )
         input_frame.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], 0),
+        )
+        self._proposal_frame = tk.Frame(conversation, bg=theme.SURFACE)
+        self._proposal_frame.pack(
             side=tk.BOTTOM,
             fill=tk.X,
             padx=theme.SPACING["md"],

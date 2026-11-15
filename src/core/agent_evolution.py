@@ -70,7 +70,7 @@ def _evolution_tick_impl(self, cycle: int) -> Optional[Dict]:
         report["skipped"] = "кулдаун"
         return report
 
-    draft = draft_config_change(ripe)
+    draft = draft_config_change(ripe, self)
     if draft is None:
         report["no_safe_lever"] = ripe
         return report
@@ -95,12 +95,18 @@ def _evolution_tick_impl(self, cycle: int) -> Optional[Dict]:
         report["proposal_failed"] = created.get("reason")
         return report
 
-    # Дописываем пробу в источник истины предложения (SQL у managed-жизни,
-    # файл у standalone). Экспорт всегда синхронизируется из источника.
+    # Дописываем пробу и точный рычаг в источник истины предложения.
     proposal_id = created["proposal_id"]
     enriched = proposal_api.enrich(
         proposal_id,
-        {"diff": draft["diff"], "verification": verification, "category": ripe},
+        {
+            "diff": draft["diff"],
+            "verification": verification,
+            "category": ripe,
+            "attr": draft["attr"],
+            "old": draft["old"],
+            "new": draft["new"],
+        },
     )
     if not enriched.get("enriched"):
         get_logger().log(f"[EVOLUTION] proposal enrich error: {enriched.get('reason')}")
@@ -120,8 +126,8 @@ def _evolution_tick_impl(self, cycle: int) -> Optional[Dict]:
             content=(
                 f"Я предлагаю изменение для себя: {draft['title']}. "
                 f"{draft['rationale']} Проба: {verdict}. "
-                f"Решение за тобой: «одобри {proposal_id}» "
-                f"или «отклони {proposal_id}»."
+                "Решение за тобой: напиши «одобри» или «отклони». "
+                "После одобрения я сама применю проверенное изменение."
             ),
             msg_type="evolution_proposal",
             tone="honest",

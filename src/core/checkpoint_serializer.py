@@ -717,12 +717,10 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             ):
                 life_guard.rebind(agent.life_id)
             proposals = getattr(agent, "architecture_proposal", None)
-            if (
-                proposals is not None
-                and hasattr(proposals, "rebind")
-                and (getattr(proposals, "life_id", None) != agent.life_id)
-            ):
-                proposals.rebind(agent.life_id)
+            if proposals is not None and hasattr(proposals, "rebind"):
+                if getattr(proposals, "life_id", None) != agent.life_id:
+                    proposals.rebind(agent.life_id)
+                agent._safe_config_overrides = proposals.load_config_overrides()
             delamain = getattr(agent, "delamain", None)
             if (
                 delamain is not None

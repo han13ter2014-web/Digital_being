@@ -1,8 +1,9 @@
 """Тесты «Эволюция-1»: голос — решение человека по предложению.
 
 Дверь «одобри/отклони» срабатывает только при живом ожидающем
-предложении; обычная речь не перехватывается. Решение пишется в файл
-предложения, применения кода не происходит никогда.
+предложении; обычная речь не перехватывается. Решение пишется в файл.
+Новые проверенные config_change исполняются ограниченно; старые записи
+без закреплённого рычага задним числом не исполняются.
 """
 
 import json
@@ -15,6 +16,7 @@ from src.core.agent import DigitalBeing
 from src.core.agent_runner import AgentRunner
 from src.core.event_bus import Events
 from src.core.paths import data_path
+from src.evolution.self_coding import draft_config_change
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +67,7 @@ def _read_proposal(agent, proposal_id):
 
 
 @pytest.mark.asyncio
-async def test_approve_by_id_changes_status_only():
+async def test_legacy_approval_is_not_executed_retroactively():
     agent, runner, bus = _make_runner()
     created = agent.architecture_proposal.propose(
         "config_change", "Тестовый рычаг", "проверка двери", cycle=1
@@ -77,10 +79,11 @@ async def test_approve_by_id_changes_status_only():
     stored = _read_proposal(agent, pid)
     assert stored["status"] == "approved"
     assert "decided_at" in stored
-    # Код не применён: предложение остаётся письмом, внедряет человек.
+    assert stored["execution"]["ok"] is False
+    assert agent._safe_config_overrides == {}
     texts = [d.get("content", "") for d in _replies(bus)]
-    assert any("одобрено" in t for t in texts)
-    assert any("не меняю" in t for t in texts)
+    assert any("Одобрение записала" in t for t in texts)
+    assert any("не удалось" in t and "Прежнее значение сохранено" in t for t in texts)
 
 
 @pytest.mark.asyncio
@@ -125,3 +128,70 @@ async def test_decide_twice_refused_honestly():
     assert _read_proposal(agent, pid)["status"] == "approved"
     texts = [d.get("content", "") for d in _replies(bus)]
     assert any("уже решено" in t for t in texts)
+
+
+def _propose_executable(agent):
+    draft = draft_config_change("energy_efficiency", agent)
+    created = agent.architecture_proposal.propose(
+        "config_change",
+        draft["title"],
+        "Проверенное изменение порога отдыха",
+        code_snippet=draft["diff"],
+        cycle=agent.cycle_count,
+        extra={**draft, "verification": {"ran": True, "passed": True, "cycles": 5}},
+    )
+    return created["proposal_id"], draft
+
+
+@pytest.mark.asyncio
+async def test_approve_latest_without_id_executes_safe_config_change():
+    agent, runner, bus = _make_runner("EvoExecute")
+    proposal_id, draft = _propose_executable(agent)
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "одобри"}))
+
+    stored = _read_proposal(agent, proposal_id)
+    assert stored["status"] == "implemented"
+    assert stored["execution"]["ok"] is True
+    assert agent._safe_config_overrides[draft["attr"]] == draft["new"]
+    texts = [d.get("content", "") for d in _replies(bus)]
+    assert any("одобрено и применено" in text for text in texts)
+    assert any("будет восстановлено после перезапуска" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_approved_unsupported_type_is_not_executed():
+    agent, runner, bus = _make_runner("EvoUnsupported")
+    created = agent.architecture_proposal.propose(
+        "method_add", "Новый метод", "Свободный код не исполняем", cycle=1
+    )
+    proposal_id = created["proposal_id"]
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "одобри"}))
+
+    assert _read_proposal(agent, proposal_id)["status"] == "approved"
+    assert agent._safe_config_overrides == {}
+    texts = [d.get("content", "") for d in _replies(bus)]
+    assert any("не исполняю сама" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_execution_failure_never_promises_success(monkeypatch):
+    agent, runner, bus = _make_runner("EvoFailure")
+    proposal_id, _draft = _propose_executable(agent)
+    monkeypatch.setattr(
+        agent.architecture_proposal,
+        "apply_approved",
+        lambda proposal_id, overrides: {
+            "applied": False,
+            "supported": True,
+            "reason": "диск недоступен",
+        },
+    )
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "одобри"}))
+
+    assert _read_proposal(agent, proposal_id)["status"] == "approved"
+    texts = [d.get("content", "") for d in _replies(bus)]
+    assert any("диск недоступен" in text for text in texts)
+    assert not any("одобрено и применено" in text for text in texts)

@@ -207,7 +207,11 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             intero_status = self.interoception.get_status()
             fatigue = float(intero_status.get("fatigue", 0.0) or 0.0)
             energy_ratio = float(self.energy) / float(LR_CONFIG.ENERGY_MAX or 1.0)
-            rest_threshold = float(getattr(LR_CONFIG, "REST_FATIGUE_THRESHOLD", 0.6))
+            from src.evolution.self_coding import effective_config_value
+
+            rest_threshold = float(
+                effective_config_value(self, "REST_FATIGUE_THRESHOLD", 0.6)
+            )
             low_ratio = float(getattr(LR_CONFIG, "LOW_ENERGY_RATIO", 0.25))
             if resting or fatigue >= rest_threshold or energy_ratio <= low_ratio:
                 candidates.append(

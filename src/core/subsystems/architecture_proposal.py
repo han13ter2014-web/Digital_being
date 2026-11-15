@@ -448,6 +448,222 @@ class ArchitectureProposal:
         }
 
     # ------------------------------------------------------------------
+    # Ограниченное исполнение одобренных config_change
+    # ------------------------------------------------------------------
+
+    def _get(self, proposal_id: str) -> Dict:
+        if not proposal_id:
+            return {}
+        if self.database is not None:
+            with closing(self.database.connect(readonly=True)) as connection:
+                row = connection.execute(
+                    f"SELECT {self._COLUMNS} FROM architecture_proposals "  # nosec B608
+                    "WHERE id = ?",
+                    (proposal_id,),
+                ).fetchone()
+            return self._payload_from_row(row) if row is not None else {}
+        path = os.path.join(self.proposals_dir, f"{proposal_id}.json")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _store_execution(self, proposal: Dict, expected_status: str) -> None:
+        """Атомарно сохранить исполнение поверх ожидаемого решения человека."""
+        if self.database is not None:
+            with self.database.write() as connection:
+                row = connection.execute(
+                    "SELECT status FROM architecture_proposals WHERE id = ?",
+                    (proposal["id"],),
+                ).fetchone()
+                if row is None or row["status"] != expected_status:
+                    actual = "не найдено" if row is None else row["status"]
+                    raise ValueError(f"неожиданный статус: {actual}")
+                self._update_payload(connection, proposal)
+                self._resync_export(connection, proposal)
+            return
+        path = os.path.join(self.proposals_dir, f"{proposal['id']}.json")
+        with open(path, "r", encoding="utf-8") as fh:
+            current = json.load(fh)
+        if current.get("status") != expected_status:
+            raise ValueError(f"неожиданный статус: {current.get('status')}")
+        temporary = path + ".tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as fh:
+                json.dump(proposal, fh, indent=2, ensure_ascii=False)
+            os.replace(temporary, path)
+        except Exception:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+            raise
+
+    def _execution_failed(self, proposal: Dict, reason: str) -> Dict:
+        failure = {
+            "applied": False,
+            "supported": True,
+            "reason": reason,
+            "title": proposal.get("title", proposal.get("id", "")),
+        }
+        proposal["execution"] = {"ok": False, "reason": reason, "at": _now()}
+        try:
+            self._store_execution(proposal, expected_status="approved")
+        except Exception as exc:
+            failure["storage_error"] = str(exc)
+        return failure
+
+    def apply_approved(self, proposal_id: str, overrides: Dict) -> Dict:
+        """Исполнить одобренный безопасный рычаг в per-agent ``overrides``.
+
+        Исходный конфиг и глобальный ``LR_CONFIG`` не изменяются. Статус и
+        действующее значение восстанавливаются из одной записи ``implemented``.
+        """
+        proposal = self._get(proposal_id)
+        title = proposal.get("title", proposal_id)
+        if not proposal:
+            return {"applied": False, "supported": True, "reason": "не найдено"}
+        if proposal.get("status") != "approved":
+            return {
+                "applied": False,
+                "supported": True,
+                "reason": f"предложение не одобрено: {proposal.get('status')}",
+                "title": title,
+            }
+        if proposal.get("type") != "config_change":
+            return {
+                "applied": False,
+                "supported": False,
+                "reason": "этот тип предложения не исполняется автоматически",
+                "title": title,
+            }
+
+        from config.simulation_config import LR_CONFIG
+        from src.evolution.self_coding import SAFE_TUNABLES
+
+        tunable = SAFE_TUNABLES.get(proposal.get("category"))
+        attr = proposal.get("attr")
+        new = proposal.get("new")
+        if tunable is None or attr != tunable.attr:
+            return self._execution_failed(proposal, "рычаг вне белого списка")
+        if type(new) is not type(tunable.candidate) or new != tunable.candidate:
+            return self._execution_failed(
+                proposal, "новое значение не совпадает с безопасным кандидатом"
+            )
+        verification = proposal.get("verification")
+        if not isinstance(verification, dict) or verification.get("passed") is not True:
+            return self._execution_failed(proposal, "изолированная проба не пройдена")
+
+        had_override = attr in overrides
+        current = overrides.get(attr, getattr(LR_CONFIG, attr, None))
+        if current != proposal.get("old"):
+            return self._execution_failed(
+                proposal,
+                f"текущее значение {current!r} не совпадает с исходным "
+                f"{proposal.get('old')!r}",
+            )
+
+        overrides[attr] = new
+        if overrides.get(attr) != new:
+            if had_override:
+                overrides[attr] = current
+            else:
+                overrides.pop(attr, None)
+            return self._execution_failed(
+                proposal, "не удалось подтвердить runtime-значение"
+            )
+
+        proposal["status"] = "implemented"
+        proposal["implemented_at"] = _now()
+        proposal["execution"] = {
+            "ok": True,
+            "attr": attr,
+            "old": current,
+            "new": new,
+            "at": proposal["implemented_at"],
+        }
+        try:
+            self._store_execution(proposal, expected_status="approved")
+        except Exception as exc:
+            if had_override:
+                overrides[attr] = current
+            else:
+                overrides.pop(attr, None)
+            proposal["status"] = "approved"
+            proposal.pop("implemented_at", None)
+            return self._execution_failed(
+                proposal, f"не удалось сохранить исполнение: {exc}"
+            )
+
+        self.registry.record(
+            "architecture_proposals",
+            title,
+            f"исполнено {attr}: {current!r} → {new!r}",
+            outcome="implemented",
+            cycle=int(proposal.get("cycle", 0) or 0),
+            meta={"proposal_id": proposal_id, "attr": attr},
+        )
+        return {
+            "applied": True,
+            "supported": True,
+            "status": "implemented",
+            "title": title,
+            "attr": attr,
+            "old": current,
+            "new": new,
+        }
+
+    def load_config_overrides(self) -> Dict:
+        """Восстановить действующие значения из собственных implemented-записей."""
+        from src.evolution.self_coding import SAFE_TUNABLES
+
+        if self.database is not None:
+            with closing(self.database.connect(readonly=True)) as connection:
+                rows = connection.execute(
+                    f"SELECT {self._COLUMNS} FROM architecture_proposals "  # nosec B608
+                    "WHERE status = 'implemented' ORDER BY updated_at, id"
+                ).fetchall()
+            records = [self._payload_from_row(row) for row in rows]
+        else:
+            records = []
+            if os.path.isdir(self.proposals_dir):
+                for fname in os.listdir(self.proposals_dir):
+                    if not fname.endswith(".json"):
+                        continue
+                    try:
+                        with open(
+                            os.path.join(self.proposals_dir, fname),
+                            "r",
+                            encoding="utf-8",
+                        ) as fh:
+                            proposal = json.load(fh)
+                        if proposal.get("status") == "implemented":
+                            records.append(proposal)
+                    except (OSError, ValueError, TypeError):
+                        continue
+            records.sort(key=lambda item: str(item.get("implemented_at", "")))
+
+        overrides = {}
+        for proposal in records:
+            tunable = SAFE_TUNABLES.get(proposal.get("category"))
+            if tunable is None or proposal.get("type") != "config_change":
+                continue
+            if proposal.get("attr") != tunable.attr:
+                continue
+            value = proposal.get("new")
+            if type(value) is not type(tunable.candidate) or value != tunable.candidate:
+                continue
+            verification = proposal.get("verification")
+            if (
+                not isinstance(verification, dict)
+                or verification.get("passed") is not True
+            ):
+                continue
+            overrides[tunable.attr] = value
+        return overrides
+
+    # ------------------------------------------------------------------
     # Разовый учёт legacy-файлов (без удаления оригиналов)
     # ------------------------------------------------------------------
 
