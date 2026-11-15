@@ -244,6 +244,33 @@ def test_layout_is_deterministic_and_inside_bounds():
         assert 0 <= y <= 600
 
 
+def test_compact_concept_ring_does_not_overlap_center_or_neighbours():
+    nodes = [
+        {
+            "id": f"concept:{index}",
+            "kind": "concept",
+            "weight": weight,
+        }
+        for index, weight in enumerate((0.86, 0.72, 0.64, 0.58, 0.43))
+    ]
+
+    positions = layout_nodes(nodes, 342, 264)
+
+    ordered = sorted(positions)
+    for first_index, first_id in enumerate(ordered):
+        first_x, first_y = positions[first_id]
+        first_weight = nodes[int(first_id.split(":")[1])]["weight"]
+        for second_id in ordered[first_index + 1 :]:
+            second_x, second_y = positions[second_id]
+            second_weight = nodes[int(second_id.split(":")[1])]["weight"]
+            distance = ((first_x - second_x) ** 2 + (first_y - second_y) ** 2) ** 0.5
+            assert distance >= (
+                node_radius(first_weight, "concept")
+                + node_radius(second_weight, "concept")
+                + 4.0
+            )
+
+
 def test_radius_and_labels_follow_weight():
     assert node_radius(1.0) > node_radius(0.0)
     assert node_shows_label(0.9)

@@ -115,13 +115,25 @@ class MainWindow(ChatWindow):
         self._now_activity = None
         self._now_choice = None
         self._now_influence = None
+        self._now_body = None
+        self._now_dominant = None
+        self._now_emotion_inner = None
+        self._now_emotion_canvas = None
+        self._now_emotion_empty = None
+        self._now_emotion_labels: Dict[str, Any] = {}
+        self._now_emotion_values: Dict[str, Any] = {}
+        self._now_emotion_bars: Dict[str, Any] = {}
+        self._now_emotion_signature: Optional[tuple] = None
         self._diary_detail = None
         self._activity_list = None
         self._activity_detail = None
+        self._activity_board = None
+        self._activity_board_cells: List[Any] = []
         self._access_card = None
         self._effector_card = None
         self._access_vars: Dict[str, Any] = {}
         self._access_switches: Dict[str, Any] = {}
+        self._access_status_labels: Dict[str, Any] = {}
         self._mono_font = None
 
         # Дневник: серии подряд одинаковых эпизодов и раскрытые группы.
@@ -144,6 +156,7 @@ class MainWindow(ChatWindow):
         self._graph_canvas = None
         self._graph_detail = None
         self._graph_counter = None
+        self._graph_zoom_label = None
         self._activity_entries: List[Dict[str, Any]] = []
         self._activity_game = None
         self._graph_data: Dict[str, Any] = {}
@@ -194,10 +207,17 @@ class MainWindow(ChatWindow):
             self._now_activity,
             self._now_choice,
             self._now_influence,
+            self._now_body,
+            self._now_dominant,
+            self._now_emotion_empty,
+            *self._now_emotion_labels.values(),
+            *self._now_emotion_values.values(),
             self._access_card,
             self._effector_card,
+            *self._access_status_labels.values(),
             self._graph_detail,
             self._graph_counter,
+            self._graph_zoom_label,
             self._diary_detail,
             self._activity_detail,
             self._pause_button,
@@ -437,7 +457,7 @@ class MainWindow(ChatWindow):
             parent,
             width=40,
             height=20,
-            bg=theme.SURFACE,
+            bg=parent.cget("bg"),
             highlightthickness=0,
             cursor="hand2",
         )
@@ -465,7 +485,7 @@ class MainWindow(ChatWindow):
             return
         on = bool(var.get())
         canvas.delete("all")
-        track = theme.GLOW_CYAN if on else theme.BORDER
+        track = theme.AMBER if on else theme.BORDER
         canvas.create_oval(2, 3, 38, 17, fill=track, outline=track)
         knob_x = 28 if on else 12
         canvas.create_oval(
@@ -473,9 +493,15 @@ class MainWindow(ChatWindow):
             5,
             knob_x + 5,
             15,
-            fill=theme.CYAN if on else theme.DIMMED,
+            fill=theme.BG_DEEP if on else theme.DIMMED,
             outline="",
         )
+        status = self._access_status_labels.get(key)
+        if status is not None:
+            status.configure(
+                text=self._t("включено" if on else "выключено"),
+                fg=theme.CYAN if on else theme.MUTED,
+            )
 
     def _refresh_access_switches(self, snapshot: Dict[str, Any]) -> None:
         """Показывать реальное состояние, даже если его изменили командой."""
@@ -483,10 +509,15 @@ class MainWindow(ChatWindow):
         for key, var in self._access_vars.items():
             item = access.get(key)
             if not isinstance(item, dict):
+                # Даже неизвестное ядру состояние переводится вместе со страницей.
+                self._draw_access_switch(key)
                 continue
             actual = bool(item.get("enabled"))
             if bool(var.get()) != actual:
                 var.set(actual)
+            else:
+                # Подпись состояния также обновляется при смене языка.
+                self._draw_access_switch(key)
 
     def _apply_life_data(self, snapshot: Dict[str, Any]) -> None:
         """Перерисовать карточки «Сейчас» и «Доступы» из снимка жизни.
@@ -517,9 +548,17 @@ class MainWindow(ChatWindow):
                 text=self._rows_text(life_view.choice_rows(snap, self._language))
             )
             if self._now_influence is not None:
+                influences = life_view.influence_rows(snap, self._language)
                 self._now_influence.configure(
-                    text=self._rows_text(life_view.influence_rows(snap, self._language))
+                    text="   ·   ".join(
+                        f"{label}: {value}" for label, value in influences
+                    )
                 )
+            if self._now_body is not None:
+                self._now_body.configure(
+                    text=self._rows_text(life_view.body_rows(snap, self._language))
+                )
+            self._apply_now_emotions(snap)
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
             self._refresh_access_switches(snap)
@@ -538,6 +577,121 @@ class MainWindow(ChatWindow):
                 self._set_state_pill(life_state)
         except Exception as exc:
             logger.debug("[MainWindow] life data: %s", exc)
+
+    def _apply_now_emotions(self, snapshot: Dict[str, Any]) -> None:
+        """Показать все уровни палитры; пересоздавать строки только при смене схемы."""
+        inner = self._now_emotion_inner
+        canvas = self._now_emotion_canvas
+        if inner is None or canvas is None:
+            return
+        rows = life_view.emotion_rows(snapshot, self._language)
+        signature = (self._language, tuple(name for name, _label, _level in rows))
+        if signature != self._now_emotion_signature:
+            for child in inner.winfo_children():
+                child.destroy()
+            self._now_emotion_labels = {}
+            self._now_emotion_values = {}
+            self._now_emotion_bars = {}
+            self._now_emotion_empty = None
+            if not rows:
+                self._now_emotion_empty = tk.Label(
+                    inner,
+                    text=self._t("Нет данных"),
+                    font=self._ui_font,
+                    bg=theme.SURFACE,
+                    fg=theme.MUTED,
+                    anchor="w",
+                )
+                self._now_emotion_empty.pack(
+                    fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"]
+                )
+            else:
+                for index, (name, label, level) in enumerate(rows):
+                    row = tk.Frame(inner, bg=theme.SURFACE)
+                    row.grid(
+                        row=index // 2,
+                        column=index % 2,
+                        sticky="ew",
+                        padx=(0, theme.SPACING["sm"]),
+                        pady=2,
+                    )
+                    row.columnconfigure(0, weight=1)
+                    name_label = tk.Label(
+                        row,
+                        text=label,
+                        font=self._now_emotion_font,
+                        bg=theme.SURFACE,
+                        fg=theme.MUTED,
+                        anchor="w",
+                    )
+                    name_label.grid(row=0, column=0, sticky="ew")
+                    value_label = tk.Label(
+                        row,
+                        text=f"{level:.2f}",
+                        width=4,
+                        font=self._now_mono_small_font,
+                        bg=theme.SURFACE,
+                        fg=theme.TEXT,
+                        anchor="e",
+                    )
+                    value_label.grid(row=0, column=1, sticky="e")
+                    bar = tk.Canvas(
+                        row,
+                        height=3,
+                        bg=theme.BORDER,
+                        highlightthickness=0,
+                        bd=0,
+                    )
+                    bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+                    fill = bar.create_rectangle(
+                        0, 0, 0, 3, fill=theme.CYAN, outline=""
+                    )
+
+                    def resize_bar(event, item=fill, emotion_name=name):
+                        value = self._now_emotion_values[emotion_name]
+                        raw = value.cget("text")
+                        event.widget.coords(item, 0, 0, event.width * float(raw), 3)
+
+                    bar.bind("<Configure>", resize_bar)
+                    self._now_emotion_labels[name] = name_label
+                    self._now_emotion_values[name] = value_label
+                    self._now_emotion_bars[name] = (bar, fill)
+                inner.columnconfigure(0, weight=1, uniform="now-emotions")
+                inner.columnconfigure(1, weight=1, uniform="now-emotions")
+                self._bind_now_emotion_wheel(inner)
+            self._now_emotion_signature = signature
+            canvas.yview_moveto(0.0)
+
+        dominant = (snapshot.get("emotions") or {}).get("dominant") or {}
+        dominant_name = dominant.get("emotion") if isinstance(dominant, dict) else None
+        if self._now_dominant is not None:
+            self._now_dominant.configure(
+                text=life_view.dominant_emotion(snapshot, self._language)
+            )
+        for name, _label, level in rows:
+            value_label = self._now_emotion_values.get(name)
+            bar, fill = self._now_emotion_bars.get(name, (None, None))
+            if value_label is None or bar is None:
+                continue
+            value_label.configure(text=f"{level:.2f}")
+            color = theme.AMBER if name == dominant_name else theme.CYAN
+            bar.itemconfigure(fill, fill=color)
+            bar.coords(fill, 0, 0, max(1, bar.winfo_width()) * level, 3)
+
+    def _scroll_now_emotions(self, event):
+        if self._now_emotion_canvas is None:
+            return "break"
+        delta = -1 if getattr(event, "num", None) == 4 else 1
+        if hasattr(event, "delta"):
+            delta = -1 if event.delta > 0 else 1
+        self._now_emotion_canvas.yview_scroll(delta, "units")
+        return "break"
+
+    def _bind_now_emotion_wheel(self, widget) -> None:
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(sequence, self._scroll_now_emotions)
+        for child in widget.winfo_children():
+            self._bind_now_emotion_wheel(child)
 
     def _refresh_pause_button(self, paused: bool) -> None:
         if self._pause_button is None:
@@ -596,6 +750,9 @@ class MainWindow(ChatWindow):
         self._ui_font = font.Font(family=theme.font_family(), size=11)
         self._card_title_font = font.Font(family=theme.font_family(), size=9)
         self._card_body_font = font.Font(family=theme.font_family(), size=12)
+        self._now_body_font = font.Font(family=theme.font_family(), size=9)
+        self._now_emotion_font = font.Font(family=theme.font_family(), size=8)
+        self._now_mono_small_font = font.Font(family=theme.mono_family(), size=8)
         self._headline_font = font.Font(
             family=theme.font_family(), size=20, weight="bold"
         )
@@ -812,22 +969,88 @@ class MainWindow(ChatWindow):
         body.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
         return body
 
+    def _now_card(self, parent, title: str, accent: str):
+        """Общий контур карточки «Сейчас»: акцентная полоса и тонкая рамка."""
+        frame = tk.Frame(
+            parent,
+            bg=theme.SURFACE,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
+        )
+        header = tk.Frame(frame, bg=theme.SURFACE)
+        header.pack(fill=tk.X)
+        tk.Frame(header, width=3, bg=accent).pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(
+            header,
+            text=title,
+            font=self._card_title_font,
+            bg=theme.SURFACE,
+            fg=accent,
+            anchor="w",
+        ).pack(
+            side=tk.LEFT,
+            fill=tk.X,
+            expand=True,
+            padx=(theme.SPACING["sm"], 0),
+            pady=theme.SPACING["xs"],
+        )
+        return frame, header
+
+    @staticmethod
+    def _now_card_text(parent, text_font, wraplength: int):
+        body = tk.Label(
+            parent,
+            text="",
+            font=text_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            anchor="nw",
+            justify=tk.LEFT,
+            wraplength=wraplength,
+        )
+        body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(1, theme.SPACING["xs"]),
+        )
+        return body
+
+    def _resize_now_page(self, event) -> None:
+        """Пересчитать переносы, не меняя компоновку остальных страниц."""
+        width = max(320, int(event.width))
+        column = max(220, (width - 36) // 2)
+        for label in (self._now_activity, self._now_choice, self._now_body):
+            if label is not None:
+                label.configure(wraplength=column - 34)
+        if self._now_influence is not None:
+            self._now_influence.configure(wraplength=width - 64)
+        for label in (self._now_headline, self._now_sub):
+            if label is not None:
+                label.configure(wraplength=width - 28)
+
     def _build_page_now(self, parent):
-        """Экран «Сейчас»: живая фраза, занятие, причина выбора, влияния."""
+        """Киберпанк-обсерватория: занятие, палитра, выбор, тело и влияния."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
+        tk.Label(
+            page,
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
         self._now_headline = tk.Label(
             page,
             text="…",
             font=self._headline_font,
             bg=theme.BG_DEEP,
-            fg=theme.TEXT,
+            fg=theme.AMBER,
             anchor="w",
             wraplength=760,
             justify=tk.LEFT,
         )
-        self._now_headline.pack(
-            fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["md"], 0)
-        )
+        self._now_headline.pack(fill=tk.X, padx=theme.SPACING["md"])
         self._now_sub = tk.Label(
             page,
             text="",
@@ -835,21 +1058,110 @@ class MainWindow(ChatWindow):
             bg=theme.BG_DEEP,
             fg=theme.MUTED,
             anchor="w",
+            justify=tk.LEFT,
+            wraplength=760,
         )
         self._now_sub.pack(
             fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"])
         )
+
         cards = tk.Frame(page, bg=theme.BG_DEEP)
-        cards.pack(fill=tk.X, padx=theme.SPACING["md"])
-        self._now_activity = self._make_card(
-            cards, "ЧЕМ ЗАНЯТО", side=tk.LEFT, expand=True, wraplength=330
+        cards.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["sm"]),
         )
-        self._now_choice = self._make_card(
-            cards, "ПОЧЕМУ ИМЕННО ЭТО", side=tk.LEFT, expand=True, wraplength=330
+        cards.columnconfigure(0, weight=1, uniform="now-columns")
+        cards.columnconfigure(1, weight=1, uniform="now-columns")
+        cards.rowconfigure(0, weight=4)
+        cards.rowconfigure(1, weight=4)
+        cards.rowconfigure(2, weight=2)
+
+        activity_card, _header = self._now_card(cards, "ЧЕМ ЗАНЯТО", theme.AMBER)
+        activity_card.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 4))
+        self._now_activity = self._now_card_text(activity_card, self._ui_font, 360)
+
+        emotions_card, emotions_header = self._now_card(
+            cards, "ЭМОЦИИ", theme.VIOLET
         )
-        self._now_influence = self._make_card(
-            page, "ЧТО ВЛИЯЕТ НА ВЫБОР", wraplength=720
+        emotions_card.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=(0, 4))
+        self._now_dominant = tk.Label(
+            emotions_header,
+            text="",
+            font=self._now_emotion_font,
+            bg=theme.SURFACE,
+            fg=theme.TEXT,
+            anchor="e",
         )
+        self._now_dominant.pack(side=tk.RIGHT, padx=theme.SPACING["sm"])
+        viewport = tk.Frame(emotions_card, bg=theme.SURFACE)
+        viewport.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=(theme.SPACING["sm"], theme.SPACING["xs"]),
+            pady=(0, theme.SPACING["sm"]),
+        )
+        self._now_emotion_canvas = tk.Canvas(
+            viewport,
+            height=60,
+            bg=theme.SURFACE,
+            highlightthickness=0,
+            bd=0,
+        )
+        emotion_scroll = tk.Scrollbar(
+            viewport,
+            orient=tk.VERTICAL,
+            command=self._now_emotion_canvas.yview,
+            bg=theme.SURFACE,
+            troughcolor=theme.BG_CENTER,
+            activebackground=theme.VIOLET,
+            highlightthickness=0,
+            bd=0,
+        )
+        self._now_emotion_canvas.configure(yscrollcommand=emotion_scroll.set)
+        emotion_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._now_emotion_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._now_emotion_inner = tk.Frame(
+            self._now_emotion_canvas, bg=theme.SURFACE
+        )
+        emotion_window = self._now_emotion_canvas.create_window(
+            (0, 0), window=self._now_emotion_inner, anchor="nw"
+        )
+        self._now_emotion_inner.bind(
+            "<Configure>",
+            lambda _event: self._now_emotion_canvas.configure(
+                scrollregion=self._now_emotion_canvas.bbox("all")
+            ),
+        )
+        self._now_emotion_canvas.bind(
+            "<Configure>",
+            lambda event: self._now_emotion_canvas.itemconfigure(
+                emotion_window, width=event.width
+            ),
+        )
+        self._bind_now_emotion_wheel(self._now_emotion_canvas)
+
+        choice_card, _header = self._now_card(
+            cards, "ПОЧЕМУ ИМЕННО ЭТО", theme.CYAN
+        )
+        choice_card.grid(row=1, column=0, sticky="nsew", padx=(0, 4), pady=4)
+        self._now_choice = self._now_card_text(choice_card, self._now_body_font, 360)
+
+        body_card, _header = self._now_card(cards, "ТЕЛО", theme.GREEN)
+        body_card.grid(row=1, column=1, sticky="nsew", padx=(4, 0), pady=4)
+        self._now_body = self._now_card_text(body_card, self._now_body_font, 360)
+
+        influence_card, _header = self._now_card(
+            cards, "ЧТО ВЛИЯЕТ НА ВЫБОР", theme.VIOLET
+        )
+        influence_card.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(4, 0)
+        )
+        self._now_influence = self._now_card_text(
+            influence_card, self._now_body_font, 760
+        )
+        page.bind("<Configure>", self._resize_now_page)
         return page
 
     # ------------------------------------------------------------------
@@ -881,16 +1193,24 @@ class MainWindow(ChatWindow):
     }
 
     def _build_page_graph(self, parent):
-        """Экран «Карта жизни»: Canvas с реальными узлами и панель деталей."""
+        """Карта жизни: неоновые орбиты, фильтры и реальные детали узлов."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
         tk.Label(
             page,
-            text="Карта жизни",
-            font=self._brand_font,
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
+            font=self._card_title_font,
             bg=theme.BG_DEEP,
-            fg=theme.TEXT,
+            fg=theme.CYAN,
             anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["md"], 0))
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Карта жизни",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
         tk.Label(
             page,
             text="узлы — то, что ядро знает, хочет и пережило; связи — только записанные",
@@ -898,26 +1218,32 @@ class MainWindow(ChatWindow):
             bg=theme.BG_DEEP,
             fg=theme.MUTED,
             anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"]))
 
-        # Чипы-фильтры: тот же цвет, что у узлов, — легенда и фильтр в одном.
-        filters = tk.Frame(page, bg=theme.BG_DEEP)
-        filters.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["xs"]))
+        filters = tk.Frame(
+            page,
+            bg=theme.SURFACE,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
+        )
+        filters.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
         all_chip = tk.Button(
             filters,
             text="все",
             font=self._card_title_font,
             command=self._on_graph_filter_all,
-            bg=theme.BG_DEEP,
-            fg=theme.CYAN,
-            activebackground=theme.SURFACE,
-            activeforeground=theme.TEXT,
+            bg=theme.AMBER,
+            fg=theme.BG_DEEP,
+            activebackground=theme.AMBER,
+            activeforeground=theme.BG_DEEP,
+            highlightbackground=theme.AMBER,
+            highlightthickness=1,
             relief=tk.FLAT,
             bd=0,
-            padx=8,
-            pady=2,
+            padx=10,
+            pady=4,
         )
-        all_chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+        all_chip.pack(side=tk.LEFT, padx=theme.SPACING["xs"], pady=theme.SPACING["xs"])
         self._graph_filter_buttons = {"all": all_chip}
         for kind in ("concept", "intention", "value", "activity", "forgotten"):
             chip = tk.Button(
@@ -925,32 +1251,41 @@ class MainWindow(ChatWindow):
                 text=self._NODE_TYPE_LABELS[kind],
                 font=self._card_title_font,
                 command=lambda k=kind: self._toggle_graph_filter(k),
-                bg=theme.BG_DEEP,
+                bg=theme.SURFACE,
                 fg=theme.MUTED,
-                activebackground=theme.SURFACE,
-                activeforeground=theme.TEXT,
+                activebackground=theme.BG_CENTER,
+                activeforeground=theme.node_color(kind),
+                highlightbackground=theme.BORDER,
+                highlightthickness=1,
                 relief=tk.FLAT,
                 bd=0,
-                padx=8,
-                pady=2,
+                padx=9,
+                pady=4,
             )
-            chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+            chip.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]), pady=theme.SPACING["xs"])
             self._graph_filter_buttons[kind] = chip
+        self._graph_zoom_label = tk.Label(
+            filters,
+            text="100%",
+            font=self._now_mono_small_font,
+            bg=theme.SURFACE,
+            fg=theme.DIMMED,
+            anchor="e",
+        )
+        self._graph_zoom_label.pack(side=tk.RIGHT, padx=theme.SPACING["sm"])
 
         body = tk.Frame(page, bg=theme.BG_DEEP)
         body.pack(
             fill=tk.BOTH,
             expand=True,
             padx=theme.SPACING["md"],
-            pady=(0, theme.SPACING["md"]),
+            pady=(0, theme.SPACING["sm"]),
         )
-
         left = tk.Frame(body, bg=theme.BG_DEEP)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
         self._graph_canvas = tk.Canvas(
             left,
-            bg=theme.BG_CENTER,
+            bg=theme.GRAPH_BG,
             highlightthickness=1,
             highlightbackground=theme.BORDER,
             bd=0,
@@ -962,35 +1297,46 @@ class MainWindow(ChatWindow):
         self._graph_canvas.bind("<ButtonRelease-1>", self._on_graph_release)
         self._graph_canvas.bind("<MouseWheel>", self._on_graph_wheel)
 
-        tk.Label(
+        help_label = tk.Label(
             left,
             text="колёсико — масштаб · перетаскивание — панорама · клик — детали",
             font=self._card_title_font,
             bg=theme.BG_DEEP,
             fg=theme.DIMMED,
             anchor="w",
-        ).pack(fill=tk.X, pady=(theme.SPACING["xs"], 0))
-
-        legend = tk.Frame(left, bg=theme.BG_DEEP)
-        legend.pack(fill=tk.X, pady=(theme.SPACING["sm"], 0))
+            justify=tk.LEFT,
+            wraplength=520,
+        )
+        help_label.pack(fill=tk.X, pady=(theme.SPACING["xs"], 0))
+        left.bind(
+            "<Configure>",
+            lambda event: help_label.configure(wraplength=max(180, event.width)),
+        )
+        legend = tk.Frame(
+            left,
+            bg=theme.BG_CENTER,
+            highlightbackground=theme.BORDER,
+            highlightthickness=1,
+        )
+        legend.pack(fill=tk.X, pady=(theme.SPACING["xs"], 0))
+        legend.columnconfigure(0, weight=1, uniform="graph-legend")
+        legend.columnconfigure(1, weight=1, uniform="graph-legend")
         for index, kind in enumerate(
             ("concept", "intention", "value", "activity", "forgotten")
         ):
-            # Три подписи в ряд: при узкой колонке легенда переносится,
-            # а не обрезается правым краем окна.
-            item = tk.Frame(legend, bg=theme.BG_DEEP)
+            item = tk.Frame(legend, bg=theme.BG_CENTER)
             item.grid(
-                row=index // 3,
-                column=index % 3,
+                row=index // 2,
+                column=index % 2,
                 sticky="w",
-                padx=(0, theme.SPACING["md"]),
-                pady=(0, 2),
+                padx=theme.SPACING["sm"],
+                pady=2,
             )
             swatch = tk.Canvas(
                 item,
                 width=18,
                 height=18,
-                bg=theme.BG_DEEP,
+                bg=theme.BG_CENTER,
                 highlightthickness=0,
             )
             swatch.pack(side=tk.LEFT)
@@ -998,30 +1344,17 @@ class MainWindow(ChatWindow):
             tk.Label(
                 item,
                 text=self._NODE_TYPE_LABELS[kind],
-                font=self._ui_font,
-                bg=theme.BG_DEEP,
+                font=self._now_body_font,
+                bg=theme.BG_CENTER,
                 fg=theme.MUTED,
             ).pack(side=tk.LEFT, padx=(4, 0))
 
-        detail = tk.Frame(
-            body,
-            bg=theme.SURFACE,
-            width=310,
-            highlightbackground=theme.BORDER,
-            highlightthickness=1,
-        )
+        detail, _detail_header = self._now_card(body, "ПОДРОБНОСТИ", theme.CYAN)
+        detail.configure(width=300)
         detail.pack(
             side=tk.RIGHT, fill=tk.Y, padx=(theme.SPACING["md"], 0), before=left
         )
         detail.pack_propagate(False)
-        tk.Label(
-            detail,
-            text="УЗЕЛ",
-            font=self._card_title_font,
-            bg=theme.SURFACE,
-            fg=theme.MUTED,
-            anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
         self._graph_detail = tk.Label(
             detail,
             text="Выберите узел на карте — покажу только то,\n"
@@ -1031,28 +1364,71 @@ class MainWindow(ChatWindow):
             fg=theme.TEXT,
             anchor="nw",
             justify=tk.LEFT,
-            wraplength=274,
+            wraplength=264,
         )
         self._graph_detail.pack(
             fill=tk.BOTH,
             expand=True,
             padx=theme.SPACING["md"],
-            pady=(0, theme.SPACING["sm"]),
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
         )
+        tk.Frame(detail, height=1, bg=theme.BORDER).pack(fill=tk.X)
         self._graph_counter = tk.Label(
             detail,
             text="узлов: 0 · связей: 0",
-            font=self._card_title_font,
+            font=self._now_mono_small_font,
             bg=theme.SURFACE,
-            fg=theme.DIMMED,
+            fg=theme.CYAN,
             anchor="w",
             justify=tk.LEFT,
-            wraplength=274,
+            wraplength=264,
         )
         self._graph_counter.pack(
-            fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"])
+            fill=tk.X, padx=theme.SPACING["md"], pady=theme.SPACING["sm"]
         )
+        self._refresh_graph_chips()
         return page
+
+    def _draw_graph_background(self, width: int, height: int) -> None:
+        """Тихая техническая сетка и орбиты — только фон, не данные Core."""
+        canvas = self._graph_canvas
+        for x in range(0, width, 32):
+            canvas.create_line(
+                x, 0, x, height, fill=theme.GRID, tags=("graph-grid",)
+            )
+        for y in range(0, height, 32):
+            canvas.create_line(
+                0, y, width, y, fill=theme.GRID, tags=("graph-grid",)
+            )
+        center_x, center_y = width / 2.0, height / 2.0
+        size = min(width, height)
+        for ratio, color in (
+            (0.18, theme.ORBIT),
+            (0.32, theme.ORBIT),
+            (0.46, theme.ORBIT_VIOLET),
+        ):
+            radius = size * ratio
+            canvas.create_oval(
+                center_x - radius,
+                center_y - radius,
+                center_x + radius,
+                center_y + radius,
+                outline=color,
+                dash=(2, 7),
+                tags=("graph-orbits",),
+            )
+        canvas.create_rectangle(
+            10, 9, 144, 31, fill=theme.GRAPH_BG, outline="", tags=("graph-grid",)
+        )
+        canvas.create_text(
+            16,
+            15,
+            text=self._t("Карта жизни").upper(),
+            font=self._card_title_font,
+            fill=theme.CYAN,
+            anchor="nw",
+            tags=("graph-grid",),
+        )
 
     def _draw_node_shape(self, canvas, x, y, radius, kind, *, tags=()):
         """Нарисовать узел формы и цвета, закреплённых за его типом."""
@@ -1214,9 +1590,21 @@ class MainWindow(ChatWindow):
                 active = self._graph_filter is not None and kind in self._graph_filter
                 color = theme.node_color(kind)
             try:
+                all_active = kind == "all" and active
                 chip.configure(
-                    bg=theme.BG_CENTER if active else theme.BG_DEEP,
-                    fg=color if active else theme.MUTED,
+                    bg=(
+                        theme.AMBER
+                        if all_active
+                        else theme.BG_CENTER if active else theme.SURFACE
+                    ),
+                    fg=(
+                        theme.BG_DEEP
+                        if all_active
+                        else color if active else theme.MUTED
+                    ),
+                    highlightbackground=(
+                        theme.AMBER if all_active else color if active else theme.BORDER
+                    ),
                 )
             except Exception:
                 pass
@@ -1318,12 +1706,16 @@ class MainWindow(ChatWindow):
         if canvas is None:
             return
         try:
+            zoom = self._graph_zoom
+            if self._graph_zoom_label is not None:
+                self._graph_zoom_label.configure(text=f"{round(zoom * 100)}%")
             width = max(int(canvas.winfo_width()), 1)
             height = max(int(canvas.winfo_height()), 1)
             canvas.delete("all")
             self._graph_tag_nodes = {}
             if width < 80 or height < 80:
                 return
+            self._draw_graph_background(width, height)
 
             nodes = self._visible_nodes()
             if not nodes:
@@ -1342,7 +1734,6 @@ class MainWindow(ChatWindow):
                 return
 
             positions = graph_view.layout_nodes(nodes, width, height)
-            zoom = self._graph_zoom
             offset_x, offset_y = self._graph_offset
             center_x, center_y = width / 2.0, height / 2.0
             # Масштаб и панорама — вокруг центра; сами координаты раскладки
@@ -1358,26 +1749,36 @@ class MainWindow(ChatWindow):
 
             visible_ids = {str(node.get("id")) for node in nodes}
             for edge in self._graph_data.get("edges") or []:
-                if (
-                    edge.get("source") not in visible_ids
-                    or edge.get("target") not in visible_ids
-                ):
+                source = edge.get("source")
+                target = edge.get("target")
+                if source not in visible_ids or target not in visible_ids:
                     continue
-                start = shifted.get(edge.get("source"))
-                end = shifted.get(edge.get("target"))
+                start = shifted.get(source)
+                end = shifted.get(target)
                 if not start or not end:
                     continue
+                active = self._graph_selected in {source, target}
                 canvas.create_line(
                     start[0],
                     start[1],
                     end[0],
                     end[1],
-                    fill=theme.EDGE,
-                    width=1,
-                    tags=("edge",),
+                    fill=theme.CYAN if active else theme.EDGE,
+                    width=2 if active else 1,
+                    tags=("edge", "selected-edge" if active else "edge-muted"),
                 )
 
-            labels = graph_view.layout_labels(nodes, shifted, width, height)
+            label_limit = max(14, min(graph_view.MAX_LABEL_CHARS, width // 18))
+            label_nodes = [
+                dict(
+                    node,
+                    label=graph_view.short_label(
+                        self._graph_node_label(node), limit=label_limit
+                    ),
+                )
+                for node in nodes
+            ]
+            labels = graph_view.layout_labels(label_nodes, shifted, width, height)
             for index, node in enumerate(nodes):
                 position = shifted.get(node.get("id"))
                 if position is None:
@@ -1391,13 +1792,14 @@ class MainWindow(ChatWindow):
                 tags = ("node", tag)
                 if node.get("id") == self._graph_selected:
                     canvas.create_oval(
-                        x - radius - 6,
-                        y - radius - 6,
-                        x + radius + 6,
-                        y + radius + 6,
-                        outline=theme.TEXT,
-                        width=1,
-                        tags=tags,
+                        x - radius - 7,
+                        y - radius - 7,
+                        x + radius + 7,
+                        y + radius + 7,
+                        fill=theme.GLOW_CYAN,
+                        outline=theme.AMBER,
+                        width=2,
+                        tags=tags + ("selected-node",),
                     )
                 self._draw_node_shape(canvas, x, y, radius, kind, tags=tags)
 
@@ -1406,13 +1808,20 @@ class MainWindow(ChatWindow):
                 if label is None:
                     continue
                 label_x, label_y, anchor = label
+                kind = str(node.get("kind") or "")
+                if kind in {"intention", "value", "activity"}:
+                    label_color = theme.node_color(kind)
+                else:
+                    label_color = theme.MUTED if kind == "forgotten" else theme.TEXT
                 canvas.create_text(
                     label_x,
                     label_y,
-                    text=graph_view.short_label(self._graph_node_label(node)),
+                    text=graph_view.short_label(
+                        self._graph_node_label(node), limit=label_limit
+                    ),
                     anchor=anchor,
-                    fill=theme.MUTED if node.get("kind") == "forgotten" else theme.TEXT,
-                    font=self._ui_font,
+                    fill=label_color,
+                    font=self._now_body_font,
                     tags=("node", f"node-{index}"),
                 )
         except Exception as exc:
@@ -1457,11 +1866,32 @@ class MainWindow(ChatWindow):
         self._render_graph()
 
     def _build_page_diary(self, parent):
-        """Дневник: строки эпизодов (время, действие, серия) и подробности."""
+        """Дневник: неоновый список эпизодов и честные подробности записи."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._page_heading(
-            page, "Дневник", "только записанные события жизни, от новых к старым"
-        )
+        tk.Label(
+            page,
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Дневник",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        tk.Label(
+            page,
+            text="только записанные события жизни, от новых к старым",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"]))
         body = tk.Frame(page, bg=theme.BG_DEEP)
         body.pack(
             fill=tk.BOTH,
@@ -1470,18 +1900,13 @@ class MainWindow(ChatWindow):
             pady=(0, theme.SPACING["md"]),
         )
 
-        holder = tk.Frame(
-            body,
-            bg=theme.BG_CENTER,
-            width=348,
-            highlightbackground=theme.BORDER,
-            highlightthickness=1,
-        )
+        holder, _header = self._now_card(body, "ЭПИЗОДЫ", theme.CYAN)
+        holder.configure(width=348)
         holder.pack(side=tk.LEFT, fill=tk.Y)
         holder.pack_propagate(False)
         self._diary_canvas = tk.Canvas(
             holder,
-            bg=theme.BG_CENTER,
+            bg=theme.SURFACE,
             highlightthickness=0,
             bd=0,
         )
@@ -1489,13 +1914,27 @@ class MainWindow(ChatWindow):
             holder,
             orient=tk.VERTICAL,
             command=self._diary_canvas.yview,
+            bg=theme.SURFACE,
+            troughcolor=theme.BG_CENTER,
+            activebackground=theme.CYAN,
+            highlightthickness=0,
+            bd=0,
+            width=10,
         )
-        self._diary_inner = tk.Frame(self._diary_canvas, bg=theme.BG_CENTER)
-        self._diary_canvas.create_window((0, 0), window=self._diary_inner, anchor="nw")
+        self._diary_inner = tk.Frame(self._diary_canvas, bg=theme.SURFACE)
+        inner_window = self._diary_canvas.create_window(
+            (0, 0), window=self._diary_inner, anchor="nw"
+        )
         self._diary_inner.bind(
             "<Configure>",
             lambda _event: self._diary_canvas.configure(
                 scrollregion=self._diary_canvas.bbox("all")
+            ),
+        )
+        self._diary_canvas.bind(
+            "<Configure>",
+            lambda event: self._diary_canvas.itemconfigure(
+                inner_window, width=event.width
             ),
         )
         self._diary_canvas.configure(yscrollcommand=scrollbar.set)
@@ -1505,18 +1944,39 @@ class MainWindow(ChatWindow):
             "<MouseWheel>",
             lambda event: self._diary_canvas.yview_scroll(-event.delta // 120, "units"),
         )
-        self._diary_detail = self._detail_panel(body, "ЭПИЗОД")
+        self._diary_detail = self._detail_panel(body, "ЭПИЗОД", accent=theme.AMBER)
         # Пустое состояние рисуется сразу: снапшоты без записей больше
         # не пересобирают список (см. защиту в _apply_diary_data).
         self._render_diary_rows()
         return page
 
     def _build_page_activities(self, parent):
-        """Каталог занятий: черновики и локальная партия, только чтение."""
+        """Неоновый каталог черновиков и партии с записанным полем игры."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._page_heading(
-            page, "Занятия", "работы и партии, которые Core действительно создал"
-        )
+        tk.Label(
+            page,
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Занятия",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        tk.Label(
+            page,
+            text="работы и партии, которые Core действительно создал",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"]))
         body = tk.Frame(page, bg=theme.BG_DEEP)
         body.pack(
             fill=tk.BOTH,
@@ -1524,22 +1984,68 @@ class MainWindow(ChatWindow):
             padx=theme.SPACING["md"],
             pady=(0, theme.SPACING["md"]),
         )
+
+        holder, _header = self._now_card(body, "КАТАЛОГ", theme.CYAN)
+        holder.configure(width=348)
+        holder.pack(side=tk.LEFT, fill=tk.Y)
+        holder.pack_propagate(False)
         self._activity_list = tk.Listbox(
-            body,
+            holder,
             width=32,
-            font=self._ui_font,
+            font=self._card_body_font,
+            selectmode=tk.BROWSE,
             bg=theme.BG_CENTER,
             fg=theme.TEXT,
-            selectbackground=theme.GLOW_AMBER,
+            selectbackground=theme.SELECTION,
             selectforeground=theme.TEXT,
+            selectborderwidth=0,
+            disabledforeground=theme.DIMMED,
+            activestyle="none",
+            exportselection=False,
             relief=tk.FLAT,
             bd=0,
             highlightthickness=1,
             highlightbackground=theme.BORDER,
+            highlightcolor=theme.AMBER,
+            justify=tk.LEFT,
         )
-        self._activity_list.pack(side=tk.LEFT, fill=tk.Y)
+        self._activity_list.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["sm"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
+        )
         self._activity_list.bind("<<ListboxSelect>>", self._on_activity_select)
-        self._activity_detail = self._detail_panel(body, "ЗАНЯТИЕ")
+        self._activity_detail = self._detail_panel(
+            body, "ЗАНЯТИЕ", accent=theme.AMBER
+        )
+
+        # Поле строится только из записанного board[9]; для черновика оно скрыто.
+        self._activity_board = tk.Frame(
+            self._activity_detail.master, bg=theme.SURFACE
+        )
+        self._activity_board_cells = []
+        for index in range(9):
+            cell = tk.Label(
+                self._activity_board,
+                text="",
+                font=self._headline_font,
+                bg=theme.BG_CENTER,
+                fg=theme.DIMMED,
+                width=3,
+                height=1,
+                highlightbackground=theme.BORDER,
+                highlightthickness=1,
+            )
+            cell.grid(
+                row=index // 3,
+                column=index % 3,
+                padx=2,
+                pady=2,
+                ipadx=4,
+                ipady=4,
+            )
+            self._activity_board_cells.append(cell)
         return page
 
     def _page_heading(self, page, title, subtitle):
@@ -1560,7 +2066,7 @@ class MainWindow(ChatWindow):
             anchor="w",
         ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"]))
 
-    def _detail_panel(self, parent, title):
+    def _detail_panel(self, parent, title, *, accent=None):
         panel = tk.Frame(
             parent,
             bg=theme.SURFACE,
@@ -1572,18 +2078,37 @@ class MainWindow(ChatWindow):
             side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(theme.SPACING["md"], 0)
         )
         panel.pack_propagate(False)
-        tk.Label(
-            panel,
-            text=title,
-            font=self._card_title_font,
-            bg=theme.SURFACE,
-            fg=theme.MUTED,
-            anchor="w",
-        ).pack(
-            fill=tk.X,
-            padx=theme.SPACING["md"],
-            pady=(theme.SPACING["md"], theme.SPACING["sm"]),
-        )
+        if accent is None:
+            tk.Label(
+                panel,
+                text=title,
+                font=self._card_title_font,
+                bg=theme.SURFACE,
+                fg=theme.MUTED,
+                anchor="w",
+            ).pack(
+                fill=tk.X,
+                padx=theme.SPACING["md"],
+                pady=(theme.SPACING["md"], theme.SPACING["sm"]),
+            )
+        else:
+            header = tk.Frame(panel, bg=theme.SURFACE)
+            header.pack(fill=tk.X)
+            tk.Frame(header, width=3, bg=accent).pack(side=tk.LEFT, fill=tk.Y)
+            tk.Label(
+                header,
+                text=title,
+                font=self._card_title_font,
+                bg=theme.SURFACE,
+                fg=theme.CYAN,
+                anchor="w",
+            ).pack(
+                side=tk.LEFT,
+                fill=tk.X,
+                expand=True,
+                padx=(theme.SPACING["sm"], 0),
+                pady=theme.SPACING["sm"],
+            )
         label = tk.Label(
             panel,
             text="Выберите запись слева.",
@@ -1598,7 +2123,13 @@ class MainWindow(ChatWindow):
             fill=tk.BOTH,
             expand=True,
             padx=theme.SPACING["md"],
-            pady=(0, theme.SPACING["md"]),
+            pady=(theme.SPACING["xs"], theme.SPACING["md"]),
+        )
+        panel.bind(
+            "<Configure>",
+            lambda event: label.configure(
+                wraplength=max(180, event.width - 2 * theme.SPACING["md"])
+            ),
         )
         return label
 
@@ -1670,14 +2201,14 @@ class MainWindow(ChatWindow):
             self._diary_inner,
             text=self._t("Записей пока нет"),
             font=self._ui_font,
-            bg=theme.BG_CENTER,
+            bg=theme.SURFACE,
             fg=theme.MUTED,
         ).pack(pady=(theme.SPACING["lg"], theme.SPACING["xs"]))
         tk.Label(
             self._diary_inner,
             text=self._t("здесь появятся события,\nкоторые ядро записало в дневник"),
             font=self._card_title_font,
-            bg=theme.BG_CENTER,
+            bg=theme.SURFACE,
             fg=theme.DIMMED,
             justify=tk.CENTER,
         ).pack(pady=(0, theme.SPACING["lg"]))
@@ -1691,64 +2222,59 @@ class MainWindow(ChatWindow):
         group_size: int = 1,
         group_key: Any = None,
     ) -> None:
-        """Одна строка дневника: время, плашка действия, тема и исход."""
+        """Карточка эпизода: время, акцент действия, тема и записанный исход."""
         title = diary_view.episode_title(episode, self._language)
+        action_key = diary_view.action_color_key(episode.get("action"))
+        accent = self._DIARY_COLORS.get(action_key, theme.GREY)
         row = tk.Frame(
-            self._diary_inner, bg=theme.BG_CENTER, highlightthickness=0, bd=0
+            self._diary_inner,
+            bg=theme.BG_CENTER,
+            highlightbackground=theme.BORDER,
+            highlightcolor=theme.BORDER,
+            highlightthickness=1,
+            bd=0,
         )
-        row.pack(fill=tk.X)
-        header = tk.Frame(row, bg=theme.BG_CENTER)
-        header.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["sm"], 0))
+        row.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["sm"], 0))
+        stripe = tk.Frame(row, width=3, bg=accent)
+        stripe._preserve_bg = True
+        stripe.pack(side=tk.LEFT, fill=tk.Y)
+        content = tk.Frame(row, bg=theme.BG_CENTER)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        header = tk.Frame(content, bg=theme.BG_CENTER)
+        header.pack(
+            fill=tk.X,
+            padx=theme.SPACING["sm"],
+            pady=(theme.SPACING["sm"], 0),
+        )
         tk.Label(
             header,
             text=diary_view.episode_time(episode),
-            font=self._mono_font or theme.mono_family(),
+            font=self._now_mono_small_font,
             bg=theme.BG_CENTER,
-            fg=theme.DIMMED,
+            fg=theme.MUTED,
         ).pack(side=tk.LEFT)
-        pill = tk.Label(
+        tk.Label(
             header,
             text=diary_view.action_label(episode.get("action"), self._language),
             font=self._card_title_font,
             bg=theme.BG_CENTER,
-            fg=self._DIARY_COLORS.get(
-                diary_view.action_color_key(episode.get("action")), theme.GREY
-            ),
+            fg=accent if action_key != "grey" else theme.MUTED,
             padx=6,
-        )
-        pill.pack(side=tk.LEFT, padx=(theme.SPACING["xs"], 0))
-        collapse_link = None
-        if group_count > 1:
-            tk.Label(
-                header,
-                text=self._t("×{count} · показать").format(count=group_count),
-                font=self._card_title_font,
-                bg=theme.BG_CENTER,
-                fg=theme.CYAN,
-            ).pack(side=tk.RIGHT)
-        elif group_size > 1:
-            # Головная строка развёрнутой серии: явная кнопка «свернуть».
-            collapse_link = tk.Label(
-                header,
-                text=self._t("×{count} · свернуть").format(count=group_size),
-                font=self._card_title_font,
-                bg=theme.BG_CENTER,
-                fg=theme.CYAN,
-            )
-            collapse_link.pack(side=tk.RIGHT)
-        tk.Label(
-            row,
+        ).pack(side=tk.RIGHT)
+        title_label = tk.Label(
+            content,
             text=title,
             font=self._ui_font,
             bg=theme.BG_CENTER,
             fg=theme.TEXT,
             anchor="w",
             justify=tk.LEFT,
-            wraplength=300,
-        ).pack(fill=tk.X, padx=theme.SPACING["sm"])
+            wraplength=280,
+        )
+        title_label.pack(fill=tk.X, padx=theme.SPACING["sm"])
         error = episode.get("error")
-        tk.Label(
-            row,
+        status_label = tk.Label(
+            content,
             text=(
                 str(error)
                 if error
@@ -1756,12 +2282,46 @@ class MainWindow(ChatWindow):
             ),
             font=self._card_title_font,
             bg=theme.BG_CENTER,
-            fg=theme.DANGER if error else theme.MUTED,
+            fg=(
+                theme.DANGER
+                if error
+                else accent if action_key != "grey" else theme.MUTED
+            ),
             anchor="w",
             justify=tk.LEFT,
-            wraplength=300,
-        ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]))
-        tk.Frame(self._diary_inner, height=1, bg=theme.BORDER).pack(fill=tk.X)
+            wraplength=280,
+        )
+        status_label.pack(
+            fill=tk.X,
+            padx=theme.SPACING["sm"],
+            pady=(2, theme.SPACING["sm"]),
+        )
+        row.bind(
+            "<Configure>",
+            lambda event, labels=(title_label, status_label): [
+                label.configure(wraplength=max(160, event.width - 36))
+                for label in labels
+            ],
+        )
+
+        collapse_link = None
+        if group_count > 1 or group_size > 1:
+            count = group_count if group_count > 1 else group_size
+            text_key = "×{count} · показать" if group_count > 1 else "×{count} · свернуть"
+            collapse_link = tk.Label(
+                content,
+                text=self._t(text_key).format(count=count),
+                font=self._now_mono_small_font,
+                bg=theme.BG_CENTER,
+                fg=theme.CYAN,
+                anchor="e",
+                cursor="hand2",
+            )
+            collapse_link.pack(
+                fill=tk.X,
+                padx=theme.SPACING["sm"],
+                pady=(0, theme.SPACING["sm"]),
+            )
 
         self._diary_rows_view.append(
             {
@@ -1838,18 +2398,25 @@ class MainWindow(ChatWindow):
         if self._diary_selected is not None and self._diary_selected < len(
             self._diary_row_frames
         ):
-            self._set_row_bg(
-                self._diary_row_frames[self._diary_selected], theme.BG_CENTER
+            previous = self._diary_row_frames[self._diary_selected]
+            self._set_row_bg(previous, theme.BG_CENTER)
+            previous.configure(
+                highlightbackground=theme.BORDER, highlightcolor=theme.BORDER
             )
         self._diary_selected = index
         if index < len(self._diary_row_frames):
-            self._set_row_bg(self._diary_row_frames[index], theme.GLOW_CYAN)
+            selected = self._diary_row_frames[index]
+            self._set_row_bg(selected, theme.SELECTION)
+            selected.configure(
+                highlightbackground=theme.AMBER, highlightcolor=theme.AMBER
+            )
 
     def _set_row_bg(self, widget, color) -> None:
-        try:
-            widget.configure(bg=color)
-        except Exception:
-            pass
+        if not getattr(widget, "_preserve_bg", False):
+            try:
+                widget.configure(bg=color)
+            except Exception:
+                pass
         for child in widget.winfo_children():
             self._set_row_bg(child, color)
 
@@ -1874,23 +2441,39 @@ class MainWindow(ChatWindow):
         self._activity_entries = drafts
         self._activity_list.delete(0, tk.END)
         for draft in self._activity_entries:
+            index = self._activity_list.size()
             self._activity_list.insert(
                 tk.END,
                 self._t("Черновик · {theme}").format(
                     theme=draft.get("theme") or self._t("без темы")
                 ),
             )
+            self._activity_list.itemconfigure(
+                index,
+                fg=theme.CYAN if draft.get("status") == "active" else theme.MUTED,
+            )
         self._activity_game = game
         if self._activity_game is not None:
+            index = self._activity_list.size()
             self._activity_list.insert(tk.END, self._t("Партия · крестики-нолики"))
+            self._activity_list.itemconfigure(index, fg=theme.VIOLET)
         if not self._activity_entries and self._activity_game is None:
             self._activity_list.insert(tk.END, self._t("Занятий пока нет"))
-            self._activity_list.configure(state=tk.DISABLED)
+            self._activity_list.configure(
+                state=tk.DISABLED,
+                justify=tk.CENTER,
+                highlightbackground=theme.BORDER,
+            )
+            if self._activity_board is not None:
+                self._activity_board.pack_forget()
+            if self._activity_detail is not None:
+                self._activity_detail.configure(text=self._t("Выберите запись слева."))
         else:
-            self._activity_list.configure(state=tk.NORMAL)
+            self._activity_list.configure(state=tk.NORMAL, justify=tk.LEFT)
             if selection:
                 index = min(selection[0], self._activity_list.size() - 1)
                 self._activity_list.selection_set(index)
+                self._on_activity_select()
 
     def _on_activity_select(self, _event=None):
         if self._activity_detail is None:
@@ -1898,6 +2481,9 @@ class MainWindow(ChatWindow):
         selection = self._activity_list.curselection()
         if not selection:
             return
+        self._activity_list.configure(highlightbackground=theme.AMBER)
+        if self._activity_board is not None:
+            self._activity_board.pack_forget()
         index = selection[0]
         if index < len(self._activity_entries):
             rows = diary_view.draft_detail(
@@ -1905,163 +2491,281 @@ class MainWindow(ChatWindow):
             )
         elif self._activity_game is not None and index == len(self._activity_entries):
             rows = diary_view.game_detail(self._life_snapshot, self._language)
+            if self._render_activity_board(self._activity_game):
+                # Клетки уже показаны графически, текстовая строка не дублируется.
+                rows = [row for row in rows if row[0] != self._t("Поле")]
         else:
             return
         self._activity_detail.configure(text=diary_view.rows_text(rows))
 
+    def _render_activity_board(self, game) -> bool:
+        """Показать только записанное поле 3×3; неверные данные не отображать."""
+        if self._activity_board is None:
+            return False
+        board = game.get("board") if isinstance(game, dict) else None
+        if not isinstance(board, list) or len(board) != 9:
+            return False
+        for index, cell in enumerate(self._activity_board_cells):
+            value = board[index]
+            text = "" if value in (None, "", ".") else str(value)
+            color = {"X": theme.CYAN, "O": theme.VIOLET}.get(text, theme.TEXT)
+            cell.configure(text=text, fg=color)
+        self._activity_board.pack(
+            before=self._activity_detail,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["sm"], theme.SPACING["sm"]),
+        )
+        return True
+
     def _build_page_access(self, parent):
-        """Экран «Доступы»: живые переключатели и что делает Effector."""
+        """Доступы: фактические переключатели, счётчики и снимок состояния."""
         from src.app.access_control import HINTS, LABELS
 
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-        self._page_heading(
-            page,
-            "Доступы",
-            "человек сам решает, что ядру разрешено; выключение ничего не стирает",
-        )
-
-        switches = tk.Frame(
-            page,
-            bg=theme.SURFACE,
-            highlightbackground=theme.BORDER,
-            highlightthickness=1,
-        )
-        switches.pack(
-            fill=tk.X, padx=theme.SPACING["md"], pady=(0, theme.SPACING["sm"])
-        )
         tk.Label(
-            switches,
-            text="РАЗРЕШЕНИЯ",
+            page,
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
             font=self._card_title_font,
-            bg=theme.SURFACE,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Доступы",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        tk.Label(
+            page,
+            text="человек сам решает, что ядру разрешено; выключение ничего не стирает",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
             fg=theme.MUTED,
             anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"]))
+
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
+        )
+        body.columnconfigure(0, weight=3)
+        body.columnconfigure(1, weight=2)
+        body.rowconfigure(0, weight=1)
+        left = tk.Frame(body, bg=theme.BG_DEEP)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SPACING["sm"]))
+        right = tk.Frame(body, bg=theme.BG_DEEP)
+        right.grid(row=0, column=1, sticky="nsew")
+
+        switches, _header = self._now_card(left, "РАЗРЕШЕНИЯ", theme.CYAN)
+        switches.pack(fill=tk.BOTH, expand=True)
+        accents = {
+            "network": theme.CYAN,
+            "delamain": theme.VIOLET,
+            "effector": theme.AMBER,
+            "presence": theme.GREY,
+        }
         for key in ("network", "delamain", "effector", "presence"):
             var = tk.BooleanVar(value=False)
             self._access_vars[key] = var
-            row = tk.Frame(switches, bg=theme.SURFACE)
-            row.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, 2))
-            self._build_access_switch(row, key, var)
+            row = tk.Frame(
+                switches,
+                bg=theme.BG_CENTER,
+                highlightbackground=theme.BORDER,
+                highlightthickness=1,
+            )
+            row.pack(
+                fill=tk.X,
+                padx=theme.SPACING["sm"],
+                pady=(theme.SPACING["sm"], 0),
+            )
+            tk.Frame(row, width=3, bg=accents[key]).pack(side=tk.LEFT, fill=tk.Y)
+            content = tk.Frame(row, bg=theme.BG_CENTER)
+            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            top = tk.Frame(content, bg=theme.BG_CENTER)
+            top.pack(
+                fill=tk.X,
+                padx=theme.SPACING["sm"],
+                pady=(theme.SPACING["sm"], 0),
+            )
+            self._build_access_switch(top, key, var)
+            status = tk.Label(
+                top,
+                text="",
+                font=self._now_mono_small_font,
+                bg=theme.BG_CENTER,
+                fg=theme.MUTED,
+                anchor="e",
+            )
+            status.pack(side=tk.RIGHT, padx=(theme.SPACING["xs"], 0))
+            self._access_status_labels[key] = status
             label = tk.Label(
-                row,
+                top,
                 text=LABELS[key],
                 font=self._ui_font,
-                bg=theme.SURFACE,
+                bg=theme.BG_CENTER,
                 fg=theme.TEXT,
                 anchor="w",
                 cursor="hand2",
             )
-            label.pack(anchor="w", padx=(theme.SPACING["sm"], 0))
+            label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(theme.SPACING["sm"], 0))
             label.bind(
                 "<Button-1>",
                 lambda _event, name=key: self._toggle_access_var(name),
             )
-            tk.Label(
-                row,
+            hint = tk.Label(
+                content,
                 text=HINTS[key],
                 font=self._card_title_font,
-                bg=theme.SURFACE,
+                bg=theme.BG_CENTER,
                 fg=theme.MUTED,
                 anchor="w",
-            ).pack(anchor="w", padx=(46, 0))
+                justify=tk.LEFT,
+                wraplength=300,
+            )
+            hint.pack(
+                fill=tk.X,
+                padx=(62, theme.SPACING["sm"]),
+                pady=(2, theme.SPACING["sm"]),
+            )
+            row.bind(
+                "<Configure>",
+                lambda event, widget=hint: widget.configure(
+                    wraplength=max(140, event.width - 82)
+                ),
+            )
+            self._draw_access_switch(key)
 
-        self._access_card = self._make_card(page, "ЧТО РАЗРЕШЕНО СЕЙЧАС")
-        self._effector_card = self._make_card(page, "ДЕЙСТВИЯ")
+        effector, _header = self._now_card(right, "ДЕЙСТВИЯ", theme.AMBER)
+        effector.pack(fill=tk.X, pady=(0, theme.SPACING["sm"]))
+        self._effector_card = self._now_card_text(effector, self._now_body_font, 240)
+        access, _header = self._now_card(
+            right, "ЧТО РАЗРЕШЕНО СЕЙЧАС", theme.VIOLET
+        )
+        access.pack(fill=tk.X, pady=(0, theme.SPACING["sm"]))
+        self._access_card = self._now_card_text(access, self._now_body_font, 240)
+        right.bind(
+            "<Configure>",
+            lambda event: (
+                self._effector_card.configure(wraplength=max(150, event.width - 34)),
+                self._access_card.configure(wraplength=max(150, event.width - 34)),
+            ),
+        )
 
-        detail = tk.Frame(
-            page,
-            bg=theme.SURFACE,
-            highlightbackground=theme.BORDER,
-            highlightthickness=1,
-        )
-        detail.pack(
-            fill=tk.BOTH,
-            expand=True,
-            padx=theme.SPACING["md"],
-            pady=(0, theme.SPACING["md"]),
-        )
-        tk.Label(
+        detail, _header = self._now_card(right, "ПОДРОБНОСТИ", theme.VIOLET)
+        detail.pack(fill=tk.BOTH, expand=True)
+        self._status_text = scrolledtext.ScrolledText(
             detail,
-            text="ПОДРОБНОСТИ",
-            font=self._card_title_font,
-            bg=theme.SURFACE,
-            fg=theme.MUTED,
-            anchor="w",
-        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 2))
-        self._status_text = tk.Text(
-            detail,
-            height=10,
+            width=20,
+            height=6,
             font=self._mono_font,
-            bg=theme.SURFACE,
+            bg=theme.BG_CENTER,
             fg=theme.TEXT,
             relief=tk.FLAT,
+            bd=0,
+            highlightthickness=0,
             state=tk.DISABLED,
-            wrap=tk.NONE,
+            wrap=tk.WORD,
         )
         self._status_text.pack(
             fill=tk.BOTH,
             expand=True,
-            padx=theme.SPACING["md"],
-            pady=(0, theme.SPACING["md"]),
+            padx=theme.SPACING["sm"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
         )
         return page
 
     def _build_page_dialog(self, parent):
-        """Страница диалога: знакомая лента и поле ввода."""
+        """Диалог: неоновая лента, закреплённый ввод и справочник команд."""
         page = tk.Frame(parent, bg=theme.BG_DEEP)
-
-        self._text = scrolledtext.ScrolledText(
+        tk.Label(
             page,
-            wrap=tk.WORD,
-            width=60,
-            height=20,
-            font=self._card_body_font,
-            bg=theme.BG_CENTER,
-            fg=theme.TEXT,
-            insertbackground=theme.TEXT,
-            relief=tk.FLAT,
-            state=tk.DISABLED,
-        )
-        self._text.pack(
-            padx=theme.SPACING["sm"],
-            pady=theme.SPACING["sm"],
+            text="СНИМКИ СОСТОЯНИЯ · СОБЫТИЯ ЯДРА",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Диалог",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        tk.Label(
+            page,
+            text="Прямой разговор с ядром — сообщения, ответы и найденные материалы.",
+            font=self._ui_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=760,
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, theme.SPACING["sm"]))
+
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(
             fill=tk.BOTH,
             expand=True,
+            padx=theme.SPACING["md"],
+            pady=(0, theme.SPACING["md"]),
         )
-        self._text.tag_config("user", foreground=theme.CYAN)
-        self._text.tag_config("agent", foreground=theme.GREEN)
-        self._text.tag_config(
-            "system",
-            foreground=theme.MUTED,
-            font=self._card_title_font,
-            justify="center",
+        body.columnconfigure(0, weight=1, minsize=340)
+        body.columnconfigure(1, weight=0, minsize=220)
+        body.rowconfigure(0, weight=1)
+
+        conversation, _header = self._now_card(body, "ЛЕНТА ДИАЛОГА", theme.CYAN)
+        conversation.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        commands, _header = self._now_card(body, "КОМАНДЫ", theme.VIOLET)
+        commands.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        commands.configure(width=260)
+        commands.grid_propagate(False)
+
+        # Сначала резервируем нижние блоки: лента не вытеснит ввод за край.
+        input_frame = tk.Frame(
+            conversation,
+            bg=theme.BG_CENTER,
+            highlightbackground=theme.CYAN,
+            highlightcolor=theme.CYAN,
+            highlightthickness=1,
         )
-        self._text.tag_config("error", foreground=theme.DANGER)
-        self._text.tag_config("life", foreground=theme.AMBER, font=self._card_body_font)
-        # Карточка источника: заголовок, метаданные, выдержка и ссылка.
-        self._text.tag_config("web_head", foreground=theme.TEXT, font=self._ui_font)
-        self._text.tag_config(
-            "web_meta", foreground=theme.DIMMED, font=self._card_title_font
+        composer_hint = tk.Label(
+            conversation,
+            text="Enter — отправить · ↑ ↓ — история ввода",
+            font=self._now_mono_small_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=480,
         )
-        self._text.tag_config(
-            "web_body",
-            foreground=theme.TEXT,
-            font=self._ui_font,
-            lmargin1=12,
-            lmargin2=12,
+        composer_hint.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
+        )
+        input_frame.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], 0),
         )
 
-        input_frame = tk.Frame(page, bg=theme.BG_DEEP)
-        input_frame.pack(
-            padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"]), fill=tk.X
-        )
-        self._input_var = tk.StringVar()
-        self._input_entry = tk.Entry(
-            input_frame,
-            textvariable=self._input_var,
-            font=self._mono_font,
-            bg=theme.SURFACE,
+        self._text = scrolledtext.ScrolledText(
+            conversation,
+            wrap=tk.WORD,
+            width=40,
+            height=12,
+            font=self._ui_font,
+            bg=theme.BG_CENTER,
             fg=theme.TEXT,
             insertbackground=theme.TEXT,
             relief=tk.FLAT,
@@ -2069,24 +2773,225 @@ class MainWindow(ChatWindow):
             highlightthickness=1,
             highlightbackground=theme.BORDER,
             highlightcolor=theme.CYAN,
+            padx=10,
+            pady=8,
+            state=tk.DISABLED,
         )
-        self._input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
+        self._text.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
+        )
+        self._text.vbar.configure(
+            bg=theme.SURFACE,
+            troughcolor=theme.BG_CENTER,
+            activebackground=theme.CYAN,
+            highlightthickness=0,
+            bd=0,
+            width=10,
+        )
+        self._text.tag_config(
+            "user",
+            foreground=theme.AMBER,
+            font=self._ui_font,
+            lmargin1=8,
+            lmargin2=8,
+            spacing1=8,
+            spacing3=6,
+        )
+        self._text.tag_config(
+            "agent",
+            foreground=theme.CYAN,
+            font=self._ui_font,
+            lmargin1=8,
+            lmargin2=8,
+            spacing1=8,
+            spacing3=6,
+        )
+        self._text.tag_config(
+            "system",
+            foreground=theme.MUTED,
+            font=self._card_title_font,
+            justify="center",
+            spacing1=6,
+            spacing3=6,
+        )
+        self._text.tag_config(
+            "error",
+            foreground=theme.DANGER,
+            font=self._ui_font,
+            lmargin1=8,
+            lmargin2=8,
+            spacing1=8,
+            spacing3=6,
+        )
+        self._text.tag_config(
+            "life",
+            foreground=theme.AMBER,
+            font=self._ui_font,
+            lmargin1=12,
+            lmargin2=12,
+            spacing1=8,
+            spacing3=6,
+        )
+        # Карточка источника: заголовок, метаданные, выдержка и ссылка.
+        self._text.tag_config(
+            "web_head",
+            foreground=theme.VIOLET,
+            font=self._ui_font,
+            spacing1=8,
+        )
+        self._text.tag_config(
+            "web_meta",
+            foreground=theme.DIMMED,
+            font=self._card_title_font,
+            lmargin1=12,
+            lmargin2=12,
+        )
+        self._text.tag_config(
+            "web_body",
+            foreground=theme.TEXT,
+            font=self._ui_font,
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=12,
+            spacing3=4,
+        )
+
+        self._input_var = tk.StringVar()
+        self._dialog_send_button = tk.Button(
+            input_frame,
+            text="Сказать",
+            command=self._on_send,
+            font=self._mono_font,
+            bg=theme.AMBER,
+            fg=theme.BG_DEEP,
+            activebackground=theme.TEXT,
+            activeforeground=theme.BG_DEEP,
+            disabledforeground=theme.DIMMED,
+            relief=tk.FLAT,
+            bd=0,
+            padx=16,
+            pady=8,
+            cursor="hand2",
+        )
+        self._dialog_send_button.pack(side=tk.RIGHT, fill=tk.Y)
+        self._input_entry = tk.Entry(
+            input_frame,
+            textvariable=self._input_var,
+            font=self._ui_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.CYAN,
+            selectbackground=theme.GLOW_CYAN,
+            selectforeground=theme.TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=0,
+        )
+        self._input_entry.pack(
+            side=tk.LEFT,
+            fill=tk.BOTH,
+            expand=True,
+            padx=(10, theme.SPACING["xs"]),
+            pady=8,
+        )
         self._input_entry.bind("<Return>", self._on_send)
         self._input_entry.bind("<Up>", self._on_history_up)
         self._input_entry.bind("<Down>", self._on_history_down)
         self._input_entry.focus_set()
-        tk.Button(
-            input_frame,
-            text="Сказать",
-            command=self._on_send,
-            bg=theme.GLOW_CYAN,
-            fg=theme.CYAN,
-            activebackground=theme.EDGE_ACTIVE,
-            activeforeground=theme.BG_DEEP,
-            relief=tk.FLAT,
-            bd=0,
-            padx=14,
-        ).pack(side=tk.LEFT, padx=(theme.SPACING["xs"], 0), ipady=4)
+        conversation.bind(
+            "<Configure>",
+            lambda event: composer_hint.configure(
+                wraplength=max(220, event.width - 32)
+            ),
+        )
+
+        command_subtitle = tk.Label(
+            commands,
+            text="Команды вводятся в поле сообщения",
+            font=self._now_body_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=220,
+        )
+        command_subtitle.pack(
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
+        )
+        command_footer = tk.Label(
+            commands,
+            text="Ответы появляются в ленте после реальных событий ядра.",
+            font=self._now_body_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="sw",
+            justify=tk.LEFT,
+            wraplength=220,
+        )
+        command_footer.pack(
+            side=tk.BOTTOM,
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], theme.SPACING["sm"]),
+        )
+        command_rows = (
+            ("/help", "справка", theme.CYAN),
+            ("/status", "состояние", theme.CYAN),
+            ("/goals", "цели", theme.CYAN),
+            ("/concepts", "концепции", theme.CYAN),
+            ("/ask", "открытый вопрос", theme.VIOLET),
+            ("/pause", "пауза", theme.AMBER),
+            ("/resume", "продолжить", theme.AMBER),
+            ("/save", "сохранить", theme.CYAN),
+        )
+        command_descriptions = []
+        for command, description, color in command_rows:
+            row = tk.Frame(
+                commands,
+                bg=theme.BG_CENTER,
+                highlightbackground=theme.BORDER,
+                highlightthickness=1,
+            )
+            row.pack(
+                fill=tk.X,
+                padx=theme.SPACING["md"],
+                pady=1,
+            )
+            tk.Label(
+                row,
+                text=command,
+                font=self._now_mono_small_font,
+                bg=theme.BG_CENTER,
+                fg=color,
+                anchor="w",
+            ).pack(side=tk.LEFT, padx=(8, 4), pady=4)
+            label = tk.Label(
+                row,
+                text=description,
+                font=self._now_body_font,
+                bg=theme.BG_CENTER,
+                fg=theme.MUTED,
+                anchor="e",
+                justify=tk.RIGHT,
+                wraplength=100,
+            )
+            label.pack(side=tk.RIGHT, padx=(4, 8), pady=4)
+            command_descriptions.append(label)
+
+        def resize_commands(event) -> None:
+            width = 220 if event.width < 760 else 260
+            commands.configure(width=width)
+            command_subtitle.configure(wraplength=width - 30)
+            command_footer.configure(wraplength=width - 30)
+            for label in command_descriptions:
+                label.configure(wraplength=max(64, width - 126))
+
+        body.bind("<Configure>", resize_commands)
 
         self._history = []
         self._history_idx = -1
@@ -2105,8 +3010,8 @@ class MainWindow(ChatWindow):
             active = name == key
             try:
                 button.configure(
-                    bg=theme.SURFACE if active else theme.SIDEBAR,
-                    fg=theme.TEXT if active else theme.MUTED,
+                    bg=theme.GLOW_AMBER if active else theme.SIDEBAR,
+                    fg=theme.AMBER if active else theme.MUTED,
                 )
             except Exception:
                 pass
@@ -2524,6 +3429,7 @@ class MainWindow(ChatWindow):
         self._diary_canvas = None
         self._diary_inner = None
         self._access_switches = {}
+        self._access_status_labels = {}
         self._graph_filter_buttons = {}
         super()._destroy_root()
 

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -173,20 +174,65 @@ def now_headline(snapshot: Dict[str, Any], language: str = "ru") -> str:
     return T("Выбираю, чем заняться")
 
 
+def emotion_rows(
+    snapshot: Dict[str, Any], language: str = "ru"
+) -> List[Tuple[str, str, float]]:
+    """Полная палитра из снимка: стабильный код, подпись и уровень 0…1."""
+    emotions = snapshot.get("emotions") or {}
+    levels = emotions.get("levels")
+    if not isinstance(levels, dict):
+        return []
+    rows: List[Tuple[str, str, float]] = []
+    for raw_name, raw_level in levels.items():
+        try:
+            level = float(raw_level)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(level):
+            continue
+        name = str(raw_name)
+        rows.append((name, i18n.value_label(name, language), max(0.0, min(1.0, level))))
+    return rows
+
+
+def dominant_emotion(snapshot: Dict[str, Any], language: str = "ru") -> str:
+    """Доминирующий компонент только если ядро действительно его записало."""
+    dominant = (snapshot.get("emotions") or {}).get("dominant") or {}
+    name = dominant.get("emotion") if isinstance(dominant, dict) else None
+    if name:
+        return i18n.value_label(name, language)
+    return i18n.text("Нет данных", language)
+
+
 def body_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     """Строки карточки тела: цифры, которые действительно есть."""
     T = partial(i18n.text, language=language)
     life = snapshot.get("life") or {}
+    body = snapshot.get("body") or {}
     rows: List[Row] = [(T("Цикл"), str(life.get("cycle", 0)))]
     energy = life.get("energy")
     if energy is not None:
         rows.append((T("Энергия"), f"{float(energy):.0f}"))
     fatigue = life.get("fatigue")
+    if fatigue is None:
+        fatigue = body.get("fatigue")
     if fatigue is not None:
-        level = life.get("fatigue_level")
+        level = life.get("fatigue_level") or body.get("fatigue_level")
         suffix = f" ({i18n.value_label(level, language)})" if level else ""
         rows.append((T("Усталость"), f"{float(fatigue):.2f}{suffix}"))
-    if life.get("needs_rest") is True:
+    for key, label in (
+        ("atp", "АТФ"),
+        ("atp_ratio", "АТФ, доля"),
+        ("glucose", "Глюкоза"),
+        ("mitochondrial_health", "Митохондрии"),
+    ):
+        value = body.get(key)
+        if value is not None:
+            rows.append((T(label), f"{float(value):.2f}"))
+    needs_rest = life.get("needs_rest")
+    if needs_rest is None:
+        needs_rest = body.get("needs_rest")
+    if needs_rest is True:
         rows.append((T("Нужен отдых"), T("да")))
     return rows
 

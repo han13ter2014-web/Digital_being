@@ -370,12 +370,20 @@ def layout_nodes(
     for ring_index, (fraction, capacity) in enumerate(_CONCEPT_RINGS):
         chunk = concepts[index : index + capacity]
         index += capacity
+        radius = max_radius * fraction
+        if ring_index == 1 and chunk:
+            # На узком Canvas доля орбиты становится меньше диаметра узла.
+            # Сохраняем зазор от центра, но не вылезаем на чужие внешние кольца.
+            clearance = node_radius(concepts[0].get("weight"), "concept") + max(
+                node_radius(node.get("weight"), "concept") for node in chunk
+            ) + 12.0
+            radius = min(max_radius * 0.55, max(radius, clearance))
         _place_ring(
             positions,
             chunk,
             center_x,
             center_y,
-            max_radius * fraction,
+            radius,
             offset=0.4 * (ring_index + 1),
         )
 
