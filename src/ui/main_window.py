@@ -140,6 +140,15 @@ class MainWindow(ChatWindow):
         self._proposal_buttons: List[Any] = []
         self._proposal_decision_pending = False
 
+        # Языковой наставник: те же USER_COMMAND, решения только по живым ID.
+        self._tutor_url_var = None
+        self._tutor_url_entry = None
+        self._tutor_status = None
+        self._tutor_exercise = None
+        self._tutor_request_frame = None
+        self._tutor_request_signature: Optional[tuple] = None
+        self._tutor_buttons: List[Any] = []
+
         # Дневник: серии подряд одинаковых эпизодов и раскрытые группы.
         self._diary_entries: List[Dict[str, Any]] = []
         self._diary_groups: List[List[Dict[str, Any]]] = []
@@ -218,6 +227,8 @@ class MainWindow(ChatWindow):
             *self._now_emotion_values.values(),
             self._access_card,
             self._effector_card,
+            self._tutor_status,
+            self._tutor_exercise,
             *self._access_status_labels.values(),
             self._graph_detail,
             self._graph_counter,
@@ -711,6 +722,7 @@ class MainWindow(ChatWindow):
             self._apply_now_emotions(snap)
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
+            self._apply_tutor_data(snap)
             self._refresh_access_switches(snap)
             if self._access_card is not None:
                 self._access_card.configure(
@@ -1028,6 +1040,7 @@ class MainWindow(ChatWindow):
 
         nav_section("СИСТЕМА")
         for key, marker, label in (
+            ("tutor", "✎", "Наставник"),
             ("access", "▣", "Доступы"),
             ("dialog", "◫", "Диалог"),
         ):
@@ -1057,6 +1070,7 @@ class MainWindow(ChatWindow):
             "graph": self._build_page_graph(content),
             "diary": self._build_page_diary(content),
             "activities": self._build_page_activities(content),
+            "tutor": self._build_page_tutor(content),
             "access": self._build_page_access(content),
             "dialog": self._build_page_dialog(content),
         }
@@ -2658,6 +2672,295 @@ class MainWindow(ChatWindow):
             pady=(theme.SPACING["sm"], theme.SPACING["sm"]),
         )
         return True
+
+    def _send_tutor_action(self, action: str, request_id: str = "") -> bool:
+        """Отправить узкую команду наставника, не обращаясь к Core напрямую."""
+        if not self._enabled_controls:
+            return False
+        if request_id:
+            if action not in {"approve", "approve_read", "reject"}:
+                return False
+            pending = (self._life_snapshot.get("tutor") or {}).get(
+                "source_requests"
+            ) or []
+            if request_id not in {
+                str(item.get("request_id"))
+                for item in pending
+                if isinstance(item, dict)
+            }:
+                return False
+            argument = request_id
+        elif action in {"allow", "read", "revoke"}:
+            argument = str(self._tutor_url_var.get() or "").strip()
+            if not argument or len(argument) > 600:
+                return False
+        elif action in {"exercise", "solve"}:
+            argument = ""
+        else:
+            return False
+        command = f"tutor {action} {argument}".rstrip()
+        try:
+            accepted = self.bus.publish_sync(
+                Events.USER_COMMAND,
+                {"command": command},
+                source="tutor",
+            )
+        except Exception as exc:
+            logger.warning("[MainWindow] tutor command: %s", exc)
+            self._append_error(str(exc))
+            return False
+        if accepted is False:
+            self._append_error(self._t("Очередь сообщений переполнена."))
+            return False
+        return True
+
+    def _apply_tutor_data(self, snapshot: Dict[str, Any]) -> None:
+        """Обновить панель из общего DTO; эталон ответа сюда не попадает."""
+        if self._tutor_status is None or self._tutor_request_frame is None:
+            return
+        tutor = snapshot.get("tutor") or {}
+        available = bool(tutor.get("available"))
+        self._tutor_status.configure(
+            text=(
+                f"Источники: {tutor.get('approved_count', 0)} · "
+                f"запросы: {tutor.get('request_count', 0)} · "
+                f"материалы: {tutor.get('materials', 0)} · "
+                f"уроки: {tutor.get('lessons', 0)} · "
+                f"подтверждено источником: {tutor.get('source_verified', 0)}\n"
+                f"Web для чтения: {'включён' if tutor.get('web_enabled') else 'выключен'}"
+            )
+        )
+        current = tutor.get("pending_exercise")
+        self._tutor_exercise.configure(
+            text=(
+                f"Текущее задание: {current.get('prompt')} · {current.get('kind')}\n"
+                "Эталон скрыт до самостоятельной попытки."
+                if isinstance(current, dict) and current.get("prompt")
+                else "Текущего задания нет. Получите его после чтения подходящего урока."
+            )
+        )
+        state = tk.NORMAL if available and self._enabled_controls else tk.DISABLED
+        for button in self._tutor_buttons:
+            button.configure(state=state)
+        if self._tutor_url_entry is not None:
+            self._tutor_url_entry.configure(state=state)
+
+        requests = [
+            item
+            for item in tutor.get("source_requests") or []
+            if isinstance(item, dict) and item.get("request_id")
+        ]
+        signature = tuple(
+            (
+                str(item.get("request_id")),
+                str(item.get("url")),
+                str(item.get("reason")),
+                item.get("cycle"),
+            )
+            for item in requests
+        )
+        if signature == self._tutor_request_signature:
+            return
+        self._tutor_request_signature = signature
+        frame = self._tutor_request_frame
+        for child in frame.winfo_children():
+            child.destroy()
+        if not requests:
+            tk.Label(
+                frame,
+                text="Запросов сущности пока нет.",
+                font=self._now_body_font,
+                bg=theme.SURFACE,
+                fg=theme.MUTED,
+                anchor="w",
+            ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"])
+            return
+        for item in requests:
+            card = tk.Frame(
+                frame,
+                bg=theme.BG_CENTER,
+                highlightbackground=theme.AMBER,
+                highlightthickness=1,
+            )
+            card.pack(
+                fill=tk.X,
+                padx=theme.SPACING["sm"],
+                pady=(0, theme.SPACING["xs"]),
+            )
+            tk.Label(
+                card,
+                text=str(item.get("reason") or "Нужен учебный источник"),
+                font=self._ui_font,
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=700,
+            ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["xs"], 0))
+            tk.Label(
+                card,
+                text=str(item.get("url") or ""),
+                font=self._now_mono_small_font,
+                bg=theme.BG_CENTER,
+                fg=theme.CYAN,
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=700,
+            ).pack(fill=tk.X, padx=theme.SPACING["sm"])
+            actions = tk.Frame(card, bg=theme.BG_CENTER)
+            actions.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["xs"])
+            for action, caption in (
+                ("approve_read", "Разрешить и прочитать"),
+                ("approve", "Только разрешить"),
+                ("reject", "Отклонить"),
+            ):
+                tk.Button(
+                    actions,
+                    text=caption,
+                    font=self._card_title_font,
+                    command=lambda a=action, rid=str(item["request_id"]): (
+                        self._send_tutor_action(a, rid)
+                    ),
+                    bg=theme.SURFACE,
+                    fg=theme.TEXT,
+                    activebackground=theme.SELECTION,
+                    activeforeground=theme.TEXT,
+                    relief=tk.FLAT,
+                    bd=0,
+                    padx=10,
+                    pady=5,
+                    state=state,
+                ).pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
+
+    def _build_page_tutor(self, parent):
+        """Источники, упражнения и явные решения по запросам сущности."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        tk.Label(
+            page,
+            text="ОБУЧЕНИЕ · РАЗРЕШЕНИЯ ЧЕЛОВЕКА",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Языковой наставник",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        self._tutor_status = tk.Label(
+            page,
+            text="Нет данных наставника",
+            font=self._now_body_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+        )
+        self._tutor_status.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, 8))
+
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"])
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        left = tk.Frame(body, bg=theme.BG_DEEP)
+        right = tk.Frame(body, bg=theme.BG_DEEP)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 5))
+        right.grid(row=0, column=1, sticky="new", padx=(5, 0))
+
+        source, _ = self._now_card(left, "РАЗРЕШЁННЫЙ HTTPS-ИСТОЧНИК", theme.CYAN)
+        source.pack(fill=tk.X, pady=(0, 8))
+        self._tutor_url_var = tk.StringVar()
+        self._tutor_url_entry = tk.Entry(
+            source,
+            textvariable=self._tutor_url_var,
+            font=self._now_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            relief=tk.FLAT,
+            state=tk.NORMAL if self._enabled_controls else tk.DISABLED,
+        )
+        self._tutor_url_entry.pack(
+            fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["xs"], 4)
+        )
+        source_actions = tk.Frame(source, bg=theme.SURFACE)
+        source_actions.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8))
+        for action, caption in (
+            ("allow", "Разрешить"),
+            ("read", "Прочитать"),
+            ("revoke", "Отозвать"),
+        ):
+            button = tk.Button(
+                source_actions,
+                text=caption,
+                font=self._card_title_font,
+                command=lambda a=action: self._send_tutor_action(a),
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                activebackground=theme.SELECTION,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+                pady=5,
+                state=tk.NORMAL if self._enabled_controls else tk.DISABLED,
+            )
+            button.pack(side=tk.LEFT, padx=(0, 5))
+            self._tutor_buttons.append(button)
+
+        exercise, _ = self._now_card(left, "САМОСТОЯТЕЛЬНОЕ УПРАЖНЕНИЕ", theme.VIOLET)
+        exercise.pack(fill=tk.X, pady=(0, 8))
+        self._tutor_exercise = self._now_card_text(exercise, self._now_body_font, 360)
+        exercise_actions = tk.Frame(exercise, bg=theme.SURFACE)
+        exercise_actions.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8))
+        for action, caption in (
+            ("exercise", "Получить задание"),
+            ("solve", "Решить и сверить"),
+        ):
+            button = tk.Button(
+                exercise_actions,
+                text=caption,
+                font=self._card_title_font,
+                command=lambda a=action: self._send_tutor_action(a),
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                activebackground=theme.SELECTION,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+                pady=5,
+                state=tk.NORMAL if self._enabled_controls else tk.DISABLED,
+            )
+            button.pack(side=tk.LEFT, padx=(0, 5))
+            self._tutor_buttons.append(button)
+
+        requests, _ = self._now_card(right, "ЗАПРОСЫ СУЩНОСТИ", theme.AMBER)
+        requests.pack(fill=tk.X, pady=(0, 8))
+        self._tutor_request_frame = tk.Frame(requests, bg=theme.SURFACE)
+        self._tutor_request_frame.pack(fill=tk.BOTH, expand=True)
+        help_card, _ = self._now_card(right, "КАК ЭТО РАБОТАЕТ", theme.GREEN)
+        help_card.pack(fill=tk.X)
+        tk.Label(
+            help_card,
+            text=(
+                "До вашего подтверждения источник не загружается. Прочитанный текст "
+                "остаётся неисполняемым карантином. Отзыв разрешения не удаляет "
+                "офлайн-уроки. «Подтверждено источником» относится только к одному "
+                "материалу, а не ко всей языковой норме."
+            ),
+            font=self._now_body_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=390,
+        ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"])
+        return page
 
     def _build_page_access(self, parent):
         """Доступы: фактические переключатели, счётчики и снимок состояния."""

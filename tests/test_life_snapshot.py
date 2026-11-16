@@ -266,3 +266,62 @@ def test_snapshot_exposes_pending_proposal_as_deep_read_only_copy():
     assert proposal["verification"]["passed"] is True
     assert agent._safe_config_overrides["FORGETTING_INTERVAL"] == 400
     assert set(agent.__dict__) == keys_before
+
+
+def test_tutor_snapshot_is_safe_deep_copy_without_expected_answer():
+    agent = _agent("TutorView")
+    url = "https://example.test/lesson"
+    request = agent.language_tutor.request_source(url, "Нужен урок", cycle=1)
+    agent.web_searcher = SimpleNamespace(is_enabled=False)
+    agent.language_tutor.lessons = [
+        {
+            "lesson_id": "lesson-safe",
+            "status": "candidate",
+            "exercises": [
+                {
+                    "exercise_id": "exercise-safe",
+                    "kind": "practice",
+                    "prompt": "ж?раф",
+                    "expected": "жираф",
+                    "status": "pending",
+                }
+            ],
+        }
+    ]
+    agent.language_tutor.pending_exercise = {
+        "lesson_id": "lesson-safe",
+        "exercise_id": "exercise-safe",
+    }
+    before = deepcopy(agent.language_tutor.to_dict())
+
+    snapshot = build_life_snapshot(agent)
+
+    tutor = snapshot["tutor"]
+    assert tutor["available"] is True
+    assert tutor["web_enabled"] is False
+    assert tutor["request_count"] == 1
+    assert tutor["source_requests"][0]["request_id"] == request["request_id"]
+    assert tutor["pending_exercise"] == {
+        "prompt": "ж?раф",
+        "kind": "practice",
+        "lesson_id": "lesson-safe",
+        "exercise_id": "exercise-safe",
+    }
+    assert "жираф" not in str(tutor)
+    tutor["source_requests"][0]["reason"] = "изменено в UI"
+    tutor["pending_exercise"]["prompt"] = "изменено в UI"
+    assert agent.language_tutor.to_dict() == before
+
+
+def test_missing_or_broken_tutor_does_not_break_snapshot():
+    agent = _agent("NoTutor")
+    agent.language_tutor = None
+    assert build_life_snapshot(agent)["tutor"]["available"] is False
+
+    def explode():
+        raise RuntimeError("наставник недоступен")
+
+    agent.language_tutor = SimpleNamespace(get_status=explode)
+    snapshot = build_life_snapshot(agent)
+    assert snapshot["tutor"]["available"] is True
+    assert snapshot["tutor"]["approved_sources"] == []

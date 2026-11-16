@@ -180,6 +180,38 @@ def _proposal_section(agent: Any) -> Dict[str, Any]:
     return section
 
 
+def _tutor_section(agent: Any) -> Dict[str, Any]:
+    """Безопасный DTO наставника: ни эталонов, ни сети, ни изменений Core."""
+    tutor = _own(agent, "language_tutor", None)
+    status = _status_of(tutor)
+    approved = _own(tutor, "approved_sources", [])
+    requests = _own(tutor, "source_requests", [])
+    approved = approved if isinstance(approved, list) else []
+    requests = requests if isinstance(requests, list) else []
+    current = status.get("pending_exercise")
+    current = current if isinstance(current, dict) else None
+    searcher = _own(agent, "web_searcher", None)
+    return {
+        "available": tutor is not None,
+        "web_enabled": bool(getattr(searcher, "is_enabled", False)),
+        "approved_sources": deepcopy(approved),
+        "source_requests": deepcopy(requests),
+        "approved_count": len(approved),
+        "request_count": len(requests),
+        "materials": int(status.get("materials", 0) or 0),
+        "lessons": int(status.get("lessons", 0) or 0),
+        "source_verified": int(status.get("source_verified", 0) or 0),
+        "pending_exercise": (
+            {
+                key: deepcopy(current.get(key))
+                for key in ("prompt", "kind", "lesson_id", "exercise_id")
+            }
+            if current is not None
+            else None
+        ),
+    }
+
+
 def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, Any]:
     """Собрать снимок жизни существа для интерфейса.
 
@@ -282,6 +314,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "proposals": _proposal_section(agent),
         "access": _access_section(agent),
         "effector": _effector_section(agent),
+        "tutor": _tutor_section(agent),
     }
 
 

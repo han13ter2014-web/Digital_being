@@ -444,6 +444,10 @@ def validate_checkpoint_state(state) -> None:
         state["naming_dialogue_phase"], str
     ):
         _fail("naming_dialogue_phase", "expected a string")
+    if state.get("language_tutor") is not None:
+        from src.core.language_tutor import validate_language_tutor
+
+        validate_language_tutor(state["language_tutor"])
     if state.get("user_model") is not None:
         user_model = _dict(state["user_model"], "user_model")
         promises = _dict(user_model.get("promises", {}), "user_model.promises")

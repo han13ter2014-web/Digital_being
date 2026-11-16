@@ -122,6 +122,54 @@ def controlled_dashboard():
             Events.USER_COMMAND,
             {"command": "access presence off"},
         ),
+        (
+            "/api/tutor",
+            {"action": "allow", "url": "  https://example.test/lesson  "},
+            Events.USER_COMMAND,
+            {"command": "tutor allow https://example.test/lesson"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "read", "url": "https://example.test/lesson"},
+            Events.USER_COMMAND,
+            {"command": "tutor read https://example.test/lesson"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "revoke", "url": "https://example.test/lesson"},
+            Events.USER_COMMAND,
+            {"command": "tutor revoke https://example.test/lesson"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "exercise"},
+            Events.USER_COMMAND,
+            {"command": "tutor exercise"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "solve"},
+            Events.USER_COMMAND,
+            {"command": "tutor solve"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "approve", "request_id": "request-0123456789abcdef"},
+            Events.USER_COMMAND,
+            {"command": "tutor approve request-0123456789abcdef"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "approve_read", "request_id": "request-0123456789abcdef"},
+            Events.USER_COMMAND,
+            {"command": "tutor approve_read request-0123456789abcdef"},
+        ),
+        (
+            "/api/tutor",
+            {"action": "reject", "request_id": "request-0123456789abcdef"},
+            Events.USER_COMMAND,
+            {"command": "tutor reject request-0123456789abcdef"},
+        ),
     ],
 )
 def test_web_publishes_exact_tk_event(
@@ -141,6 +189,11 @@ def test_web_publishes_exact_tk_event(
         ("/api/control/life/request", {"kind": "explode"}),
         ("/api/access", {"key": "core", "state": "on"}),
         ("/api/access", {"key": "network", "state": "perhaps"}),
+        ("/api/tutor", {"action": "execute"}),
+        ("/api/tutor", {"action": "allow", "url": ""}),
+        ("/api/tutor", {"action": "allow", "url": "https://x.test/" + "a" * 600}),
+        ("/api/tutor", {"action": "approve", "request_id": "x" * 41}),
+        ("/api/tutor", {"action": "reject"}),
     ],
 )
 def test_invalid_commands_never_reach_bus(controlled_dashboard, path, body):
@@ -163,6 +216,7 @@ def test_standalone_is_honest_and_never_accepts_mutations():
             ("/api/control/save", {}),
             ("/api/control/life/wake", {}),
             ("/api/access", {"key": "network", "state": "off"}),
+            ("/api/tutor", {"action": "exercise"}),
         ):
             status, response = _post(port, path, body)
             assert status == 503 and response["status"] == "unavailable"

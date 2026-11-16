@@ -2884,6 +2884,9 @@ class AgentRunner:
         # === Доступы: те же переключатели, что на экране «Доступы» ===
         if cmd.startswith("access "):
             return self._handle_access_command(cmd)
+        # === Наставник языка: разрешённые источники и офлайн-упражнения ===
+        if cmd == "tutor" or cmd.startswith("tutor "):
+            return self._handle_tutor_command(cmd_raw)
         # === Этап 2.5: /web — управление web-поиском ===
         if cmd in ("web on", "web_on"):
             ws = getattr(self.agent, "web_searcher", None)
@@ -2963,6 +2966,117 @@ class AgentRunner:
         if cmd == "delamain" or cmd.startswith("delamain "):
             return self._handle_delamain_command(cmd_raw)
         return f"❓ Неизвестная команда: /{cmd}. Введите /help."
+
+    def _handle_tutor_command(self, cmd_raw: str) -> str:
+        """Управлять наставником; чтение страницы возможно только через /web."""
+        tutor = getattr(self.agent, "language_tutor", None)
+        if tutor is None:
+            return "⚠️ Языковой наставник не подключён."
+
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else "status"
+        rest = parts[2].strip() if len(parts) > 2 else ""
+        usage = (
+            "Использование: /tutor [allow|read|revoke <HTTPS URL> | "
+            "approve|approve_read|reject <request_id> | exercise | solve]"
+        )
+        try:
+            if action == "status" and not rest:
+                status = tutor.get_status()
+                return (
+                    "📚 Языковой наставник:\n"
+                    f"   Разрешено источников: {status['approved_sources']}\n"
+                    f"   Запросов сущности: {status['source_requests']}\n"
+                    f"   Материалов в карантине: {status['materials']}\n"
+                    f"   Уроков: {status['lessons']}; подтверждено источником: "
+                    f"{status['source_verified']}\n"
+                    f"   Текущее упражнение: {'да' if status['pending'] else 'нет'}\n"
+                    "   Подтверждение относится к одному источнику, не ко всей норме."
+                )
+            if action in {"approve", "approve_read", "reject"}:
+                if not rest:
+                    return f"Использование: /tutor {action} <request_id>"
+                if action == "approve_read":
+                    searcher = getattr(self.agent, "web_searcher", None)
+                    if searcher is None:
+                        return "⚠️ Web-поиск не настроен; запрос остаётся ожидающим."
+                    if not searcher.is_enabled:
+                        return "⚠️ Интернет-поиск выключен; запрос не разрешён и не прочитан."
+                result = tutor.resolve_source_request(rest, approved=action != "reject")
+                if result["status"] == "not_found":
+                    return "📚 Запрос не найден или уже обработан."
+                if result["status"] == "limit_reached":
+                    return "⚠️ Достигнут предел источников; запрос остаётся ожидающим."
+                if action == "reject":
+                    return "📚 Запрос отклонён; источник не разрешён и не загружен."
+                if action == "approve":
+                    return "📚 Источник разрешён без загрузки."
+                rest = result["url"]
+                action = "read"
+            if action in {"allow", "read", "revoke"}:
+                if not rest:
+                    return f"Использование: /tutor {action} <HTTPS URL>"
+                if action == "allow":
+                    result = tutor.approve_source(rest)
+                    messages = {
+                        "approved": "Источник разрешён. Теперь: /tutor read <URL>.",
+                        "already_approved": "Источник уже разрешён.",
+                        "limit_reached": "Достигнут предел разрешённых источников.",
+                    }
+                    return f"📚 {messages[result['status']]}"
+                if action == "revoke":
+                    result = tutor.revoke_source(rest)
+                    if result["status"] == "not_approved":
+                        return "📚 Источник не был разрешён."
+                    return "📚 Разрешение отозвано; сохранённые уроки доступны офлайн."
+
+                searcher = getattr(self.agent, "web_searcher", None)
+                if searcher is None:
+                    return "⚠️ Web-поиск не настроен."
+                if not searcher.is_enabled:
+                    return "⚠️ Интернет-поиск выключен (/web on чтобы включить)."
+                result = tutor.ingest(
+                    rest,
+                    cycle=self.agent.cycle_count,
+                    fetcher=searcher.open_page,
+                )
+                status = result["status"]
+                if status == "quarantined_lesson":
+                    return (
+                        "📚 Урок сохранён в карантине; команды из текста не выполнялись.\n"
+                        "Самостоятельное задание: /tutor exercise"
+                    )
+                if status == "duplicate":
+                    return "📚 Этот материал уже сохранён; повтор не усиливает уверенность."
+                if status == "permission_denied":
+                    return "⚠️ Сначала разрешите источник: /tutor allow <URL>."
+                if status == "rejected":
+                    return f"📚 Материал отклонён: {result.get('error', 'ошибка формата')}."
+                if status == "limit_reached":
+                    return "⚠️ Достигнут предел сохранённых материалов или уроков."
+                return f"🌐 Не удалось прочитать источник ({status})."
+            if action == "exercise" and not rest:
+                result = tutor.begin_exercise()
+                if result["status"] == "no_exercise":
+                    return (
+                        "📚 Нет доступных заданий. Сначала прочитайте разрешённый урок."
+                    )
+                return (
+                    f"📚 Задание ({result['kind']}): {result['prompt']}\n"
+                    "Замени «?» по правилу. Эталон скрыт до /tutor solve."
+                )
+            if action == "solve" and not rest:
+                result = tutor.solve_pending(cycle=self.agent.cycle_count)
+                if result["status"] == "no_pending":
+                    return "📚 Нет текущего задания. Начните: /tutor exercise."
+                return (
+                    f"📚 Мой ответ: {result['answer']}; эталон: {result['expected']}.\n"
+                    f"Результат: {result['status']}; урок: {result['lesson_status']}."
+                )
+            return usage
+        except ValueError as exc:
+            return f"⚠️ {exc}"
 
     def _handle_access_command(self, cmd: str) -> str:
         """Включить или выключить разрешение из окна или командой."""
@@ -3694,6 +3808,10 @@ class AgentRunner:
             "  /web on    — включить интернет-поиск\n"
             "  /web off   — выключить интернет-поиск\n"
             "  /web <запрос> — поиск в Wikipedia\n"
+            "  /tutor     — статус языкового наставника\n"
+            "  /tutor allow|read|revoke <HTTPS URL> — источник урока\n"
+            "  /tutor exercise — задание без эталона\n"
+            "  /tutor solve  — самостоятельно решить и сверить\n"
             "  /access <network|delamain|effector> on|off — разрешение\n"
             "  /delamain  — статус локального слоя действий\n"
             "  /delamain on|off — включить/выключить Delamain-local\n"

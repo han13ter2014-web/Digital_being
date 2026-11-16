@@ -274,6 +274,12 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.dialogue_learning = DialogueLearning()
 
+    # Интернет-наставник: отдельные разрешения источников и карантин уроков.
+    # Не имеет доступа к Core и не изменяет общий лексикон или цели.
+    from src.core.language_tutor import LanguageTutor
+
+    self.language_tutor = LanguageTutor()
+
     # === «Эмоции-1»: эмоциональный контур ===
     # Страх/счастье/грусть/покой с реальными причинами и затуханием.
     # Окрашивает жизнь (тон, care, статус), но не выбирает целей и

@@ -118,6 +118,7 @@ def test_subsystem_specs_all_attached():
             "user_interaction",
             "long_term_memory",
             "user_model",
+            "language_tutor",
             "mental_models",
             "_open_questions_manager",
         ):

@@ -199,6 +199,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "dialogue_learning", None) is not None
             else None
         ),
+        # Разрешения источников, карантин и учебные попытки наставника.
+        "language_tutor": (
+            agent.language_tutor.to_dict()
+            if getattr(agent, "language_tutor", None) is not None
+            else None
+        ),
         # «Эмоции-1»: эмоциональный контур — уровни, причины, журнал.
         # Без секции после рестарта сущность забывала бы, что пережила.
         "emotional_state": (
@@ -371,6 +377,7 @@ _INPLACE_RESTORE_PATHS = (
     ("user_model",),
     ("user_interaction",),
     ("dialogue_learning",),
+    ("language_tutor",),
     ("emotional_state",),
     ("interoception",),
     ("interoception", "state"),
@@ -901,6 +908,14 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         and getattr(agent, "dialogue_learning", None) is not None
     ):
         agent.dialogue_learning.load_from(saved_learning)
+
+    saved_tutor = state.get("language_tutor")
+    if getattr(agent, "language_tutor", None) is not None:
+        from src.core.language_tutor import LanguageTutor
+
+        agent.language_tutor.load_from(
+            saved_tutor if isinstance(saved_tutor, dict) else LanguageTutor().to_dict()
+        )
 
     # «Эмоции-1»: пережитое переживает рестарт.
     saved_emotions = state.get("emotional_state")

@@ -76,6 +76,16 @@ def _find_label(widget, needle: str):
     return None
 
 
+def _find_button(widget, caption: str):
+    for child in widget.winfo_children():
+        if isinstance(child, tk.Button) and str(child.cget("text")) == caption:
+            return child
+        found = _find_button(child, caption)
+        if found is not None:
+            return found
+    return None
+
+
 def test_shell_builds_and_switches_pages(root):
     win = _window(root)
     assert set(win._pages) == {
@@ -83,6 +93,7 @@ def test_shell_builds_and_switches_pages(root):
         "graph",
         "diary",
         "activities",
+        "tutor",
         "access",
         "dialog",
     }
@@ -95,6 +106,68 @@ def test_shell_builds_and_switches_pages(root):
     assert win._text is not None
     assert win._input_var is not None
     assert win._status_text is not None
+
+
+def test_tutor_buttons_publish_commands_and_only_live_request_ids(root):
+    from src.core.event_bus import Events
+
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha")
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    request_id = "request-0123456789abcdef"
+    win._apply_life_data(
+        {
+            "tutor": {
+                "available": True,
+                "web_enabled": True,
+                "approved_count": 1,
+                "source_requests": [
+                    {
+                        "request_id": request_id,
+                        "url": "https://example.test/lesson",
+                        "reason": "Хочу проверить правило",
+                        "cycle": 3,
+                    }
+                ],
+            }
+        }
+    )
+    root.update()
+
+    win._tutor_url_var.set("https://example.test/manual")
+    _find_button(win._pages["tutor"], "Разрешить").invoke()
+    assert bus.published[-1] == (
+        Events.USER_COMMAND,
+        {"command": "tutor allow https://example.test/manual"},
+    )
+    _find_button(win._tutor_request_frame, "Разрешить и прочитать").invoke()
+    assert bus.published[-1][1] == {"command": f"tutor approve_read {request_id}"}
+    _find_button(win._tutor_request_frame, "Только разрешить").invoke()
+    assert bus.published[-1][1] == {"command": f"tutor approve {request_id}"}
+    _find_button(win._tutor_request_frame, "Отклонить").invoke()
+    assert bus.published[-1][1] == {"command": f"tutor reject {request_id}"}
+
+    before = len(bus.published)
+    assert win._send_tutor_action("approve", "request-unknown") is False
+    assert len(bus.published) == before
+    assert "жираф" not in str(win._tutor_exercise.cget("text"))
+
+
+def test_tutor_controls_respect_read_only_mode(root):
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha", enabled_controls=False)
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    win._tutor_url_var.set("https://example.test/manual")
+
+    assert str(_find_button(win._pages["tutor"], "Разрешить").cget("state")) == (
+        tk.DISABLED
+    )
+    assert win._send_tutor_action("allow") is False
+    assert bus.published == []
 
 
 def test_language_switch_retranslates_static_and_empty_states(root):
