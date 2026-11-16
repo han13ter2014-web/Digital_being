@@ -300,6 +300,10 @@ def _act_listen_music_impl(
             expected_revision=expected_revision,
             expected_sha256=expected_sha256,
         )
+        previous = self.music_memory.get_work(observation["work_id"])
+        from src.cognition.music_affect import select_music_affect
+
+        affect = select_music_affect(observation, previous, self.cycle_count)
         self.music_memory.record_observation(observation, self.cycle_count)
     except Exception as exc:
         get_logger().log(f"[MUSIC] прослушивание отменено: {exc}")
@@ -308,6 +312,18 @@ def _act_listen_music_impl(
             "target": theme,
             "text": f"Ответ: прослушивание не состоялось — {exc}",
         }
+
+    episode = None
+    emotional_state = getattr(self, "emotional_state", None)
+    if affect is not None and emotional_state is not None:
+        episode = emotional_state.handle_event(
+            affect["event"],
+            cycle=self.cycle_count,
+            cause=affect["cause"],
+            scale=affect["scale"],
+        )
+        if episode is not None:
+            self.music_memory.record_affect(observation, episode)
 
     marker = getattr(self, "_unheard_music_revision", None)
     if isinstance(marker, dict) and (
@@ -324,6 +340,7 @@ def _act_listen_music_impl(
         "listened": True,
         "target": observation["theme"],
         "observation": observation,
+        "affect": episode,
         "text": (
             f"Ответ: прослушала свою мелодию «{observation['theme']}», "
             f"редакция {observation['revision']}"

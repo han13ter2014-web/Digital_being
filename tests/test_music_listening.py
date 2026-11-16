@@ -1,4 +1,4 @@
-"""Этап 3: прослушивание собственной мелодии без музыкального аффекта."""
+"""Прослушивание собственной мелодии: жизненный цикл и нейтральные повторы."""
 
 from copy import deepcopy
 from unittest.mock import patch
@@ -68,13 +68,16 @@ def test_compose_marks_unheard_revision_but_does_not_force_listening(
     assert agent.music_memory.get_work(work["id"]) is None
 
 
-def test_successful_listen_records_memory_without_emotion_knowledge_or_goal(
+def test_neutral_repeat_adds_no_emotion_knowledge_goal_or_need_reward(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
     agent = DigitalBeing(name="ListenNeutral")
     work = _compose(agent)
+    agent.act("listen_music", intention=_selection(listening_candidate(agent)))
+    agent.cycle_count += 1
     candidate = listening_candidate(agent)
+    before_work = agent.music_memory.get_work(work["id"])
     emotions = deepcopy(agent.emotional_state.to_dict())
     knowledge = deepcopy(agent.knowledge_base)
     models = deepcopy(agent.mental_models.to_storage_dict())
@@ -87,10 +90,10 @@ def test_successful_listen_records_memory_without_emotion_knowledge_or_goal(
 
     assert "прослушала свою мелодию" in result
     remembered = agent.music_memory.get_work(work["id"])
-    assert remembered["listen_count"] == 1
-    assert remembered["familiarity"] > 0.0
-    assert remembered["personal_significance"] == 0.0
-    assert remembered["associations"] == []
+    assert remembered["listen_count"] == 2
+    assert remembered["familiarity"] > before_work["familiarity"]
+    assert remembered["personal_significance"] == before_work["personal_significance"]
+    assert remembered["associations"] == before_work["associations"]
     assert agent._unheard_music_revision is None
     assert agent._last_action_outcome.had_effect
     assert agent.emotional_state.to_dict() == emotions
@@ -180,6 +183,10 @@ def test_restart_does_not_make_heard_revision_new_and_repeat_remains_possible(
 
     assert candidate["params"]["unheard"] is False
     assert restored.music_memory.has_listened(work["id"], 1, work["sha256"])
+    initial_significance = restored.music_memory.get_work(work["id"])[
+        "personal_significance"
+    ]
+    assert initial_significance > 0.0
     immediate_strength = candidate["strength"]
     restored.cycle_count += 12
     later = listening_candidate(restored)
@@ -188,7 +195,7 @@ def test_restart_does_not_make_heard_revision_new_and_repeat_remains_possible(
     remembered = restored.music_memory.get_work(work["id"])
     assert remembered["listen_count"] == 2
     assert remembered["first_listened_cycle"] == 0
-    assert remembered["personal_significance"] == 0.0
+    assert remembered["personal_significance"] == initial_significance
 
 
 def test_listening_adds_no_direct_creative_strength_bonus(tmp_path, monkeypatch):
