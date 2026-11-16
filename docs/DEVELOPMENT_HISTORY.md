@@ -73,13 +73,14 @@ Ctrl+C проверен для source console на текущей Windows с gra
 P1 «Эхо эмоций» и P2 «Обучаемый диалог» завершены коммитом `9a85097`: локальный
 regression — **2876 passed, 2 skipped**, GitHub Actions № 142 — **8/8 success**.
 
-P3-A «Арбитр выбора» реализован в локальном рабочем дереве: Decision Episode
+P3-A «Арбитр выбора» реализован коммитом `0a4fa0a`: Decision Episode
 отделяет ожидание, исполнение и наблюдаемое удовлетворение намерения, хранится
 в intention_history и восстанавливается в JSON/SQLite. Политика выбора не
 изменялась. Профильный regression — **324 passed**, полный — **2904 passed,
 2 skipped за 328,96 с**. Три пары изолированных прогонов по 1000 циклов дали
-одинаковый выбор и корректные restart. Commit/push/CI не выполнялись; P3-B
-остаётся отдельной работой. Отчёт: `tmp/choice_arbiter_inventory/report.md`.
+одинаковый выбор и корректные restart. Коммит отправлен в `origin/main`; GitHub
+Actions run `43870978304`, № 145 — **success, 8/8 jobs**. P3-B остаётся отдельной
+работой. Отчёт: `tmp/choice_arbiter_inventory/report.md`.
 
 `advisor` InternalSimulator ещё не включён. Сознание, субъективность и человеческая
 свобода воли не обещаются как доказанный факт.
