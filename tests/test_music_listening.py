@@ -188,9 +188,11 @@ def test_restart_does_not_make_heard_revision_new_and_repeat_remains_possible(
     ]
     assert initial_significance > 0.0
     immediate_strength = candidate["strength"]
+    assert immediate_strength < 0.30
     restored.cycle_count += 12
     later = listening_candidate(restored)
     assert later["strength"] > immediate_strength
+    assert later["strength"] > 0.30
     restored.act("listen_music", intention=_selection(later))
     remembered = restored.music_memory.get_work(work["id"])
     assert remembered["listen_count"] == 2

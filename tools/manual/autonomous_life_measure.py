@@ -19,7 +19,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
-async def measure(cycles, seed):
+async def measure(cycles, seed, initial_music=False):
     import numpy as np
     from src.app.paths import setup_environment
     from src.app.bootstrap import create_agent
@@ -30,6 +30,9 @@ async def measure(cycles, seed):
     np.random.seed(seed)
     env = setup_environment(chdir=False)
     agent, _ = create_agent(env, "AutonomousMeasure", new=True)
+    if initial_music:
+        # Общая реальная отправная точка обоих контуров, не подмена выбора.
+        agent.act("compose_music")
     actions, sources, offers, selected = Counter(), Counter(), Counter(), Counter()
     rivals, matches = Counter(), Counter()
     traces = []
@@ -61,6 +64,10 @@ async def measure(cycles, seed):
         Counter(),
         Counter(),
     )
+    executed_actions, music_affects = Counter(), Counter()
+    music_listens = music_repeat_listens = music_neutral_listens = 0
+    music_failed_listens = 0
+    listen_streak = music_streak = max_listen_streak = max_music_streak = 0
 
     def attach(current):
         original = current.autonomous_tick
@@ -68,9 +75,54 @@ async def measure(cycles, seed):
         def observe():
             nonlocal play_turns, max_history, max_waiting, max_active_waiting
             nonlocal arbitration_rounds, exact_tie_rounds
+            nonlocal music_listens, music_repeat_listens, music_neutral_listens
+            nonlocal music_failed_listens, listen_streak, music_streak
+            nonlocal max_listen_streak, max_music_streak
+            heard_before = {
+                (work["work_id"], revision["revision"], revision["sha256"])
+                for work in current.music_memory.to_checkpoint()["works"].values()
+                for revision in work["recent_revisions"]
+            }
+            episodes = current.emotional_state.episodes
+            episode_before = episodes[-1] if episodes else None
             report = original()
-            if (report.get("autonomous_action") or {}).get("action") == "play":
+            executed_action = (report.get("autonomous_action") or {}).get(
+                "action", "none"
+            )
+            executed_actions[executed_action] += 1
+            if executed_action == "play":
                 play_turns += 1
+            listen_streak = (
+                listen_streak + 1 if executed_action == "listen_music" else 0
+            )
+            music_streak = (
+                music_streak + 1
+                if executed_action in {"compose_music", "listen_music"}
+                else 0
+            )
+            max_listen_streak = max(max_listen_streak, listen_streak)
+            max_music_streak = max(max_music_streak, music_streak)
+            if executed_action == "listen_music":
+                outcome = getattr(current, "_last_action_outcome", None)
+                if outcome is not None and outcome.had_effect:
+                    music_listens += 1
+                    params = (report.get("executed_intention") or {}).get(
+                        "params"
+                    ) or {}
+                    provenance = (
+                        params.get("work_id"),
+                        params.get("revision"),
+                        params.get("sha256"),
+                    )
+                    if provenance in heard_before:
+                        music_repeat_listens += 1
+                    episodes = current.emotional_state.episodes
+                    if episodes and episodes[-1] is not episode_before:
+                        music_affects[episodes[-1]["event"]] += 1
+                    else:
+                        music_neutral_listens += 1
+                else:
+                    music_failed_listens += 1
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
@@ -288,6 +340,8 @@ async def measure(cycles, seed):
                 from copy import deepcopy
 
                 game_before = deepcopy(getattr(agent, "_local_play", None))
+                music_memory_before = agent.music_memory.to_checkpoint()
+                music_catalog_before = deepcopy(getattr(agent, "_music_catalog", {}))
                 await runner.stop()
                 from src.core.subsystem_base import PluginRegistry
 
@@ -301,6 +355,10 @@ async def measure(cycles, seed):
                     == agent.interoception.state.fatigue,
                     "cooldown_identical": last_check
                     == getattr(agent, "_last_experiment_cycle", None),
+                    "music_memory_identical": music_memory_before
+                    == agent.music_memory.to_checkpoint(),
+                    "music_catalog_identical": music_catalog_before
+                    == getattr(agent, "_music_catalog", {}),
                 }
                 restart["intention_history_equal"] = history_before == getattr(
                     agent, "_intention_history", []
@@ -319,9 +377,25 @@ async def measure(cycles, seed):
         }
         for key, claim in agent.mental_models.claims.items()
     }
+    music_works = list(agent.music_memory.to_checkpoint()["works"].values())
     return {
         "seed": seed,
         "cycles": cycles,
+        "executed_actions": dict(executed_actions),
+        "music_listens": music_listens,
+        "music_repeat_listens": music_repeat_listens,
+        "music_neutral_listens": music_neutral_listens,
+        "music_failed_listens": music_failed_listens,
+        "music_affect_episodes": dict(music_affects),
+        "music_affect_total": sum(music_affects.values()),
+        "music_listen_share": music_listens / cycles,
+        "max_consecutive_listens": max_listen_streak,
+        "max_consecutive_music_actions": max_music_streak,
+        "music_works_heard": len(music_works),
+        "music_associations": sum(len(work["associations"]) for work in music_works),
+        "music_significance_max": max(
+            (work["personal_significance"] for work in music_works), default=0.0
+        ),
         "arbitrated_actions": dict(actions),
         "action_offers": dict(action_offers),
         "arbitration_rounds": arbitration_rounds,
@@ -398,6 +472,8 @@ if __name__ == "__main__":
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--no-method-feedback", action="store_true")
     parser.add_argument("--no-continuation", action="store_true")
+    parser.add_argument("--no-music-perception", action="store_true")
+    parser.add_argument("--with-initial-music", action="store_true")
     args = parser.parse_args()
     if args.cycles < 2:
         parser.error("Нужно минимум два цикла")
@@ -425,9 +501,20 @@ if __name__ == "__main__":
                         return_value=None,
                     )
                 )
-            result = asyncio.run(measure(args.cycles, args.seed))
+            if args.no_music_perception:
+                stack.enter_context(
+                    patch(
+                        "src.cognition.music_attention.listening_candidate",
+                        return_value=None,
+                    )
+                )
+            result = asyncio.run(
+                measure(args.cycles, args.seed, args.with_initial_music)
+            )
         result["continuation_enabled"] = not args.no_continuation
         result["method_feedback_enabled"] = not args.no_method_feedback
+        result["music_perception_enabled"] = not args.no_music_perception
+        result["initial_music"] = args.with_initial_music
         args.report.write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )

@@ -61,7 +61,7 @@ def listening_candidate(agent):
             significance = float(remembered["personal_significance"])
             associations = len(remembered["associations"])
             strength = (
-                0.06
+                0.062
                 + min(0.22, elapsed * 0.02)
                 + significance * 0.12
                 + min(4, associations) * 0.01
