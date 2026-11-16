@@ -1,7 +1,7 @@
 """Варианты творческого занятия для существующего арбитра."""
 
 from src.cognition.creative_catalog import catalog_for
-from src.cognition.creative_draft import LIMIT, MAX_DRAFTS, draft_available
+from src.cognition.creative_draft import MAX_DRAFTS, draft_available
 
 
 def creative_choices(agent, candidate):
@@ -14,31 +14,17 @@ def creative_choices(agent, candidate):
     for state in catalog.values():
         if state.get("status", "active") != "active":
             continue
-        if state["revision"] < LIMIT:
-            choices.append(
-                {
-                    **candidate,
-                    "params": {
-                        **params,
-                        "draft_mode": "continue",
-                        "draft_id": state["id"],
-                        "reason": "Продолжить доступный собственный черновик",
-                    },
-                }
-            )
-        elif state == getattr(agent, "_creative_draft", None):
-            choices.append(
-                {
-                    **candidate,
-                    "strength": strength * 0.8,
-                    "params": {
-                        **params,
-                        "draft_mode": "leave",
-                        "draft_id": state["id"],
-                        "reason": "Достигнут лимит редакций; оставить текст как есть",
-                    },
-                }
-            )
+        choices.append(
+            {
+                **candidate,
+                "params": {
+                    **params,
+                    "draft_mode": "continue",
+                    "draft_id": state["id"],
+                    "reason": "Продолжить доступный собственный черновик",
+                },
+            }
+        )
     if len(catalog) < MAX_DRAFTS and draft_available(None):
         choices.append(
             {

@@ -2,12 +2,12 @@
 
 from copy import deepcopy
 
+from src.cognition.creative_context import build_creative_context
 from src.cognition.creative_draft import (
     MAX_DRAFTS,
     draft_step,
     leave_draft,
     validate_draft,
-    LIMIT,
 )
 
 
@@ -66,14 +66,17 @@ def perform_creative(agent, mode="continue", identifier=None, reason=""):
     else:
         if mode == "new" and len(catalog) >= MAX_DRAFTS:
             raise ValueError("Каталог работ заполнен")
-        if identifier is not None and (
-            selected.get("status") == "left" or selected["revision"] >= LIMIT
-        ):
-            raise ValueError("Выбранная работа оставлена или исчерпала лимит редакций")
+        if identifier is not None and selected.get("status") == "left":
+            raise ValueError("Выбранная работа оставлена")
         from src.core.activity_workspace import workspace_for
 
+        context = build_creative_context(
+            agent, theme=selected["theme"] if mode != "new" and selected else None
+        )
         updated = draft_step(
-            None if mode == "new" else selected, workspace=workspace_for(agent)
+            None if mode == "new" else selected,
+            workspace=workspace_for(agent),
+            context=context,
         )
     catalog[updated["id"]] = deepcopy(updated)
     validate_catalog(catalog)

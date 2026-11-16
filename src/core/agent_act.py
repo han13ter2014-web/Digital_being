@@ -592,6 +592,17 @@ def act_impl(
                 f"[EXPECTATION] {action_type}: delta={observation['delta']:.3f}, "
                 f"matched={observation['prediction_matched']}"
             )
+            if (
+                observation.get("prediction_matched") is False
+                or observation.get("fatigue_prediction_matched") is False
+            ):
+                emotional_state = getattr(self, "emotional_state", None)
+                if emotional_state is not None:
+                    emotional_state.handle_event(
+                        "unexpected_outcome",
+                        cycle=self.cycle_count,
+                        cause=action_type,
+                    )
 
     # === Мотивация: результат действия (P1.2 Valence Feedback) ===
     if hasattr(self, "motivation_system"):

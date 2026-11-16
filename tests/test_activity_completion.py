@@ -61,5 +61,6 @@ def test_real_selected_draft_revision_completes_activity_not_knowledge():
         agent.autonomous_tick()
     assert goal["status"] == "completed"
     assert goal["activity"]["steps"] == 1
+    assert agent._creative_draft["status"] == "active"
     assert agent.success_streak == streak
     assert agent.mental_models.to_storage_dict() == knowledge

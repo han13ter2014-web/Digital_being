@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 from src.core.agent import DigitalBeing
 from src.cognition.creative_choices import creative_choices
-from src.cognition.creative_draft import LIMIT
 
 
 def base():
@@ -26,9 +25,9 @@ def test_choices_depend_on_work_state_without_creating_files():
     choices = creative_choices(agent, base())
     assert {c["params"]["draft_mode"] for c in choices} == {"continue", "new"}
     assert choices[0]["params"]["draft_id"] == agent._creative_draft["id"]
-    agent._creative_draft["revision"] = LIMIT
+    agent._creative_draft["revision"] = 8
     choices = creative_choices(agent, base())
-    assert {c["params"]["draft_mode"] for c in choices} == {"leave", "new"}
+    assert {c["params"]["draft_mode"] for c in choices} == {"continue", "new"}
 
 
 def test_arbiter_selected_new_work_uses_expanded_params():

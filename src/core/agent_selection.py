@@ -212,7 +212,7 @@ def _is_candidate_available_impl(self, candidate) -> bool:
         target = intention_target(candidate)
         if self._normalize_action(candidate.get("action")) == "create_draft":
             from src.cognition.creative_catalog import creative_request, catalog_for
-            from src.cognition.creative_draft import LIMIT, MAX_DRAFTS, draft_available
+            from src.cognition.creative_draft import MAX_DRAFTS, draft_available
 
             mode, identifier, _ = creative_request(candidate)
             catalog = catalog_for(self)
@@ -237,11 +237,9 @@ def _is_candidate_available_impl(self, candidate) -> bool:
                 )
             if identifier is not None and mode == "continue":
                 selected = catalog[identifier]
-                return (
-                    selected.get("status", "active") == "active"
-                    and selected["revision"] < LIMIT
-                    and self._is_action_affordable("create_draft")
-                )
+                return selected.get(
+                    "status", "active"
+                ) == "active" and self._is_action_affordable("create_draft")
     except ValueError:
         return False
     action = self._normalize_action(candidate.get("action"))

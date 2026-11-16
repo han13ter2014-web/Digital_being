@@ -775,11 +775,15 @@ class UnifiedMotivationSystem:
     def on_action_result(self, action_type: str, success: bool, valence: float):
         action_keys = {action_type}
         action_keys.update(ACTION_ALIASES.get(action_type, []))
+        satisfied_needs = []
         for need in self.needs.values():
             if any(k in need.related_actions for k in action_keys):
                 if success and valence > 0:
                     before = need.current_level
+                    was_pressing = need.is_pressing()
                     need.satisfy(valence * 0.5)
+                    if was_pressing and not need.is_pressing():
+                        satisfied_needs.append(need.name)
                     logger.log(
                         f"[MOTIVATION] Need '{need.label}' satisfied by "
                         f"{action_type} ({before:.2f} → {need.current_level:.2f})"
@@ -795,6 +799,14 @@ class UnifiedMotivationSystem:
                     logger.log(
                         f"[MOTIVATION] Need '{need.label}' frustrated by {action_type} ({valence:.2f})"
                     )
+        if satisfied_needs:
+            emotional_state = getattr(self.agent, "emotional_state", None)
+            if emotional_state is not None:
+                emotional_state.handle_event(
+                    "need_satisfied",
+                    cycle=self.agent.cycle_count,
+                    cause=", ".join(satisfied_needs),
+                )
         self._needs_state_cache = {
             name: need.current_level for name, need in self.needs.items()
         }
