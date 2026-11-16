@@ -170,6 +170,12 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     if own_goal is not None:
         candidates.append(own_goal)
 
+    from src.cognition.music_attention import listening_candidate
+
+    music_listening = listening_candidate(self)
+    if music_listening is not None:
+        candidates.append(music_listening)
+
     pending_stimulus = getattr(self, "_attention_stimulus", None)
     if pending_stimulus is not None:
         candidates.append(
@@ -626,6 +632,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 "ask_user",
                 "web_search",
                 "create_draft",
+                "listen_music",
             } and selected_intention.get("params"):
                 action_result = self.act(chosen_action, intention=selected_intention)
             else:

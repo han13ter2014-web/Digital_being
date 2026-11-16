@@ -217,6 +217,94 @@ def music_notation(state):
     return " | ".join(words)
 
 
+def _validate_observation_score(bars):
+    """Полная нотная структура, пригодная для честного наблюдения."""
+    if not isinstance(bars, list) or not bars:
+        raise ValueError("local_music.observation: пустая нотная структура")
+    for bar in bars:
+        if not isinstance(bar, list) or not bar:
+            raise ValueError("local_music.observation: пустой или невалидный такт")
+        for event in bar:
+            if not isinstance(event, (tuple, list)) or len(event) != 2:
+                raise ValueError("local_music.observation: невалидное событие")
+            midi, duration = event
+            if midi is not None and (type(midi) is not int or not 0 <= midi <= 127):
+                raise ValueError("local_music.observation: невалидная MIDI-нота")
+            if (
+                isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or not math.isfinite(duration)
+                or duration <= 0.0
+            ):
+                raise ValueError("local_music.observation: невалидная длительность")
+    return bars
+
+
+def observe_music(
+    state, *, workspace=None, expected_revision=None, expected_sha256=None
+):
+    """Наблюдать реальную редакцию собственной мелодии без изменения файла.
+
+    Это восприятие музыкальной структуры, а не аффект и не человеческий слух.
+    Проверка ожидаемой версии не даёт устаревшему кандидату молча перенести
+    переживание на другую редакцию. SHA-256 фактического WAV должен совпасть
+    с записью работы: чужая или повреждённая версия не становится опытом.
+    """
+    validate_music(state)
+    if expected_revision is not None and state["revision"] != expected_revision:
+        raise ValueError("Прослушивание отменено: редакция мелодии изменилась")
+    if expected_sha256 is not None and state["sha256"] != expected_sha256:
+        raise ValueError("Прослушивание отменено: ожидалась другая версия мелодии")
+
+    workspace = workspace or ActivityWorkspace()
+    target = workspace.sandbox.resolve(f"{state['id']}.wav")
+    content = target.read_bytes()
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if actual_sha256 != state["sha256"]:
+        raise ValueError("Мелодия изменена извне; прослушивание отменено")
+
+    bars = _validate_observation_score(
+        _compose_score(state["theme"], state["mood"], state["revision"])
+    )
+    events = [event for bar in bars for event in bar]
+    notes = [midi for midi, _duration in events if midi is not None]
+    note_count = len(notes)
+    rest_count = len(events) - note_count
+    event_count = len(events)
+    repeated_notes = sum(
+        1 for previous, current in zip(notes, notes[1:]) if previous == current
+    )
+    changed_phrases = sum(
+        1 for previous, current in zip(bars, bars[1:]) if previous != current
+    )
+    mode, _tonic, tempo = MOODS[state["mood"]]
+
+    return {
+        "schema_version": 1,
+        "work_id": state["id"],
+        "theme": state["theme"],
+        "revision": state["revision"],
+        "sha256": actual_sha256,
+        "features": {
+            "mode": mode,
+            "tempo_bpm": tempo,
+            "note_count": note_count,
+            "rest_count": rest_count,
+            "note_density": note_count / event_count,
+            "pause_ratio": rest_count / event_count,
+            "pitch_low": min(notes) if notes else None,
+            "pitch_high": max(notes) if notes else None,
+            "pitch_span": max(notes) - min(notes) if notes else None,
+            "repeated_note_ratio": (
+                repeated_notes / (note_count - 1) if note_count > 1 else 0.0
+            ),
+            "phrase_change_ratio": (
+                changed_phrases / (len(bars) - 1) if len(bars) > 1 else 0.0
+            ),
+        },
+    }
+
+
 def music_step(state=None, *, mood="calm", theme=None, workspace=None):
     """Одна редакция мелодии: новая работа или новая фраза поверх.
 

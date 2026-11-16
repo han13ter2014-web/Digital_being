@@ -173,6 +173,13 @@ def _is_action_available_impl(self, action: Optional[str]) -> bool:
         return self._is_action_affordable(normalized) and music_available(
             getattr(self, "_music_work", None)
         )
+    if normalized == "listen_music":
+        from src.cognition.music_attention import listening_candidate
+
+        return (
+            self._is_action_affordable(normalized)
+            and listening_candidate(self) is not None
+        )
     if normalized == "ask_user":
         return self._can_ask_now(self.cycle_count) and self._has_question_target()
     if normalized == "web_search":
@@ -208,6 +215,16 @@ def _is_action_available_impl(self, action: Optional[str]) -> bool:
 def _is_candidate_available_impl(self, candidate) -> bool:
     from src.cognition.intention_payload import intention_target
 
+    if self._normalize_action(candidate.get("action")) == "listen_music":
+        params = candidate.get("params") or {}
+        work = getattr(self, "_music_catalog", {}).get(params.get("work_id"))
+        return bool(
+            self._is_action_affordable("listen_music")
+            and isinstance(work, dict)
+            and work.get("id") == params.get("work_id")
+            and work.get("revision") == params.get("revision")
+            and work.get("sha256") == params.get("sha256")
+        )
     try:
         target = intention_target(candidate)
         if self._normalize_action(candidate.get("action")) == "create_draft":

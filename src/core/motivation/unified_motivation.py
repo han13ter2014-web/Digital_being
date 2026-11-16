@@ -826,6 +826,8 @@ class UnifiedMotivationSystem:
         """
         if context is None:
             context = {}
+        if action_type == "listen_music":
+            return 0.0
 
         # Базовая валентность по типу действия. Здесь должны быть ОБА
         # имени: мотивация предлагает действия как «ask_question», а
@@ -905,6 +907,9 @@ class UnifiedMotivationSystem:
         """
         if context is None:
             context = {}
+        if action_type == "listen_music":
+            # Наблюдение мелодии нейтрально до отдельно обоснованного аффекта.
+            return 0.0
 
         # Start with predicted valence as baseline
         predicted = self.predict_valence(action_type, context)

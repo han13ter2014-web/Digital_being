@@ -190,6 +190,7 @@ from src.core.agent_creative import (
     _act_draw_impl,
     list_art_works_impl,
     _act_compose_music_impl,
+    _act_listen_music_impl,
     list_music_works_impl,
     _reward_creative_success_impl,
     _record_creative_failure_impl,
@@ -269,6 +270,7 @@ class DigitalBeing:
         "draw": "draw",
         # «Музыка-1»: сочинение мелодии — отпечаток состояния в звуке
         "compose_music": "compose_music",
+        "listen_music": "listen_music",
         "explore": "explore",
         "exploration": "explore",
         "novelty_seeking": "explore",
@@ -882,6 +884,16 @@ class DigitalBeing:
 
     def _act_compose_music(self) -> Dict:
         return _act_compose_music_impl(self)
+
+    def _act_listen_music(
+        self, work_id=None, expected_revision=None, expected_sha256=None
+    ) -> Dict:
+        return _act_listen_music_impl(
+            self,
+            work_id=work_id,
+            expected_revision=expected_revision,
+            expected_sha256=expected_sha256,
+        )
 
     def list_music_works(self) -> List[Dict]:
         return list_music_works_impl(self)

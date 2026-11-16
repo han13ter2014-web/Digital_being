@@ -48,21 +48,112 @@ async def measure(cycles, seed):
     action_offers = Counter()
     satisfactions, resolutions, intention_statuses = Counter(), Counter(), Counter()
     empty_productive = Counter()
-    max_history = max_waiting = 0
+    max_history = max_waiting = max_active_waiting = 0
+    arbitration_rounds = exact_tie_rounds = 0
+    tie_winners, tie_participants = Counter(), Counter()
+    loss_reasons, loss_actions = Counter(), Counter()
+    intention_offers, intention_choices = Counter(), Counter()
+    goal_offers = Counter()
+    candidate_score_stats = {}
+    candidate_losses_to = {}
+    waiting_states, waiting_actions, waiting_goal_links = (
+        Counter(),
+        Counter(),
+        Counter(),
+    )
 
     def attach(current):
         original = current.autonomous_tick
 
         def observe():
-            nonlocal play_turns, max_history, max_waiting
+            nonlocal play_turns, max_history, max_waiting, max_active_waiting
+            nonlocal arbitration_rounds, exact_tie_rounds
             report = original()
             if (report.get("autonomous_action") or {}).get("action") == "play":
                 play_turns += 1
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
-            for evaluation in arbiter.get("all_evaluations") or []:
-                action_offers[evaluation.get("action", "none")] += 1
+
+            # LoopCloser может заменить финальное действие. Конкуренцию score
+            # измеряем на исходном решении арбитра, не на последующем escape.
+            arbitration = report.get("initial_arbitration") or arbiter
+            diagnostics = arbitration.get("choice_diagnostics") or {}
+            evaluations = arbitration.get("all_evaluations") or []
+            winner_index = diagnostics.get("winner_input_index")
+            tied_indices = set(diagnostics.get("tied_input_indices") or [])
+            if diagnostics:
+                arbitration_rounds += 1
+                if diagnostics.get("exact_tie"):
+                    exact_tie_rounds += 1
+                    tie_winners[
+                        f"{arbitration.get('source')}:{arbitration.get('action')}"
+                    ] += 1
+            for evaluation in evaluations:
+                action = evaluation.get("action", "none")
+                action_offers[action] += 1
+                stats = candidate_score_stats.setdefault(
+                    action,
+                    {
+                        "offers": 0,
+                        "strength_total": 0.0,
+                        "arbiter_score_total": 0.0,
+                        "combined_score_total": 0.0,
+                        "combined_score_min": None,
+                        "combined_score_max": None,
+                    },
+                )
+                stats["offers"] += 1
+                for field in ("strength", "arbiter_score", "combined_score"):
+                    value = evaluation.get(field)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        stats[f"{field}_total"] += float(value)
+                combined = evaluation.get("combined_score")
+                if isinstance(combined, (int, float)) and not isinstance(
+                    combined, bool
+                ):
+                    stats["combined_score_min"] = (
+                        combined
+                        if stats["combined_score_min"] is None
+                        else min(stats["combined_score_min"], combined)
+                    )
+                    stats["combined_score_max"] = (
+                        combined
+                        if stats["combined_score_max"] is None
+                        else max(stats["combined_score_max"], combined)
+                    )
+
+                contexts = []
+                if evaluation.get("target") is not None:
+                    contexts.append("with_target")
+                if evaluation.get("goal_id") is not None:
+                    contexts.append("with_goal_id")
+                    goal_offers[str(evaluation["goal_id"])] += 1
+                if evaluation.get("continuation_of") is not None:
+                    contexts.append("continuation")
+                for context in contexts:
+                    intention_offers[context] += 1
+                    if evaluation.get("input_index") == winner_index:
+                        intention_choices[context] += 1
+
+                if (
+                    diagnostics.get("exact_tie")
+                    and evaluation.get("input_index") in tied_indices
+                ):
+                    tie_participants[f"{evaluation.get('source')}:{action}"] += 1
+                if evaluation.get("input_index") == winner_index:
+                    continue
+                if evaluation.get("verdict") == "stop":
+                    reason = "stopped"
+                elif evaluation.get("input_index") in tied_indices:
+                    reason = "exact_tie_input_order"
+                else:
+                    reason = "lower_score"
+                loss_reasons[reason] += 1
+                loss_actions[f"{action}:{reason}"] += 1
+                winner = f"{arbitration.get('source')}:{arbitration.get('action')}"
+                candidate_losses_to.setdefault(action, Counter())[winner] += 1
+
             selected_entry = next(
                 (
                     item
@@ -84,10 +175,24 @@ async def measure(cycles, seed):
                     and not outcome.get("had_effect")
                 ):
                     empty_productive[action] += 1
-            max_history = max(max_history, len(getattr(current, "_intention_history", [])))
-            max_waiting = max(
-                max_waiting, len(getattr(current, "_waiting_intentions", {}))
+            max_history = max(
+                max_history, len(getattr(current, "_intention_history", []))
             )
+            waiting = getattr(current, "_waiting_intentions", {})
+            max_waiting = max(max_waiting, len(waiting))
+            active_waiting = 0
+            for waiting_entry in waiting.values():
+                resolution = waiting_entry.get("resolution") or {}
+                state = resolution.get("kind") or (
+                    waiting_entry.get("evidence_goal") or {}
+                ).get("status", "unknown")
+                waiting_states[state] += 1
+                waiting_actions[waiting_entry.get("action", "unknown")] += 1
+                linked = waiting_entry.get("goal_id") is not None
+                waiting_goal_links["with_goal_id" if linked else "without_goal_id"] += 1
+                if not resolution:
+                    active_waiting += 1
+            max_active_waiting = max(max_active_waiting, active_waiting)
             continuation = report.get("continuation_proposal")
             if continuation:
                 target = continuation["params"]["topic"]
@@ -219,12 +324,39 @@ async def measure(cycles, seed):
         "cycles": cycles,
         "arbitrated_actions": dict(actions),
         "action_offers": dict(action_offers),
+        "arbitration_rounds": arbitration_rounds,
+        "exact_tie_rounds": exact_tie_rounds,
+        "exact_tie_winners": dict(tie_winners),
+        "exact_tie_participants": dict(tie_participants),
+        "candidate_loss_reasons": dict(loss_reasons),
+        "candidate_loss_actions": dict(loss_actions),
+        "candidate_losses_to": {
+            action: dict(winners) for action, winners in candidate_losses_to.items()
+        },
+        "candidate_score_stats": candidate_score_stats,
+        "intention_context_offers": dict(intention_offers),
+        "intention_context_choices": dict(intention_choices),
+        "goal_id_offers": dict(goal_offers),
         "decision_satisfaction": dict(satisfactions),
         "decision_resolutions": dict(resolutions),
         "intention_statuses": dict(intention_statuses),
         "empty_productive_actions": dict(empty_productive),
         "max_intention_history": max_history,
         "max_waiting_intentions": max_waiting,
+        "max_active_waiting_intentions": max_active_waiting,
+        "waiting_state_observations": dict(waiting_states),
+        "waiting_action_observations": dict(waiting_actions),
+        "waiting_goal_link_observations": dict(waiting_goal_links),
+        "final_waiting_queue": [
+            {
+                "action": entry.get("action"),
+                "target": entry.get("target"),
+                "goal_id": entry.get("goal_id"),
+                "evidence_status": (entry.get("evidence_goal") or {}).get("status"),
+                "resolution": entry.get("resolution"),
+            }
+            for entry in getattr(agent, "_waiting_intentions", {}).values()
+        ],
         "play_turns": play_turns,
         "final_game": getattr(agent, "_local_play", None),
         "continuation_offers": dict(continuation_offers),

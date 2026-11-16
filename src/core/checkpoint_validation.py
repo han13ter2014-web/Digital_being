@@ -308,6 +308,10 @@ def validate_checkpoint_state(state) -> None:
         from src.cognition.internal_simulator import InternalSimulator
 
         InternalSimulator.validate_checkpoint_dict(state["internal_simulation"])
+    if state.get("music_memory") is not None:
+        from src.cognition.music_memory import validate_music_memory
+
+        validate_music_memory(state["music_memory"])
     if state.get("meta_cognition"):
         # Пустая секция означает, что у legacy/fake-агента её ещё нет.
         from src.cognition.experience_observers import (

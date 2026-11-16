@@ -274,6 +274,14 @@ class DecisionArbitrator:
                 "reasoning": "Нет доступных кандидатов",
                 "voices": {},
                 "all_evaluations": [],
+                "choice_diagnostics": {
+                    "candidate_count": 0,
+                    "allowed_count": 0,
+                    "stopped_count": 0,
+                    "winner_input_index": None,
+                    "exact_tie": False,
+                    "tied_input_indices": [],
+                },
                 "simulation": None,
             }
 
@@ -287,7 +295,7 @@ class DecisionArbitrator:
         max_adjustment = max(0.0, min(0.1, max_adjustment))
 
         evaluations = []
-        for cand in candidates:
+        for input_index, cand in enumerate(candidates):
             action_name = cand.get("action", "unknown")
             source = cand.get("source", "unknown")
             strength = cand.get("strength", 0.5)
@@ -315,6 +323,7 @@ class DecisionArbitrator:
             evaluations.append(
                 {
                     "candidate": cand,
+                    "input_index": input_index,
                     "simulation": simulation,
                     "verdict": verdict_result,
                     "base_combined_score": base_score,
@@ -328,9 +337,34 @@ class DecisionArbitrator:
 
         def public_evaluation(entry):
             simulation = entry["simulation"] or {}
+            candidate = entry["candidate"]
+            params = candidate.get("params") or {}
+            if not isinstance(params, dict):
+                params = {}
+            target = next(
+                (
+                    params[key].strip()
+                    for key in ("topic", "concept", "target")
+                    if isinstance(params.get(key), str) and params[key].strip()
+                ),
+                None,
+            )
+            goal_id = params.get("goal_id", params.get("activity_goal_id"))
+            if goal_id is not None and not isinstance(goal_id, str):
+                if type(goal_id) is not int:
+                    goal_id = None
+            continuation_of = params.get("continuation_of")
             return {
-                "action": entry["candidate"]["action"],
-                "source": entry["candidate"]["source"],
+                "action": candidate["action"],
+                "source": candidate["source"],
+                "input_index": entry["input_index"],
+                "strength": float(candidate.get("strength", 0.5)),
+                "arbiter_score": entry["arbiter_score"],
+                "target": target,
+                "goal_id": goal_id,
+                "continuation_of": (
+                    continuation_of if isinstance(continuation_of, str) else None
+                ),
                 "base_combined_score": round(entry["base_combined_score"], 3),
                 "predicted_effect_probability": simulation.get(
                     "predicted_effect_probability"
@@ -344,6 +378,23 @@ class DecisionArbitrator:
         allowed = [
             entry for entry in evaluations if entry["verdict"]["verdict"] != "stop"
         ]
+        tied = (
+            [
+                entry
+                for entry in allowed
+                if entry["combined_score"] == allowed[0]["combined_score"]
+            ]
+            if allowed
+            else []
+        )
+        choice_diagnostics = {
+            "candidate_count": len(evaluations),
+            "allowed_count": len(allowed),
+            "stopped_count": len(evaluations) - len(allowed),
+            "winner_input_index": allowed[0]["input_index"] if allowed else None,
+            "exact_tie": len(tied) > 1,
+            "tied_input_indices": [entry["input_index"] for entry in tied],
+        }
         if not allowed:
             return {
                 "action": "wait",
@@ -355,6 +406,7 @@ class DecisionArbitrator:
                 "voices": {},
                 "simulation": None,
                 "all_evaluations": [public_evaluation(entry) for entry in evaluations],
+                "choice_diagnostics": choice_diagnostics,
             }
         best = allowed[0]
         best_candidate = best["candidate"]
@@ -370,6 +422,7 @@ class DecisionArbitrator:
             "reasoning": reasoning,
             "voices": best_verdict["voices"],
             "all_evaluations": [public_evaluation(entry) for entry in evaluations],
+            "choice_diagnostics": choice_diagnostics,
         }
 
     # ============================================================

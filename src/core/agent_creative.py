@@ -240,6 +240,12 @@ def _act_compose_music_impl(self) -> Dict:
         if not isinstance(catalog, dict):
             catalog = self._music_catalog = {}
         catalog[updated["id"]] = dict(updated)
+        # Сочинение — ещё не слушание: сохраняем только ориентир внимания.
+        self._unheard_music_revision = {
+            "work_id": updated["id"],
+            "revision": updated["revision"],
+            "sha256": updated["sha256"],
+        }
         self._record_will(
             "music_works",
             updated["theme"],
@@ -256,6 +262,73 @@ def _act_compose_music_impl(self) -> Dict:
     except Exception as exc:
         get_logger().log(f"[MUSIC] не удалось сочинить: {exc}")
         return {"text": "Ответ: хотела сочинить мелодию, но не получилось"}
+
+
+def _act_listen_music_impl(
+    self, work_id=None, expected_revision=None, expected_sha256=None
+) -> Dict:
+    """Воспринять конкретную собственную редакцию без аффекта и записи файла."""
+    from src.cognition.local_music import observe_music
+    from src.cognition.music_attention import listening_candidate
+    from src.core.activity_workspace import workspace_for
+
+    if work_id is None:
+        candidate = listening_candidate(self)
+        if candidate is None:
+            return {
+                "listened": False,
+                "text": "Ответ: нет собственной мелодии для прослушивания",
+            }
+        params = candidate["params"]
+        work_id = params["work_id"]
+        expected_revision = params["revision"]
+        expected_sha256 = params["sha256"]
+
+    catalog = getattr(self, "_music_catalog", {})
+    work = catalog.get(work_id) if isinstance(catalog, dict) else None
+    theme = str(work.get("theme") or "") if isinstance(work, dict) else ""
+    if work is None:
+        return {
+            "listened": False,
+            "target": theme,
+            "text": "Ответ: прослушивание не состоялось — работа не найдена",
+        }
+    try:
+        observation = observe_music(
+            work,
+            workspace=workspace_for(self),
+            expected_revision=expected_revision,
+            expected_sha256=expected_sha256,
+        )
+        self.music_memory.record_observation(observation, self.cycle_count)
+    except Exception as exc:
+        get_logger().log(f"[MUSIC] прослушивание отменено: {exc}")
+        return {
+            "listened": False,
+            "target": theme,
+            "text": f"Ответ: прослушивание не состоялось — {exc}",
+        }
+
+    marker = getattr(self, "_unheard_music_revision", None)
+    if isinstance(marker, dict) and (
+        marker.get("work_id"),
+        marker.get("revision"),
+        marker.get("sha256"),
+    ) == (
+        observation["work_id"],
+        observation["revision"],
+        observation["sha256"],
+    ):
+        self._unheard_music_revision = None
+    return {
+        "listened": True,
+        "target": observation["theme"],
+        "observation": observation,
+        "text": (
+            f"Ответ: прослушала свою мелодию «{observation['theme']}», "
+            f"редакция {observation['revision']}"
+        ),
+    }
 
 
 def list_music_works_impl(self) -> List[Dict]:

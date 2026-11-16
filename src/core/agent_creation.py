@@ -258,6 +258,12 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     # «Музыка-1»: каталог мелодий и текущая работа — как у рисунков.
     self._music_catalog: Dict[str, Dict] = {}
     self._music_work: Optional[Dict] = None
+    # Ориентир текущей жизни; после restart непрослушанное восстанавливается
+    # сопоставлением каталога с MusicMemory, а не пометкой «всё новое».
+    self._unheard_music_revision: Optional[Dict] = None
+    from src.cognition.music_memory import MusicMemory
+
+    self.music_memory = MusicMemory()
     self._local_guess: Optional[Dict] = None
 
     # === «Собеседник-7»: саморазвитие диалоговых таблиц ===

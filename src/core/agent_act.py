@@ -508,6 +508,27 @@ def act_impl(
         composed = handler() if handler else None
         topic = (composed or {}).get("target") or ""
         action = (composed or {}).get("text") or action
+    elif action_type == "listen_music":
+        handler = getattr(self, "_act_listen_music", None)
+        params = (intention or {}).get("params", {})
+        listened = (
+            handler(
+                work_id=params.get("work_id"),
+                expected_revision=params.get("revision"),
+                expected_sha256=params.get("sha256"),
+            )
+            if handler
+            else None
+        )
+        topic = (listened or {}).get("target") or ""
+        action = (listened or {}).get("text") or action
+        if listened is not None and listened.get("listened") is True:
+            confirmed_result = True
+            observation = listened["observation"]
+            result_description = (
+                f"прослушана мелодия {observation['work_id']} "
+                f"редакция {observation['revision']}"
+            )
     elif action_type == "hypothesis":
         handler = getattr(self, "_act_hypothesis", None)
         guess = handler() if handler else None
@@ -544,16 +565,15 @@ def act_impl(
         self._last_action_outcome = outcome
 
     # === «Эмоции-1» (оценки исхода): исход исполнения окрашивает состояние ===
-    # Интенсивности задаёт таблица EVENT_EMOTIONS (emotional_state.py);
-    # scale не передаём — исход либо был, либо нет. Путь исключений
-    # окрашивается в autonomous_tick (_wire_execution_exception_emotion).
-    _wire_action_outcome_emotion(self, action_type, outcome)
+    # Музыкальный аффект — отдельный этап: здесь фиксируется только наблюдение.
+    if action_type != "listen_music":
+        _wire_action_outcome_emotion(self, action_type, outcome)
 
     if outcome is not None and outcome.had_effect:
         get_logger().log(f"[LOOP] {action_type} дал результат: {outcome.summary}")
         # Прогресс цели засчитывается по доказанному результату, а не
-        # по факту «пошевелился». Тема — то, над чем шла работа.
-        if topic:
+        # по факту «пошевелился». Прослушивание не является учебным ответом.
+        if topic and action_type != "listen_music":
             credit = self._check_goal_progress(
                 topic, answered=True, evidence=outcome.delta
             )

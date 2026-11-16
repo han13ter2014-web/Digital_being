@@ -559,15 +559,24 @@ def test_actual_action_types_satisfy_needs(action_type, need_name):
 def test_every_agent_action_type_has_motivation_feedback():
     """У каждого действия агента есть адресат в потребностях.
 
-    Исключения — телесные и служебные действия (отдых, чекпоинт, wait):
-    они восстанавливают не психику, а ресурс. Если появится новое
-    действие без обратной связи, тест укажет на дыру в мосте.
+    Исключения — телесные и служебные действия (отдых, чекпоинт, wait),
+    а также нейтральное listen_music: до отдельного аффекта оно не должно
+    скрыто удовлетворять потребности. Для остальных новых действий тест
+    по-прежнему указывает на дыру в мосте обратной связи.
     """
     from src.core.agent import DigitalBeing
     from src.core.motivation.unified_motivation import ACTION_ALIASES, DEFAULT_NEEDS
 
     # default означает нераспознанный акт, а не универсальный успех.
-    inert = {"rest", "wait", "deep_rest", "checkpoint_now", "default", "let_go"}
+    inert = {
+        "rest",
+        "wait",
+        "deep_rest",
+        "checkpoint_now",
+        "default",
+        "let_go",
+        "listen_music",
+    }
     action_types = set(DigitalBeing.ACTION_ALIASES.values()) | {"default"}
 
     for action_type in sorted(action_types - inert):

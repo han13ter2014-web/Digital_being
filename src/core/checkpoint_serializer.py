@@ -322,6 +322,11 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         "art_work": deepcopy(getattr(agent, "_art_work", None)),
         "music_catalog": deepcopy(getattr(agent, "_music_catalog", {})),
         "music_work": deepcopy(getattr(agent, "_music_work", None)),
+        "music_memory": (
+            agent.music_memory.to_checkpoint()
+            if getattr(agent, "music_memory", None) is not None
+            else {"schema_version": 1, "works": {}}
+        ),
         "waiting_intentions": deepcopy(getattr(agent, "_waiting_intentions", {})),
         "method_preferences": deepcopy(getattr(agent, "_method_preferences", {})),
         "intention_history": deepcopy(getattr(agent, "_intention_history", [])),
@@ -527,6 +532,9 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     else:
         InternalSimulator.validate_checkpoint_dict(staged_internal_simulation)
         staged_internal_simulation = deepcopy(staged_internal_simulation)
+    from src.cognition.music_memory import MusicMemory
+
+    staged_music_memory = MusicMemory.from_checkpoint(state.get("music_memory"))
     staged_meta_cognition = deepcopy(state.get("meta_cognition") or {})
     from src.cognition.integrated_experience import (
         stage_integrated_experience,
@@ -792,6 +800,7 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     agent._art_work = deepcopy(state.get("art_work"))
     agent._music_catalog = deepcopy(state.get("music_catalog", {}))
     agent._music_work = deepcopy(state.get("music_work"))
+    agent.music_memory = staged_music_memory
     agent._waiting_intentions = deepcopy(state.get("waiting_intentions", {}))
     # Правила и история разобраны и проверены в фазе 1.
     agent._method_preferences = staged_method_preferences
