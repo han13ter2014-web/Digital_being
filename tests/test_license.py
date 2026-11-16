@@ -1,7 +1,13 @@
 """Единая AGPLv3 для пакета, репозитория и установщика."""
 
 from pathlib import Path
-import tomllib
+
+import pytest
+
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +25,7 @@ def test_repository_and_installer_carry_full_agplv3():
     assert "не являются дополнительными лицензионными условиями" in installer_text
 
 
+@pytest.mark.skipif(tomllib is None, reason="tomllib требует Python >= 3.11")
 def test_package_and_readmes_declare_agpl3_only():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
