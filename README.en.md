@@ -219,3 +219,9 @@ help the development, you can support the project with a voluntary donation:
 Funds may go to infrastructure, long-continuity testing, development time,
 and demo preparation. A donation does not buy influence over the Core and
 does not change the project's architectural boundaries.
+
+## License
+
+Current and future versions of Digital Being are licensed under **AGPL-3.0-only**.
+See [LICENSE](LICENSE) for the full text. Versions previously released under MIT
+remain available under the MIT terms; this license change is not retroactive.

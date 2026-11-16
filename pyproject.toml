@@ -8,7 +8,7 @@ version = "0.1.6"
 description = "Цифровое существо, которое живёт, помнит, думает, имеет волю"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-only" }
 authors = [
     { name = "Digital Being Team" }
 ]
