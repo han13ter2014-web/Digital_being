@@ -45,18 +45,49 @@ async def measure(cycles, seed):
     continuation_traces = []
     restart = None
     play_turns = 0
+    action_offers = Counter()
+    satisfactions, resolutions, intention_statuses = Counter(), Counter(), Counter()
+    empty_productive = Counter()
+    max_history = max_waiting = 0
 
     def attach(current):
         original = current.autonomous_tick
 
         def observe():
-            nonlocal play_turns
+            nonlocal play_turns, max_history, max_waiting
             report = original()
             if (report.get("autonomous_action") or {}).get("action") == "play":
                 play_turns += 1
             arbiter = report.get("arbitrator") or {}
             actions[arbiter.get("action", "none")] += 1
             sources[arbiter.get("source", "none")] += 1
+            for evaluation in arbiter.get("all_evaluations") or []:
+                action_offers[evaluation.get("action", "none")] += 1
+            selected_entry = next(
+                (
+                    item
+                    for item in reversed(getattr(current, "_intention_history", []))
+                    if item["id"] == report.get("intention_id")
+                ),
+                None,
+            )
+            if selected_entry is not None:
+                intention_statuses[selected_entry["status"]] += 1
+                episode = selected_entry.get("decision_episode") or {}
+                satisfactions[episode.get("satisfaction", "missing")] += 1
+                resolutions[episode.get("resolution", "missing")] += 1
+                action = selected_entry.get("action", "none")
+                outcome = selected_entry.get("outcome") or {}
+                if (
+                    selected_entry.get("status") == "performed"
+                    and action not in {"wait", "rest", "deep_rest"}
+                    and not outcome.get("had_effect")
+                ):
+                    empty_productive[action] += 1
+            max_history = max(max_history, len(getattr(current, "_intention_history", [])))
+            max_waiting = max(
+                max_waiting, len(getattr(current, "_waiting_intentions", {}))
+            )
             continuation = report.get("continuation_proposal")
             if continuation:
                 target = continuation["params"]["topic"]
@@ -187,6 +218,13 @@ async def measure(cycles, seed):
         "seed": seed,
         "cycles": cycles,
         "arbitrated_actions": dict(actions),
+        "action_offers": dict(action_offers),
+        "decision_satisfaction": dict(satisfactions),
+        "decision_resolutions": dict(resolutions),
+        "intention_statuses": dict(intention_statuses),
+        "empty_productive_actions": dict(empty_productive),
+        "max_intention_history": max_history,
+        "max_waiting_intentions": max_waiting,
         "play_turns": play_turns,
         "final_game": getattr(agent, "_local_play", None),
         "continuation_offers": dict(continuation_offers),

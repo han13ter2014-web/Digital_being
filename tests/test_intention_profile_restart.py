@@ -36,6 +36,7 @@ def test_intention_history_survives_normal_restart(tmp_path, monkeypatch, backen
         completed = deepcopy(first._intention_history[-1])
         assert completed["id"] == report["intention_id"]
         assert completed["status"] == "performed"
+        assert completed["decision_episode"]["satisfaction"] == "satisfied"
         unfinished = begin_intention(
             first,
             {

@@ -105,6 +105,9 @@ def _complete_effector_intention_impl(self, payload):
         )
     else:
         return
+    from src.cognition.decision_episode import finish_decision_episode
+
+    finish_decision_episode(self, entry)
     self._record_core_life_episode(entry)
 
 

@@ -322,6 +322,7 @@ def _act_ask_user_impl(self, target=None, *, DigitalBeing) -> Dict:
     self._record_will("questions_asked", target, "самостоятельный вопрос")
     return {
         "target": target,
+        "asked": True,
         "text": f"Ответ: спросила человека про '{target}'",
     }
 

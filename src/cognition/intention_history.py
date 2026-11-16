@@ -15,6 +15,13 @@ def begin_intention(agent, selection):
     if history is None:
         history = agent._intention_history = []
     params = selection.get("params") or {}
+    goal_id = params.get("goal_id", params.get("activity_goal_id"))
+    if (
+        goal_id is not None
+        and not isinstance(goal_id, str)
+        and type(goal_id) is not int
+    ):
+        goal_id = None
     entry = {
         "id": str(uuid4()),
         "cycle": agent.cycle_count,
@@ -22,6 +29,7 @@ def begin_intention(agent, selection):
         "source": str(selection.get("source") or "unknown"),
         "target": intention_target(selection),
         "reason": str(params.get("reason") or selection.get("reasoning") or ""),
+        "goal_id": goal_id,
         "continuation_of": params.get("continuation_of"),
         "status": "started",
         "outcome": None,
@@ -31,6 +39,9 @@ def begin_intention(agent, selection):
     from src.cognition.intention_evidence import begin_evidence_goal
 
     begin_evidence_goal(agent, entry)
+    from src.cognition.decision_episode import begin_decision_episode
+
+    begin_decision_episode(agent, entry)
     history.append(entry)
     del history[:-LIMIT]
     return entry
@@ -150,6 +161,13 @@ def validate_history(history):
             raise ValueError("intention_history.continuation_of")
         if entry.get("target") is not None and not isinstance(entry["target"], str):
             raise ValueError("intention_history.target")
+        goal_id = entry.get("goal_id")
+        if (
+            goal_id is not None
+            and not isinstance(goal_id, str)
+            and type(goal_id) is not int
+        ):
+            raise ValueError("intention_history.goal_id")
         if entry.get("status") not in {
             "started",
             "interrupted",
@@ -163,6 +181,10 @@ def validate_history(history):
             raise ValueError("intention_history.outcome")
         if entry.get("simulation") is not None:
             _validate_simulation(entry["simulation"])
+        if entry.get("decision_episode") is not None:
+            from src.cognition.decision_episode import validate_decision_episode
+
+            validate_decision_episode(entry["decision_episode"], entry)
 
 
 def restore_history(history):
@@ -171,6 +193,9 @@ def restore_history(history):
     for entry in result:
         if entry["status"] == "started":
             entry["status"] = "interrupted"
+            episode = entry.get("decision_episode")
+            if isinstance(episode, dict):
+                episode["resolution"] = "none"
             simulation = entry.get("simulation")
             if isinstance(simulation, dict) and simulation.get("status") == "predicted":
                 simulation["status"] = "cancelled"

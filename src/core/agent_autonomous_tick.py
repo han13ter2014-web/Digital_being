@@ -618,6 +618,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                     self, activity_attrs.get(chosen_action, "_creative_draft"), None
                 )
             )
+            activity_after = None
             if self._normalize_action(chosen_action) in {
                 "explore",
                 "decomposition",
@@ -709,6 +710,15 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             from src.cognition.intention_evidence import finish_evidence_goal
 
             finish_evidence_goal(self, intention_entry)
+            from src.cognition.decision_episode import finish_decision_episode
+
+            finish_decision_episode(
+                self,
+                intention_entry,
+                outcome=last,
+                activity_before=activity_before,
+                activity_after=activity_after,
+            )
             result["intention_id"] = intention_entry["id"]
             result["executed_intention"] = {
                 "action": chosen_action,
@@ -790,6 +800,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
 
             observe_integrated_action(self, intention_entry, error=e)
             finish_intention(intention_entry, error=e)
+            from src.cognition.decision_episode import finish_decision_episode
+
+            finish_decision_episode(self, intention_entry)
             get_logger().log(f"[AUTONOMOUS_ACTION] Error: {e}")
             result["autonomous_action"] = {"action": chosen_action, "error": str(e)}
             absolution = self._absorb_action_failure(chosen_action, str(e))

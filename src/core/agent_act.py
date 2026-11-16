@@ -471,6 +471,10 @@ def act_impl(
         )
         topic = (asked or {}).get("target") or ""
         action = (asked or {}).get("text") or action
+        # Структурный факт queued-вопроса, а не правдоподобный текст ответа.
+        if asked is not None and asked.get("asked") is True:
+            confirmed_result = True
+            result_description = f"вопрос по теме '{topic}' поставлен в очередь"
     elif action_type == "communicate":
         handler = getattr(self, "_act_communicate", None)
         told = handler() if handler else None
