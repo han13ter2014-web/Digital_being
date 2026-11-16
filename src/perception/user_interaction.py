@@ -15,6 +15,12 @@ from typing import Dict
 from uuid import uuid4
 
 from src.core.dialogue_memory import DialogueActRing
+from src.core.human_affect import (
+    NEGATIVE_AFFECT_THRESHOLD,
+    decayed_affect,
+    negative_affect_strength,
+    restore_affect,
+)
 
 
 # === Ленивый импорт, чтобы не создавать циклическую зависимость ===
@@ -111,6 +117,9 @@ class UserInteraction:
         self._last_user_message_cycle = None  # Когда пользователь последний раз писал
         # Т5: отдельное кольцо смысловых актов, а не полная история UI.
         self.dialogue_act_ring = DialogueActRing()
+        # Краткое свидетельство о состоянии человека. Не черта и не факт:
+        # затухает по циклу, а влияние взвешено через доверие и близость.
+        self.last_human_affect = None
 
         # Настройки взаимодействия
         self.max_pending_questions = 3
@@ -151,8 +160,8 @@ class UserInteraction:
             # но в stdout уже напечатано.
             pass
 
-    def can_ask_question(self, cycle_count: int) -> bool:
-        """Проверяет может ли агент задать вопрос пользователю."""
+    def can_ask_question(self, cycle_count: int, *, respect_affect=True) -> bool:
+        """Проверить лимиты и текущую силу сообщённого негативного аффекта."""
         if len(self.pending_questions) >= self.max_pending_questions:
             return False
 
@@ -165,6 +174,11 @@ class UserInteraction:
         if len(recent_questions) > 5:
             return False
 
+        if (
+            respect_affect
+            and self.negative_affect_strength(cycle_count) >= NEGATIVE_AFFECT_THRESHOLD
+        ):
+            return False
         return True
 
     def ask_user(
@@ -176,30 +190,25 @@ class UserInteraction:
         sub_questions: list = None,
         sub_question_index: int = 0,
         sub_answers: dict = None,
+        respect_affect=True,
     ) -> dict:
         """Добавляет вопрос в очередь ожидающих.
 
-        Args:
-            question: Текст вопроса пользователю.
-            context: Контекст вопроса.
-            cycle: Номер цикла.
-            complex_question: Оригинальный сложный вопрос (если это под-вопрос).
-            sub_questions: Список всех под-вопросов для синтеза.
-            sub_question_index: Индекс текущего под-вопроса в списке.
-            sub_answers: Уже собранные ответы цепочки {под-вопрос: ответ}.
-                Передаётся по цепочке, чтобы синтез получил ровно ответы
-                этого сложного вопроса (без сканирования общей истории).
+        ``respect_affect=False`` разрешён только явно инициированному
+        человеком протоколу подтверждения, не автономным вопросам.
         """
-        # Идентичный неотвеченный вопрос уже в очереди — второй не
-        # добавляем. Старые сборки накапливали дубликаты (каждый
-        # кулдаун — новая запись), и после рестарта они вечно
-        # напоминали о себе, перехватывая светские реплики.
         normalized_question = str(question).strip()
         for existing in self.pending_questions:
             if str(existing.get("question", "")).strip() == normalized_question:
-                return {"status": "duplicate", "id": existing["id"]}
+                return {
+                    "status": "duplicate",
+                    "id": existing["id"],
+                    "response_id": existing.get(
+                        "response_id", f"question:{existing['id']}"
+                    ),
+                }
 
-        if not self.can_ask_question(cycle):
+        if not self.can_ask_question(cycle, respect_affect=respect_affect):
             return {
                 "status": "failed",
                 "reason": "Не могу задать вопрос сейчас (перезагрузка)",
@@ -208,10 +217,12 @@ class UserInteraction:
         # id = максимум среди живых вопросов + 1, а не len(pending)+1:
         # после восстановления из чекпоинта в очереди могут быть
         # вопросы с большими id, и len-схема выдавала дубликаты — ответ
-        # попадал в чужой вопрос.
+        # попадал в чужой вопрос. Числовой id нужен UI и может повториться
+        # после ответа; response_id остаётся уникальным для атрибуции отзыва.
         question_id = max((q["id"] for q in self.pending_questions), default=0) + 1
         question_entry = {
             "id": question_id,
+            "response_id": f"question:{uuid4().hex}",
             "question": question,
             "context": context,
             "answered": False,
@@ -268,7 +279,11 @@ class UserInteraction:
                 priority=2,  # вопросы к пользователю — высокий приоритет
             )
 
-        return {"status": "queued", "id": question_entry["id"]}
+        return {
+            "status": "queued",
+            "id": question_entry["id"],
+            "response_id": question_entry["response_id"],
+        }
 
     def get_pending_question(self) -> dict:
         """Получает следующий ожидающий вопрос."""
@@ -681,6 +696,17 @@ class UserInteraction:
             del self.message_history[: -self.MESSAGE_HISTORY_MAX]
         return {"status": "received", "cycle": cycle}
 
+    def set_human_affect(self, affect) -> None:
+        """Сохранить только валидное свидетельство, без служебных маркеров."""
+        self.last_human_affect = restore_affect(affect)
+
+    def human_affect_at(self, cycle_count):
+        """Вернуть независимую копию свежего затухшего состояния или None."""
+        return decayed_affect(self.last_human_affect, cycle_count)
+
+    def negative_affect_strength(self, cycle_count) -> float:
+        return negative_affect_strength(self.last_human_affect, cycle_count)
+
     def record_dialogue_act(
         self,
         kind,
@@ -690,6 +716,7 @@ class UserInteraction:
         cycle=0,
         user_text="",
         agent_text="",
+        affect=None,
     ) -> None:
         """Записать дескриптор завершённой реплики в рабочую память Т5."""
         self.dialogue_act_ring.record(
@@ -699,6 +726,7 @@ class UserInteraction:
             cycle=cycle,
             user_text=user_text,
             agent_text=agent_text,
+            affect=affect,
         )
 
     # ============================================================
@@ -726,9 +754,23 @@ class UserInteraction:
             "question_history": [dict(entry) for entry in self.question_history[-50:]],
             "outgoing_messages": outgoing[-self.OUTGOING_TRACE_MAX :],
             "dialogue_acts": self.dialogue_act_ring.snapshot(),
+            "last_human_affect": (
+                dict(
+                    self.last_human_affect,
+                    components=dict(self.last_human_affect["components"]),
+                )
+                if self.last_human_affect is not None
+                else None
+            ),
             "pending_questions": [
                 {
                     "id": q["id"],
+                    **(
+                        {"response_id": q["response_id"]}
+                        if isinstance(q.get("response_id"), str)
+                        and q["response_id"].strip()
+                        else {}
+                    ),
                     "question": q["question"],
                     "context": q.get("context", ""),
                     "cycle": int(q.get("cycle", 0)),
@@ -762,6 +804,7 @@ class UserInteraction:
             return
 
         self.dialogue_act_ring.restore(data.get("dialogue_acts"))
+        self.last_human_affect = restore_affect(data.get("last_human_affect"))
 
         saved_history = data.get("question_history")
         if isinstance(saved_history, list):
@@ -816,6 +859,12 @@ class UserInteraction:
                             if isinstance(raw_id, (int, float))
                             and not isinstance(raw_id, bool)
                             else max((q["id"] for q in restored_pending), default=0) + 1
+                        ),
+                        **(
+                            {"response_id": entry["response_id"]}
+                            if isinstance(entry.get("response_id"), str)
+                            and entry["response_id"].strip()
+                            else {}
                         ),
                         "question": question,
                         "context": context,

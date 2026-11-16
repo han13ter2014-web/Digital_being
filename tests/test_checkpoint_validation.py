@@ -204,6 +204,14 @@ def test_legacy_omissions_and_sentinels_are_valid(state):
             "user_interaction.pending_questions[0].sub_answers",
         ),
         (
+            {
+                "user_interaction": {
+                    "pending_questions": [{"question": "Q", "response_id": " "}]
+                }
+            },
+            "user_interaction.pending_questions[0].response_id",
+        ),
+        (
             {"user_interaction": {"dialogue_acts": {}}},
             "user_interaction.dialogue_acts",
         ),

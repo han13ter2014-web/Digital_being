@@ -23,11 +23,17 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from src.core.human_affect import (
+    extract_learned_human_affect,
+    extract_static_human_affect,
+)
+
 ACT_ANSWER = "answer"
 ACT_ASK_ABOUT_SELF = "ask_about_self"
 ACT_FOLLOW_UP = "follow_up"
 ACT_REQUEST = "request"
 ACT_SOCIAL = "social"
+ACT_HUMAN_AFFECT = "human_affect"
 ACT_UNKNOWN = "unknown"
 
 
@@ -365,33 +371,25 @@ def social_reply_kind(text) -> str:
 
 @dataclass(frozen=True)
 class DialogueAct:
-    """Распознанный акт пользователя.
-
-    ``matched_marker`` — конкретный маркер, по которому решено; для
-    ACT_UNKNOWN всегда пустой. Поле нужно тестам и журналам: решение
-    маршрутизации должно быть проверяемым, а не магией.
-    """
+    """Распознанный акт пользователя и необязательный аффект-дескриптор."""
 
     kind: str
     matched_marker: str = ""
+    affect: Optional[dict] = None
 
 
-def classify_user_text(text, learned=None) -> DialogueAct:
-    """Определить речевой акт пользователя по таблице маркеров.
+def classify_user_text(
+    text,
+    learned=None,
+    learned_affect=None,
+    *,
+    cycle=0,
+    testimony_weight=0.5,
+) -> DialogueAct:
+    """Определить речевой акт один раз, включая наблюдаемый аффект.
 
-    Приоритет: явная ответная формула → ACT_ANSWER; вопрос о сущности →
-    ACT_ASK_ABOUT_SELF; социальная фраза → ACT_SOCIAL; иначе
-    ACT_UNKNOWN (старая маршрутизация без изменений).
-
-    «Собеседник-7»: необязательный ``learned`` — отображение
-    {нормализованная фраза: акт} из DialogueLearning. Обученные маркеры
-    проверяются ПОСЛЕ статических таблиц (рукописное сильнее
-    обученного) и ведут только на существующие акты.
-
-    Сравнение идёт по нормализованному тексту: нижний регистр, сжатые
-    пробелы. Пунктуация не вырезается — маркеры в таблицах уже содержат
-    только буквы и пробелы, а «ответ:» с двоеточием ловит и «Ответ:»,
-    и «ответ:».
+    Статические акты и статический аффект сильнее любых learned-таблиц.
+    ``user_taught`` — свидетельство человека с весом доверия, не факт.
     """
     normalized = " ".join(str(text or "").lower().split())
     if not normalized:
@@ -405,16 +403,10 @@ def classify_user_text(text, learned=None) -> DialogueAct:
         if marker in normalized:
             return DialogueAct(ACT_ASK_ABOUT_SELF, marker)
 
-    # Вопрос-узнавание имени: тоже вопрос о сущности, до просьб и
-    # социальной речи. Ответ строится из актуального имени в Core.
     proposed = extract_identity_check(text)
     if proposed is not None:
         return DialogueAct(ACT_ASK_ABOUT_SELF, proposed)
 
-    # Просьбы о невозможном — после вопросов о себе и до социальной
-    # речи. Сравнение по тексту со заменой «ё»→«е» и вынесенными
-    # запятыми («Опиши, что чувствуешь?» — та же просьба, что без
-    # запятой; запятая не должна ломать фразу).
     if not _REQUEST_GUARD_RE.search(normalized):
         folded = normalized.replace("ё", "е")
         speakable = " ".join(folded.replace(",", " ").split())
@@ -424,12 +416,28 @@ def classify_user_text(text, learned=None) -> DialogueAct:
         if match is not None:
             return DialogueAct(ACT_REQUEST, match.group(0).lower())
 
+    affect = extract_static_human_affect(
+        text, cycle=cycle, testimony_weight=testimony_weight
+    )
+    if affect is not None:
+        return DialogueAct(ACT_HUMAN_AFFECT, affect["marker"], affect)
+
     for marker in _SOCIAL_MARKERS:
         if marker in normalized:
             return DialogueAct(ACT_SOCIAL, marker)
 
-    # Обученные маркеры — строго после статических таблиц: рукописное
-    # решение разработчика обучение не перекрывает.
+    # Специализированное user_taught-значение сильнее общего learned-акта,
+    # но обе таблицы остаются ниже всех статических правил.
+    if learned_affect:
+        affect = extract_learned_human_affect(
+            text,
+            learned_affect,
+            cycle=cycle,
+            testimony_weight=testimony_weight,
+        )
+        if affect is not None:
+            return DialogueAct(ACT_HUMAN_AFFECT, affect["marker"], affect)
+
     if learned:
         for phrase, kind in learned.items():
             if phrase and phrase in normalized:

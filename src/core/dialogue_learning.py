@@ -9,15 +9,17 @@ DialogueLearning — саморазвитие диалоговых таблиц 
 сущностью».
 
 Граница субъектности: сущность НЕ выдумывает маркеры сама. Человек —
-учитель: фраза становится маркером только после явного подтверждения
-пользователя через вопрос-уточнение. Детерминизм сохранён: обученные
-маркеры — литеральные подстроки, ведущие только на существующие акты
-(social / about_self / request) с их детерминированными честными
-ответами. ACT_ANSWER сознательно исключён: выученный «ответ» смог бы
-закрывать настоящие вопросы сущности мусором — это единственный акт,
-который пишет в знания, а обучение не должно создавать новых
-генераторов поведения. Слова пользователя пишутся только в таблицы
-распознавания речи (факт о речи человека), не в ценности и мотивацию.
+источник свидетельства, а не безусловной истины: фраза становится маркером
+только после явного подтверждения через вопрос-уточнение. Детерминизм
+сохранён: обученные маркеры — литеральные подстроки, ведущие только на
+существующие акты (social / about_self / request) с детерминированными
+честными ответами. ACT_ANSWER сознательно исключён: выученный «ответ» смог
+бы закрывать настоящие вопросы сущности мусором — это единственный акт,
+который пишет в знания, а обучение не должно создавать новых генераторов
+поведения. Слова пользователя пишутся только в таблицы распознавания речи
+(свидетельство о речи человека), не в ценности и мотивацию. Отдельные
+эмоциональные ассоциации тоже остаются user_taught-свидетельствами: их
+поведенческий вес зависит от доверия и близости, но не становится фактом.
 
 Приоритет: статические рукописные таблицы всегда сильнее обученных —
 обученное заполняет пробелы, а не перекрывает решения разработчика.
@@ -36,6 +38,15 @@ from src.core.dialogue_acts import (
     ACT_SOCIAL,
     is_noise_input,
 )
+from src.core.human_affect import (
+    AFFECT_COMPONENTS,
+    AFFECT_LABELS,
+    AFFECT_PHRASE_MAX_LEN,
+    BASE_AFFECT_ACTIVATION,
+    normalize_affect_phrase,
+    restore_learned_affect,
+)
+from src.core.dialogue_strategies import DialogueStrategyMemory
 
 # Обучаемые акты — только те, что ведут на существующие
 # детерминированные ответы и не пишут в знания.
@@ -55,9 +66,18 @@ BUFFER_MAX = 50
 PHRASE_MIN_LEN = 3
 PHRASE_MAX_LEN = 80
 
-# Префикс контекста pending-вопроса: по нему runner узнаёт, что ответ
-# пользователя — обучающий, а не обычный.
+# Префиксы разных протоколов. Старые ответы 1–4 никогда не становятся
+# эмоциональным обучением; user_taught требует отдельного подтверждения.
 PROPOSAL_CONTEXT_PREFIX = "dialogue_learning: "
+AFFECT_PROPOSAL_CONTEXT_PREFIX = "affect_learning: "
+LEARNED_AFFECT_MAX = 200
+
+_AFFECT_CONFIRM_ANSWERS = frozenset(
+    {"да", "подтверждаю", "запомни", "верно", "согласен", "согласна"}
+)
+_AFFECT_REJECT_ANSWERS = frozenset(
+    {"нет", "не надо", "не учи", "не учить", "не запоминай", "отмена", "неверно"}
+)
 
 # Команда забвения: «забудь фразу X».
 FORGET_PREFIX = "забудь фразу"
@@ -111,13 +131,16 @@ class DialogueLearning:
     """
 
     def __init__(self) -> None:
-        # нормализованная фраза → {"count", "first_cycle", "last_cycle"}
         self.buffer: Dict[str, dict] = {}
-        # нормализованная фраза → {"act": kind, "cycle": int}
         self.learned: Dict[str, dict] = {}
-        # нормализованная фраза → cycle запрета («4 — не учить»).
-        # Запрет навсегда: coping с отказом без бесконечного переспроса.
         self.suppressed: Dict[str, int] = {}
+        # Точная фраза → пользовательское свидетельство о значении. Это не
+        # факт и не оценка личности; вес доверия вычисляется при чтении.
+        self.learned_affect: Dict[str, dict] = {}
+        self.suppressed_affect: Dict[str, int] = {}
+        # Отдельно от автономных method_preferences: отзыв о реплике не
+        # меняет действия, знания или ценности сущности.
+        self.strategy_memory = DialogueStrategyMemory()
         self.last_proposal_cycle: int = -PROPOSAL_COOLDOWN_CYCLES
 
     # === Сбор ===
@@ -157,11 +180,14 @@ class DialogueLearning:
         явного ответа человека в ``resolve``.
         """
         phrase = normalize_phrase(text)
+        affect_phrase = normalize_affect_phrase(phrase)
         if (
             not phrase
             or is_noise_input(phrase)
             or phrase in self.learned
             or phrase in self.suppressed
+            or affect_phrase in self.learned_affect
+            or affect_phrase in self.suppressed_affect
             or cycle - self.last_proposal_cycle < PROPOSAL_COOLDOWN_CYCLES
         ):
             return None
@@ -174,7 +200,13 @@ class DialogueLearning:
             return False
         if is_noise_input(phrase):
             return False
+        affect_phrase = normalize_affect_phrase(phrase)
         if phrase in self.learned or phrase in self.suppressed:
+            return False
+        if (
+            affect_phrase in self.learned_affect
+            or affect_phrase in self.suppressed_affect
+        ):
             return False
         return True
 
@@ -295,16 +327,96 @@ class DialogueLearning:
         }
         return dict(sorted(entries.items(), key=lambda kv: len(kv[0]), reverse=True))
 
+    def affect_classifier_entries(self) -> Dict[str, dict]:
+        """Точные user_taught-записи, без нечёткого recall и без фактов."""
+        restored = {}
+        for phrase, entry in self.learned_affect.items():
+            clean = restore_learned_affect(entry)
+            if clean is not None:
+                restored[phrase] = clean
+        return restored
+
+    # === Отдельное аффективное обучение ===
+
+    @staticmethod
+    def build_affect_proposal(phrase: str, component: str) -> dict:
+        phrase = normalize_affect_phrase(phrase)
+        label = AFFECT_LABELS.get(component, component)
+        return {
+            "question": (
+                f"Запомнить «{phrase}» как твоё выражение: «{label}»? "
+                "Я сохраню именно твоё объяснение, а не безусловный факт. "
+                "Ответь «да» или «нет»."
+            ),
+            "context": AFFECT_PROPOSAL_CONTEXT_PREFIX + component + ":" + phrase,
+        }
+
+    @staticmethod
+    def is_affect_proposal_context(context) -> bool:
+        return str(context or "").startswith(AFFECT_PROPOSAL_CONTEXT_PREFIX)
+
+    @staticmethod
+    def affect_from_context(context) -> tuple:
+        text = str(context or "")
+        if not text.startswith(AFFECT_PROPOSAL_CONTEXT_PREFIX):
+            return "", ""
+        payload = text[len(AFFECT_PROPOSAL_CONTEXT_PREFIX) :]
+        component, separator, phrase = payload.partition(":")
+        if not separator or component not in AFFECT_COMPONENTS:
+            return "", ""
+        return normalize_affect_phrase(phrase), component
+
+    def resolve_affect(self, phrase, component, answer, cycle: int = 0) -> dict:
+        """Записать только явно подтверждённое свидетельство человека."""
+        phrase = normalize_affect_phrase(phrase)
+        if (
+            len(phrase) < PHRASE_MIN_LEN
+            or len(phrase) > AFFECT_PHRASE_MAX_LEN
+            or component not in AFFECT_COMPONENTS
+        ):
+            return {"status": "unclear", "phrase": phrase}
+        normalized_answer = normalize_affect_phrase(answer)
+        if normalized_answer in _AFFECT_REJECT_ANSWERS:
+            self.suppressed_affect[phrase] = int(cycle)
+            self.buffer.pop(phrase, None)
+            return {"status": "suppressed", "phrase": phrase}
+        if normalized_answer not in _AFFECT_CONFIRM_ANSWERS:
+            return {"status": "unclear", "phrase": phrase}
+        if (
+            phrase not in self.learned_affect
+            and len(self.learned_affect) >= LEARNED_AFFECT_MAX
+        ):
+            return {"status": "limit", "phrase": phrase}
+        self.learned_affect[phrase] = {
+            "components": {component: 1.0},
+            "weight": BASE_AFFECT_ACTIVATION,
+            "evidence": "user_taught",
+            "cycle": int(cycle),
+        }
+        self.suppressed_affect.pop(phrase, None)
+        self.buffer.pop(phrase, None)
+        return {
+            "status": "learned",
+            "phrase": phrase,
+            "component": component,
+        }
+
     # === Забвение ===
 
     def forget(self, phrase) -> bool:
-        """Забыть выученную фразу («забудь фразу X»). True, если была."""
+        """Забыть общую и аффективную связь фразы, если они были."""
         normalized = normalize_phrase(phrase)
+        removed = False
         if normalized in self.learned:
             del self.learned[normalized]
             self.suppressed[normalized] = 0
-            return True
-        return False
+            removed = True
+        affect_phrase = normalize_affect_phrase(phrase)
+        if affect_phrase in self.learned_affect:
+            del self.learned_affect[affect_phrase]
+            self.suppressed_affect[affect_phrase] = 0
+            removed = True
+        return removed
 
     @staticmethod
     def parse_forget_command(text) -> Optional[str]:
@@ -322,6 +434,9 @@ class DialogueLearning:
             "buffered": len(self.buffer),
             "learned": len(self.learned),
             "suppressed": len(self.suppressed),
+            "learned_affect": len(self.learned_affect),
+            "suppressed_affect": len(self.suppressed_affect),
+            "dialogue_strategies": self.strategy_memory.get_status(),
         }
 
     # === Сериализация ===
@@ -331,6 +446,15 @@ class DialogueLearning:
             "buffer": {phrase: dict(entry) for phrase, entry in self.buffer.items()},
             "learned": {phrase: dict(entry) for phrase, entry in self.learned.items()},
             "suppressed": dict(self.suppressed),
+            "learned_affect": {
+                phrase: dict(
+                    entry,
+                    components=dict(entry.get("components") or {}),
+                )
+                for phrase, entry in self.learned_affect.items()
+            },
+            "suppressed_affect": dict(self.suppressed_affect),
+            "dialogue_strategies": self.strategy_memory.to_dict(),
             "last_proposal_cycle": self.last_proposal_cycle,
         }
 
@@ -338,6 +462,9 @@ class DialogueLearning:
         """Восстановиться из чекпоинта. Повреждённые поля → дефолты."""
         if not isinstance(data, dict):
             return
+        # Старый checkpoint без подсекции означает пустую strategy-память,
+        # а не сохранение случайного состояния прежней жизни.
+        self.strategy_memory = DialogueStrategyMemory()
         buffer = data.get("buffer")
         if isinstance(buffer, dict):
             restored: Dict[str, dict] = {}
@@ -374,6 +501,37 @@ class DialogueLearning:
                 for phrase, cycle in suppressed.items()
                 if isinstance(cycle, (int, float)) and not isinstance(cycle, bool)
             }
+        learned_affect = data.get("learned_affect")
+        if isinstance(learned_affect, dict):
+            restored_affect: Dict[str, dict] = {}
+            for raw_phrase, entry in list(learned_affect.items())[:LEARNED_AFFECT_MAX]:
+                phrase = normalize_affect_phrase(raw_phrase)
+                clean = restore_learned_affect(entry)
+                if not phrase or len(phrase) > AFFECT_PHRASE_MAX_LEN or clean is None:
+                    continue
+                restored_affect[phrase] = clean
+            self.learned_affect = restored_affect
+        suppressed_affect = data.get("suppressed_affect")
+        if isinstance(suppressed_affect, dict):
+            restored_suppressed: Dict[str, int] = {}
+            for raw_phrase, cycle in suppressed_affect.items():
+                phrase = normalize_affect_phrase(raw_phrase)
+                if (
+                    not phrase
+                    or isinstance(cycle, bool)
+                    or not isinstance(cycle, (int, float))
+                ):
+                    continue
+                try:
+                    clean_cycle = int(cycle)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if clean_cycle >= 0:
+                    restored_suppressed[phrase] = clean_cycle
+            self.suppressed_affect = restored_suppressed
+        strategies = data.get("dialogue_strategies")
+        if isinstance(strategies, dict):
+            self.strategy_memory.load_from(strategies)
         last = data.get("last_proposal_cycle")
         if isinstance(last, (int, float)) and not isinstance(last, bool):
             self.last_proposal_cycle = int(last)

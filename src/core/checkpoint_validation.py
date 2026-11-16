@@ -81,6 +81,43 @@ def _numeric_mapping(value, path):
         _number(item, f"{path}.{key}")
 
 
+def _affect(data, path, *, learned=False, metadata=False):
+    """Проверить свидетельство, не присваивая ему статус факта."""
+    from src.core.human_affect import (
+        AFFECT_COMPONENTS,
+        AFFECT_EVIDENCE_KINDS,
+        AFFECT_PHRASE_MAX_LEN,
+        normalize_affect_phrase,
+    )
+
+    data = _dict(data, path)
+    components = _dict(data.get("components"), f"{path}.components")
+    if not components:
+        _fail(f"{path}.components", "expected at least one component")
+    for name, value in components.items():
+        if name not in AFFECT_COMPONENTS:
+            _fail(f"{path}.components.{name}", "unknown affect component")
+        _number(value, f"{path}.components.{name}")
+        if not 0.0 <= value <= 1.0:
+            _fail(f"{path}.components.{name}", "expected a value in [0, 1]")
+    evidence = data.get("evidence")
+    expected = {"user_taught"} if learned else AFFECT_EVIDENCE_KINDS
+    if evidence not in expected:
+        _fail(f"{path}.evidence", "unknown evidence kind")
+    weight_field = "weight" if learned else "testimony_weight"
+    weight = data.get(weight_field)
+    _number(weight, f"{path}.{weight_field}")
+    if not 0.0 < weight <= 1.0:
+        _fail(f"{path}.{weight_field}", "expected a value in (0, 1]")
+    _integer(data.get("cycle"), f"{path}.cycle", nonnegative=True)
+    if metadata:
+        if not isinstance(data.get("marker"), str):
+            _fail(f"{path}.marker", "expected a string")
+        if not isinstance(data.get("shared_marker"), bool):
+            _fail(f"{path}.shared_marker", "expected a boolean")
+    return normalize_affect_phrase, AFFECT_PHRASE_MAX_LEN
+
+
 def _node(data, path, *, name=None):
     from src.cognition.mental_models import ConceptNode
 
@@ -457,6 +494,109 @@ def validate_checkpoint_state(state) -> None:
         )
         for phrase, cycle in suppressed.items():
             _convertible_int(cycle, f"dialogue_learning.suppressed.{phrase}")
+        learned_affect = _dict(
+            learning.get("learned_affect", {}), "dialogue_learning.learned_affect"
+        )
+        if len(learned_affect) > 200:
+            _fail("dialogue_learning.learned_affect", "too many entries")
+        for phrase, entry in learned_affect.items():
+            entry_path = f"dialogue_learning.learned_affect.{phrase}"
+            normalize, max_len = _affect(entry, entry_path, learned=True)
+            if not isinstance(phrase, str) or normalize(phrase) != phrase:
+                _fail(entry_path, "expected a normalized string phrase")
+            if not phrase or len(phrase) > max_len:
+                _fail(entry_path, "phrase length out of range")
+        suppressed_affect = _dict(
+            learning.get("suppressed_affect", {}),
+            "dialogue_learning.suppressed_affect",
+        )
+        for phrase, cycle in suppressed_affect.items():
+            path = f"dialogue_learning.suppressed_affect.{phrase}"
+            if not isinstance(phrase, str) or not phrase:
+                _fail(path, "expected a nonempty string phrase")
+            _integer(cycle, path, nonnegative=True)
+        strategies_state = _dict(
+            learning.get("dialogue_strategies", {}),
+            "dialogue_learning.dialogue_strategies",
+        )
+        from src.core.dialogue_strategies import (
+            RECENT_RESPONSE_IDS_MAX,
+            RESPONSE_ID_MAX_LEN,
+            STRATEGY_WHITELIST,
+        )
+
+        outcomes = _dict(
+            strategies_state.get("outcomes", {}),
+            "dialogue_learning.dialogue_strategies.outcomes",
+        )
+        for context, strategies in outcomes.items():
+            context_path = f"dialogue_learning.dialogue_strategies.outcomes.{context}"
+            if context not in STRATEGY_WHITELIST:
+                _fail(context_path, "unknown strategy context")
+            strategies = _dict(strategies, context_path)
+            for strategy, raw in strategies.items():
+                path = f"{context_path}.{strategy}"
+                if strategy not in STRATEGY_WHITELIST[context]:
+                    _fail(path, "unknown dialogue strategy")
+                entry = _dict(raw, path)
+                for field in ("support", "opposition"):
+                    value = entry.get(field)
+                    _number(value, f"{path}.{field}")
+                    if value < 0.0:
+                        _fail(f"{path}.{field}", "expected a nonnegative number")
+                response_count = entry.get("response_count")
+                _integer(response_count, f"{path}.response_count", nonnegative=True)
+                _integer(
+                    entry.get("last_cycle"), f"{path}.last_cycle", nonnegative=True
+                )
+                recent = _list(
+                    entry.get("recent_response_ids"), f"{path}.recent_response_ids"
+                )
+                if len(recent) > RECENT_RESPONSE_IDS_MAX:
+                    _fail(f"{path}.recent_response_ids", "too many response IDs")
+                for index, response_id in enumerate(recent):
+                    if (
+                        not isinstance(response_id, str)
+                        or not 0 < len(response_id.strip()) <= RESPONSE_ID_MAX_LEN
+                    ):
+                        _fail(
+                            f"{path}.recent_response_ids[{index}]",
+                            "invalid response ID",
+                        )
+                if len(set(recent)) != len(recent):
+                    _fail(f"{path}.recent_response_ids", "duplicate response ID")
+                if response_count < len(recent):
+                    _fail(f"{path}.response_count", "inconsistent response count")
+        preferences = _dict(
+            strategies_state.get("preferences", {}),
+            "dialogue_learning.dialogue_strategies.preferences",
+        )
+        for context, raw in preferences.items():
+            path = f"dialogue_learning.dialogue_strategies.preferences.{context}"
+            if context not in STRATEGY_WHITELIST:
+                _fail(path, "unknown strategy context")
+            entry = _dict(raw, path)
+            if entry.get("strategy") not in STRATEGY_WHITELIST[context]:
+                _fail(f"{path}.strategy", "unknown dialogue strategy")
+            if entry.get("evidence") != "user_taught":
+                _fail(f"{path}.evidence", "expected user_taught")
+            _integer(entry.get("cycle"), f"{path}.cycle", nonnegative=True)
+        target = strategies_state.get("feedback_target")
+        if target is not None:
+            path = "dialogue_learning.dialogue_strategies.feedback_target"
+            target = _dict(target, path)
+            response_id = target.get("response_id")
+            if (
+                not isinstance(response_id, str)
+                or not 0 < len(response_id.strip()) <= RESPONSE_ID_MAX_LEN
+            ):
+                _fail(f"{path}.response_id", "invalid response ID")
+            context = target.get("context_key")
+            if context not in STRATEGY_WHITELIST:
+                _fail(f"{path}.context_key", "unknown strategy context")
+            if target.get("strategy_id") not in STRATEGY_WHITELIST[context]:
+                _fail(f"{path}.strategy_id", "unknown dialogue strategy")
+            _integer(target.get("cycle"), f"{path}.cycle", nonnegative=True)
     if state.get("emotional_state") is not None:
         emotions = _dict(state["emotional_state"], "emotional_state")
         levels = _dict(emotions.get("levels", {}), "emotional_state.levels")
@@ -497,6 +637,10 @@ def validate_checkpoint_state(state) -> None:
                     _fail(f"{path}.{field}", "expected a string")
             if "cycle" in entry:
                 _integer(entry["cycle"], f"{path}.cycle", nonnegative=True)
+        if interaction.get("last_human_affect") is not None:
+            _affect(
+                interaction["last_human_affect"], "user_interaction.last_human_affect"
+            )
         for index, entry in enumerate(
             _list(
                 interaction.get("dialogue_acts", []),
@@ -514,6 +658,8 @@ def validate_checkpoint_state(state) -> None:
                 if not isinstance(entity, str):
                     _fail(f"{path}.entities[{entity_index}]", "expected a string")
             _integer(entry.get("cycle"), f"{path}.cycle", nonnegative=True)
+            if entry.get("affect") is not None:
+                _affect(entry["affect"], f"{path}.affect", metadata=True)
         for index, question in enumerate(
             _list(
                 interaction.get("pending_questions", []),
@@ -526,6 +672,11 @@ def validate_checkpoint_state(state) -> None:
                 _fail(f"{path}.question", "expected a string")
             if "id" in question:
                 _convertible_int(question["id"], f"{path}.id")
+            if "response_id" in question and (
+                not isinstance(question["response_id"], str)
+                or not question["response_id"].strip()
+            ):
+                _fail(f"{path}.response_id", "expected a non-empty string")
             for field in ("cycle", "sub_question_index"):
                 if field in question:
                     _integer(question[field], f"{path}.{field}", nonnegative=True)

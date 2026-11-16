@@ -106,6 +106,32 @@ def test_ask_user_ids_stay_unique_after_restore():
     assert rui.question_history[-1]["question"] == "Новый вопрос?"
 
 
+def test_question_response_ids_are_unique_and_survive_checkpoint():
+    """Числовой id может повториться после ответа, а feedback-id — нет."""
+    original = DigitalBeing(name="ResponseIds")
+    ui = original.user_interaction
+    first = ui.ask_user("Первый вопрос?", cycle=10)
+    ui.submit_answer(first["id"], "Ответ", cycle=11)
+    second = ui.ask_user("Второй вопрос?", cycle=1300)
+
+    assert first["id"] == second["id"] == 1
+    assert first["response_id"] != second["response_id"]
+
+    state = build_state_from_agent(original)
+    validate_checkpoint_state(state)
+    restored = DigitalBeing(name="ResponseIds")
+    apply_state_to_agent(restored, state)
+    pending = restored.user_interaction.get_pending_question()
+    assert pending["response_id"] == second["response_id"]
+
+    restored.user_interaction.restore_from_checkpoint(
+        {"pending_questions": [{"id": 1, "question": "Старый вопрос?"}]}
+    )
+    legacy = restored.user_interaction.get_pending_question()
+    assert "response_id" not in legacy
+    assert f"question:{legacy['id']}" == "question:1"
+
+
 def test_restore_skips_corrupt_and_answered_entries():
     """Битые записи пропускаются, мёртвые (отвечённые) вопросы не
     восстанавливаются, id без коллизий, маркеры цикла на месте."""

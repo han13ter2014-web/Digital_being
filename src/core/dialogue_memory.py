@@ -388,6 +388,7 @@ class DialogueActRing:
         cycle=0,
         user_text="",
         agent_text="",
+        affect=None,
     ) -> None:
         kind = _clean_text(kind, 80)
         agent_text = _clean_text(agent_text)
@@ -402,21 +403,35 @@ class DialogueActRing:
                 if _clean_text(entity, 240)
             )
         )[:10]
-        self._acts.append(
-            {
-                "kind": kind,
-                "topic": _clean_text(topic, 240),
-                "entities": clean_entities,
-                "cycle": _cycle_number(cycle),
-                "user_text": _clean_text(user_text),
-                "agent_text": agent_text,
-            }
-        )
+        if affect is not None:
+            from src.core.human_affect import restore_affect
+
+            affect = restore_affect(affect, include_metadata=True)
+        entry = {
+            "kind": kind,
+            "topic": _clean_text(topic, 240),
+            "entities": clean_entities,
+            "cycle": _cycle_number(cycle),
+            "user_text": _clean_text(user_text),
+            "agent_text": agent_text,
+        }
+        if affect is not None:
+            entry["affect"] = affect
+        self._acts.append(entry)
         self._acts = self._acts[-self.size :]
+
+    @staticmethod
+    def _copy_entry(entry):
+        copied = dict(entry, entities=list(entry["entities"]))
+        if "affect" in entry:
+            copied["affect"] = dict(
+                entry["affect"], components=dict(entry["affect"]["components"])
+            )
+        return copied
 
     def snapshot(self) -> list:
         """Независимая копия для чтения и сериализации."""
-        return [dict(entry, entities=list(entry["entities"])) for entry in self._acts]
+        return [self._copy_entry(entry) for entry in self._acts]
 
     def restore(self, data) -> None:
         """Восстановить только валидные дескрипторы; старое поле → пусто."""
@@ -444,7 +459,31 @@ class DialogueActRing:
                 cycle=cycle,
                 user_text=entry.get("user_text", ""),
                 agent_text=agent_text,
+                affect=entry.get("affect"),
             )
+
+    def fresh_acts(self, cycle, limit=3) -> list:
+        """Свежие акты newest-first с transient attention-весами."""
+        from src.core.human_affect import AFFECT_ATTENTION_WEIGHTS
+
+        current = _cycle_number(cycle)
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+        fresh = []
+        for entry in reversed(self._acts):
+            age = current - entry["cycle"]
+            if age < 0 or age > self.ttl:
+                continue
+            copied = self._copy_entry(entry)
+            index = len(fresh)
+            copied["attention"] = AFFECT_ATTENTION_WEIGHTS[
+                min(index, len(AFFECT_ATTENTION_WEIGHTS) - 1)
+            ]
+            fresh.append(copied)
+            if len(fresh) >= limit:
+                break
+        return fresh
 
     def _fresh_candidate(self, cycle):
         if not self._acts:

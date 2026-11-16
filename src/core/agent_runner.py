@@ -57,6 +57,7 @@ from src.core.dialogue_acts import (
     ACT_ANSWER,
     ACT_ASK_ABOUT_SELF,
     ACT_FOLLOW_UP,
+    ACT_HUMAN_AFFECT,
     ACT_REQUEST,
     ACT_SOCIAL,
     SOCIAL_KIND_GREETING,
@@ -70,6 +71,21 @@ from src.core.dialogue_acts import (
     social_reply_kind,
 )
 from src.core.dialogue_learning import DialogueLearning
+from src.core.dialogue_strategies import (
+    build_preference_proposal,
+    is_forget_preference_request,
+    is_preference_context,
+    parse_feedback,
+    parse_preference_decision,
+    parse_preference_request,
+    preference_from_context,
+)
+from src.core.human_affect import (
+    AFFECT_LABELS,
+    attachment_testimony_weight,
+    extract_affect_teaching,
+    shared_affect_components,
+)
 from src.core.dialogue_memory import (
     anaphora_marker,
     build_follow_up_clarification,
@@ -411,7 +427,15 @@ class AgentRunner:
         # без изменений — безопасный fallback сохранён.
         # «Собеседник-7»: обученные маркеры участвуют в классификации
         # (после статических таблиц).
-        act = classify_user_text(text, learned=self._learned_markers())
+        act = classify_user_text(
+            text,
+            learned=self._learned_markers(),
+            learned_affect=self._learned_affect(),
+            cycle=self.agent.cycle_count,
+            testimony_weight=attachment_testimony_weight(
+                getattr(self.agent, "attachment", None)
+            ),
+        )
 
         # Один вход — одно социальное наблюдение, включая ранние двери и
         # диалог имени. Это модель наблюдаемого акта, а не оценка личности.
@@ -434,22 +458,137 @@ class AgentRunner:
         # без требования команды /name. Это должно происходить до помещения
         # текста в очередь стимулов, иначе «Малютка» станет концептом, а имя
         # агента останется прежним.
+        learning = getattr(self.agent, "dialogue_learning", None)
+        strategy_memory = getattr(learning, "strategy_memory", None)
         naming = getattr(self.agent, "naming_dialogue", None)
         if naming is not None and await self._handle_naming_phase(naming, text):
+            if strategy_memory is not None:
+                strategy_memory.clear_feedback_target()
             return
 
         # === «Собеседник-7»: обучающий ответ — до всех дверей ===
         # Ответ на вопрос-уточнение («1», «вопрос», «не учи») не должен
         # проглатываться дверями шума/социальной речи: «2» — без букв,
         # «приветствие» — содержит социальный маркер «привет».
-        learning = getattr(self.agent, "dialogue_learning", None)
         if (
             learning is not None
             and pending is not None
             and DialogueLearning.is_proposal_context(pending.get("context"))
         ):
-            await self._handle_learning_answer(pending, interaction, text)
+            feedback = None
+            if strategy_memory is not None:
+                current = strategy_memory.current_target(self.agent.cycle_count)
+                response_id = pending.get("response_id") or f"question:{pending['id']}"
+                if (
+                    current is not None
+                    and current["strategy_id"] == "learning_question"
+                    and current["response_id"] == response_id
+                ):
+                    feedback = parse_feedback(text, current["strategy_id"])
+                if feedback is None:
+                    strategy_memory.clear_feedback_target()
+            await self._handle_learning_answer(
+                pending, interaction, text, feedback=feedback
+            )
             return
+        if (
+            learning is not None
+            and pending is not None
+            and DialogueLearning.is_affect_proposal_context(pending.get("context"))
+        ):
+            if strategy_memory is not None:
+                strategy_memory.clear_feedback_target()
+            await self._handle_affect_learning_answer(pending, interaction, text)
+            return
+        if (
+            learning is not None
+            and pending is not None
+            and is_preference_context(pending.get("context"))
+        ):
+            if strategy_memory is not None:
+                strategy_memory.clear_feedback_target()
+            await self._handle_preference_answer(pending, interaction, text)
+            return
+
+        # P2, этап 2: оценивается только свежий фактически показанный ответ.
+        # Любая промежуточная не-feedback реплика разрывает атрибуцию.
+        if strategy_memory is not None:
+            target = strategy_memory.current_target(self.agent.cycle_count)
+            if target is not None:
+                feedback = parse_feedback(text, target["strategy_id"])
+                if feedback is None:
+                    strategy_memory.clear_feedback_target()
+                else:
+                    if interaction is not None:
+                        interaction.receive_user_message(
+                            text, cycle=self.agent.cycle_count
+                        )
+                    user_model = getattr(self.agent, "user_model", None)
+                    if user_model is not None:
+                        user_model.observe(text, cycle=self.agent.cycle_count)
+                    outcome = strategy_memory.apply_feedback(
+                        target["response_id"],
+                        feedback,
+                        self.agent.cycle_count,
+                        testimony_weight=attachment_testimony_weight(
+                            getattr(self.agent, "attachment", None)
+                        ),
+                    )
+                    if outcome["status"] == "duplicate":
+                        reply = (
+                            "Такая оценка уже записана; повторно учитывать её не буду."
+                        )
+                    elif outcome["status"] == "recorded":
+                        reply = "Приняла и сохранила твою оценку этого ответа."
+                    else:
+                        reply = "Не смогла привязать оценку к ответу; не сохранила её."
+                    await self._reply_to_user(
+                        reply,
+                        context="dialogue_feedback",
+                        source="dialogue_strategies",
+                        user_text=text,
+                    )
+                    return
+
+        # P2, этап 3: scoped правило возникает только после отдельного pending.
+        preference_request = parse_preference_request(text)
+        preference_forget = is_forget_preference_request(text)
+        if (
+            strategy_memory is not None
+            and interaction is not None
+            and (preference_request is not None or preference_forget)
+        ):
+            action = "forget" if preference_forget else "set"
+            strategy = preference_request
+            if preference_forget:
+                current = strategy_memory.preference_for("unknown")
+                if current is None:
+                    interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+                    user_model = getattr(self.agent, "user_model", None)
+                    if user_model is not None:
+                        user_model.observe(text, cycle=self.agent.cycle_count)
+                    await self._reply_to_user(
+                        "Правила для непонятных реплик нет — забывать нечего.",
+                        context="dialogue_preference",
+                        source="dialogue_strategies",
+                        user_text=text,
+                    )
+                    return
+                strategy = current["strategy"]
+            await self._propose_dialogue_preference(
+                interaction, strategy, action, user_text=text
+            )
+            return
+
+        if learning is not None and interaction is not None:
+            teaching = extract_affect_teaching(text)
+            if teaching is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+                user_model = getattr(self.agent, "user_model", None)
+                if user_model is not None:
+                    user_model.observe(text, cycle=self.agent.cycle_count)
+                await self._propose_affect_learning(interaction, teaching)
+                return
 
         # === «Эволюция-1»: решение человека по предложению ===
         # «одобри prop_…» / «отклони prop_…» (или без id — последнее
@@ -623,6 +762,33 @@ class AgentRunner:
             )
             await self._reply_to_user(
                 response, context="noise_input", source="dialogue_acts"
+            )
+            return
+
+        # Слова человека о его состоянии — свидетельство, не ответ на
+        # открытый вопрос и не долговременная черта. Контекст кольца может
+        # только подтвердить разделённость уже распознанной реплики.
+        if act.kind == ACT_HUMAN_AFFECT and act.affect is not None:
+            if interaction is not None:
+                interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+                interaction.set_human_affect(act.affect)
+                recent_acts = interaction.dialogue_act_ring.fresh_acts(
+                    self.agent.cycle_count, limit=3
+                )
+            else:
+                recent_acts = []
+            user_model = getattr(self.agent, "user_model", None)
+            if user_model is not None:
+                user_model.observe(text, cycle=self.agent.cycle_count)
+            response, reply_context = self._format_human_affect_reply(
+                act.affect, recent_acts, pending
+            )
+            await self._reply_to_user(
+                response,
+                context=reply_context,
+                source="dialogue_acts",
+                user_text=text,
+                dialogue_affect=act.affect,
             )
             return
 
@@ -806,6 +972,26 @@ class AgentRunner:
                     text, cycle=self.agent.cycle_count
                 )
             if candidate is not None and interaction is not None:
+                if strategy_memory is not None:
+                    decision = strategy_memory.select_strategy(
+                        "unknown", self.agent.cycle_count
+                    )
+                    if decision["strategy_id"] == "unknown_listen":
+                        message_id = await self._reply_to_user(
+                            "Я тебя слышу, но пока не понимаю, о чём это. "
+                            "Можешь продолжить; я не буду перебивать вопросом.",
+                            context="unknown_listen",
+                            source="dialogue_strategies",
+                            user_text=text,
+                        )
+                        if isinstance(message_id, str) and message_id:
+                            strategy_memory.register_response(
+                                message_id,
+                                "unknown_listen",
+                                "unknown",
+                                self.agent.cycle_count,
+                            )
+                        return
                 proposal = learning.build_proposal(
                     candidate, cycle=self.agent.cycle_count
                 )
@@ -818,6 +1004,24 @@ class AgentRunner:
                     "queued",
                     "duplicate",
                 }:
+                    # Только новая публикация создаёт target. Duplicate —
+                    # старый pending, а не показанный сейчас ответ.
+                    question_id = asked.get("id")
+                    response_id = asked.get("response_id")
+                    if not (isinstance(response_id, str) and response_id.strip()):
+                        response_id = f"question:{question_id}"
+                    if (
+                        asked.get("status") == "queued"
+                        and strategy_memory is not None
+                        and isinstance(question_id, int)
+                        and not isinstance(question_id, bool)
+                    ):
+                        strategy_memory.register_response(
+                            response_id,
+                            "learning_question",
+                            "unknown",
+                            self.agent.cycle_count,
+                        )
                     # Кулдаун — только за фактически заданный вопрос:
                     # отказ ask_user (свой cooldown вопросов) не должен
                     # молча глушить фразу на 1200 циклов.
@@ -852,18 +1056,205 @@ class AgentRunner:
             return None
         return learning.classifier_entries()
 
-    async def _handle_learning_answer(self, pending, interaction, text) -> None:
+    def _learned_affect(self):
+        """Точные пользовательские ассоциации, без нечёткого recall."""
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if learning is None:
+            return None
+        return learning.affect_classifier_entries()
+
+    async def _propose_dialogue_preference(
+        self, interaction, strategy, action, *, user_text
+    ) -> None:
+        """Поставить отдельный вопрос, не меняя preference до ответа."""
+        proposal = build_preference_proposal(strategy, action)
+        interaction.receive_user_message(user_text, cycle=self.agent.cycle_count)
+        user_model = getattr(self.agent, "user_model", None)
+        if user_model is not None:
+            user_model.observe(user_text, cycle=self.agent.cycle_count)
+        asked = interaction.ask_user(
+            proposal["question"],
+            context=proposal["context"],
+            cycle=self.agent.cycle_count,
+            # Протокол инициирован человеком; лимиты очереди сохраняются.
+            respect_affect=False,
+        )
+        if isinstance(asked, dict) and asked.get("status") in {
+            "queued",
+            "duplicate",
+        }:
+            return
+        await self._reply_to_user(
+            "Поняла пожелание, но сейчас не могу задать вопрос для "
+            "подтверждения. Правило не изменено.",
+            context="dialogue_preference",
+            source="dialogue_strategies",
+            user_text=user_text,
+        )
+
+    async def _handle_preference_answer(self, pending, interaction, text) -> None:
+        """Применить только явное решение по отдельному preference-pending."""
+        if interaction is not None:
+            interaction.submit_answer(pending["id"], text, cycle=self.agent.cycle_count)
+        learning = getattr(self.agent, "dialogue_learning", None)
+        memory = getattr(learning, "strategy_memory", None)
+        action, strategy = preference_from_context(pending.get("context"))
+        decision = parse_preference_decision(text)
+        if memory is None or action is None or decision is not True:
+            reply = "Правило не изменено."
+        elif action == "set":
+            memory.set_preference("unknown", strategy, self.agent.cycle_count)
+            rule = (
+                "не задавать учебных вопросов"
+                if strategy == "unknown_listen"
+                else "задавать учебный вопрос"
+            )
+            reply = (
+                f"Запомнила правило только для непонятных реплик: {rule}. "
+                "Его можно исправить или забыть."
+            )
+        else:
+            current = memory.preference_for("unknown")
+            if current is not None and current["strategy"] == strategy:
+                memory.clear_preference("unknown")
+                reply = (
+                    "Забыла правило для непонятных реплик. "
+                    "Прежние отзывы не изменены."
+                )
+            elif current is None:
+                reply = "Правила уже нет; ничего не удалила."
+            else:
+                reply = "Правило изменилось с момента вопроса; ничего не удалила."
+        await self._reply_to_user(
+            reply,
+            context="dialogue_preference",
+            source="dialogue_strategies",
+            user_text=text,
+        )
+
+    async def _propose_affect_learning(self, interaction, teaching) -> None:
+        """Предложить связь, но не сохранять её до отдельного «да»."""
+        learning = self.agent.dialogue_learning
+        proposal = learning.build_affect_proposal(
+            teaching["phrase"], teaching["component"]
+        )
+        asked = interaction.ask_user(
+            proposal["question"],
+            context=proposal["context"],
+            cycle=self.agent.cycle_count,
+            # Человек сам начал обучение: свежая грусть не блокирует это
+            # подтверждение. Кулдаун и лимиты очереди остаются в силе.
+            respect_affect=False,
+        )
+        if isinstance(asked, dict) and asked.get("status") in {
+            "queued",
+            "duplicate",
+        }:
+            learning.mark_proposed(self.agent.cycle_count)
+            return
+        await self._reply_to_user(
+            "Поняла объяснение, но сейчас не могу задать вопрос для "
+            "подтверждения. Связь пока не сохранена.",
+            context="affect_learning_deferred",
+            source="dialogue_learning",
+        )
+
+    async def _handle_affect_learning_answer(self, pending, interaction, text) -> None:
+        """Применить ответ только к отдельному affect-pending вопросу."""
+        phrase, component = DialogueLearning.affect_from_context(pending.get("context"))
+        if interaction is not None:
+            interaction.submit_answer(pending["id"], text, cycle=self.agent.cycle_count)
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if learning is None or not phrase or not component:
+            await self._reply_to_user(
+                "Ответ записан, но связь не распознана и не сохранена.",
+                context="affect_learning",
+                source="dialogue_learning",
+            )
+            return
+        outcome = learning.resolve_affect(
+            phrase, component, text, cycle=self.agent.cycle_count
+        )
+        if outcome["status"] == "learned":
+            reply = (
+                f"Сохранила «{phrase}» как твоё свидетельство: "
+                f"«{AFFECT_LABELS[component]}». Это не безусловный факт; "
+                "связь можно исправить или забыть."
+            )
+        elif outcome["status"] == "suppressed":
+            reply = f"Хорошо: «{phrase}» как выражение эмоции учить не буду."
+        elif outcome["status"] == "limit":
+            reply = (
+                "Лексикон выражений заполнен. Новую связь не сохранила; "
+                "сначала можно забыть ненужную фразу."
+            )
+        else:
+            reply = (
+                "Не поняла подтверждение — связь не сохранена. "
+                "Если захочешь, объясни её позже ещё раз."
+            )
+        await self._reply_to_user(
+            reply, context="affect_learning", source="dialogue_learning"
+        )
+
+    async def _handle_learning_answer(
+        self, pending, interaction, text, *, feedback=None
+    ) -> None:
         """Применить обучающий ответ к фразе («Собеседник-7»).
 
         Вопрос-уточнение закрывается через тот же submit_answer, что и
         обычные ответы: история диалога остаётся единой. Непонятный
         ответ ничему не учит и не запрещает — кулдаун предложений не
-        даёт спросить снова сразу.
+        даёт спросить снова сразу. Точный feedback закрывает вопрос, но
+        оценивает только показанную стратегию, не обучая саму фразу.
         """
         phrase = DialogueLearning.phrase_from_context(pending.get("context"))
+        learning = getattr(self.agent, "dialogue_learning", None)
+        if feedback is not None:
+            if interaction is not None:
+                interaction.submit_answer(
+                    pending["id"], text, cycle=self.agent.cycle_count
+                )
+            memory = getattr(learning, "strategy_memory", None)
+            response_id = pending.get("response_id") or f"question:{pending['id']}"
+            outcome = (
+                memory.apply_feedback(
+                    response_id,
+                    feedback,
+                    self.agent.cycle_count,
+                    testimony_weight=attachment_testimony_weight(
+                        getattr(self.agent, "attachment", None)
+                    ),
+                )
+                if memory is not None
+                else {"status": "ignored"}
+            )
+            if outcome["status"] == "recorded":
+                reply = (
+                    "Приняла: фразу не стала учить, а твою оценку учебного "
+                    "вопроса сохранила."
+                )
+            elif outcome["status"] == "duplicate":
+                reply = "Фразу не стала учить; такая оценка уже была записана."
+            else:
+                reply = (
+                    "Фразу не стала учить, но не смогла привязать оценку к "
+                    "учебному вопросу; не сохранила её."
+                )
+            await self._reply_to_user(
+                reply, context="dialogue_learning", source="dialogue_learning"
+            )
+            return
+        teaching = extract_affect_teaching(text, default_phrase=phrase)
+        if learning is not None and phrase and teaching is not None:
+            if interaction is not None:
+                interaction.submit_answer(
+                    pending["id"], text, cycle=self.agent.cycle_count
+                )
+            await self._propose_affect_learning(interaction, teaching)
+            return
         if interaction is not None:
             interaction.submit_answer(pending["id"], text, cycle=self.agent.cycle_count)
-        learning = getattr(self.agent, "dialogue_learning", None)
         if learning is None or not phrase:
             await self._reply_to_user(
                 "Ответ записан.",
@@ -910,15 +1301,15 @@ class AgentRunner:
         user_text="",
         dialogue_topic="",
         dialogue_entities=(),
-    ) -> None:
-        """Доставить прямую реплику и сохранить её дескриптор в кольцо Т5.
+        dialogue_affect=None,
+    ) -> str | None:
+        """Доставить реплику, записать дескриптор и вернуть ID сообщения.
 
         «Собеседник-6»: ответ на реплику человека — это AGENT_MESSAGE
         (UserInteraction.send_reply), а не AGENT_THOUGHT: реплика видна
         в чате как сообщение, попадает в message_history и переживает
         рестарт, а не теряется в потоке автономных мыслей. Для стендов
-        без user_interaction — прежняя публикация мысли (совместимость
-        с фейками в тестах).
+        без user_interaction — прежняя публикация мысли и возврат None.
         """
         voice = getattr(self.agent, "voice_router", None)
         if voice is not None:
@@ -939,7 +1330,7 @@ class AgentRunner:
 
         interaction = getattr(self.agent, "user_interaction", None)
         if interaction is not None and hasattr(interaction, "send_reply"):
-            interaction.send_reply(
+            message_id = interaction.send_reply(
                 text,
                 context=context,
                 cycle=self.agent.cycle_count,
@@ -951,10 +1342,11 @@ class AgentRunner:
                 user_text,
                 dialogue_topic,
                 dialogue_entities,
+                dialogue_affect,
             )
-            return
+            return message_id
         if interaction is not None and hasattr(interaction, "send_message"):
-            interaction.send_message(
+            message_id = interaction.send_message(
                 text,
                 msg_type="statement",
                 tone="casual",
@@ -969,14 +1361,16 @@ class AgentRunner:
                 user_text,
                 dialogue_topic,
                 dialogue_entities,
+                dialogue_affect,
             )
-            return
+            return message_id
         await self.bus.publish(
             Events.AGENT_THOUGHT,
             {"text": text, "cycle": self.agent.cycle_count},
             source=source,
             priority=1,
         )
+        return None
 
     def _record_dialogue_reply(
         self,
@@ -986,6 +1380,7 @@ class AgentRunner:
         user_text,
         dialogue_topic,
         dialogue_entities,
+        dialogue_affect=None,
     ) -> None:
         """Старые fake interaction без кольца остаются совместимыми."""
         recorder = getattr(interaction, "record_dialogue_act", None)
@@ -998,6 +1393,7 @@ class AgentRunner:
             cycle=self.agent.cycle_count,
             user_text=user_text,
             agent_text=text,
+            affect=dialogue_affect,
         )
 
     async def _handle_user_definition(self, definition) -> None:
@@ -1199,6 +1595,61 @@ class AgentRunner:
             topic = context[len(prefix) :].strip()
             return topic or None
         return None
+
+    @staticmethod
+    def _format_human_affect_reply(affect, recent_acts, pending) -> tuple:
+        """Описать услышанные слова, не присваивая себе чужое переживание."""
+        shared = shared_affect_components(affect, recent_acts)
+        components = affect["components"]
+        adverbs = {
+            "joy": "радостно",
+            "sadness": "грустно",
+            "calm": "спокойно",
+            "anxiety": "тревожно",
+        }
+        genitives = {
+            "joy": "радости",
+            "sadness": "грусти",
+            "calm": "спокойствия",
+            "anxiety": "тревоги",
+        }
+        if shared:
+            names = " и ".join(adverbs[name] for name in shared)
+            reply = (
+                f"Я слышу: тебе тоже {names}. Сохраняю это как твоё "
+                "описание разделённого состояния, а не как безусловный факт."
+            )
+            context = "emotion_echo_shared"
+        elif len(components) > 1:
+            names = []
+            for name, value in components.items():
+                prefix = "немного " if value <= 0.35 else ""
+                names.append(prefix + genitives[name])
+            reply = (
+                "Я слышу в твоих словах одновременно "
+                + " и ".join(names)
+                + ". Спасибо, что делишься."
+            )
+            if any(name in components for name in ("sadness", "anxiety")):
+                reply += " Не буду торопить тебя с вопросами."
+            context = "emotion_echo_mixed"
+        else:
+            name = next(iter(components))
+            reply = f"Я слышу: ты описываешь, что тебе {adverbs[name]}."
+            if name in ("sadness", "anxiety"):
+                reply += " Я рядом и не буду торопить тебя с ответами и вопросами."
+            elif name == "calm":
+                reply += " Побуду рядом в том же ровном ритме."
+            else:
+                reply += " Спасибо, что делишься."
+            context = "emotion_echo"
+        topic = AgentRunner._topic_from_pending(pending)
+        if topic:
+            reply += (
+                f" Вопрос про «{topic}» остаётся открытым — "
+                "ответишь, когда захочешь."
+            )
+        return reply, context
 
     @staticmethod
     def _format_social_reply(text, pending) -> str:

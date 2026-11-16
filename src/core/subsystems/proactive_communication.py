@@ -26,6 +26,7 @@ from src.core.dialogue_acts import (
     ACT_UNKNOWN,
     classify_user_text,
 )
+from src.core.human_affect import NEGATIVE_AFFECT_THRESHOLD
 
 
 class ContextAwareness:
@@ -367,6 +368,34 @@ class ProactiveCommunication:
         # При страдании — только забота
         if msg is not None and suffering > 0.4 and msg.get("msg_type") not in ("care",):
             msg = None  # отменяем радостные сообщения
+
+        # Уже разрешённая попытка адаптируется к словам человека, но сама
+        # по себе эта запись новое сообщение не инициирует. Это свидетельство
+        # с затуханием, а не постоянная черта или утверждение о причине.
+        if msg is not None:
+            strength_getter = getattr(
+                self.user_interaction, "negative_affect_strength", None
+            )
+            strength = strength_getter(cycle) if callable(strength_getter) else 0.0
+            if strength >= NEGATIVE_AFFECT_THRESHOLD:
+                current = self.user_interaction.human_affect_at(cycle) or {}
+                components = current.get("components", {})
+                label = (
+                    "тревожно"
+                    if components.get("anxiety", 0.0) >= components.get("sadness", 0.0)
+                    else "грустно"
+                )
+                msg = {
+                    "content": (
+                        f"Помню, ты писал, что тебе {label}. Я рядом; "
+                        "отвечать не обязательно."
+                    ),
+                    "msg_type": "care",
+                    "tone": "cautious",
+                    "urgency": 0.15,
+                    "context": "human_negative_affect",
+                    "cycle": cycle,
+                }
 
         if msg is not None:
             self._last_proactive_cycle = cycle
