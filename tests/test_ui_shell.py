@@ -94,6 +94,7 @@ def test_shell_builds_and_switches_pages(root):
         "diary",
         "activities",
         "tutor",
+        "contacts",
         "access",
         "dialog",
     }
@@ -168,6 +169,267 @@ def test_tutor_controls_respect_read_only_mode(root):
     )
     assert win._send_tutor_action("allow") is False
     assert bus.published == []
+
+
+def _external_snapshot(
+    *, pending=False, can_manage=True, provider="manual", automation_state="idle"
+):
+    messages = [
+        {
+            "message_id": "inbound-1",
+            "direction": "inbound",
+            "claim_type": "external_ai_claim",
+            "status": "quarantined",
+            "text": "Внешняя реплика",
+            "text_sha256": "a" * 64,
+            "cycle": 4,
+            "origin": "owner",
+            "revision": 0,
+            "error": None,
+        }
+    ]
+    pending_draft = None
+    if pending:
+        pending_draft = {
+            "message_id": "outbound-1",
+            "direction": "outbound",
+            "claim_type": "agent_draft",
+            "status": "draft",
+            "text": "Первый проект",
+            "text_sha256": "b" * 64,
+            "cycle": 5,
+            "origin": "owner",
+            "revision": 1,
+            "error": None,
+        }
+        messages.append(pending_draft)
+    return {
+        "external_contacts": {
+            "available": True,
+            "can_manage": can_manage,
+            "active": 1,
+            "messages": len(messages),
+            "pending_drafts": int(pending),
+            "journal_limit": 12,
+            "sessions": [
+                {
+                    "session_id": "session-1",
+                    "profile_id": "profile-1",
+                    "provider": provider,
+                    "model": "rufp/default" if provider == "rufp" else None,
+                    "external_id": "deepseek-web",
+                    "topic": "тема",
+                    "reason": "причина",
+                    "status": "active",
+                    "display_name": "DeepSeek",
+                    "message_count": len(messages),
+                    "messages": messages,
+                    "pending_draft": pending_draft,
+                    "automation": {
+                        "state": automation_state,
+                        "in_flight": automation_state in {"running", "pausing"},
+                        "replies_sent": 1 if automation_state != "idle" else 0,
+                        "max_replies": 3,
+                        "tokens_used": 120 if automation_state != "idle" else 0,
+                        "max_total_tokens": 1200,
+                        "min_interval_sec": 2.0,
+                        "usage": {},
+                        "tokens_estimated": False,
+                        "billing_receipts": [],
+                        "last_error": None,
+                        "automatic_resume": False,
+                    },
+                }
+            ],
+        }
+    }
+
+
+def test_external_buttons_publish_commands_and_only_live_session_ids(root):
+    from src.core.event_bus import Events
+
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha")
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    win._apply_life_data(_external_snapshot())
+    root.update()
+
+    win._external_start_vars["name"].set("DeepSeek")
+    win._external_start_vars["external_id"].set("deepseek-web")
+    win._external_start_vars["topic"].set("тема")
+    win._external_start_vars["reason"].set("причина")
+    _find_button(win._pages["contacts"], "Создать сессию").invoke()
+    assert bus.published[-1] == (
+        Events.USER_COMMAND,
+        {"command": "external start manual | DeepSeek | deepseek-web | тема | причина"},
+    )
+
+    win._external_ingest_text.insert("1.0", "  Привет | это карантин  ")
+    _find_button(win._pages["contacts"], "Добавить в карантин").invoke()
+    assert bus.published[-1][1] == {
+        "command": "external ingest session-1 | Привет | это карантин"
+    }
+    _find_button(win._pages["contacts"], "Создать проект").invoke()
+    assert bus.published[-1][1] == {"command": "external draft session-1"}
+
+    win._apply_life_data(_external_snapshot(pending=True))
+    root.update()
+    win._external_edit_text.delete("1.0", tk.END)
+    win._external_edit_text.insert("1.0", "Новая\nредакция | точно")
+    _find_button(win._pages["contacts"], "Сохранить изменения").invoke()
+    assert bus.published[-1][1] == {
+        "command": "external edit session-1 | Новая\nредакция | точно"
+    }
+    _find_button(win._pages["contacts"], "Одобрить").invoke()
+    assert bus.published[-1][1] == {"command": "external approve session-1"}
+
+    approved = _external_snapshot(pending=True)
+    approved["external_contacts"]["sessions"][0]["pending_draft"]["status"] = "approved"
+    win._apply_life_data(approved)
+    root.update()
+    _find_button(win._pages["contacts"], "Отметить ручную передачу").invoke()
+    assert bus.published[-1][1] == {"command": "external handoff session-1"}
+    _find_button(win._pages["contacts"], "Остановить сессию").invoke()
+    assert bus.published[-1][1] == {"command": "external stop session-1"}
+
+    before = len(bus.published)
+    win._external_selected_session_id = "session-unknown"
+    assert win._send_external_action("stop") is False
+    assert win._send_external_action("send") is False
+    assert len(bus.published) == before
+
+
+def test_external_automation_commands_limits_and_busy_state(root):
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha")
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    win._apply_life_data(_external_snapshot(provider="rufp"))
+    root.update()
+
+    win._external_start_vars["provider"].set("rufp")
+    win._external_start_vars["name"].set("RUFP")
+    win._external_start_vars["external_id"].set("rufp-api")
+    win._external_start_vars["topic"].set("тема")
+    win._external_start_vars["reason"].set("ограниченный диалог")
+    win._external_start_vars["model"].set("rufp/default")
+    _find_button(win._pages["contacts"], "Создать сессию").invoke()
+    assert bus.published[-1][1] == {
+        "command": (
+            "external start rufp | RUFP | rufp-api | тема | "
+            "ограниченный диалог | rufp/default"
+        )
+    }
+
+    _find_button(win._pages["contacts"], "Запустить автообмен").invoke()
+    assert bus.published[-1][1] == {
+        "command": "external auto session-1 3 1200 2"
+    }
+
+    win._apply_life_data(
+        _external_snapshot(provider="rufp", automation_state="running")
+    )
+    root.update()
+    for caption in ("Запустить автообмен", "Добавить в карантин", "Удалить журнал"):
+        assert str(_find_button(win._pages["contacts"], caption).cget("state")) == (
+            tk.DISABLED
+        )
+    assert str(_find_button(win._pages["contacts"], "Остановить сессию").cget("state")) == (
+        tk.NORMAL
+    )
+    detail = str(win._external_session_detail.cget("text"))
+    assert "rufp/default" in detail
+    assert "реплики: 1/3" in detail
+    assert "токены: 120/1200" in detail
+    assert "запрос: выполняется" in detail
+    _find_button(win._pages["contacts"], "Пауза").invoke()
+    assert bus.published[-1][1] == {"command": "external pause session-1"}
+
+    win._apply_life_data(
+        _external_snapshot(provider="rufp", automation_state="paused")
+    )
+    root.update()
+    _find_button(win._pages["contacts"], "Ручное вмешательство").invoke()
+    assert bus.published[-1][1] == {"command": "external manual session-1"}
+    _find_button(win._pages["contacts"], "Продолжить").invoke()
+    assert bus.published[-1][1] == {"command": "external resume session-1"}
+
+    win._apply_life_data(_external_snapshot(provider="rufp"))
+    root.update()
+    before = len(bus.published)
+    for key, value in (
+        ("max_replies", "0"),
+        ("max_total_tokens", "4097"),
+        ("min_interval_sec", "0"),
+    ):
+        original = win._external_auto_vars[key].get()
+        win._external_auto_vars[key].set(value)
+        assert win._send_external_action("auto") is False
+        win._external_auto_vars[key].set(original)
+    assert len(bus.published) == before
+
+
+def test_external_controls_respect_read_only_mode_and_guest(root):
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha", enabled_controls=False)
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    win._apply_life_data(_external_snapshot(provider="rufp"))
+
+    assert str(
+        _find_button(win._pages["contacts"], "Создать сессию").cget("state")
+    ) == (tk.DISABLED)
+    assert win._send_external_action("start") is False
+    assert win._send_external_action("draft") is False
+    assert win._send_external_action("auto") is False
+
+    guest = MainWindow(bus, "Alpha")
+    guest._root = root
+    guest._poll_running = True
+    guest._build_ui()
+    guest._apply_life_data(
+        _external_snapshot(can_manage=False, provider="rufp")
+    )
+    assert (
+        str(_find_button(guest._pages["contacts"], "Создать сессию").cget("state"))
+        == tk.DISABLED
+    )
+    assert guest._send_external_action("ingest") is False
+    assert guest._send_external_action("auto") is False
+    assert bus.published == []
+
+
+def test_external_editor_keeps_active_input_and_clear_requires_confirmation(
+    root, monkeypatch
+):
+    from tkinter import messagebox
+
+    bus = RecordingBus()
+    win = MainWindow(bus, "Alpha")
+    win._root = root
+    win._poll_running = True
+    win._build_ui()
+    snapshot = _external_snapshot(pending=True)
+    win._apply_life_data(snapshot)
+    root.update()
+    win._external_edit_text.focus_set()
+    win._external_edit_text.delete("1.0", tk.END)
+    win._external_edit_text.insert("1.0", "Моя незавершённая правка")
+
+    win._apply_life_data(snapshot)
+    root.update()
+    assert win._external_edit_text.get("1.0", "end-1c") == "Моя незавершённая правка"
+
+    monkeypatch.setattr(messagebox, "askyesno", lambda *args, **kwargs: False)
+    _find_button(win._pages["contacts"], "Удалить журнал").invoke()
+    assert bus.published == []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *args, **kwargs: True)
+    _find_button(win._pages["contacts"], "Удалить журнал").invoke()
+    assert bus.published[-1][1] == {"command": "external clear session-1"}
 
 
 def test_language_switch_retranslates_static_and_empty_states(root):

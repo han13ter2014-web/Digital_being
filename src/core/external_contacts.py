@@ -1,10 +1,10 @@
-"""Ручной внешний диалог без доступа внешнего текста к Core.
+"""Внешний диалог без доступа внешнего текста к Core.
 
 Входящие реплики являются только ``external_ai_claim``. Проект ответа
 строится из ограниченных детерминированных шаблонов и не содержит память
 других профилей. Одобрение привязано к точному хешу текста; stop и редактирование
-делают прежнее разрешение неприменимым. Реальный сетевой адаптер сюда не
-встроен: передача владельцем и подтверждённая отправка — разные исходы.
+делают прежнее разрешение неприменимым. Ручная передача и отправка через явно
+переданный адаптер — разные исходы; сетевой цикл живёт в external_dialogue.
 """
 
 from __future__ import annotations
@@ -31,7 +31,25 @@ MAX_TOPIC_CHARS = 160
 MAX_REASON_CHARS = 240
 MAX_EXTERNAL_ID_CHARS = 128
 MAX_PROVIDER_CHARS = 64
+MAX_MODEL_CHARS = 128
 MAX_ID_CHARS = 160
+MAX_CONTROL_EVENTS = 128
+CONTROL_EVENT_KINDS = frozenset(
+    {
+        "started",
+        "resumed",
+        "pausing",
+        "paused",
+        "stopping",
+        "stopped",
+        "manual_takeover",
+        "reply_sent",
+        "response_ingested",
+        "api_error",
+        "budget_reached",
+        "late_response_discarded",
+    }
+)
 SESSION_STATUSES = frozenset({"active", "stopped"})
 OUTGOING_STATUSES = frozenset(
     {"draft", "approved", "rejected", "handed_off", "sent", "send_failed", "stopped"}
@@ -76,6 +94,13 @@ def _provider(value) -> str:
     return provider
 
 
+def _model(value) -> Optional[str]:
+    if value is None:
+        return None
+    _text(value, "model", MAX_MODEL_CHARS)
+    return str(value).strip()
+
+
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -86,6 +111,7 @@ def _validate_session(session, path: str) -> None:
     for field in ("session_id", "profile_id"):
         _text(session.get(field), f"{path}.{field}", MAX_ID_CHARS)
     _provider(session.get("provider"))
+    _model(session.get("model"))
     _text(session.get("external_id"), f"{path}.external_id", MAX_EXTERNAL_ID_CHARS)
     _text(session.get("topic"), f"{path}.topic", MAX_TOPIC_CHARS)
     _text(session.get("reason"), f"{path}.reason", MAX_REASON_CHARS)
@@ -103,6 +129,24 @@ def _validate_session(session, path: str) -> None:
         _text(stop_reason, f"{path}.stop_reason", MAX_REASON_CHARS)
     elif stopped_cycle is not None or stop_reason is not None:
         _fail(path, "active session cannot contain stop data")
+
+
+def _validate_control_event(event, path: str, session_by_id: dict) -> None:
+    if not isinstance(event, dict):
+        _fail(path, "expected a dictionary")
+    session_id = event.get("session_id")
+    _text(session_id, f"{path}.session_id", MAX_ID_CHARS)
+    session = session_by_id.get(session_id)
+    if session is None:
+        _fail(f"{path}.session_id", "unknown session")
+    if event.get("kind") not in CONTROL_EVENT_KINDS:
+        _fail(f"{path}.kind", "unknown control event")
+    _cycle(event.get("cycle"), f"{path}.cycle")
+    if event["cycle"] < session["created_cycle"]:
+        _fail(f"{path}.cycle", "event precedes its session")
+    reason = event.get("reason")
+    if reason is not None:
+        _text(reason, f"{path}.reason", MAX_REASON_CHARS, nonempty=False)
 
 
 def _validate_message(message, path: str) -> None:
@@ -180,6 +224,14 @@ def validate_external_contacts(data, registry_data) -> None:
         ):
             _fail(path, "session channel does not match its external profile")
 
+    events = data.get("control_events", [])
+    if not isinstance(events, list) or len(events) > MAX_CONTROL_EVENTS:
+        _fail("external_contacts.control_events", "expected a bounded list")
+    for index, event in enumerate(events):
+        _validate_control_event(
+            event, f"external_contacts.control_events[{index}]", session_by_id
+        )
+
     messages = data.get("messages")
     if not isinstance(messages, list) or len(messages) > MAX_MESSAGES:
         _fail("external_contacts.messages", "expected a bounded list")
@@ -232,6 +284,7 @@ class ExternalContactManager:
     def __init__(self) -> None:
         self.sessions = []
         self.messages = []
+        self.control_events = []
 
     def _session(self, session_id: str) -> Optional[dict]:
         return next(
@@ -260,9 +313,11 @@ class ExternalContactManager:
         topic: str,
         reason: str,
         cycle: int,
+        model: Optional[str] = None,
     ) -> dict:
         _cycle(cycle)
         provider = _provider(provider)
+        model = _model(model)
         _text(external_id, "external_id", MAX_EXTERNAL_ID_CHARS)
         external_id = str(external_id).strip()
         _text(topic, "topic", MAX_TOPIC_CHARS)
@@ -276,6 +331,7 @@ class ExternalContactManager:
             "session_id": f"external-{uuid4()}",
             "profile_id": profile_id,
             "provider": provider,
+            "model": model,
             "external_id": str(external_id).strip(),
             "topic": str(topic).strip(),
             "reason": str(reason).strip(),
@@ -533,6 +589,29 @@ class ExternalContactManager:
         session["last_cycle"] = max(session["last_cycle"], cycle)
         return {"status": "sent", **deepcopy(draft)}
 
+    def record_event(
+        self, session_id: str, kind: str, *, cycle: int, reason: Optional[str] = None
+    ) -> dict:
+        """Добавить безопасное событие управления в ограниченный локальный журнал."""
+        _cycle(cycle)
+        if kind not in CONTROL_EVENT_KINDS:
+            raise ValueError("kind: unknown control event")
+        if reason is not None:
+            _text(reason, "reason", MAX_REASON_CHARS, nonempty=False)
+        session = self._session(session_id)
+        if session is None:
+            return {"status": "not_found", "session_id": session_id}
+        event = {
+            "session_id": session_id,
+            "kind": kind,
+            "cycle": cycle,
+            "reason": reason,
+        }
+        self.control_events.append(event)
+        del self.control_events[:-MAX_CONTROL_EVENTS]
+        session["last_cycle"] = max(session["last_cycle"], cycle)
+        return {"status": "recorded", **deepcopy(event)}
+
     def clear(self, session_id: str) -> dict:
         session = self._session(session_id)
         if session is None:
@@ -540,6 +619,9 @@ class ExternalContactManager:
         self.sessions.remove(session)
         self.messages = [
             item for item in self.messages if item["session_id"] != session_id
+        ]
+        self.control_events = [
+            item for item in self.control_events if item["session_id"] != session_id
         ]
         return {"status": "cleared", "session_id": session_id}
 
@@ -552,6 +634,11 @@ class ExternalContactManager:
             "messages": [
                 deepcopy(item)
                 for item in self.messages
+                if item["session_id"] == session_id
+            ],
+            "control_events": [
+                deepcopy(item)
+                for item in self.control_events
                 if item["session_id"] == session_id
             ],
         }
@@ -572,9 +659,11 @@ class ExternalContactManager:
             "schema_version": SCHEMA_VERSION,
             "sessions": deepcopy(self.sessions),
             "messages": deepcopy(self.messages),
+            "control_events": deepcopy(self.control_events),
         }
 
     def load_from(self, data, registry_data) -> None:
         validate_external_contacts(data, registry_data)
         self.sessions = deepcopy(data["sessions"])
         self.messages = deepcopy(data["messages"])
+        self.control_events = deepcopy(data.get("control_events", []))

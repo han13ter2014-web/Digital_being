@@ -149,6 +149,26 @@ class MainWindow(ChatWindow):
         self._tutor_request_signature: Optional[tuple] = None
         self._tutor_buttons: List[Any] = []
 
+        # Внешние контакты: наблюдение за DTO и только узкие USER_COMMAND.
+        self._external_status = None
+        self._external_session_list = None
+        self._external_session_detail = None
+        self._external_journal = None
+        self._external_session_ids: List[str] = []
+        self._external_selected_session_id: Optional[str] = None
+        self._external_session_signature: Optional[tuple] = None
+        self._external_journal_signature: Optional[tuple] = None
+        self._external_edit_signature: Optional[str] = None
+        self._external_start_vars: Dict[str, Any] = {}
+        self._external_start_entries: List[Any] = []
+        self._external_auto_vars: Dict[str, Any] = {}
+        self._external_auto_entries: List[Any] = []
+        self._external_start_button = None
+        self._external_ingest_text = None
+        self._external_edit_text = None
+        self._external_ingest_button = None
+        self._external_action_buttons: Dict[str, Any] = {}
+
         # Дневник: серии подряд одинаковых эпизодов и раскрытые группы.
         self._diary_entries: List[Dict[str, Any]] = []
         self._diary_groups: List[List[Dict[str, Any]]] = []
@@ -229,6 +249,8 @@ class MainWindow(ChatWindow):
             self._effector_card,
             self._tutor_status,
             self._tutor_exercise,
+            self._external_status,
+            self._external_session_detail,
             *self._access_status_labels.values(),
             self._graph_detail,
             self._graph_counter,
@@ -723,6 +745,7 @@ class MainWindow(ChatWindow):
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
             self._apply_tutor_data(snap)
+            self._apply_external_data(snap)
             self._refresh_access_switches(snap)
             if self._access_card is not None:
                 self._access_card.configure(
@@ -1041,6 +1064,7 @@ class MainWindow(ChatWindow):
         nav_section("СИСТЕМА")
         for key, marker, label in (
             ("tutor", "✎", "Наставник"),
+            ("contacts", "♧", "Контакты"),
             ("access", "▣", "Доступы"),
             ("dialog", "◫", "Диалог"),
         ):
@@ -1071,6 +1095,7 @@ class MainWindow(ChatWindow):
             "diary": self._build_page_diary(content),
             "activities": self._build_page_activities(content),
             "tutor": self._build_page_tutor(content),
+            "contacts": self._build_page_contacts(content),
             "access": self._build_page_access(content),
             "dialog": self._build_page_dialog(content),
         }
@@ -2960,6 +2985,680 @@ class MainWindow(ChatWindow):
             justify=tk.LEFT,
             wraplength=390,
         ).pack(fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"])
+        return page
+
+    @staticmethod
+    def _external_field(
+        value: Any, limit: int, *, required: bool = False
+    ) -> str | None:
+        value = str(value or "").strip()
+        if required and not value:
+            return None
+        if len(value) > limit or any(char in value for char in ("|", "\r", "\n")):
+            return None
+        return value
+
+    def _external_selected_session(self) -> Optional[Dict[str, Any]]:
+        section = self._life_snapshot.get("external_contacts") or {}
+        for session in section.get("sessions") or []:
+            if (
+                isinstance(session, dict)
+                and session.get("session_id") == self._external_selected_session_id
+            ):
+                return session
+        return None
+
+    def _external_action_allowed(
+        self, action: str, session: Optional[Dict[str, Any]], can_manage: bool
+    ) -> bool:
+        if not can_manage or not isinstance(session, dict):
+            return False
+        automation = session.get("automation")
+        automation = automation if isinstance(automation, dict) else {}
+        automation_state = str(automation.get("state") or "idle")
+        busy = automation_state in {"running", "pausing", "stopping"}
+        if action == "clear":
+            return not busy
+        if session.get("status") != "active":
+            return False
+        if action == "stop":
+            return True
+        pending = session.get("pending_draft")
+        pending = pending if isinstance(pending, dict) else None
+        messages = session.get("messages") or []
+        has_inbound = any(
+            isinstance(message, dict) and message.get("direction") == "inbound"
+            for message in messages
+        )
+        if action == "auto":
+            return (
+                not busy
+                and pending is None
+                and has_inbound
+                and session.get("provider") != "manual"
+                and automation_state in {"idle", "completed"}
+            )
+        if action == "pause":
+            return automation_state == "running"
+        if action == "resume":
+            return automation_state in {"paused", "manual"}
+        if action == "manual":
+            return automation_state in {"running", "pausing", "paused"}
+        if busy:
+            return False
+        if action == "ingest":
+            return pending is None
+        if action == "draft":
+            return pending is None and has_inbound
+        if action == "edit":
+            return pending is not None
+        if action == "approve":
+            return pending is not None and pending.get("status") == "draft"
+        if action == "reject":
+            return pending is not None
+        if action == "handoff":
+            return pending is not None and pending.get("status") == "approved"
+        return False
+
+    def _send_external_action(self, action: str) -> bool:
+        """Опубликовать только разрешённую команду по живому session ID."""
+        section = self._life_snapshot.get("external_contacts") or {}
+        can_manage = bool(
+            self._enabled_controls
+            and section.get("available")
+            and section.get("can_manage")
+        )
+        if not can_manage:
+            return False
+        if action == "start":
+            limits = {
+                "provider": 64,
+                "name": 120,
+                "external_id": 128,
+                "topic": 160,
+                "reason": 240,
+                "model": 128,
+            }
+            fields = []
+            for key, limit in limits.items():
+                value = self._external_field(
+                    self._external_start_vars[key].get(),
+                    limit,
+                    required=key == "name",
+                )
+                if value is None:
+                    return False
+                fields.append(value)
+            fields[0] = fields[0] or "manual"
+            if not fields[-1]:
+                fields.pop()
+            command = "external start " + " | ".join(fields)
+        else:
+            session = self._external_selected_session()
+            if not self._external_action_allowed(action, session, can_manage):
+                return False
+            session_id = self._external_field(
+                session.get("session_id"), 160, required=True
+            )
+            if session_id is None or any(char.isspace() for char in session_id):
+                return False
+            if action in {"ingest", "edit"}:
+                widget = (
+                    self._external_ingest_text
+                    if action == "ingest"
+                    else self._external_edit_text
+                )
+                text = widget.get("1.0", "end-1c").strip() if widget else ""
+                if not text or len(text) > 4000:
+                    return False
+                command = f"external {action} {session_id} | {text}"
+            elif action == "auto":
+                try:
+                    replies = int(self._external_auto_vars["max_replies"].get())
+                    tokens = int(self._external_auto_vars["max_total_tokens"].get())
+                    interval = float(self._external_auto_vars["min_interval_sec"].get())
+                except (TypeError, ValueError):
+                    return False
+                if (
+                    not 1 <= replies <= 8
+                    or not 1 <= tokens <= 4096
+                    or not 1.0 <= interval <= 60.0
+                ):
+                    return False
+                command = (
+                    f"external auto {session_id} {replies} {tokens} {interval:g}"
+                )
+            else:
+                command = f"external {action} {session_id}"
+        try:
+            accepted = self.bus.publish_sync(
+                Events.USER_COMMAND,
+                {"command": command},
+                source="external",
+            )
+        except Exception as exc:
+            logger.warning("[MainWindow] external command: %s", exc)
+            self._append_error(str(exc))
+            return False
+        if accepted is False:
+            self._append_error(self._t("Очередь сообщений переполнена."))
+            return False
+        if action == "start":
+            for key, variable in self._external_start_vars.items():
+                if key != "provider":
+                    variable.set("")
+        elif action == "ingest" and self._external_ingest_text is not None:
+            self._external_ingest_text.delete("1.0", tk.END)
+        return True
+
+    def _request_external_clear(self) -> bool:
+        from tkinter import messagebox
+
+        if not self._external_selected_session():
+            return False
+        confirmed = messagebox.askyesno(
+            self._t("Удалить журнал"),
+            self._t(
+                "Удалить локальный журнал этой сессии? Профиль собеседника сохранится."
+            ),
+            parent=self._root,
+        )
+        return self._send_external_action("clear") if confirmed else False
+
+    def _copy_external_draft(self) -> bool:
+        session = self._external_selected_session()
+        pending = session.get("pending_draft") if session else None
+        if not isinstance(pending, dict):
+            return False
+        try:
+            self._root.clipboard_clear()
+            self._root.clipboard_append(str(pending.get("text") or ""))
+            return True
+        except Exception as exc:
+            logger.warning("[MainWindow] external clipboard: %s", exc)
+            self._append_error(str(exc))
+            return False
+
+    def _on_external_session_select(self, _event=None) -> None:
+        selection = self._external_session_list.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if index >= len(self._external_session_ids):
+            return
+        self._external_selected_session_id = self._external_session_ids[index]
+        self._apply_external_data(self._life_snapshot)
+
+    @staticmethod
+    def _replace_external_text(widget, text: str, state: str) -> None:
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", text)
+        widget.configure(state=state)
+
+    def _apply_external_data(self, snapshot: Dict[str, Any]) -> None:
+        """Обновить журнал без доступа к памяти профилей или Core."""
+        if self._external_status is None or self._external_session_list is None:
+            return
+        section = snapshot.get("external_contacts") or {}
+        can_manage = bool(
+            self._enabled_controls
+            and section.get("available")
+            and section.get("can_manage")
+        )
+        self._external_status.configure(
+            text=(
+                f"Активные сессии: {section.get('active', 0)} · "
+                f"сообщения: {section.get('messages', 0)} · "
+                f"ожидают решения: {section.get('pending_drafts', 0)}\n"
+                f"Управление: {'владелец' if can_manage else 'только наблюдение'}"
+            )
+        )
+        sessions = [
+            session
+            for session in section.get("sessions") or []
+            if isinstance(session, dict) and session.get("session_id")
+        ]
+        session_ids = [str(session["session_id"]) for session in sessions]
+        previous_selected = self._external_selected_session_id
+        if previous_selected not in session_ids:
+            self._external_selected_session_id = session_ids[0] if session_ids else None
+        session_changed = previous_selected != self._external_selected_session_id
+        self._external_session_ids = session_ids
+        signature = (
+            self._language,
+            tuple(
+                (
+                    str(session.get("session_id")),
+                    str(session.get("display_name")),
+                    str(session.get("status")),
+                    session.get("message_count"),
+                )
+                for session in sessions
+            ),
+        )
+        if signature != self._external_session_signature:
+            self._external_session_signature = signature
+            self._external_session_list.configure(state=tk.NORMAL)
+            self._external_session_list.delete(0, tk.END)
+            if sessions:
+                for session in sessions:
+                    self._external_session_list.insert(
+                        tk.END,
+                        f"{session.get('display_name') or 'Внешний ИИ'} · "
+                        f"{session.get('status') or '—'} · "
+                        f"{session.get('message_count', 0)}",
+                    )
+            else:
+                self._external_session_list.insert(tk.END, "Внешних сессий пока нет.")
+            self._external_session_list.configure(
+                state=tk.NORMAL if sessions else tk.DISABLED
+            )
+        self._external_session_list.selection_clear(0, tk.END)
+        if self._external_selected_session_id in session_ids:
+            self._external_session_list.selection_set(
+                session_ids.index(self._external_selected_session_id)
+            )
+
+        session = self._external_selected_session()
+        automation = (session or {}).get("automation")
+        automation = automation if isinstance(automation, dict) else {}
+        automation_state = str(automation.get("state") or "idle")
+        automation_busy = automation_state in {"running", "pausing", "stopping"}
+        if session:
+            error = automation.get("last_error")
+            self._external_session_detail.configure(
+                text=(
+                    f"{session.get('display_name') or 'Внешний ИИ'} · "
+                    f"{session.get('provider') or '—'} · "
+                    f"{session.get('model') or 'ручной канал'} · "
+                    f"{session.get('topic') or '—'}\n"
+                    f"Статус: {session.get('status') or '—'} · "
+                    f"сообщений: {session.get('message_count', 0)}\n"
+                    f"Автообмен: {automation_state} · "
+                    f"реплики: {automation.get('replies_sent', 0)}/"
+                    f"{automation.get('max_replies', 0)} · "
+                    f"токены: {automation.get('tokens_used', 0)}/"
+                    f"{automation.get('max_total_tokens', 0)} · "
+                    f"запрос: {'выполняется' if automation.get('in_flight') else 'нет'}"
+                    + (f"\nОшибка автообмена: {error}" if error else "")
+                )
+            )
+        else:
+            self._external_session_detail.configure(
+                text="Выберите или создайте сессию. Журнал содержит последние 12 сообщений."
+            )
+        messages = session.get("messages") if session else []
+        messages = messages if isinstance(messages, list) else []
+        journal_signature = (
+            self._language,
+            self._external_selected_session_id,
+            tuple(
+                (
+                    str(message.get("message_id")),
+                    message.get("revision"),
+                    str(message.get("status")),
+                    str(message.get("text")),
+                    str(message.get("error")),
+                )
+                for message in messages
+                if isinstance(message, dict)
+            ),
+        )
+        if journal_signature != self._external_journal_signature:
+            self._external_journal_signature = journal_signature
+            blocks = []
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                direction = (
+                    "Входящая · external_ai_claim"
+                    if message.get("direction") == "inbound"
+                    else f"Исходящая · {message.get('origin') or 'owner'}"
+                )
+                digest = str(message.get("text_sha256") or "")[:12]
+                header = (
+                    f"{direction} · {message.get('status') or '—'} · "
+                    f"цикл {message.get('cycle', '—')}"
+                )
+                if digest:
+                    header += f" · SHA-256 {digest}…"
+                block = f"{header}\n{message.get('text') or ''}"
+                if message.get("error"):
+                    block += f"\nОшибка: {message['error']}"
+                blocks.append(block)
+            content = "\n\n".join(blocks) or "Сообщений в этой сессии пока нет."
+            self._replace_external_text(self._external_journal, content, tk.DISABLED)
+
+        pending = session.get("pending_draft") if session else None
+        pending = pending if isinstance(pending, dict) else None
+        edit_signature = (
+            f"{self._external_selected_session_id}:"
+            f"{pending.get('message_id')}:{pending.get('revision')}"
+            if pending
+            else ""
+        )
+        if edit_signature != self._external_edit_signature and (
+            session_changed
+            or pending is None
+            or self._external_edit_text.focus_get() is not self._external_edit_text
+        ):
+            self._replace_external_text(
+                self._external_edit_text,
+                str(pending.get("text") or "") if pending else "",
+                tk.DISABLED,
+            )
+            self._external_edit_signature = edit_signature
+
+        entry_state = tk.NORMAL if can_manage else tk.DISABLED
+        for entry in self._external_start_entries:
+            entry.configure(state=entry_state)
+        self._external_start_button.configure(state=entry_state)
+        auto_entry_state = (
+            tk.NORMAL if can_manage and not automation_busy else tk.DISABLED
+        )
+        for entry in self._external_auto_entries:
+            entry.configure(state=auto_entry_state)
+        for action, button in self._external_action_buttons.items():
+            allowed = self._external_action_allowed(action, session, can_manage)
+            button.configure(state=tk.NORMAL if allowed else tk.DISABLED)
+        ingest_allowed = self._external_action_allowed("ingest", session, can_manage)
+        self._external_ingest_button.configure(
+            state=tk.NORMAL if ingest_allowed else tk.DISABLED
+        )
+        self._external_ingest_text.configure(
+            state=tk.NORMAL if ingest_allowed else tk.DISABLED
+        )
+        edit_allowed = self._external_action_allowed("edit", session, can_manage)
+        self._external_edit_text.configure(
+            state=tk.NORMAL if edit_allowed else tk.DISABLED
+        )
+        self._external_action_buttons["copy"].configure(
+            state=tk.NORMAL if pending else tk.DISABLED
+        )
+
+    def _build_page_contacts(self, parent):
+        """Внешние сессии: карантин, ручной канал и лимитированный API-обмен."""
+        page = tk.Frame(parent, bg=theme.BG_DEEP)
+        tk.Label(
+            page,
+            text="ВНЕШНИЕ СОБЕСЕДНИКИ · ЛОКАЛЬНЫЙ ЖУРНАЛ",
+            font=self._card_title_font,
+            bg=theme.BG_DEEP,
+            fg=theme.CYAN,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(theme.SPACING["sm"], 0))
+        tk.Label(
+            page,
+            text="Внешние контакты",
+            font=self._headline_font,
+            bg=theme.BG_DEEP,
+            fg=theme.AMBER,
+            anchor="w",
+        ).pack(fill=tk.X, padx=theme.SPACING["md"])
+        self._external_status = tk.Label(
+            page,
+            text="Нет данных внешних контактов",
+            font=self._now_body_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+        )
+        self._external_status.pack(fill=tk.X, padx=theme.SPACING["md"], pady=(2, 4))
+        tk.Label(
+            page,
+            text=(
+                "Входящие реплики остаются карантином external_ai_claim. Для RUFP "
+                "доступен ограниченный автообмен; пауза, ручное вмешательство и "
+                "остановка всегда под контролем владельца. Ключ хранится отдельно."
+            ),
+            font=self._now_body_font,
+            bg=theme.BG_DEEP,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=850,
+        ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, 8))
+
+        body = tk.Frame(page, bg=theme.BG_DEEP)
+        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"])
+        body.columnconfigure(0, weight=0, minsize=280)
+        body.columnconfigure(1, weight=1)
+        left = tk.Frame(body, bg=theme.BG_DEEP)
+        right = tk.Frame(body, bg=theme.BG_DEEP)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 5))
+        right.grid(row=0, column=1, sticky="new", padx=(5, 0))
+
+        sessions, _ = self._now_card(left, "СЕССИИ · ДО 8", theme.CYAN)
+        sessions.pack(fill=tk.X, pady=(0, 8))
+        self._external_session_list = tk.Listbox(
+            sessions,
+            height=7,
+            font=self._now_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            selectbackground=theme.SELECTION,
+            selectforeground=theme.TEXT,
+            highlightbackground=theme.BORDER,
+            relief=tk.FLAT,
+            exportselection=False,
+            selectmode=tk.BROWSE,
+            state=tk.DISABLED,
+        )
+        self._external_session_list.pack(
+            fill=tk.X, padx=theme.SPACING["sm"], pady=theme.SPACING["sm"]
+        )
+        self._external_session_list.bind(
+            "<<ListboxSelect>>", self._on_external_session_select
+        )
+
+        start, _ = self._now_card(left, "НОВАЯ СЕССИЯ", theme.VIOLET)
+        start.pack(fill=tk.X)
+        fields = (
+            ("provider", "Provider: manual или rufp", "manual"),
+            ("name", "Имя собеседника", ""),
+            ("external_id", "Внешний идентификатор", ""),
+            ("topic", "Тема", ""),
+            ("reason", "Причина", ""),
+            ("model", "Модель API (пусто для ручного канала)", ""),
+        )
+        for key, caption, default in fields:
+            tk.Label(
+                start,
+                text=caption,
+                font=self._card_title_font,
+                bg=theme.SURFACE,
+                fg=theme.MUTED,
+                anchor="w",
+            ).pack(fill=tk.X, padx=theme.SPACING["sm"])
+            variable = tk.StringVar(value=default)
+            entry = tk.Entry(
+                start,
+                textvariable=variable,
+                font=self._now_body_font,
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                insertbackground=theme.TEXT,
+                relief=tk.FLAT,
+                state=tk.DISABLED,
+            )
+            entry.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(2, 5))
+            self._external_start_vars[key] = variable
+            self._external_start_entries.append(entry)
+        self._external_start_button = tk.Button(
+            start,
+            text="Создать сессию",
+            font=self._card_title_font,
+            command=lambda: self._send_external_action("start"),
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            activebackground=theme.SELECTION,
+            activeforeground=theme.TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=5,
+            state=tk.DISABLED,
+        )
+        self._external_start_button.pack(
+            anchor="w", padx=theme.SPACING["sm"], pady=(0, theme.SPACING["sm"])
+        )
+
+        journal, _ = self._now_card(
+            right, "ЖУРНАЛ · ПОСЛЕДНИЕ 12 СООБЩЕНИЙ", theme.CYAN
+        )
+        journal.pack(fill=tk.X, pady=(0, 8))
+        self._external_session_detail = tk.Label(
+            journal,
+            text="Выберите или создайте сессию.",
+            font=self._now_body_font,
+            bg=theme.SURFACE,
+            fg=theme.MUTED,
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=520,
+        )
+        self._external_session_detail.pack(fill=tk.X, padx=theme.SPACING["sm"])
+        self._external_journal = scrolledtext.ScrolledText(
+            journal,
+            height=7,
+            font=self._now_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+        )
+        self._external_journal.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=theme.SPACING["sm"],
+            pady=theme.SPACING["sm"],
+        )
+
+        ingest, _ = self._now_card(right, "ВХОДЯЩАЯ РЕПЛИКА · КАРАНТИН", theme.VIOLET)
+        ingest.pack(fill=tk.X, pady=(0, 8))
+        self._external_ingest_text = tk.Text(
+            ingest,
+            height=3,
+            font=self._now_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+        )
+        self._external_ingest_text.pack(
+            fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["xs"], 4)
+        )
+        ingest_actions = tk.Frame(ingest, bg=theme.SURFACE)
+        ingest_actions.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8))
+
+        editor, _ = self._now_card(
+            right, "ПРОЕКТ ОТВЕТА · РЕШЕНИЕ ВЛАДЕЛЬЦА", theme.AMBER
+        )
+        editor.pack(fill=tk.X)
+        self._external_edit_text = tk.Text(
+            editor,
+            height=4,
+            font=self._now_body_font,
+            bg=theme.BG_CENTER,
+            fg=theme.TEXT,
+            insertbackground=theme.TEXT,
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+        )
+        self._external_edit_text.pack(
+            fill=tk.X, padx=theme.SPACING["sm"], pady=(theme.SPACING["xs"], 4)
+        )
+        edit_actions = tk.Frame(editor, bg=theme.SURFACE)
+        edit_actions.pack(fill=tk.X, padx=theme.SPACING["sm"])
+        edit_actions_secondary = tk.Frame(editor, bg=theme.SURFACE)
+        edit_actions_secondary.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8))
+
+        def add_action(parent, action, caption, command=None):
+            button = tk.Button(
+                parent,
+                text=caption,
+                font=self._card_title_font,
+                command=command or (lambda: self._send_external_action(action)),
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                activebackground=theme.SELECTION,
+                activeforeground=theme.TEXT,
+                relief=tk.FLAT,
+                bd=0,
+                padx=9,
+                pady=5,
+                state=tk.DISABLED,
+            )
+            button.pack(side=tk.LEFT, padx=(0, 5), pady=2)
+            self._external_action_buttons[action] = button
+            return button
+
+        self._external_ingest_button = add_action(
+            ingest_actions, "ingest", "Добавить в карантин"
+        )
+        add_action(ingest_actions, "draft", "Создать проект")
+        add_action(edit_actions, "edit", "Сохранить изменения")
+        add_action(edit_actions, "approve", "Одобрить")
+        add_action(edit_actions, "reject", "Отклонить")
+        add_action(edit_actions, "copy", "Скопировать", self._copy_external_draft)
+        add_action(edit_actions_secondary, "handoff", "Отметить ручную передачу")
+        add_action(edit_actions_secondary, "stop", "Остановить сессию")
+        add_action(
+            edit_actions_secondary,
+            "clear",
+            "Удалить журнал",
+            self._request_external_clear,
+        )
+
+        automatic, _ = self._now_card(
+            left, "АВТООБМЕН · ЖЁСТКИЕ ЛИМИТЫ", theme.GREEN
+        )
+        automatic.pack(fill=tk.X, pady=(8, 0))
+        auto_fields = (
+            ("max_replies", "Реплики · 1–8", "3"),
+            ("max_total_tokens", "Токены · 1–4096", "1200"),
+            ("min_interval_sec", "Интервал, сек · 1–60", "2"),
+        )
+        for key, caption, default in auto_fields:
+            tk.Label(
+                automatic,
+                text=caption,
+                font=self._card_title_font,
+                bg=theme.SURFACE,
+                fg=theme.MUTED,
+                anchor="w",
+            ).pack(fill=tk.X, padx=theme.SPACING["sm"])
+            variable = tk.StringVar(value=default)
+            entry = tk.Entry(
+                automatic,
+                textvariable=variable,
+                font=self._now_body_font,
+                bg=theme.BG_CENTER,
+                fg=theme.TEXT,
+                insertbackground=theme.TEXT,
+                relief=tk.FLAT,
+                state=tk.DISABLED,
+            )
+            entry.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(2, 5))
+            self._external_auto_vars[key] = variable
+            self._external_auto_entries.append(entry)
+        auto_actions = tk.Frame(automatic, bg=theme.SURFACE)
+        auto_actions.pack(fill=tk.X, padx=theme.SPACING["sm"])
+        auto_actions_secondary = tk.Frame(automatic, bg=theme.SURFACE)
+        auto_actions_secondary.pack(
+            fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8)
+        )
+        add_action(auto_actions, "auto", "Запустить автообмен")
+        add_action(auto_actions, "pause", "Пауза")
+        add_action(auto_actions_secondary, "resume", "Продолжить")
+        add_action(auto_actions_secondary, "manual", "Ручное вмешательство")
         return page
 
     def _build_page_access(self, parent):

@@ -212,6 +212,150 @@ def _tutor_section(agent: Any) -> Dict[str, Any]:
     }
 
 
+def _external_contacts_section(agent: Any) -> Dict[str, Any]:
+    """Ограниченный read-only журнал внешних сессий без чужой памяти."""
+    manager = _own(agent, "external_contacts", None)
+    registry = _own(agent, "social_registry", None)
+    section: Dict[str, Any] = {
+        "available": manager is not None,
+        "can_manage": False,
+        "active": 0,
+        "messages": 0,
+        "pending_drafts": 0,
+        "journal_limit": 12,
+        "sessions": [],
+    }
+    if manager is None:
+        return section
+    section["can_manage"] = bool(
+        registry is not None
+        and getattr(registry, "owner_profile_id", None) is not None
+        and getattr(registry, "current_profile_id", None)
+        == getattr(registry, "owner_profile_id", None)
+    )
+    status = _status_of(manager)
+    for key in ("active", "messages", "pending_drafts"):
+        try:
+            section[key] = int(status.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            section[key] = 0
+
+    message_fields = (
+        "message_id",
+        "direction",
+        "claim_type",
+        "status",
+        "text",
+        "text_sha256",
+        "cycle",
+        "origin",
+        "revision",
+        "error",
+    )
+    sessions = _own(manager, "sessions", [])
+    if not isinstance(sessions, list):
+        return section
+    controllers = _own(agent, "_external_dialogue_controllers", {})
+    controllers = controllers if isinstance(controllers, dict) else {}
+    getter = getattr(manager, "get_session", None)
+    if not callable(getter):
+        return section
+    for raw_session in sessions:
+        if not isinstance(raw_session, dict) or not raw_session.get("session_id"):
+            continue
+        session_id = str(raw_session["session_id"])
+        try:
+            detail = getter(session_id)
+        except Exception:  # pragma: no cover - защита UI
+            continue
+        if not isinstance(detail, dict):
+            continue
+        profile = None
+        if registry is not None:
+            try:
+                profile = registry.get_profile(str(detail.get("profile_id", "")))
+            except Exception:  # pragma: no cover - защита UI
+                profile = None
+        raw_messages = detail.get("messages")
+        raw_messages = raw_messages if isinstance(raw_messages, list) else []
+        messages = [
+            {key: deepcopy(message.get(key)) for key in message_fields}
+            for message in raw_messages[-section["journal_limit"] :]
+            if isinstance(message, dict)
+        ]
+        pending = next(
+            (
+                deepcopy(message)
+                for message in reversed(messages)
+                if message.get("direction") == "outbound"
+                and message.get("status") in {"draft", "approved"}
+            ),
+            None,
+        )
+        automation = {"state": "idle", "automatic_resume": False}
+        controller = controllers.get(session_id)
+        status_getter = getattr(controller, "get_status", None)
+        if callable(status_getter):
+            try:
+                raw_automation = status_getter()
+            except Exception:  # pragma: no cover - защита UI
+                raw_automation = None
+            if isinstance(raw_automation, dict):
+                for key in (
+                    "state",
+                    "in_flight",
+                    "replies_sent",
+                    "max_replies",
+                    "tokens_used",
+                    "max_total_tokens",
+                    "min_interval_sec",
+                    "usage",
+                    "tokens_estimated",
+                    "billing_receipts",
+                    "last_error",
+                    "automatic_resume",
+                ):
+                    automation[key] = deepcopy(raw_automation.get(key))
+        item = {
+            key: deepcopy(detail.get(key))
+            for key in (
+                "session_id",
+                "profile_id",
+                "provider",
+                "model",
+                "external_id",
+                "topic",
+                "reason",
+                "status",
+                "created_cycle",
+                "last_cycle",
+                "stopped_cycle",
+                "stop_reason",
+            )
+        }
+        item.update(
+            {
+                "display_name": str(
+                    (profile or {}).get("display_name") or "Внешний ИИ"
+                ),
+                "message_count": len(raw_messages),
+                "messages": messages,
+                "pending_draft": pending,
+                "automation": automation,
+                "control_events": [
+                    {
+                        key: deepcopy(event.get(key))
+                        for key in ("kind", "cycle", "reason")
+                    }
+                    for event in (detail.get("control_events") or [])[-12:]
+                    if isinstance(event, dict)
+                ],
+            }
+        )
+        section["sessions"].append(item)
+    return section
+
+
 def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, Any]:
     """Собрать снимок жизни существа для интерфейса.
 
@@ -315,6 +459,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "access": _access_section(agent),
         "effector": _effector_section(agent),
         "tutor": _tutor_section(agent),
+        "external_contacts": _external_contacts_section(agent),
     }
 
 

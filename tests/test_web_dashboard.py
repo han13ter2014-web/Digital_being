@@ -271,6 +271,10 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert "function renderTutor(section)" in body
     assert "sendCommand('/api/tutor'" in body
     assert "До вашего подтверждения источник не загружается" in body
+    assert 'id="page-contacts"' in body
+    assert body.count('data-page="contacts"') == 2
+    assert "function renderExternal(section)" in body
+    assert "sendCommand('/api/external'" in body
     assert "set_goal" not in body
     assert "think(" not in body and "save_state(" not in body
 

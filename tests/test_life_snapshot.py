@@ -325,3 +325,121 @@ def test_missing_or_broken_tutor_does_not_break_snapshot():
     snapshot = build_life_snapshot(agent)
     assert snapshot["tutor"]["available"] is True
     assert snapshot["tutor"]["approved_sources"] == []
+
+
+def _external_session(agent, external_id="deepseek-web"):
+    return agent.external_contacts.start_session(
+        agent.social_registry,
+        provider="manual",
+        name="DeepSeek",
+        external_id=external_id,
+        topic="осторожный разговор",
+        reason="проверка панели",
+        cycle=agent.cycle_count,
+    )
+
+
+def test_external_snapshot_is_bounded_deep_copy_without_private_memory():
+    agent = _agent("ExternalSnapshot")
+    private_text = "Личная тайна владельца"
+    agent.user_interaction.receive_user_message(private_text, cycle=1)
+    started = _external_session(agent)
+    session_id = started["session_id"]
+    agent.external_contacts.ingest(session_id, "Привет от внешней модели", cycle=2)
+    agent.external_contacts.create_draft(session_id, cycle=3)
+    before = deepcopy(agent.external_contacts.to_dict())
+
+    snapshot = build_life_snapshot(agent)
+    view = snapshot["external_contacts"]
+    session = view["sessions"][0]
+
+    assert view["available"] is True
+    assert view["can_manage"] is True
+    assert view["pending_drafts"] == 1
+    assert session["display_name"] == "DeepSeek"
+    assert session["message_count"] == 2
+    assert session["pending_draft"]["status"] == "draft"
+    assert session["messages"][0]["claim_type"] == "external_ai_claim"
+    assert private_text not in str(view)
+    session["messages"][0]["text"] = "изменено в UI"
+    assert agent.external_contacts.to_dict() == before
+
+
+def test_external_snapshot_limits_journal_and_denies_guest_management():
+    agent = _agent("ExternalSnapshotLimits")
+    session_id = _external_session(agent)["session_id"]
+    for cycle in range(1, 8):
+        agent.external_contacts.ingest(session_id, f"Реплика {cycle}", cycle=cycle)
+        agent.external_contacts.create_draft(session_id, cycle=cycle)
+        agent.external_contacts.reject(session_id, cycle=cycle)
+
+    view = build_life_snapshot(agent)["external_contacts"]
+    session = view["sessions"][0]
+    assert session["message_count"] == 14
+    assert len(session["messages"]) == view["journal_limit"] == 12
+    assert session["messages"][0]["text"] == "Реплика 2"
+    assert session["messages"][-1]["status"] == "rejected"
+
+    agent.social_registry.create_local_person("Гость", cycle=8)
+    guest_view = build_life_snapshot(agent)["external_contacts"]
+    assert guest_view["can_manage"] is False
+    assert guest_view["sessions"][0]["display_name"] == "DeepSeek"
+
+
+def test_missing_external_manager_has_honest_empty_snapshot():
+    agent = _agent("ExternalSnapshotMissing")
+    agent.external_contacts = None
+
+    view = build_life_snapshot(agent)["external_contacts"]
+
+    assert view["available"] is False
+    assert view["can_manage"] is False
+    assert view["sessions"] == []
+
+
+def test_external_snapshot_exposes_model_and_safe_automation_status():
+    agent = _agent("ExternalAutomationSnapshot")
+    started = agent.external_contacts.start_session(
+        agent.social_registry,
+        provider="rufp",
+        name="RUFP",
+        external_id="rufp-fixture",
+        topic="проверка",
+        reason="явный запуск",
+        cycle=0,
+        model="rufp/default",
+    )
+    session_id = started["session_id"]
+    agent.external_contacts.record_event(session_id, "started", cycle=0)
+
+    class Controller:
+        def get_status(self):
+            return {
+                "state": "running",
+                "in_flight": True,
+                "replies_sent": 1,
+                "max_replies": 3,
+                "tokens_used": 25,
+                "max_total_tokens": 100,
+                "min_interval_sec": 2.0,
+                "usage": {"total_tokens": 25},
+                "tokens_estimated": False,
+                "billing_receipts": [{"cost_rub": 0.01}],
+                "last_error": None,
+                "automatic_resume": False,
+                "api_key": "must-not-leak",
+                "response_text": "not part of automation DTO",
+            }
+
+    agent._external_dialogue_controllers = {session_id: Controller()}
+    session = build_life_snapshot(agent)["external_contacts"]["sessions"][0]
+
+    assert session["model"] == "rufp/default"
+    assert session["automation"]["state"] == "running"
+    assert session["automation"]["replies_sent"] == 1
+    assert session["automation"]["automatic_resume"] is False
+    assert session["control_events"] == [
+        {"kind": "started", "cycle": 0, "reason": None}
+    ]
+    assert "must-not-leak" not in str(session)
+    assert "not part of automation DTO" not in str(session)

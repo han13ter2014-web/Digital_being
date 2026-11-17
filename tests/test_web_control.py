@@ -170,6 +170,91 @@ def controlled_dashboard():
             Events.USER_COMMAND,
             {"command": "tutor reject request-0123456789abcdef"},
         ),
+        (
+            "/api/external",
+            {
+                "action": "start",
+                "provider": " manual ",
+                "name": " DeepSeek ",
+                "external_id": " deepseek-web ",
+                "topic": " тема ",
+                "reason": " причина ",
+            },
+            Events.USER_COMMAND,
+            {
+                "command": "external start manual | DeepSeek | deepseek-web | тема | причина"
+            },
+        ),
+        (
+            "/api/external",
+            {
+                "action": "start",
+                "provider": "rufp",
+                "name": "RUFP",
+                "external_id": "rufp-api",
+                "topic": "тема",
+                "reason": "ограниченный диалог",
+                "model": " rufp/default ",
+            },
+            Events.USER_COMMAND,
+            {
+                "command": (
+                    "external start rufp | RUFP | rufp-api | тема | "
+                    "ограниченный диалог | rufp/default"
+                )
+            },
+        ),
+        (
+            "/api/external",
+            {
+                "action": "auto",
+                "session_id": "session-1",
+                "max_replies": 3,
+                "max_total_tokens": 1200,
+                "min_interval_sec": 2.0,
+            },
+            Events.USER_COMMAND,
+            {"command": "external auto session-1 3 1200 2"},
+        ),
+        (
+            "/api/external",
+            {
+                "action": "ingest",
+                "session_id": "session-1",
+                "text": "  Привет | это карантин  ",
+            },
+            Events.USER_COMMAND,
+            {"command": "external ingest session-1 | Привет | это карантин"},
+        ),
+        (
+            "/api/external",
+            {
+                "action": "edit",
+                "session_id": "session-1",
+                "text": "Новая\nредакция | точно",
+            },
+            Events.USER_COMMAND,
+            {"command": "external edit session-1 | Новая\nредакция | точно"},
+        ),
+        *[
+            (
+                "/api/external",
+                {"action": action, "session_id": "session-1"},
+                Events.USER_COMMAND,
+                {"command": f"external {action} session-1"},
+            )
+            for action in (
+                "draft",
+                "approve",
+                "reject",
+                "handoff",
+                "pause",
+                "resume",
+                "manual",
+                "stop",
+                "clear",
+            )
+        ],
     ],
 )
 def test_web_publishes_exact_tk_event(
@@ -194,6 +279,42 @@ def test_web_publishes_exact_tk_event(
         ("/api/tutor", {"action": "allow", "url": "https://x.test/" + "a" * 600}),
         ("/api/tutor", {"action": "approve", "request_id": "x" * 41}),
         ("/api/tutor", {"action": "reject"}),
+        ("/api/external", {"action": "send", "session_id": "session-1"}),
+        ("/api/external", {"action": "execute", "session_id": "session-1"}),
+        ("/api/external", {"action": "start", "name": "   "}),
+        ("/api/external", {"action": "start", "name": "Deep|Seek"}),
+        ("/api/external", {"action": "start", "name": "Deep\nSeek"}),
+        ("/api/external", {"action": "draft", "session_id": "x" * 161}),
+        ("/api/external", {"action": "draft", "session_id": "session id"}),
+        ("/api/external", {"action": "draft", "session_id": "session|id"}),
+        (
+            "/api/external",
+            {"action": "ingest", "session_id": "session-1", "text": "  \n "},
+        ),
+        (
+            "/api/external",
+            {"action": "edit", "session_id": "session-1", "text": "x" * 4001},
+        ),
+        *[
+            (
+                "/api/external",
+                {"action": "auto", "session_id": "session-1", key: value},
+            )
+            for key, value in (
+                ("max_replies", 0),
+                ("max_replies", 9),
+                ("max_replies", True),
+                ("max_replies", 1.5),
+                ("max_total_tokens", 0),
+                ("max_total_tokens", 4097),
+                ("max_total_tokens", False),
+                ("max_total_tokens", "1200"),
+                ("min_interval_sec", 0),
+                ("min_interval_sec", 61),
+                ("min_interval_sec", True),
+                ("min_interval_sec", "2"),
+            )
+        ],
     ],
 )
 def test_invalid_commands_never_reach_bus(controlled_dashboard, path, body):
@@ -217,6 +338,7 @@ def test_standalone_is_honest_and_never_accepts_mutations():
             ("/api/control/life/wake", {}),
             ("/api/access", {"key": "network", "state": "off"}),
             ("/api/tutor", {"action": "exercise"}),
+            ("/api/external", {"action": "start", "name": "DeepSeek"}),
         ):
             status, response = _post(port, path, body)
             assert status == 503 and response["status"] == "unavailable"

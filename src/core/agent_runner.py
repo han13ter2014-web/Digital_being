@@ -44,6 +44,12 @@ from typing import Any, Dict, List, Optional
 from config.simulation_config import LR_CONFIG
 from src.core.event_bus import EventBus, Events
 from src.core.energy_policy import EnergyPolicy
+from src.core.external_adapters import (
+    ExternalAdapterError,
+    available_models,
+    create_external_adapter,
+)
+from src.core.external_dialogue import ExternalDialogueController
 from src.core.stimulus_selector import (
     TRAIL_GOAL_PRIORITY_PROB,
     is_open_question_stimulus,
@@ -336,6 +342,10 @@ class AgentRunner:
         self._dialogue_journal_lock = threading.RLock()
         self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
+        # Живые контроллеры не сериализуются: restart никогда не возобновляет API.
+        self._external_dialogues: Dict[str, ExternalDialogueController] = {}
+        self._external_adapter_factory = create_external_adapter
+        self.agent._external_dialogue_controllers = self._external_dialogues
 
         # Дедупликация стимулов: не повторять один и тот же вопрос
         # чаще, чем раз в STIMULUS_COOLDOWN_TICKS тиков (см. docs/BASELINE.md).
@@ -2229,6 +2239,17 @@ class AgentRunner:
 
     async def stop(self) -> None:
         """Обработать принятые сообщения, остановить адаптеры и сохраниться."""
+        controllers = list(self._external_dialogues.values())
+        for controller in controllers:
+            controller.stop("остановка жизненного цикла")
+        if controllers:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*(controller.wait() for controller in controllers)),
+                    timeout=40.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.name}] Таймаут остановки внешних диалогов")
         webhooks = getattr(self.agent, "webhooks", None)
         stop_webhooks = getattr(webhooks, "stop", None)
         if callable(stop_webhooks):
@@ -3182,8 +3203,23 @@ class AgentRunner:
         except ValueError as exc:
             return f"⚠️ {exc}"
 
+    def _external_controller(self, session: dict) -> ExternalDialogueController:
+        session_id = session["session_id"]
+        controller = self._external_dialogues.get(session_id)
+        if controller is None:
+            adapter = self._external_adapter_factory(
+                session["provider"], session.get("model"), max_tokens=160
+            )
+            controller = ExternalDialogueController(
+                self.agent.external_contacts,
+                adapter,
+                cycle=lambda: self.agent.cycle_count,
+            )
+            self._external_dialogues[session_id] = controller
+        return controller
+
     def _handle_external_command(self, cmd_raw: str) -> str:
-        """Ручной внешний диалог; сетевой отправки эта команда не выполняет."""
+        """Ручной и явно ограниченный автономный внешний диалог."""
         manager = getattr(self.agent, "external_contacts", None)
         registry = getattr(self.agent, "social_registry", None)
         if manager is None or registry is None:
@@ -3199,22 +3235,29 @@ class AgentRunner:
         usage = (
             "Использование: /external [status | start <имя> | "
             "start <provider> | <имя> | <external_id> | <тема> | <причина> | "
-            "ingest|edit <session_id> | <текст> | draft|approve|reject|"
-            "handoff|stop|show|clear <session_id>]"
+            "<model> | ingest|edit <session_id> | <текст> | "
+            "auto <session_id> [реплики] [токены] [интервал] | "
+            "pause|resume|manual|draft|approve|reject|handoff|stop|show|clear "
+            "<session_id>]"
         )
         try:
             if action == "status" and not rest:
                 status = manager.get_status()
+                running = sum(
+                    controller.get_status()["state"] in {"running", "pausing", "stopping"}
+                    for controller in self._external_dialogues.values()
+                )
                 return (
                     "🌐 Внешние контакты:\n"
                     f"   Сессий: {status['sessions']}; активных: {status['active']}\n"
                     f"   Сообщений в локальном журнале: {status['messages']}\n"
                     f"   Ожидают решения: {status['pending_drafts']}\n"
-                    "   Сетевая отправка не настроена; ручная передача отмечается "
-                    "отдельно."
+                    f"   Автономных обменов: {running}\n"
+                    "   Ключ читается из Credential Manager или env, не из команд."
                 )
             if action == "start" and rest:
                 fields = [item.strip() for item in rest.split("|")]
+                model = None
                 if len(fields) == 1:
                     provider = "manual"
                     name = fields[0]
@@ -3222,14 +3265,19 @@ class AgentRunner:
                     topic = "внешний разговор"
                     reason = "ручной контакт владельца"
                 else:
-                    if len(fields) > 5:
+                    if len(fields) > 6:
                         return usage
-                    fields += [""] * (5 - len(fields))
-                    provider, name, external_id, topic, reason = fields
+                    fields += [""] * (6 - len(fields))
+                    provider, name, external_id, topic, reason, model = fields
                     provider = provider or "manual"
                     external_id = external_id or f"{provider}:{name.casefold()}"
                     topic = topic or "внешний разговор"
                     reason = reason or "ручной контакт владельца"
+                    if provider != "manual":
+                        models = available_models(provider)
+                        model = model or (models[0] if len(models) == 1 else "")
+                        if model not in models:
+                            return "⚠️ Выберите модель из разрешённого каталога."
                 result = manager.start_session(
                     registry,
                     provider=provider,
@@ -3238,13 +3286,49 @@ class AgentRunner:
                     topic=topic,
                     reason=reason,
                     cycle=cycle,
+                    model=model or None,
                 )
                 if result["status"] == "limit_reached":
                     return "⚠️ Достигнут предел внешних сессий."
                 return (
                     f"🌐 Внешняя сессия создана: {result['session_id']}\n"
+                    f"Модель: {result.get('model') or 'ручной канал'}.\n"
                     "Профиль external_ai не получил права или память владельца."
                 )
+            if action in {"auto", "pause", "resume", "manual"} and rest:
+                arguments = rest.split()
+                session_id = arguments[0]
+                session = manager.get_session(session_id)
+                if session is None:
+                    return "🌐 Сессия не найдена."
+                controller = self._external_controller(session)
+                if action == "auto":
+                    if len(arguments) > 4:
+                        return usage
+                    replies = int(arguments[1]) if len(arguments) > 1 else 3
+                    tokens = int(arguments[2]) if len(arguments) > 2 else 1200
+                    interval = float(arguments[3]) if len(arguments) > 3 else 2.0
+                    result = controller.start(
+                        session_id,
+                        max_replies=replies,
+                        max_total_tokens=tokens,
+                        min_interval_sec=interval,
+                    )
+                    if result["status"] == "started":
+                        return (
+                            f"🤖 Автономный обмен запущен: до {replies} реплик, "
+                            f"{tokens} токенов, интервал {interval:g} с."
+                        )
+                elif action == "pause":
+                    result = controller.pause()
+                elif action == "resume":
+                    result = controller.resume()
+                    if result["status"] == "resumed":
+                        return "▶️ Автономный обмен продолжен по явной команде."
+                else:
+                    result = controller.manual_takeover()
+                state = result.get("state", result["status"])
+                return f"🌐 Состояние автономного обмена: {state}."
             if action in {"ingest", "edit"}:
                 session_id, separator, text = rest.partition("|")
                 session_id = session_id.strip()
@@ -3285,16 +3369,31 @@ class AgentRunner:
                         return "🌐 Сессия не найдена."
                     lines = [
                         f"🌐 {session_id} · {session['status']} · "
-                        f"{session['provider']}:{session['external_id']}"
+                        f"{session['provider']}:{session['external_id']} · "
+                        f"{session.get('model') or 'ручной канал'}"
                     ]
+                    controller = self._external_dialogues.get(session_id)
+                    if controller is not None:
+                        lines.append(
+                            f"Автономный обмен: {controller.get_status()['state']}"
+                        )
                     for message in session["messages"][-12:]:
                         lines.append(
                             f"[{message['direction']}:{message['status']}] "
                             f"{message['text']}"
                         )
                     return "\n".join(lines)
+                controller = self._external_dialogues.get(session_id)
                 if action == "clear":
+                    if controller is not None and controller.get_status()["state"] in {
+                        "running",
+                        "pausing",
+                        "stopping",
+                    }:
+                        return "⚠️ Сначала остановите обмен и дождитесь завершения запроса."
                     result = manager.clear(session_id)
+                    if result["status"] == "cleared":
+                        self._external_dialogues.pop(session_id, None)
                 elif action == "draft":
                     result = manager.create_draft(session_id, cycle=cycle)
                 elif action == "approve":
@@ -3303,6 +3402,8 @@ class AgentRunner:
                     result = manager.reject(session_id, cycle=cycle)
                 elif action == "handoff":
                     result = manager.mark_handed_off(session_id, cycle=cycle)
+                elif controller is not None:
+                    result = controller.stop()
                 else:
                     result = manager.stop(
                         session_id, cycle=cycle, reason="остановлено владельцем"
@@ -3324,6 +3425,8 @@ class AgentRunner:
                     )
                 if status == "rejected":
                     return "🚫 Проект отклонён и не может быть передан."
+                if status == "stopping":
+                    return "🛑 Останавливаю после текущего запроса; новый не начнётся."
                 if status == "stopped":
                     return "🛑 Сессия остановлена; ожидающие проекты закрыты."
                 if status == "cleared":
@@ -3354,6 +3457,8 @@ class AgentRunner:
                     return "🌐 Сессия не найдена."
                 return f"🌐 Результат: {status}."
             return usage
+        except ExternalAdapterError as exc:
+            return f"⚠️ Внешний канал отклонён: {exc.code}."
         except ValueError as exc:
             return f"⚠️ {exc}"
 
