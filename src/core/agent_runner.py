@@ -3244,7 +3244,8 @@ class AgentRunner:
             if action == "status" and not rest:
                 status = manager.get_status()
                 running = sum(
-                    controller.get_status()["state"] in {"running", "pausing", "stopping"}
+                    controller.get_status()["state"]
+                    in {"running", "pausing", "stopping"}
                     for controller in self._external_dialogues.values()
                 )
                 return (
@@ -3390,7 +3391,9 @@ class AgentRunner:
                         "pausing",
                         "stopping",
                     }:
-                        return "⚠️ Сначала остановите обмен и дождитесь завершения запроса."
+                        return (
+                            "⚠️ Сначала остановите обмен и дождитесь завершения запроса."
+                        )
                     result = manager.clear(session_id)
                     if result["status"] == "cleared":
                         self._external_dialogues.pop(session_id, None)
