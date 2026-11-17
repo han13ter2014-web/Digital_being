@@ -20,6 +20,7 @@ PluginRegistry и попадает в общий tick() по priority.
   переходит к следующему.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -143,7 +144,7 @@ class NurseryWatcher(Subsystem):
 
         events: List[Dict[str, Any]] = []
         for seed_name in sorted(new_seeds):
-            payload = self._inspect_seed(seed_name)
+            payload = self._inspect_seed(seed_name, include_full_metadata=True)
             if payload is None:
                 continue
             self._seed_history.append(payload)
@@ -232,7 +233,20 @@ class NurseryWatcher(Subsystem):
         self, seed_name: str, include_full_metadata: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Читает метаданные seed-а. Возвращает None если невалидный."""
-        seed_path = os.path.join(self.nursery_dir, seed_name)
+        if (
+            not isinstance(seed_name, str)
+            or not seed_name
+            or os.path.basename(seed_name) != seed_name
+            or seed_name in (".", "..")
+        ):
+            return None
+        root = os.path.realpath(self.nursery_dir)
+        seed_path = os.path.realpath(os.path.join(root, seed_name))
+        try:
+            if os.path.commonpath((root, seed_path)) != root:
+                return None
+        except ValueError:
+            return None
         if not os.path.isdir(seed_path):
             return None
 
@@ -243,6 +257,7 @@ class NurseryWatcher(Subsystem):
             "mtime": 0.0,
             "size_bytes": 0,
             "is_complete": False,
+            "seed_sha256": None,
             "metadata": None,
             "identity": None,
             "personality_signature": None,
@@ -273,6 +288,12 @@ class NurseryWatcher(Subsystem):
         missing = [f for f in self.REQUIRED_SEED_FILES if f not in present]
         payload["is_complete"] = not missing
         payload["missing_files"] = missing
+        if payload["is_complete"]:
+            try:
+                payload["seed_sha256"] = self._package_hash(seed_path)
+            except (OSError, ValueError) as exc:
+                payload["seed_hash_error"] = str(exc)
+                logger.warning(f"[{self.name}] {seed_name}: хеш не вычислен: {exc}")
 
         if include_full_metadata:
             for fname, key in (
@@ -299,6 +320,25 @@ class NurseryWatcher(Subsystem):
 
         return payload
 
+    @staticmethod
+    def _package_hash(seed_path: str) -> str:
+        """SHA-256 содержимого и относительных имён всех обычных файлов пакета."""
+        digest = hashlib.sha256()
+        for root, directories, files in os.walk(seed_path):
+            directories.sort()
+            for filename in sorted(files):
+                full = os.path.join(root, filename)
+                if os.path.islink(full) or not os.path.isfile(full):
+                    raise ValueError("seed package contains a non-regular file")
+                relative = os.path.relpath(full, seed_path).replace(os.sep, "/")
+                digest.update(relative.encode("utf-8"))
+                digest.update(b"\0")
+                with open(full, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                digest.update(b"\0")
+        return digest.hexdigest()
+
     def _emit_new_seed(self, payload: Dict[str, Any]) -> None:
         """Уведомить подписчиков и агента о новом seed-е."""
         logger.info(
@@ -318,6 +358,14 @@ class NurseryWatcher(Subsystem):
             pass
         # Через агента (если есть совместимый метод).
         if self._agent is not None:
+            registry = getattr(self._agent, "social_registry", None)
+            if registry is not None:
+                try:
+                    registry.observe_local_seed(
+                        payload, cycle=int(getattr(self._agent, "cycle_count", 0))
+                    )
+                except (TypeError, ValueError) as exc:
+                    logger.warning(f"[{self.name}] lineage не записан: {exc}")
             notify = getattr(self._agent, "on_nursery_new_seed", None)
             if callable(notify):
                 try:

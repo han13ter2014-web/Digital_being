@@ -80,6 +80,7 @@ from src.core.dialogue_strategies import (
     parse_preference_request,
     preference_from_context,
 )
+from src.core.response_experience import parse_generic_feedback
 from src.core.human_affect import (
     AFFECT_LABELS,
     attachment_testimony_weight,
@@ -420,6 +421,35 @@ class AgentRunner:
             interaction.get_pending_question() if interaction is not None else None
         )
 
+        # Явная смена говорящего происходит до социальных наблюдений и обучения:
+        # знакомство гостя не должно быть записано прежнему пользователю.
+        registry = getattr(self.agent, "social_registry", None)
+        if registry is not None:
+            from src.core.social_registry import process_introduction
+
+            registry.note_contact(self.agent.cycle_count)
+            naming = getattr(self.agent, "naming_dialogue", None)
+            introduction = process_introduction(
+                registry,
+                text,
+                cycle=self.agent.cycle_count,
+                pending_question=pending,
+                naming_phase=getattr(naming, "phase", "none"),
+            )
+            attribution = getattr(self.agent, "social_attribution", None)
+            if attribution is not None:
+                attribution.sync_active_profile()
+            if introduction is not None:
+                if interaction is not None:
+                    interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+                await self._reply_to_user(
+                    introduction["reply"],
+                    context="social_introduction",
+                    source="social_registry",
+                    user_text=text,
+                )
+                return
+
         # === «Собеседник-1/5»: акт распознаётся один раз до дверей ===
         # Живой прогон 2026-11-01: «Я же уже отвечал тебе» уходило в
         # «Ответ записан» или в изучение концептов («Не нашел файл для…»).
@@ -539,6 +569,11 @@ class AgentRunner:
                             "Такая оценка уже записана; повторно учитывать её не буду."
                         )
                     elif outcome["status"] == "recorded":
+                        experience = getattr(self.agent, "response_experience", None)
+                        if experience is not None:
+                            experience.observe_feedback(
+                                target["response_id"], feedback, self.agent.cycle_count
+                            )
                         reply = "Приняла и сохранила твою оценку этого ответа."
                     else:
                         reply = "Не смогла привязать оценку к ответу; не сохранила её."
@@ -549,6 +584,40 @@ class AgentRunner:
                         user_text=text,
                     )
                     return
+
+        # Обычный ответ тоже может получить точный явный отзыв. Без свежего
+        # ожидания или при составной фразе этот контур ничего не перехватывает.
+        experience = getattr(self.agent, "response_experience", None)
+        if experience is not None:
+            response_id = experience.latest_response_id
+            pending_response = experience.responses.get(response_id)
+            feedback = parse_generic_feedback(text)
+            if (
+                feedback is not None
+                and pending_response is not None
+                and pending_response["status"] == "pending"
+            ):
+                observed = experience.observe_feedback(
+                    response_id, feedback, self.agent.cycle_count
+                )
+                if observed is not None:
+                    if interaction is not None:
+                        interaction.receive_user_message(
+                            text, cycle=self.agent.cycle_count
+                        )
+                    user_model = getattr(self.agent, "user_model", None)
+                    if user_model is not None:
+                        user_model.observe(text, cycle=self.agent.cycle_count)
+                    await self._reply_to_user(
+                        "Приняла и сохранила твою оценку этого ответа.",
+                        context="dialogue_feedback",
+                        source="response_experience",
+                        user_text=text,
+                    )
+                    return
+            # Любая другая реплика — наблюдаемый результат, но не успех и не
+            # поддержка заимствованного оборота.
+            experience.observe_reply(act.kind, self.agent.cycle_count)
 
         # P2, этап 3: scoped правило возникает только после отдельного pending.
         preference_request = parse_preference_request(text)
@@ -807,7 +876,15 @@ class AgentRunner:
                 reply_context = "social_reply"
             if response:
                 await self._reply_to_user(
-                    response, context=reply_context, source="dialogue_acts"
+                    response,
+                    context=reply_context,
+                    source="dialogue_acts",
+                    user_text=text,
+                    borrow_context=(
+                        social_reply_kind(text)
+                        if reply_context == "social_reply"
+                        else ""
+                    ),
                 )
             return
 
@@ -1230,6 +1307,11 @@ class AgentRunner:
                 else {"status": "ignored"}
             )
             if outcome["status"] == "recorded":
+                experience = getattr(self.agent, "response_experience", None)
+                if experience is not None:
+                    experience.observe_feedback(
+                        response_id, feedback, self.agent.cycle_count
+                    )
                 reply = (
                     "Приняла: фразу не стала учить, а твою оценку учебного "
                     "вопроса сохранила."
@@ -1302,15 +1384,30 @@ class AgentRunner:
         dialogue_topic="",
         dialogue_entities=(),
         dialogue_affect=None,
+        response_references=(),
+        borrow_context="",
     ) -> str | None:
-        """Доставить реплику, записать дескриптор и вернуть ID сообщения.
+        """Составить план, доставить реплику и зарегистрировать её ID.
 
-        «Собеседник-6»: ответ на реплику человека — это AGENT_MESSAGE
-        (UserInteraction.send_reply), а не AGENT_THOUGHT: реплика видна
-        в чате как сообщение, попадает в message_history и переживает
-        рестарт, а не теряется в потоке автономных мыслей. Для стендов
-        без user_interaction — прежняя публикация мысли и возврат None.
+        Ссылки и заимствование проверяются до voice/webhook/UI. Ожидание
+        создаётся только после фактического message_id; fallback через
+        AGENT_THOUGHT остаётся совместимым и не порождает ложной доставки.
         """
+        experience = getattr(self.agent, "response_experience", None)
+        plan = None
+        if experience is not None:
+            prepared = experience.prepare_plan(
+                self.agent,
+                text,
+                context=context,
+                source=source,
+                user_text=user_text,
+                references=response_references,
+                borrow_context=borrow_context,
+            )
+            text = prepared["text"]
+            plan = prepared["plan"]
+
         voice = getattr(self.agent, "voice_router", None)
         if voice is not None:
             try:
@@ -1344,6 +1441,8 @@ class AgentRunner:
                 dialogue_entities,
                 dialogue_affect,
             )
+            if plan is not None and isinstance(message_id, str) and message_id:
+                experience.register_delivery(message_id, plan, self.agent.cycle_count)
             return message_id
         if interaction is not None and hasattr(interaction, "send_message"):
             message_id = interaction.send_message(
@@ -1363,6 +1462,8 @@ class AgentRunner:
                 dialogue_entities,
                 dialogue_affect,
             )
+            if plan is not None and isinstance(message_id, str) and message_id:
+                experience.register_delivery(message_id, plan, self.agent.cycle_count)
             return message_id
         await self.bus.publish(
             Events.AGENT_THOUGHT,

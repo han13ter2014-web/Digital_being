@@ -222,6 +222,12 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.user_model = UserModel()
 
+    # === Социальный реестр: владелец канала и текущий собеседник ===
+    # Профили не заменяют UserModel и не дают прав по одному имени.
+    from src.core.social_registry import SocialRegistry
+
+    self.social_registry = SocialRegistry()
+
     # === «Собеседник-3/5»: свидетельство пользователя — знание ===
     # {тема: cycle_count} — когда тема в последний раз закрыта
     # человеком: он объяснил её или попросил не переспрашивать
@@ -274,11 +280,28 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.dialogue_learning = DialogueLearning()
 
+    # Ассоциации речи — только кандидаты распознавания с provenance.
+    # Личная часть переключается SocialAttribution, общая создаётся явно.
+    from src.core.associative_lexicon import AssociativeLexicon
+
+    self.associative_lexicon = AssociativeLexicon()
+
+    # План, фактическая доставка и наблюдаемый результат каждого ответа.
+    # Личная часть переключается вместе с остальным диалоговым контекстом.
+    from src.core.response_experience import ResponseExperience
+
+    self.response_experience = ResponseExperience()
+
     # Интернет-наставник: отдельные разрешения источников и карантин уроков.
     # Не имеет доступа к Core и не изменяет общий лексикон или цели.
     from src.core.language_tutor import LanguageTutor
 
     self.language_tutor = LanguageTutor()
+
+    # Персональные снапшоты диалога и обучения для текущего собеседника.
+    from src.core.social_attribution import SocialAttribution
+
+    self.social_attribution = SocialAttribution(self)
 
     # === «Эмоции-1»: эмоциональный контур ===
     # Страх/счастье/грусть/покой с реальными причинами и затуханием.
@@ -308,6 +331,8 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     self.parent_seed: Optional[str] = None
     self.parent_name: Optional[str] = None
     self.parent_dream_time: Optional[str] = None
+    # Поколение этой жизни; у новой жизни без семени оно нулевое.
+    self.seed_generation: int = 0
 
     # === Этап 2.5: WebSearcher (Wikipedia) ===
     # Создаём ДО ThinkingPipeline, чтобы передать ему ссылку.
@@ -514,6 +539,7 @@ def _run_post_init_hooks_impl(self) -> None:
         self.sleep_cycle.mental_models = self.mental_models
         self.sleep_cycle.knowledge_subsystem = self.knowledge_subsystem
         self.sleep_cycle.goal_subsystem = self.goal_subsystem
+        self.sleep_cycle.social_attribution = self.social_attribution
 
     # MindDream: привязываем зависимости.
     if hasattr(self, "mind_dream"):

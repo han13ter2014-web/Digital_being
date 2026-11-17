@@ -790,6 +790,46 @@ class UserInteraction:
             ),
         }
 
+    def to_personal_dict(self) -> dict:
+        """Полный ограниченный контекст одного собеседника, включая входящие."""
+        data = self.to_checkpoint_dict()
+        data["messages"] = [
+            dict(entry) for entry in self.message_history[-self.MESSAGE_HISTORY_MAX :]
+        ]
+        return data
+
+    def restore_personal_state(self, data) -> None:
+        """Заменить личный контекст целиком, не затрагивая bus и quiet hours."""
+        if not isinstance(data, dict):
+            return
+        self.question_history = []
+        self.pending_questions = []
+        self.message_queue = []
+        self.message_history = []
+        self._last_user_message_cycle = None
+        self.dialogue_act_ring.restore([])
+        self.last_human_affect = None
+        self.last_question_cycle = -self.cooldown_cycles
+        self.restore_from_checkpoint(data)
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            restored = []
+            for entry in messages[-self.MESSAGE_HISTORY_MAX :]:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("sender") not in {"user", "agent"}:
+                    continue
+                if not isinstance(entry.get("id"), str) or not entry["id"]:
+                    continue
+                if not isinstance(entry.get("content"), str) or not entry["content"]:
+                    continue
+                cycle = entry.get("cycle")
+                if isinstance(cycle, bool) or not isinstance(cycle, int) or cycle < 0:
+                    continue
+                restored.append(dict(entry))
+            self.message_history = restored
+            self.message_queue = []
+
     def restore_from_checkpoint(self, data) -> None:
         """Восстановить диалоговое состояние из снапшота чекпоинта.
 

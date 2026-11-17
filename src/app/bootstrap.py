@@ -210,10 +210,18 @@ def awaken_from_seed(
         except (OSError, ValueError) as exc:
             logger.warning("Семя %s: metadata не прочитаны: %s", seed_name, exc)
 
+    agent.parent_seed = seed_name
+    parent_generation = metadata.get("generation", 0)
+    agent.seed_generation = (
+        parent_generation + 1
+        if isinstance(parent_generation, int)
+        and not isinstance(parent_generation, bool)
+        and parent_generation >= 0
+        else 1
+    )
     parent_name = metadata.get("parent_name")
     if parent_name:
         agent.parent_name = str(parent_name)
-        agent.parent_seed = seed_name
         agent.parent_dream_time = metadata.get("dream_time")
         report["parent_name"] = str(parent_name)
 

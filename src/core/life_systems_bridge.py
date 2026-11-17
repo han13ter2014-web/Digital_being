@@ -59,10 +59,51 @@ def step_meta_learning(agent, resource_status: Optional[Dict] = None) -> Optiona
         return {"error": str(exc)}
 
 
+def associate_expression(
+    agent,
+    expression: str,
+    target_kind: str,
+    target_id: str,
+    *,
+    cycle: int,
+    scope: str = "personal",
+    source: str = "explicit",
+    confirmed=None,
+) -> Dict:
+    """Создать связь только с реальной целью и отдельным provenance."""
+    lexicon = getattr(agent, "associative_lexicon", None)
+    if lexicon is None:
+        raise ValueError("associative_lexicon: subsystem is not attached")
+    registry = getattr(agent, "social_registry", None)
+    profile_id = str(getattr(registry, "current_profile_id", "") or "")
+
+    def target_exists(value: str) -> bool:
+        if target_kind == "concept":
+            models = getattr(agent, "mental_models", None)
+            return value in getattr(models, "concepts", {})
+        if target_kind == "episode":
+            memory = getattr(agent, "long_term_memory", None)
+            checker = getattr(memory, "has_episode", None)
+            return callable(checker) and checker(value)
+        return False
+
+    return lexicon.associate(
+        expression,
+        target_kind,
+        target_id,
+        cycle=int(cycle),
+        scope=scope,
+        profile_id=profile_id,
+        source=source,
+        confirmed=confirmed,
+        target_exists=target_exists,
+    )
+
+
 def observe_user_message(
     agent, text: str, act, cycle: int, reaction_to_us: str = ""
 ) -> Optional[Dict]:
-    """Записать один фактический вход пользователя в SocialCell и время."""
+    """Записать один фактический вход пользователя в наблюдатели жизни."""
     observation = {
         "timestamp": int(cycle),
         "action": str(getattr(act, "kind", "message") or "message"),
@@ -72,14 +113,50 @@ def observe_user_message(
         observation["reaction_to_us"] = reaction_to_us
     try:
         social = getattr(agent, "social_cell", None)
+        registry = getattr(agent, "social_registry", None)
+        current = str(getattr(registry, "current_profile_id", "") or "")
         if social is not None:
-            social.observe_interaction("user", observation)
+            social_key = "user"
+            if registry is not None and current != registry.owner_profile_id:
+                social_key = f"profile:{current}"
+            social.observe_interaction(social_key, observation)
         engine = getattr(agent, "continuous_time", None)
         if engine is not None:
             engine.emit_event("social", dict(observation))
         from src.cognition.integrated_experience import observe_integrated_user_message
 
         observe_integrated_user_message(agent, text, int(cycle))
+
+        lexicon = getattr(agent, "associative_lexicon", None)
+        if lexicon is not None and current:
+            source = "observed_act"
+            confirmed = False
+            learning = getattr(agent, "dialogue_learning", None)
+            marker = str(getattr(act, "matched_marker", "") or "")
+            taught = getattr(learning, "learned", {}).get(marker, {})
+            if taught.get("act") == getattr(act, "kind", None):
+                source = "user_taught"
+                confirmed = True
+            lexicon.observe_act(
+                text,
+                getattr(act, "kind", ""),
+                cycle=int(cycle),
+                profile_id=current,
+                source=source,
+                confirmed=confirmed,
+            )
+        experience = getattr(agent, "response_experience", None)
+        if experience is not None and current and getattr(act, "kind", "") == "social":
+            from src.core.dialogue_acts import social_reply_kind
+
+            # Наблюдение не даёт права сразу повторить оборот: уровень и
+            # возможность использования определяет SpeechImitation.
+            experience.imitation.observe(
+                text,
+                context=social_reply_kind(text),
+                profile_id=current,
+                cycle=int(cycle),
+            )
         return observation
     except Exception as exc:
         get_logger().log(f"[SOCIAL_CELL] observation error: {exc}")

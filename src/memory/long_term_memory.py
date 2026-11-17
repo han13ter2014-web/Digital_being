@@ -258,6 +258,10 @@ class LongTermMemory:
 
         return memory_id
 
+    def has_episode(self, memory_id: str) -> bool:
+        """Проверить существование реального эпизода без изменения памяти."""
+        return isinstance(memory_id, str) and memory_id in self._episodic_ids.values()
+
     def _apply_episodic_limit(self) -> int:
         """Мягкое ограничение эпизодов (Шаг 2).
 

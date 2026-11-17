@@ -119,6 +119,11 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         ),
         "schema_version": SCHEMA_VERSION,
         **({"life_id": agent.life_id} if getattr(agent, "life_id", None) else {}),
+        # Происхождение жизни нужно следующим семенам и после restart.
+        "parent_seed": getattr(agent, "parent_seed", None),
+        "parent_name": getattr(agent, "parent_name", None),
+        "parent_dream_time": getattr(agent, "parent_dream_time", None),
+        "seed_generation": int(getattr(agent, "seed_generation", 0)),
         "name": agent.name,
         "energy": agent.energy,
         "cycle_count": agent.cycle_count,
@@ -174,6 +179,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "user_model", None) is not None
             else None
         ),
+        # Социальный реестр: отсутствие секции — legacy default с владельцем.
+        "social_registry": (
+            agent.social_registry.to_dict()
+            if getattr(agent, "social_registry", None) is not None
+            else None
+        ),
         # «Собеседник-3»: штампы «тема объяснена пользователем в цикле N».
         # После рестарта сущность не переспрашивает объяснённое.
         "user_explained_topics": dict(
@@ -199,10 +210,31 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "dialogue_learning", None) is not None
             else None
         ),
+        # Общие речевые ассоциации; личные находятся в social_attribution.
+        "associative_lexicon": (
+            agent.associative_lexicon.to_shared_dict()
+            if getattr(agent, "associative_lexicon", None) is not None
+            else None
+        ),
+        # План и ожидание активного ответа; личные снапшоты всех профилей
+        # находятся в social_attribution, как и остальной диалоговый опыт.
+        "response_experience": (
+            agent.response_experience.to_dict()
+            if getattr(agent, "response_experience", None) is not None
+            else None
+        ),
         # Разрешения источников, карантин и учебные попытки наставника.
         "language_tutor": (
             agent.language_tutor.to_dict()
             if getattr(agent, "language_tutor", None) is not None
+            else None
+        ),
+        # Персональные контексты всех профилей; top-level поля выше остаются
+        # снапшотом активного собеседника для совместимости старого чтения.
+        "social_attribution": (
+            agent.social_attribution.to_dict()
+            if getattr(agent, "social_attribution", None) is not None
+            and getattr(agent, "social_registry", None) is not None
             else None
         ),
         # «Эмоции-1»: эмоциональный контур — уровни, причины, журнал.
@@ -375,8 +407,12 @@ _INPLACE_RESTORE_PATHS = (
     ("internal_simulator",),
     ("naming_dialogue",),
     ("user_model",),
+    ("social_registry",),
+    ("social_attribution",),
     ("user_interaction",),
     ("dialogue_learning",),
+    ("associative_lexicon",),
+    ("response_experience",),
     ("language_tutor",),
     ("emotional_state",),
     ("interoception",),
@@ -742,6 +778,10 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
                 and getattr(delamain, "life_id", None) != agent.life_id
             ):
                 delamain.bind_life(agent.life_id)
+    agent.parent_seed = state.get("parent_seed")
+    agent.parent_name = state.get("parent_name")
+    agent.parent_dream_time = state.get("parent_dream_time")
+    agent.seed_generation = state.get("seed_generation", 0)
     if isinstance(state.get("name"), str):
         agent.name = state["name"]
     agent.energy = state.get("energy", 150)
@@ -873,6 +913,14 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     ):
         agent.user_model.load_from(saved_user_model)
 
+    # Отсутствующая секция — старый checkpoint: сохраняем новый default owner.
+    saved_social_registry = state.get("social_registry")
+    if (
+        isinstance(saved_social_registry, dict)
+        and getattr(agent, "social_registry", None) is not None
+    ):
+        agent.social_registry.load_from(saved_social_registry)
+
     # «Собеседник-3»: штампы объяснённых тем переживают рестарт.
     saved_explained = state.get("user_explained_topics")
     if isinstance(saved_explained, dict) and hasattr(agent, "_user_explained_topics"):
@@ -909,6 +957,27 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     ):
         agent.dialogue_learning.load_from(saved_learning)
 
+    saved_lexicon = state.get("associative_lexicon")
+    if getattr(agent, "associative_lexicon", None) is not None:
+        if isinstance(saved_lexicon, dict):
+            agent.associative_lexicon.load_shared_from(saved_lexicon)
+        else:
+            from src.core.associative_lexicon import AssociativeLexicon
+
+            agent.associative_lexicon.load_shared_from(
+                AssociativeLexicon().to_shared_dict()
+            )
+
+    saved_experience = state.get("response_experience")
+    if getattr(agent, "response_experience", None) is not None:
+        from src.core.response_experience import ResponseExperience
+
+        agent.response_experience.load_from(
+            saved_experience
+            if isinstance(saved_experience, dict)
+            else ResponseExperience().to_dict()
+        )
+
     saved_tutor = state.get("language_tutor")
     if getattr(agent, "language_tutor", None) is not None:
         from src.core.language_tutor import LanguageTutor
@@ -916,6 +985,17 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.language_tutor.load_from(
             saved_tutor if isinstance(saved_tutor, dict) else LanguageTutor().to_dict()
         )
+
+    # Новый формат активирует сохранённый профиль после обычных top-level
+    # секций. Legacy-контур принадлежит владельцу, даже если промежуточный
+    # checkpoint этапа 1 завершился на госте.
+    attribution = getattr(agent, "social_attribution", None)
+    if attribution is not None and getattr(agent, "social_registry", None) is not None:
+        saved_attribution = state.get("social_attribution")
+        if isinstance(saved_attribution, dict):
+            attribution.load_from(saved_attribution)
+        else:
+            attribution.load_legacy()
 
     # «Эмоции-1»: пережитое переживает рестарт.
     saved_emotions = state.get("emotional_state")

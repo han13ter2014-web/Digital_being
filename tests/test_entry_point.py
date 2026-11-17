@@ -220,6 +220,8 @@ def test_awaken_from_seed_inherits_and_saves(env):
     assert report["seed"] == "SeedA"
     assert report["seed_report"]["concepts"] >= 3
     assert agent.parent_name == "Parent"
+    assert agent.parent_seed == "SeedA"
+    assert agent.seed_generation == 1
     assert agent.value_evolution.current_values == ["Опыт", "Тишина"]
 
     # Главное отличие от прежнего скрипта: ребёнок сохранён на диск.

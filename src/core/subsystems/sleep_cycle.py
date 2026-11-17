@@ -27,6 +27,7 @@ class SleepCycle:
         knowledge_subsystem=None,
         cycle_interval: int = 100,
         goal_subsystem=None,
+        social_attribution=None,
     ):
         self.agent_name = agent_name
         self.long_term_memory = long_term_memory
@@ -34,11 +35,13 @@ class SleepCycle:
         self.knowledge_subsystem = knowledge_subsystem
         self.cycle_interval = cycle_interval
         self.goal_subsystem = goal_subsystem
+        self.social_attribution = social_attribution
 
         # Метрики сна
         self.total_sleeps = 0
         self.last_consolidated_count = 0
         self.last_goal_outcomes_consolidated = 0
+        self.last_language_consolidation: Dict = {}
         self.last_patterns_found = []
         self.sleep_history: List[Dict] = []
 
@@ -54,6 +57,9 @@ class SleepCycle:
     def attach_goals(self, goals) -> None:
         self.goal_subsystem = goals
 
+    def attach_language(self, attribution) -> None:
+        self.social_attribution = attribution
+
     # ============================================================
     # Главный метод
     # ============================================================
@@ -62,9 +68,9 @@ class SleepCycle:
 
         Шаги:
         1. Консолидация значимых концепций и исходов целей в LongTermMemory.
-        2. Очистка слабых связей в mental_models.
+        2. Консолидация языкового опыта без новых свидетельств.
         3. Поиск скрытых паттернов.
-        4. Прунинг knowledge_base.
+        4. Очистка и ограничение операционных журналов.
         """
         if cycle_count % self.cycle_interval != 0 and self.total_sleeps > 0:
             return {"slept": False, "reason": "не время"}
@@ -91,6 +97,9 @@ class SleepCycle:
                         pass
 
         goal_outcomes = self._consolidate_goal_outcomes()
+        language = {}
+        if self.social_attribution is not None:
+            language = self.social_attribution.consolidate_language(cycle_count)
 
         # 2. Поиск паттернов: концепции, появившиеся вместе
         if self.mental_models:
@@ -103,6 +112,7 @@ class SleepCycle:
             "timestamp": datetime.now().isoformat(),
             "consolidated_count": consolidated,
             "goal_outcomes_consolidated": goal_outcomes,
+            "language": language,
             "patterns_found": len(patterns),
             "patterns": patterns[:3],  # топ-3
         }
@@ -111,6 +121,7 @@ class SleepCycle:
         self.sleep_history = self.sleep_history[-100:]
         self.last_consolidated_count = consolidated
         self.last_goal_outcomes_consolidated = goal_outcomes
+        self.last_language_consolidation = dict(language)
         self.last_patterns_found = patterns
         self.total_sleeps += 1
 
@@ -183,6 +194,7 @@ class SleepCycle:
             "total_sleeps": self.total_sleeps,
             "last_consolidated": self.last_consolidated_count,
             "last_goal_outcomes_consolidated": self.last_goal_outcomes_consolidated,
+            "last_language_consolidation": dict(self.last_language_consolidation),
             "last_patterns": len(self.last_patterns_found),
             "interval": self.cycle_interval,
         }

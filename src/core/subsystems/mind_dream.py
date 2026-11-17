@@ -317,7 +317,11 @@ class MindDream:
         """Собирает данные для семени — всё, что должно наследоваться."""
         data: Dict[str, Any] = {
             "metadata": {
+                "schema_version": 1,
                 "parent_name": self.agent_name,
+                "parent_life_id": getattr(agent, "life_id", None),
+                "parent_seed": getattr(agent, "parent_seed", None),
+                "generation": int(getattr(agent, "seed_generation", 0)),
                 "parent_creation_time": getattr(
                     agent, "creation_time", datetime.now()
                 ).isoformat(),

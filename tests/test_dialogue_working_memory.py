@@ -186,6 +186,8 @@ async def test_old_checkpoint_without_ring_restores_empty_ring():
     await _say(runner, "Чем занимаешься?")
     state = build_state_from_agent(original)
     state["user_interaction"].pop("dialogue_acts", None)
+    # Legacy checkpoint не содержит и новой канонической per-profile копии.
+    state.pop("social_attribution", None)
     validate_checkpoint_state(state)
 
     restored = DigitalBeing(name="Ring")

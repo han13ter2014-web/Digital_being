@@ -133,12 +133,22 @@ def test_dream_seed_export_and_inheritance_preserve_evidence(tmp_path):
     parent.cycle_count = 12
     parent.completed_goals = 2
     parent.energy = 0.5
+    parent.life_id = "11111111-1111-1111-1111-111111111111"
+    parent.parent_seed = "Earlier_seed"
+    parent.seed_generation = 3
     dream = MindDream("parent", registry=None)
     seed_data = dream._collect_seed_data(parent)
     assert seed_data["mental_models"] == model.to_storage_dict()
+    assert seed_data["metadata"]["parent_life_id"] == parent.life_id
+    assert seed_data["metadata"]["parent_seed"] == "Earlier_seed"
+    assert seed_data["metadata"]["generation"] == 3
+    assert seed_data["metadata"]["schema_version"] == 1
 
     seed_dir = tmp_path / "full-seed"
     seed_dir.mkdir()
+    (seed_dir / "metadata.json").write_text(
+        json.dumps(seed_data["metadata"], ensure_ascii=False), encoding="utf-8"
+    )
     (seed_dir / "mental_models.json").write_text(
         json.dumps(seed_data["mental_models"], ensure_ascii=False), encoding="utf-8"
     )
@@ -149,6 +159,8 @@ def test_dream_seed_export_and_inheritance_preserve_evidence(tmp_path):
     assert report["inherited_concepts"] == 1
     assert report["concepts"] == 2
     assert report["saved"] is True
+    assert child.parent_seed == "full-seed"
+    assert child.seed_generation == 4
     _assert_node_equal(child.mental_models.concepts["память"], model.concepts["память"])
     child.save_state.assert_called_once_with()
     child.save_mental_models.assert_called_once_with()

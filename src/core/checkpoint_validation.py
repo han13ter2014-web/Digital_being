@@ -300,6 +300,16 @@ def validate_checkpoint_state(state) -> None:
         from src.core.life_identity import validate_life_id
 
         validate_life_id(state["life_id"])
+    for field, limit in (
+        ("parent_seed", 128),
+        ("parent_name", 128),
+        ("parent_dream_time", 64),
+    ):
+        value = state.get(field)
+        if value is not None and (not isinstance(value, str) or len(value) > limit):
+            _fail(field, f"expected null or a string of at most {limit} characters")
+    if "seed_generation" in state:
+        _integer(state["seed_generation"], "seed_generation", nonnegative=True)
     if state.get("active_inference") is not None:
         from src.cognition.inference_continuity import validate_inference
 
@@ -444,10 +454,39 @@ def validate_checkpoint_state(state) -> None:
         state["naming_dialogue_phase"], str
     ):
         _fail("naming_dialogue_phase", "expected a string")
+    if state.get("social_registry") is not None:
+        from src.core.social_registry import validate_social_registry
+
+        validate_social_registry(state["social_registry"])
+    if state.get("response_experience") is not None:
+        from src.core.response_experience import validate_response_experience
+
+        validate_response_experience(state["response_experience"])
+        registry = state.get("social_registry")
+        if isinstance(registry, dict):
+            current = registry.get("current_profile_id")
+            for response in state["response_experience"]["responses"]:
+                if response["plan"]["state"]["profile_id"] != current:
+                    _fail(
+                        "response_experience.responses",
+                        "response profile does not match current social profile",
+                    )
+            for expression in state["response_experience"]["imitation"]["expressions"]:
+                if expression["profile_id"] != current:
+                    _fail(
+                        "response_experience.imitation.expressions",
+                        "expression profile does not match current social profile",
+                    )
     if state.get("language_tutor") is not None:
         from src.core.language_tutor import validate_language_tutor
 
         validate_language_tutor(state["language_tutor"])
+    if state.get("social_attribution") is not None:
+        from src.core.social_attribution import validate_social_attribution
+
+        validate_social_attribution(
+            state["social_attribution"], state.get("social_registry")
+        )
     if state.get("user_model") is not None:
         user_model = _dict(state["user_model"], "user_model")
         promises = _dict(user_model.get("promises", {}), "user_model.promises")
@@ -630,6 +669,12 @@ def validate_checkpoint_state(state) -> None:
             )
             if not 0.0 <= intensity <= 1.0:
                 _fail(f"{path}.intensity", "intensity out of [0, 1]")
+    if state.get("associative_lexicon") is not None:
+        from src.core.associative_lexicon import validate_associative_lexicon
+
+        validate_associative_lexicon(
+            state["associative_lexicon"], expected_scope="shared"
+        )
     if state.get("user_interaction") is not None:
         interaction = _dict(state["user_interaction"], "user_interaction")
         for index, entry in enumerate(

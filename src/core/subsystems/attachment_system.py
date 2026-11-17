@@ -85,9 +85,23 @@ class AttachmentSystem:
     def __init__(self, agent_name: str = "agent"):
         self.agent_name = agent_name
         self._attachments: Dict[str, Attachment] = {}
+        # Старый ключ владельца остаётся "user"; гости получают profile:<uuid>.
+        self._active_user_key = "user"
+
+    def set_active_profile(self, profile_id: str, owner_profile_id: str) -> None:
+        """Выбрать персональный ключ без переноса отношений владельца гостю."""
+        self._active_user_key = (
+            "user" if profile_id == owner_profile_id else f"profile:{profile_id}"
+        )
+
+    def _resolve_user_key(self, name: str, kind: str = "user") -> str:
+        if name == "user" and kind == "user":
+            return self._active_user_key
+        return name
 
     def get_or_create(self, name: str, kind: str = "user") -> Attachment:
         """Возвращает или создаёт запись привязанности."""
+        name = self._resolve_user_key(name, kind)
         if name not in self._attachments:
             self._attachments[name] = Attachment(name, kind)
         return self._attachments[name]
@@ -125,12 +139,14 @@ class AttachmentSystem:
     def trust_factor(self, source: str) -> float:
         """Возвращает фактор доверия к источнику (0.0-1.0).
         Используется при оценке новых знаний."""
+        source = self._resolve_user_key(source)
         if source not in self._attachments:
             return 0.5  # нейтральное доверие к незнакомому
         return self._attachments[source].trust
 
     def is_significant(self, source: str) -> bool:
         """Является ли источник значимым для агента?"""
+        source = self._resolve_user_key(source)
         if source not in self._attachments:
             return False
         att = self._attachments[source]
@@ -139,6 +155,7 @@ class AttachmentSystem:
     def get_status(self) -> Dict:
         return {
             "agent_name": self.agent_name,
+            "active_user_key": self._active_user_key,
             "attachments": {
                 name: att.to_dict() for name, att in self._attachments.items()
             },

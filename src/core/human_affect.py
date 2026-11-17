@@ -147,7 +147,8 @@ def attachment_testimony_weight(attachment) -> float:
     intimacy = 0.0
     try:
         status = attachment.get_status()
-        user = status.get("attachments", {}).get("user", {})
+        active_key = status.get("active_user_key", "user")
+        user = status.get("attachments", {}).get(active_key, {})
         intimacy = _unit_number(user.get("intimacy"), 0.0)
     except Exception:
         pass
