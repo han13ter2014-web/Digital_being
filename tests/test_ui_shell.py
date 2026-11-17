@@ -325,9 +325,7 @@ def test_external_automation_commands_limits_and_busy_state(root):
     }
 
     _find_button(win._pages["contacts"], "Запустить автообмен").invoke()
-    assert bus.published[-1][1] == {
-        "command": "external auto session-1 3 1200 2"
-    }
+    assert bus.published[-1][1] == {"command": "external auto session-1 3 1200 2"}
 
     win._apply_life_data(
         _external_snapshot(provider="rufp", automation_state="running")
@@ -337,9 +335,9 @@ def test_external_automation_commands_limits_and_busy_state(root):
         assert str(_find_button(win._pages["contacts"], caption).cget("state")) == (
             tk.DISABLED
         )
-    assert str(_find_button(win._pages["contacts"], "Остановить сессию").cget("state")) == (
-        tk.NORMAL
-    )
+    assert str(
+        _find_button(win._pages["contacts"], "Остановить сессию").cget("state")
+    ) == (tk.NORMAL)
     detail = str(win._external_session_detail.cget("text"))
     assert "rufp/default" in detail
     assert "реплики: 1/3" in detail
@@ -348,9 +346,7 @@ def test_external_automation_commands_limits_and_busy_state(root):
     _find_button(win._pages["contacts"], "Пауза").invoke()
     assert bus.published[-1][1] == {"command": "external pause session-1"}
 
-    win._apply_life_data(
-        _external_snapshot(provider="rufp", automation_state="paused")
-    )
+    win._apply_life_data(_external_snapshot(provider="rufp", automation_state="paused"))
     root.update()
     _find_button(win._pages["contacts"], "Ручное вмешательство").invoke()
     assert bus.published[-1][1] == {"command": "external manual session-1"}
@@ -362,7 +358,7 @@ def test_external_automation_commands_limits_and_busy_state(root):
     before = len(bus.published)
     for key, value in (
         ("max_replies", "0"),
-        ("max_total_tokens", "4097"),
+        ("max_total_tokens", "256001"),
         ("min_interval_sec", "0"),
     ):
         original = win._external_auto_vars[key].get()
@@ -391,9 +387,7 @@ def test_external_controls_respect_read_only_mode_and_guest(root):
     guest._root = root
     guest._poll_running = True
     guest._build_ui()
-    guest._apply_life_data(
-        _external_snapshot(can_manage=False, provider="rufp")
-    )
+    guest._apply_life_data(_external_snapshot(can_manage=False, provider="rufp"))
     assert (
         str(_find_button(guest._pages["contacts"], "Создать сессию").cget("state"))
         == tk.DISABLED

@@ -17,6 +17,9 @@ class FakeAdapter:
     model = "rufp/default"
     max_tokens = 40
 
+    def request_token_upper_bound(self, *, session_id, text):
+        return 1
+
     def __init__(self, responses=None, *, fail=False, block=False):
         self.responses = list(responses or ["Привет! Продолжим осторожный разговор."])
         self.fail = fail
@@ -74,12 +77,15 @@ def _controller(agent, adapter, *, opening="Привет, внешний соб�
     )
 
 
-async def _spin_until(predicate, turns=100):
-    for _ in range(turns):
+async def _spin_until(predicate, timeout=2.0):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
         if predicate():
             return
-        await asyncio.sleep(0)
-    raise AssertionError("condition was not reached")
+        if loop.time() >= deadline:
+            raise AssertionError("condition was not reached")
+        await asyncio.sleep(0.001)
 
 
 @pytest.mark.asyncio
@@ -120,26 +126,36 @@ async def test_token_budget_stops_without_starting_another_request():
 
     def rich_receipt(**kwargs):
         result = original_send(**kwargs)
-        result["usage"] = {"prompt_tokens": 300, "completion_tokens": 300, "total_tokens": 600}
+        result["usage"] = {
+            "prompt_tokens": 300,
+            "completion_tokens": 300,
+            "total_tokens": 600,
+        }
         return result
 
     adapter.send = rich_receipt
+    adapter.request_token_upper_bound = lambda *, session_id, text: 600
     controller.start(
         session_id, max_replies=4, max_total_tokens=1000, min_interval_sec=0
     )
     status = await controller.wait()
 
     assert status["state"] == "completed"
-    assert status["replies_sent"] == 2
-    assert status["tokens_used"] == 1200
-    assert len(adapter.calls) == 2
+    assert status["replies_sent"] == 1
+    assert status["tokens_used"] == 600
+    assert len(adapter.calls) == 1
+    session = agent.external_contacts.get_session(session_id)
+    assert session["messages"][-1]["status"] == "draft"
     assert controller.resume()["status"] == "invalid_state"
+    rejected = agent.external_contacts.reject(session_id, cycle=0)
+    assert rejected["status"] == "rejected"
     explicit = controller.start(
-        session_id, max_replies=1, max_total_tokens=100, min_interval_sec=0
+        session_id, max_replies=1, max_total_tokens=1000, min_interval_sec=0
     )
     assert explicit["status"] == "started"
-    await controller.wait()
-    assert len(adapter.calls) == 3
+    explicit_status = await controller.wait()
+    assert explicit_status["tokens_used"] == 600
+    assert len(adapter.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -155,9 +171,7 @@ async def test_missing_usage_uses_conservative_accounting():
         return result
 
     adapter.send = no_usage
-    controller.start(
-        session_id, max_replies=8, max_total_tokens=45, min_interval_sec=0
-    )
+    controller.start(session_id, max_replies=8, max_total_tokens=45, min_interval_sec=0)
     status = await controller.wait()
 
     assert status["tokens_estimated"] is True
@@ -373,9 +387,7 @@ async def test_runner_exposes_catalog_and_bounded_auto_commands():
     session_id = agent.external_contacts.sessions[0]["session_id"]
     assert "rufp/default" in started
     await runner.handle_command(f"/external ingest {session_id} | Привет")
-    automatic = await runner.handle_command(
-        f"/external auto {session_id} 1 100 0"
-    )
+    automatic = await runner.handle_command(f"/external auto {session_id} 1 100 0")
     controller = runner._external_dialogues[session_id]
     status = await controller.wait()
 
@@ -410,3 +422,50 @@ async def test_runner_stop_also_stops_inflight_external_dialogue():
     assert runner._external_dialogues[session_id].state == "stopped"
     assert agent.external_contacts.get_session(session_id)["status"] == "stopped"
     assert len(agent.external_contacts.get_session(session_id)["messages"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_budget_overrun_pauses_without_retry_and_keeps_receipt():
+    agent = _agent()
+    adapter = FakeAdapter()
+    session_id, controller = _controller(agent, adapter)
+    original_send = adapter.send
+
+    def excessive_receipt(**kwargs):
+        result = original_send(**kwargs)
+        result["usage"] = {
+            "prompt_tokens": 300,
+            "completion_tokens": 300,
+            "total_tokens": 600,
+        }
+        return result
+
+    adapter.send = excessive_receipt
+    controller.start(
+        session_id, max_replies=4, max_total_tokens=100, min_interval_sec=0
+    )
+    status = await controller.wait()
+
+    assert status["state"] == "paused"
+    assert status["pause_reason"] == "provider_budget_exceeded"
+    assert status["last_error"] is None
+    assert status["replies_sent"] == 1
+    assert status["tokens_used"] == 600
+    assert len(adapter.calls) == 1
+    session = agent.external_contacts.get_session(session_id)
+    assert session["messages"][-1]["status"] == "quarantined"
+    assert any(
+        event["kind"] == "provider_budget_exceeded"
+        for event in session["control_events"]
+    )
+    assert not any(event["kind"] == "api_error" for event in session["control_events"])
+
+
+def test_token_budget_accepts_256000_and_rejects_larger_values():
+    agent = _agent()
+    adapter = FakeAdapter()
+    _, controller = _controller(agent, adapter)
+
+    controller._validate_limits(1, 256000, 0)
+    with pytest.raises(ValueError, match="1 to 256000"):
+        controller._validate_limits(1, 256001, 0)

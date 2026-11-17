@@ -172,6 +172,11 @@ def _validate_plan(plan, path="plan") -> None:
             _fail(f"{path}.borrowed", "inconsistent borrowed component")
 
 
+def validate_response_plan(plan, path="plan") -> None:
+    """Публичная проверка плана для session-scoped внешних ответов."""
+    _validate_plan(plan, path)
+
+
 def validate_response_experience(data) -> None:
     if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
         _fail("response_experience", "unsupported snapshot")
@@ -317,8 +322,14 @@ class ResponseExperience:
         user_text="",
         references=(),
         borrow_context="",
+        profile_id="",
+        expire_pending=True,
     ) -> dict:
-        """Проверить ссылки и составить план до фактической доставки."""
+        """Проверить ссылки и составить план до фактической доставки.
+
+        Внешний session-scoped план задаёт профиль явно и не истекает ожидания
+        локального собеседника. По умолчанию прежнее поведение не меняется.
+        """
         cycle = int(agent.cycle_count)
         _cycle(cycle)
         _text(text, "text", TEXT_MAX_LEN)
@@ -331,7 +342,9 @@ class ResponseExperience:
             raise ValueError("references: expected a bounded sequence")
         clean_references = [self._verify_reference(agent, item) for item in references]
         registry = getattr(agent, "social_registry", None)
-        profile_id = str(getattr(registry, "current_profile_id", "") or "")
+        profile_id = str(
+            profile_id or getattr(registry, "current_profile_id", "") or ""
+        )
         borrowed = None
         composed = str(text)
         if borrow_context and profile_id:
@@ -369,7 +382,8 @@ class ResponseExperience:
             plan["realization"]["kind"] = "borrowed_prefix"
             plan["borrowed"] = borrowed
         _validate_plan(plan)
-        self.expire(cycle)
+        if expire_pending:
+            self.expire(cycle)
         return {"text": composed, "plan": plan}
 
     @staticmethod

@@ -251,6 +251,7 @@ def _external_contacts_section(agent: Any) -> Dict[str, Any]:
         "origin",
         "revision",
         "error",
+        "response",
     )
     sessions = _own(manager, "sessions", [])
     if not isinstance(sessions, list):
@@ -313,6 +314,7 @@ def _external_contacts_section(agent: Any) -> Dict[str, Any]:
                     "tokens_estimated",
                     "billing_receipts",
                     "last_error",
+                    "pause_reason",
                     "automatic_resume",
                 ):
                     automation[key] = deepcopy(raw_automation.get(key))
@@ -331,6 +333,7 @@ def _external_contacts_section(agent: Any) -> Dict[str, Any]:
                 "last_cycle",
                 "stopped_cycle",
                 "stop_reason",
+                "metrics",
             )
         }
         item.update(

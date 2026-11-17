@@ -8,7 +8,7 @@ import math
 from typing import Callable, Optional
 
 MAX_AUTONOMOUS_REPLIES = 8
-MAX_TOTAL_TOKENS = 4096
+MAX_TOTAL_TOKENS = 256_000
 MAX_INTERVAL_SEC = 60.0
 _RUNNING_STATES = frozenset({"running", "pausing", "stopping"})
 
@@ -35,6 +35,7 @@ class ExternalDialogueController:
         self.session_id: Optional[str] = None
         self.state = "idle"
         self.last_error: Optional[str] = None
+        self.pause_reason: Optional[str] = None
         self.max_replies = 0
         self.max_total_tokens = 0
         self.min_interval_sec = 0.0
@@ -75,7 +76,7 @@ class ExternalDialogueController:
             or not isinstance(max_total_tokens, int)
             or not 1 <= max_total_tokens <= MAX_TOTAL_TOKENS
         ):
-            raise ValueError("max_total_tokens: expected an integer from 1 to 4096")
+            raise ValueError("max_total_tokens: expected an integer from 1 to 256000")
         if not 0.0 <= float(min_interval_sec) <= MAX_INTERVAL_SEC:
             raise ValueError("min_interval_sec: expected a value from 0 to 60")
 
@@ -113,6 +114,7 @@ class ExternalDialogueController:
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self.billing_receipts = []
         self.last_error = None
+        self.pause_reason = None
         self._stop_requested = False
         self._pause_requested = False
         self._manual_requested = False
@@ -135,6 +137,7 @@ class ExternalDialogueController:
         self._manual_requested = False
         self._stop_requested = False
         self.last_error = None
+        self.pause_reason = None
         self._control = asyncio.Event()
         self.state = "running"
         self._record("resumed")
@@ -224,7 +227,9 @@ class ExternalDialogueController:
             self.tokens_used += total
         else:
             self.tokens_estimated = True
-            self.tokens_used += math.ceil(len(outgoing_text) / 4) + self.adapter.max_tokens
+            self.tokens_used += (
+                math.ceil(len(outgoing_text) / 4) + self.adapter.max_tokens
+            )
         billing = receipt.get("billing") if isinstance(receipt, dict) else None
         if isinstance(billing, dict) and billing:
             self.billing_receipts.append(deepcopy(billing))
@@ -253,12 +258,31 @@ class ExternalDialogueController:
         finally:
             self.in_flight = False
 
+    def _request_token_upper_bound(self, text: str):
+        try:
+            bound = self.adapter.request_token_upper_bound(
+                session_id=self.session_id, text=text
+            )
+        except Exception:
+            self.last_error = "budget_estimate_failed"
+            return None
+        if isinstance(bound, bool) or not isinstance(bound, int) or bound < 1:
+            self.last_error = "budget_estimate_failed"
+            return None
+        return bound
+
     async def _step(self) -> str:
         draft = self.manager.create_draft(self.session_id, cycle=self.cycle())
         if draft["status"] != "draft":
             self.last_error = f"draft_{draft['status']}"
             self._record("api_error", self.last_error)
             return "error"
+        upper_bound = self._request_token_upper_bound(draft["text"])
+        if upper_bound is None:
+            self._record("api_error", self.last_error)
+            return "error"
+        if self.tokens_used + upper_bound > self.max_total_tokens:
+            return "budget"
         approved = self.manager.approve(self.session_id, cycle=self.cycle())
         if approved["status"] not in {"approved", "already_approved"}:
             self.last_error = f"approval_{approved['status']}"
@@ -293,6 +317,18 @@ class ExternalDialogueController:
             self._record("api_error", self.last_error)
             return "error"
         self._record("response_ingested", incoming["message_id"])
+        if self.tokens_used > self.max_total_tokens:
+            self.pause_reason = "provider_budget_exceeded"
+            self._record(
+                "provider_budget_exceeded",
+                f"tokens={self.tokens_used}; limit={self.max_total_tokens}",
+            )
+            return "provider_budget_exceeded"
+        reason = self.manager.empty_exchange_reason(self.session_id)
+        if reason is not None:
+            self.pause_reason = reason
+            self._record("empty_exchange", reason)
+            return "empty_exchange"
         return "sent"
 
     async def _delay(self) -> None:
@@ -300,9 +336,7 @@ class ExternalDialogueController:
             await asyncio.sleep(0)
             return
         try:
-            await asyncio.wait_for(
-                self._control.wait(), timeout=self.min_interval_sec
-            )
+            await asyncio.wait_for(self._control.wait(), timeout=self.min_interval_sec)
         except asyncio.TimeoutError:
             pass
 
@@ -325,6 +359,9 @@ class ExternalDialogueController:
                 if outcome == "stopped" or self._stop_requested:
                     self._finish_stop()
                     return
+                if outcome == "budget":
+                    self._finish_budget()
+                    return
                 if outcome == "error":
                     if self._pause_requested:
                         self._finish_pause()
@@ -332,6 +369,11 @@ class ExternalDialogueController:
                         self.state = "paused"
                         self._record("paused", self.last_error)
                     return
+                if outcome in {"empty_exchange", "provider_budget_exceeded"}:
+                    if not self._pause_requested:
+                        self.state = "paused"
+                        self._record("paused", self.pause_reason)
+                        return
                 if self._pause_requested:
                     self._finish_pause()
                     return
@@ -366,5 +408,6 @@ class ExternalDialogueController:
             "tokens_estimated": self.tokens_estimated,
             "billing_receipts": deepcopy(self.billing_receipts),
             "last_error": self.last_error,
+            "pause_reason": self.pause_reason,
             "automatic_resume": False,
         }

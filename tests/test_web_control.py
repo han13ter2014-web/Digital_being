@@ -306,7 +306,7 @@ def test_web_publishes_exact_tk_event(
                 ("max_replies", True),
                 ("max_replies", 1.5),
                 ("max_total_tokens", 0),
-                ("max_total_tokens", 4097),
+                ("max_total_tokens", 256001),
                 ("max_total_tokens", False),
                 ("max_total_tokens", "1200"),
                 ("min_interval_sec", 0),

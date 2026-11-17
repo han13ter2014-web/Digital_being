@@ -299,10 +299,14 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     self.language_tutor = LanguageTutor()
 
     # Внешние контакты: карантин, проекты и решения владельца.
-    # Внешний текст не проходит через команды и не получает доступ к Core.
+    # Планировщик получает read-only доступ к ограниченному состоянию агента,
+    # но сохраняет план и outcome только в session-scoped журнале.
     from src.core.external_contacts import ExternalContactManager
+    from src.core.external_response import ExternalResponsePlanner
 
-    self.external_contacts = ExternalContactManager()
+    self.external_contacts = ExternalContactManager(
+        response_planner=ExternalResponsePlanner(self)
+    )
 
     # Персональные снапшоты диалога и обучения для текущего собеседника.
     from src.core.social_attribution import SocialAttribution

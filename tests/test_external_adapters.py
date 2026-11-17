@@ -221,9 +221,7 @@ def test_default_wire_parser_rejects_invalid_json_and_oversize(monkeypatch):
         module.urllib.request, "build_opener", lambda *args: Opener(b"not-json")
     )
     with pytest.raises(ExternalAdapterError, match="invalid_response"):
-        module._urllib_transport(
-            url=RUFP_ENDPOINT, payload={}, headers={}, timeout=1.0
-        )
+        module._urllib_transport(url=RUFP_ENDPOINT, payload={}, headers={}, timeout=1.0)
 
     monkeypatch.setattr(
         module.urllib.request,
@@ -231,9 +229,7 @@ def test_default_wire_parser_rejects_invalid_json_and_oversize(monkeypatch):
         lambda *args: Opener(b"x" * (MAX_WIRE_BYTES + 1)),
     )
     with pytest.raises(ExternalAdapterError, match="response_too_large"):
-        module._urllib_transport(
-            url=RUFP_ENDPOINT, payload={}, headers={}, timeout=1.0
-        )
+        module._urllib_transport(url=RUFP_ENDPOINT, payload={}, headers={}, timeout=1.0)
 
 
 def test_no_redirect_handler_is_installed(monkeypatch):
@@ -269,3 +265,20 @@ def test_no_redirect_handler_is_installed(monkeypatch):
     assert len(seen) == 1
     assert isinstance(seen[0], module._NoRedirectHandler)
     assert seen[0].redirect_request(None, None, 307, "", {}, "https://evil") is None
+
+
+def test_request_token_upper_bound_matches_wire_payload_without_mutation():
+    calls = []
+
+    def transport(**kwargs):
+        calls.append(kwargs)
+        return _response()
+
+    adapter = _adapter(transport, max_tokens=77)
+    bound = adapter.request_token_upper_bound(session_id="external-1", text="Привет")
+
+    assert adapter._histories == {}
+    assert calls == []
+    adapter.send(session_id="external-1", message_id="out-1", text="Привет")
+    wire_bytes = json.dumps(calls[0]["payload"], ensure_ascii=False).encode("utf-8")
+    assert bound == len(wire_bytes) + 77

@@ -3121,13 +3121,11 @@ class MainWindow(ChatWindow):
                     return False
                 if (
                     not 1 <= replies <= 8
-                    or not 1 <= tokens <= 4096
+                    or not 1 <= tokens <= 256000
                     or not 1.0 <= interval <= 60.0
                 ):
                     return False
-                command = (
-                    f"external auto {session_id} {replies} {tokens} {interval:g}"
-                )
+                command = f"external auto {session_id} {replies} {tokens} {interval:g}"
             else:
                 command = f"external {action} {session_id}"
         try:
@@ -3267,6 +3265,8 @@ class MainWindow(ChatWindow):
         automation_busy = automation_state in {"running", "pausing", "stopping"}
         if session:
             error = automation.get("last_error")
+            pause_reason = automation.get("pause_reason")
+            metrics = session.get("metrics") or {}
             self._external_session_detail.configure(
                 text=(
                     f"{session.get('display_name') or 'Внешний ИИ'} · "
@@ -3280,7 +3280,12 @@ class MainWindow(ChatWindow):
                     f"{automation.get('max_replies', 0)} · "
                     f"токены: {automation.get('tokens_used', 0)}/"
                     f"{automation.get('max_total_tokens', 0)} · "
-                    f"запрос: {'выполняется' if automation.get('in_flight') else 'нет'}"
+                    f"запрос: {'выполняется' if automation.get('in_flight') else 'нет'}\n"
+                    f"Качество: follow-up {metrics.get('substantive_follow_ups', 0)} · "
+                    f"generic fallback {metrics.get('generic_fallbacks', 0)} · "
+                    f"provenance {metrics.get('provenance_complete', 0)}/"
+                    f"{metrics.get('planned_responses', 0)}"
+                    + (f"\nПричина паузы: {pause_reason}" if pause_reason else "")
                     + (f"\nОшибка автообмена: {error}" if error else "")
                 )
             )
@@ -3617,13 +3622,11 @@ class MainWindow(ChatWindow):
             self._request_external_clear,
         )
 
-        automatic, _ = self._now_card(
-            left, "АВТООБМЕН · ЖЁСТКИЕ ЛИМИТЫ", theme.GREEN
-        )
+        automatic, _ = self._now_card(left, "АВТООБМЕН · ЖЁСТКИЕ ЛИМИТЫ", theme.GREEN)
         automatic.pack(fill=tk.X, pady=(8, 0))
         auto_fields = (
             ("max_replies", "Реплики · 1–8", "3"),
-            ("max_total_tokens", "Токены · 1–4096", "1200"),
+            ("max_total_tokens", "Токены · 1–256000", "1200"),
             ("min_interval_sec", "Интервал, сек · 1–60", "2"),
         )
         for key, caption, default in auto_fields:
@@ -3652,9 +3655,7 @@ class MainWindow(ChatWindow):
         auto_actions = tk.Frame(automatic, bg=theme.SURFACE)
         auto_actions.pack(fill=tk.X, padx=theme.SPACING["sm"])
         auto_actions_secondary = tk.Frame(automatic, bg=theme.SURFACE)
-        auto_actions_secondary.pack(
-            fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8)
-        )
+        auto_actions_secondary.pack(fill=tk.X, padx=theme.SPACING["sm"], pady=(0, 8))
         add_action(auto_actions, "auto", "Запустить автообмен")
         add_action(auto_actions, "pause", "Пауза")
         add_action(auto_actions_secondary, "resume", "Продолжить")

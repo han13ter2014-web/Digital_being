@@ -21,6 +21,14 @@ from src.core.dialogue_acts import (
     classify_user_text,
     social_reply_kind,
 )
+from src.core.external_response import (
+    close_response,
+    empty_exchange_reason,
+    mark_response_delivered,
+    observe_response,
+    response_metrics,
+    validate_external_response,
+)
 
 SCHEMA_VERSION = 1
 MAX_SESSIONS = 8
@@ -47,6 +55,8 @@ CONTROL_EVENT_KINDS = frozenset(
         "response_ingested",
         "api_error",
         "budget_reached",
+        "provider_budget_exceeded",
+        "empty_exchange",
         "late_response_discarded",
     }
 )
@@ -178,6 +188,8 @@ def _validate_message(message, path: str) -> None:
             _fail(path, "inbound claim cannot be a response draft")
         if message.get("error") is not None:
             _fail(f"{path}.error", "inbound claim cannot contain send error")
+        if message.get("response") is not None:
+            _fail(f"{path}.response", "inbound claim cannot own a response plan")
         return
     if message.get("status") not in OUTGOING_STATUSES:
         _fail(f"{path}.status", "unknown outgoing status")
@@ -186,6 +198,22 @@ def _validate_message(message, path: str) -> None:
     _text(message.get("based_on"), f"{path}.based_on", MAX_ID_CHARS)
     if message.get("origin") not in _ORIGINS:
         _fail(f"{path}.origin", "unknown response origin")
+    response = message.get("response")
+    if response is not None:
+        validate_external_response(response, f"{path}.response")
+        expected_status = {
+            "draft": {"draft"},
+            "approved": {"draft"},
+            "sent": {"pending", "observed"},
+            "handed_off": {"pending", "observed"},
+            "rejected": {"closed"},
+            "stopped": {"closed"},
+            "send_failed": {"closed"},
+        }[message["status"]]
+        if response["status"] not in expected_status:
+            _fail(f"{path}.response.status", "response and delivery status differ")
+    if message["origin"] == "owner_edit" and response is not None:
+        _fail(f"{path}.response", "owner edit invalidates the machine plan")
     error = message.get("error")
     if message["status"] == "send_failed":
         _text(error, f"{path}.error", MAX_REASON_CHARS)
@@ -262,6 +290,15 @@ def validate_external_contacts(data, registry_data) -> None:
                 or source["session_id"] != session_id
             ):
                 _fail(f"{path}.based_on", "response requires an earlier inbound claim")
+            response = message.get("response")
+            if response is not None:
+                plan = response["plan"]
+                if plan["state"]["profile_id"] != session["profile_id"]:
+                    _fail(f"{path}.response.plan", "response profile escaped session")
+                if plan["observed_input"] != source["text"][:500]:
+                    _fail(f"{path}.response.plan", "observed input does not match")
+                if plan["realization"]["text"] != message["text"]:
+                    _fail(f"{path}.response.plan", "realized text does not match")
             if message["status"] in ACTIVE_DRAFT_STATUSES:
                 if session_id in active_drafts:
                     _fail(path, "multiple active drafts in one session")
@@ -281,10 +318,11 @@ def validate_external_contacts(data, registry_data) -> None:
 class ExternalContactManager:
     """Ограниченные сессии, проекты, решения владельца и локальный журнал."""
 
-    def __init__(self) -> None:
+    def __init__(self, response_planner=None) -> None:
         self.sessions = []
         self.messages = []
         self.control_events = []
+        self.response_planner = response_planner
 
     def _session(self, session_id: str) -> Optional[dict]:
         return next(
@@ -385,7 +423,21 @@ class ExternalContactManager:
             "revision": 0,
             "external_message_id": external_message_id,
             "error": None,
+            "response": None,
         }
+        pending = next(
+            (
+                item
+                for item in reversed(self.messages)
+                if item["session_id"] == session_id
+                and item["direction"] == "outbound"
+                and item["status"] in {"sent", "handed_off"}
+                and (item.get("response") or {}).get("status") == "pending"
+            ),
+            None,
+        )
+        if pending is not None:
+            observe_response(session, pending, message)
         self.messages.append(message)
         session["last_cycle"] = max(session["last_cycle"], cycle)
         return {"status": "quarantined", **deepcopy(message)}
@@ -441,7 +493,19 @@ class ExternalContactManager:
             >= MAX_MESSAGES_PER_SESSION
         ):
             return {"status": "limit_reached", "session_id": session_id}
-        text = self._draft_text(source["text"])
+        history = [item for item in self.messages if item["session_id"] == session_id][
+            -8:
+        ]
+        response = (
+            self.response_planner.build(session, source, history, cycle=cycle)
+            if self.response_planner is not None
+            else None
+        )
+        text = (
+            response["plan"]["realization"]["text"]
+            if response is not None
+            else self._draft_text(source["text"])
+        )
         draft = {
             "message_id": f"out-{uuid4()}",
             "session_id": session_id,
@@ -456,6 +520,7 @@ class ExternalContactManager:
             "revision": 1,
             "external_message_id": None,
             "error": None,
+            "response": response,
         }
         self.messages.append(draft)
         session["last_cycle"] = max(session["last_cycle"], cycle)
@@ -480,6 +545,7 @@ class ExternalContactManager:
         draft["cycle"] = cycle
         draft["external_message_id"] = None
         draft["error"] = None
+        draft["response"] = None
         session["last_cycle"] = max(session["last_cycle"], cycle)
         return {"status": "draft", **deepcopy(draft)}
 
@@ -511,6 +577,7 @@ class ExternalContactManager:
         if draft is None:
             return {"status": "no_draft", "session_id": session_id}
         draft["status"] = "rejected"
+        close_response(draft.get("response"))
         draft["cycle"] = cycle
         session["last_cycle"] = max(session["last_cycle"], cycle)
         return {"status": "rejected", **deepcopy(draft)}
@@ -533,6 +600,7 @@ class ExternalContactManager:
                 and message["status"] in ACTIVE_DRAFT_STATUSES
             ):
                 message["status"] = "stopped"
+                close_response(message.get("response"))
                 message["cycle"] = cycle
         return {"status": "stopped", **deepcopy(session)}
 
@@ -550,6 +618,7 @@ class ExternalContactManager:
         if draft["text_sha256"] != _hash_text(draft["text"]):
             return {"status": "approval_mismatch", "session_id": session_id}
         draft["status"] = "handed_off"
+        mark_response_delivered(draft.get("response"))
         draft["cycle"] = cycle
         session["last_cycle"] = max(session["last_cycle"], cycle)
         return {"status": "handed_off", **deepcopy(draft)}
@@ -579,11 +648,13 @@ class ExternalContactManager:
             _optional_text(external_message_id, "external_message_id", MAX_ID_CHARS)
         except Exception as exc:
             draft["status"] = "send_failed"
+            close_response(draft.get("response"), "send_failed")
             draft["error"] = f"{type(exc).__name__}: adapter did not confirm delivery"
             draft["cycle"] = cycle
             session["last_cycle"] = max(session["last_cycle"], cycle)
             return {"status": "send_failed", **deepcopy(draft)}
         draft["status"] = "sent"
+        mark_response_delivered(draft.get("response"))
         draft["external_message_id"] = external_message_id
         draft["cycle"] = cycle
         session["last_cycle"] = max(session["last_cycle"], cycle)
@@ -625,6 +696,10 @@ class ExternalContactManager:
         ]
         return {"status": "cleared", "session_id": session_id}
 
+    def empty_exchange_reason(self, session_id: str):
+        """Признак паузы по качеству диалога, а не по сбою провайдера."""
+        return empty_exchange_reason(self.messages, session_id)
+
     def get_session(self, session_id: str) -> Optional[dict]:
         session = self._session(session_id)
         if session is None:
@@ -641,6 +716,7 @@ class ExternalContactManager:
                 for item in self.control_events
                 if item["session_id"] == session_id
             ],
+            "metrics": response_metrics(self.messages, session_id),
         }
 
     def get_status(self) -> dict:

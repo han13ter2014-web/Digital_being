@@ -156,7 +156,7 @@ class ExternalChatAdapter:
         self._histories: Dict[str, list] = {}
 
     def _messages(self, session_id: str, text: str) -> list:
-        history = self._histories.setdefault(session_id, [])
+        history = self._histories.get(session_id, [])
         messages = [
             {
                 "role": "system",
@@ -170,16 +170,32 @@ class ExternalChatAdapter:
         ]
         return messages
 
-    def send(self, *, session_id: str, message_id: str, text: str) -> dict:
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
-            raise ExternalAdapterError("invalid_outgoing_text")
-        api_key = self._credential_loader(self.provider)
-        payload = {
+    def _payload(self, session_id: str, text: str) -> dict:
+        return {
             "model": self.model,
             "messages": self._messages(session_id, text),
             "stream": False,
             "max_tokens": self.max_tokens,
         }
+
+    def request_token_upper_bound(self, *, session_id: str, text: str) -> int:
+        """Консервативный потолок запроса без сети и изменения истории.
+
+        Сериализованный JSON заведомо больше видимого модели текста. Это не
+        tokenizer конкретного провайдера, а намеренно осторожная оценка до
+        отправки; фактический usage проверяется отдельно после ответа.
+        """
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
+            raise ExternalAdapterError("invalid_outgoing_text")
+        payload = self._payload(session_id, text)
+        wire_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return len(wire_bytes) + self.max_tokens
+
+    def send(self, *, session_id: str, message_id: str, text: str) -> dict:
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
+            raise ExternalAdapterError("invalid_outgoing_text")
+        api_key = self._credential_loader(self.provider)
+        payload = self._payload(session_id, text)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
