@@ -481,6 +481,12 @@ def validate_checkpoint_state(state) -> None:
         from src.core.language_tutor import validate_language_tutor
 
         validate_language_tutor(state["language_tutor"])
+    if state.get("external_contacts") is not None:
+        from src.core.external_contacts import validate_external_contacts
+
+        validate_external_contacts(
+            state["external_contacts"], state.get("social_registry")
+        )
     if state.get("social_attribution") is not None:
         from src.core.social_attribution import validate_social_attribution
 

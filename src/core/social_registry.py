@@ -301,6 +301,49 @@ class SocialRegistry:
         self.current_profile_id = profile_id
         return profile_id
 
+    def create_external_ai(
+        self,
+        name: str,
+        *,
+        provider: str,
+        external_id: str,
+        cycle: int = 0,
+    ) -> str:
+        """Создать внешний профиль без смены локального собеседника и прав.
+
+        Повторный контакт с тем же стабильным идентификатором использует
+        существующий профиль. Само имя идентичность не доказывает.
+        """
+        _text(name, "display_name", max_length=MAX_NAME_LENGTH)
+        _text(provider, "provider", max_length=64)
+        _text(external_id, "external_id", max_length=128)
+        _cycle(cycle, "cycle")
+        for profile_id, profile in self.profiles.items():
+            if profile["kind"] != "external_ai":
+                continue
+            for binding in profile["channel_bindings"]:
+                if (
+                    binding["channel"] == provider
+                    and binding["external_id"] == external_id
+                ):
+                    profile["last_seen_cycle"] = max(profile["last_seen_cycle"], cycle)
+                    return profile_id
+        if len(self.profiles) >= MAX_PROFILES:
+            raise ValueError("social registry profile limit reached")
+        profile_id = str(uuid4())
+        profile = self._profile(
+            profile_id,
+            "external_ai",
+            name=name,
+            introduced_by=self.owner_profile_id,
+            cycle=cycle,
+        )
+        profile["channel_bindings"] = [
+            {"channel": provider, "external_id": external_id, "confidence": 1.0}
+        ]
+        self.profiles[profile_id] = profile
+        return profile_id
+
     def _add_digital_being(
         self, name: str, lineage: dict, *, cycle: int, local: bool
     ) -> str:

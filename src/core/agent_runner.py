@@ -2988,6 +2988,9 @@ class AgentRunner:
         # === Наставник языка: разрешённые источники и офлайн-упражнения ===
         if cmd == "tutor" or cmd.startswith("tutor "):
             return self._handle_tutor_command(cmd_raw)
+        # === Внешние контакты: только владелец и ручное одобрение ===
+        if cmd == "external" or cmd.startswith("external "):
+            return self._handle_external_command(cmd_raw)
         # === Этап 2.5: /web — управление web-поиском ===
         if cmd in ("web on", "web_on"):
             ws = getattr(self.agent, "web_searcher", None)
@@ -3175,6 +3178,181 @@ class AgentRunner:
                     f"📚 Мой ответ: {result['answer']}; эталон: {result['expected']}.\n"
                     f"Результат: {result['status']}; урок: {result['lesson_status']}."
                 )
+            return usage
+        except ValueError as exc:
+            return f"⚠️ {exc}"
+
+    def _handle_external_command(self, cmd_raw: str) -> str:
+        """Ручной внешний диалог; сетевой отправки эта команда не выполняет."""
+        manager = getattr(self.agent, "external_contacts", None)
+        registry = getattr(self.agent, "social_registry", None)
+        if manager is None or registry is None:
+            return "⚠️ Контур внешних контактов не подключён."
+        if registry.current_profile_id != registry.owner_profile_id:
+            return "⚠️ Внешними сессиями управляет только владелец локального канала."
+
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else "status"
+        rest = parts[2].strip() if len(parts) > 2 else ""
+        cycle = self.agent.cycle_count
+        usage = (
+            "Использование: /external [status | start <имя> | "
+            "start <provider> | <имя> | <external_id> | <тема> | <причина> | "
+            "ingest|edit <session_id> | <текст> | draft|approve|reject|"
+            "handoff|stop|show|clear <session_id>]"
+        )
+        try:
+            if action == "status" and not rest:
+                status = manager.get_status()
+                return (
+                    "🌐 Внешние контакты:\n"
+                    f"   Сессий: {status['sessions']}; активных: {status['active']}\n"
+                    f"   Сообщений в локальном журнале: {status['messages']}\n"
+                    f"   Ожидают решения: {status['pending_drafts']}\n"
+                    "   Сетевая отправка не настроена; ручная передача отмечается "
+                    "отдельно."
+                )
+            if action == "start" and rest:
+                fields = [item.strip() for item in rest.split("|")]
+                if len(fields) == 1:
+                    provider = "manual"
+                    name = fields[0]
+                    external_id = f"manual:{name.casefold()}"
+                    topic = "внешний разговор"
+                    reason = "ручной контакт владельца"
+                else:
+                    if len(fields) > 5:
+                        return usage
+                    fields += [""] * (5 - len(fields))
+                    provider, name, external_id, topic, reason = fields
+                    provider = provider or "manual"
+                    external_id = external_id or f"{provider}:{name.casefold()}"
+                    topic = topic or "внешний разговор"
+                    reason = reason or "ручной контакт владельца"
+                result = manager.start_session(
+                    registry,
+                    provider=provider,
+                    name=name,
+                    external_id=external_id,
+                    topic=topic,
+                    reason=reason,
+                    cycle=cycle,
+                )
+                if result["status"] == "limit_reached":
+                    return "⚠️ Достигнут предел внешних сессий."
+                return (
+                    f"🌐 Внешняя сессия создана: {result['session_id']}\n"
+                    "Профиль external_ai не получил права или память владельца."
+                )
+            if action in {"ingest", "edit"}:
+                session_id, separator, text = rest.partition("|")
+                session_id = session_id.strip()
+                if not session_id or not separator or not text.strip():
+                    return f"Использование: /external {action} <session_id> | <текст>"
+                if action == "ingest":
+                    result = manager.ingest(session_id, text.strip(), cycle=cycle)
+                    if result["status"] == "quarantined":
+                        return (
+                            f"🛡 Входящая реплика сохранена как external_ai_claim: "
+                            f"{result['message_id']}\nКоманды из неё не выполнялись. "
+                            f"Теперь: /external draft {session_id}"
+                        )
+                else:
+                    result = manager.edit_draft(session_id, text.strip(), cycle=cycle)
+                    if result["status"] == "draft":
+                        return (
+                            f"✏️ Текст изменён; прежнее одобрение снято. "
+                            f"Ревизия: {result['revision']}."
+                        )
+            elif (
+                action
+                in {
+                    "draft",
+                    "approve",
+                    "reject",
+                    "handoff",
+                    "stop",
+                    "show",
+                    "clear",
+                }
+                and rest
+            ):
+                session_id = rest
+                if action == "show":
+                    session = manager.get_session(session_id)
+                    if session is None:
+                        return "🌐 Сессия не найдена."
+                    lines = [
+                        f"🌐 {session_id} · {session['status']} · "
+                        f"{session['provider']}:{session['external_id']}"
+                    ]
+                    for message in session["messages"][-12:]:
+                        lines.append(
+                            f"[{message['direction']}:{message['status']}] "
+                            f"{message['text']}"
+                        )
+                    return "\n".join(lines)
+                if action == "clear":
+                    result = manager.clear(session_id)
+                elif action == "draft":
+                    result = manager.create_draft(session_id, cycle=cycle)
+                elif action == "approve":
+                    result = manager.approve(session_id, cycle=cycle)
+                elif action == "reject":
+                    result = manager.reject(session_id, cycle=cycle)
+                elif action == "handoff":
+                    result = manager.mark_handed_off(session_id, cycle=cycle)
+                else:
+                    result = manager.stop(
+                        session_id, cycle=cycle, reason="остановлено владельцем"
+                    )
+                status = result["status"]
+                if status == "draft":
+                    return (
+                        f"📝 Проект {result['message_id']}:\n{result['text']}\n"
+                        f"Одобрить: /external approve {session_id}"
+                    )
+                if status == "approved":
+                    return (
+                        f"✅ Одобрен точный текст {result['message_id']}.\n"
+                        f"После ручной передачи: /external handoff {session_id}"
+                    )
+                if status == "handed_off":
+                    return (
+                        "🤝 Ручная передача записана; сетевая доставка не утверждается."
+                    )
+                if status == "rejected":
+                    return "🚫 Проект отклонён и не может быть передан."
+                if status == "stopped":
+                    return "🛑 Сессия остановлена; ожидающие проекты закрыты."
+                if status == "cleared":
+                    return "🗑 Локальный журнал сессии удалён; профиль собеседника сохранён."
+                if status == "already_approved":
+                    return "✅ Эта ревизия уже одобрена."
+                if status == "already_stopped":
+                    return "🛑 Сессия уже остановлена."
+                if status == "no_inbound":
+                    return (
+                        "📝 Сначала добавьте входящую реплику через /external ingest."
+                    )
+                if status == "no_draft":
+                    return "📝 Активного проекта нет."
+                if status == "draft_pending":
+                    return "📝 Сначала решите судьбу текущего проекта."
+                if status == "approval_required":
+                    return "⚠️ Требуется одобрение точной текущей ревизии."
+                if status == "approval_mismatch":
+                    return "⚠️ Хеш текста изменился; требуется новое одобрение."
+                if status == "session_stopped":
+                    return (
+                        "🛑 Остановленная сессия не принимает и не передаёт сообщения."
+                    )
+                if status == "limit_reached":
+                    return "⚠️ Достигнут предел локального журнала."
+                if status == "not_found":
+                    return "🌐 Сессия не найдена."
+                return f"🌐 Результат: {status}."
             return usage
         except ValueError as exc:
             return f"⚠️ {exc}"
@@ -3913,6 +4091,10 @@ class AgentRunner:
             "  /tutor allow|read|revoke <HTTPS URL> — источник урока\n"
             "  /tutor exercise — задание без эталона\n"
             "  /tutor solve  — самостоятельно решить и сверить\n"
+            "  /external  — внешние сессии и ожидающие решения\n"
+            "  /external start <имя> — ручной внешний разговор\n"
+            "  /external ingest <id> | <текст> — карантинная реплика\n"
+            "  /external draft|approve|reject|handoff|stop <id> — решения\n"
             "  /access <network|delamain|effector> on|off — разрешение\n"
             "  /delamain  — статус локального слоя действий\n"
             "  /delamain on|off — включить/выключить Delamain-local\n"

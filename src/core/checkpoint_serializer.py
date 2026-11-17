@@ -229,6 +229,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "language_tutor", None) is not None
             else None
         ),
+        # Внешние сессии и ограниченный журнал живут только в локальном checkpoint.
+        "external_contacts": (
+            agent.external_contacts.to_dict()
+            if getattr(agent, "external_contacts", None) is not None
+            else None
+        ),
         # Персональные контексты всех профилей; top-level поля выше остаются
         # снапшотом активного собеседника для совместимости старого чтения.
         "social_attribution": (
@@ -414,6 +420,7 @@ _INPLACE_RESTORE_PATHS = (
     ("associative_lexicon",),
     ("response_experience",),
     ("language_tutor",),
+    ("external_contacts",),
     ("emotional_state",),
     ("interoception",),
     ("interoception", "state"),
@@ -984,6 +991,17 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
 
         agent.language_tutor.load_from(
             saved_tutor if isinstance(saved_tutor, dict) else LanguageTutor().to_dict()
+        )
+
+    if getattr(agent, "external_contacts", None) is not None:
+        from src.core.external_contacts import ExternalContactManager
+
+        saved_contacts = state.get("external_contacts")
+        agent.external_contacts.load_from(
+            saved_contacts
+            if isinstance(saved_contacts, dict)
+            else ExternalContactManager().to_dict(),
+            agent.social_registry.to_dict(),
         )
 
     # Новый формат активирует сохранённый профиль после обычных top-level

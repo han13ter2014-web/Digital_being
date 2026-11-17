@@ -298,6 +298,12 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.language_tutor = LanguageTutor()
 
+    # Внешние контакты: карантин, проекты и решения владельца.
+    # Внешний текст не проходит через команды и не получает доступ к Core.
+    from src.core.external_contacts import ExternalContactManager
+
+    self.external_contacts = ExternalContactManager()
+
     # Персональные снапшоты диалога и обучения для текущего собеседника.
     from src.core.social_attribution import SocialAttribution
 

@@ -122,6 +122,7 @@ def test_subsystem_specs_all_attached():
             "social_attribution",
             "associative_lexicon",
             "language_tutor",
+            "external_contacts",
             "mental_models",
             "_open_questions_manager",
         ):
