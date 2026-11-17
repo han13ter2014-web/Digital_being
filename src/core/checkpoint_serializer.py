@@ -223,10 +223,22 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "response_experience", None) is not None
             else None
         ),
+        # Явные связи английских поверхностных форм с общими понятиями.
+        "language_concept_links": (
+            agent.language_concept_links.to_dict()
+            if getattr(agent, "language_concept_links", None) is not None
+            else None
+        ),
         # Разрешения источников, карантин и учебные попытки наставника.
         "language_tutor": (
             agent.language_tutor.to_dict()
             if getattr(agent, "language_tutor", None) is not None
+            else None
+        ),
+        # Отдельные EN-разрешения, карантин и проверяемые rule packs.
+        "english_language_tutor": (
+            agent.english_language_tutor.to_dict()
+            if getattr(agent, "english_language_tutor", None) is not None
             else None
         ),
         # Внешние сессии и ограниченный журнал живут только в локальном checkpoint.
@@ -419,7 +431,9 @@ _INPLACE_RESTORE_PATHS = (
     ("dialogue_learning",),
     ("associative_lexicon",),
     ("response_experience",),
+    ("language_concept_links",),
     ("language_tutor",),
+    ("english_language_tutor",),
     ("external_contacts",),
     ("emotional_state",),
     ("interoception",),
@@ -985,12 +999,32 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             else ResponseExperience().to_dict()
         )
 
+    if getattr(agent, "language_concept_links", None) is not None:
+        from src.core.language_concepts import LanguageConceptLinks
+
+        saved_links = state.get("language_concept_links")
+        agent.language_concept_links.load_from(
+            saved_links
+            if isinstance(saved_links, dict)
+            else LanguageConceptLinks().to_dict()
+        )
+
     saved_tutor = state.get("language_tutor")
     if getattr(agent, "language_tutor", None) is not None:
         from src.core.language_tutor import LanguageTutor
 
         agent.language_tutor.load_from(
             saved_tutor if isinstance(saved_tutor, dict) else LanguageTutor().to_dict()
+        )
+
+    if getattr(agent, "english_language_tutor", None) is not None:
+        from src.core.english_language_tutor import EnglishLanguageTutor
+
+        saved_english_tutor = state.get("english_language_tutor")
+        agent.english_language_tutor.load_from(
+            saved_english_tutor
+            if isinstance(saved_english_tutor, dict)
+            else EnglishLanguageTutor().to_dict()
         )
 
     if getattr(agent, "external_contacts", None) is not None:

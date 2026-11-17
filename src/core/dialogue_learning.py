@@ -30,6 +30,7 @@ DialogueLearning — саморазвитие диалоговых таблиц 
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Dict, List, Optional
 
 from src.core.dialogue_acts import (
@@ -142,6 +143,55 @@ class DialogueLearning:
         # меняет действия, знания или ценности сущности.
         self.strategy_memory = DialogueStrategyMemory()
         self.last_proposal_cycle: int = -PROPOSAL_COOLDOWN_CYCLES
+        # Публичные поля выше описывают активный язык. Неактивный язык хранится
+        # отдельным полным снапшотом, включая cooldown и strategy memory.
+        self.active_language = "ru"
+        self._language_states: Dict[str, dict] = {}
+
+    def _language_state(self) -> dict:
+        return {
+            "buffer": {phrase: dict(entry) for phrase, entry in self.buffer.items()},
+            "learned": {phrase: dict(entry) for phrase, entry in self.learned.items()},
+            "suppressed": dict(self.suppressed),
+            "learned_affect": {
+                phrase: dict(entry, components=dict(entry.get("components") or {}))
+                for phrase, entry in self.learned_affect.items()
+            },
+            "suppressed_affect": dict(self.suppressed_affect),
+            "dialogue_strategies": self.strategy_memory.to_dict(),
+            "last_proposal_cycle": self.last_proposal_cycle,
+        }
+
+    def set_language(self, language_id: str) -> None:
+        """Активировать независимый опыт RU/EN без потери прежнего языка."""
+        if language_id not in {"ru", "en"}:
+            raise ValueError("language_id: expected ru or en")
+        if language_id == self.active_language:
+            return
+        self._language_states[self.active_language] = self._language_state()
+        saved = self._language_states.pop(language_id, None)
+        self.active_language = language_id
+        if saved is not None:
+            self._restore_language_state(saved)
+            return
+        self.buffer = {}
+        self.learned = {}
+        self.suppressed = {}
+        self.learned_affect = {}
+        self.suppressed_affect = {}
+        self.strategy_memory = DialogueStrategyMemory()
+        self.last_proposal_cycle = -PROPOSAL_COOLDOWN_CYCLES
+
+    def _restore_language_state(self, state: dict) -> None:
+        restored = DialogueLearning()
+        restored.load_from(state)
+        self.buffer = restored.buffer
+        self.learned = restored.learned
+        self.suppressed = restored.suppressed
+        self.learned_affect = restored.learned_affect
+        self.suppressed_affect = restored.suppressed_affect
+        self.strategy_memory = restored.strategy_memory
+        self.last_proposal_cycle = restored.last_proposal_cycle
 
     # === Сбор ===
 
@@ -442,26 +492,23 @@ class DialogueLearning:
     # === Сериализация ===
 
     def to_dict(self) -> dict:
+        # Верхнеуровневые поля сохраняют старый формат активного языка.
+        # Неактивные состояния добавляются отдельно и никогда не смешиваются.
         return {
-            "buffer": {phrase: dict(entry) for phrase, entry in self.buffer.items()},
-            "learned": {phrase: dict(entry) for phrase, entry in self.learned.items()},
-            "suppressed": dict(self.suppressed),
-            "learned_affect": {
-                phrase: dict(
-                    entry,
-                    components=dict(entry.get("components") or {}),
-                )
-                for phrase, entry in self.learned_affect.items()
-            },
-            "suppressed_affect": dict(self.suppressed_affect),
-            "dialogue_strategies": self.strategy_memory.to_dict(),
-            "last_proposal_cycle": self.last_proposal_cycle,
+            "schema_version": 2,
+            "active_language": self.active_language,
+            "language_states": deepcopy(self._language_states),
+            **self._language_state(),
         }
 
     def load_from(self, data) -> None:
         """Восстановиться из чекпоинта. Повреждённые поля → дефолты."""
         if not isinstance(data, dict):
             return
+        self.active_language = data.get("active_language", "ru")
+        if self.active_language not in {"ru", "en"}:
+            self.active_language = "ru"
+        self._language_states = {}
         # Старый checkpoint без подсекции означает пустую strategy-память,
         # а не сохранение случайного состояния прежней жизни.
         self.strategy_memory = DialogueStrategyMemory()
@@ -535,6 +582,18 @@ class DialogueLearning:
         last = data.get("last_proposal_cycle")
         if isinstance(last, (int, float)) and not isinstance(last, bool):
             self.last_proposal_cycle = int(last)
+        states = data.get("language_states")
+        if isinstance(states, dict):
+            for language_id, state in states.items():
+                if (
+                    language_id not in {"ru", "en"}
+                    or language_id == self.active_language
+                    or not isinstance(state, dict)
+                ):
+                    continue
+                restored_state = DialogueLearning()
+                restored_state.load_from(state)
+                self._language_states[language_id] = restored_state._language_state()
 
     # === Внутреннее ===
 

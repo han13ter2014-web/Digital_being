@@ -443,3 +443,158 @@ def test_external_snapshot_exposes_model_and_safe_automation_status():
     ]
     assert "must-not-leak" not in str(session)
     assert "not part of automation DTO" not in str(session)
+
+
+def test_english_tutor_snapshot_is_safe_deep_copy_without_expected_or_excerpt():
+    agent = _agent("EnglishTutorView")
+    tutor = agent.english_language_tutor
+    url = "https://example.test/english/regular-plural-s"
+    request = tutor.request_source(url, "Check one English rule", cycle=1)
+    tutor.materials = [
+        {
+            "url": url,
+            "title": "Offline lesson",
+            "language_id": "en",
+            "content_hash": "a" * 64,
+            "excerpt": "secret source excerpt",
+            "fetched_cycle": 1,
+            "status": "parsed",
+            "reason": "",
+        }
+    ]
+    tutor.rule_packs = [
+        {
+            "pack_id": "en-pack-safe",
+            "rule_id": "en_regular_plural_s",
+            "status": "candidate",
+            "exercises": [
+                {
+                    "exercise_id": "exercise-safe",
+                    "kind": "practice",
+                    "prompt": "cat",
+                    "expected": "cats",
+                    "status": "pending",
+                }
+            ],
+        }
+    ]
+    tutor.pending_exercise = {
+        "pack_id": "en-pack-safe",
+        "exercise_id": "exercise-safe",
+    }
+    agent.web_searcher = SimpleNamespace(is_enabled=False)
+    before = deepcopy(tutor.to_dict())
+
+    snapshot = build_life_snapshot(agent)["english_tutor"]
+
+    assert snapshot["available"] is True
+    assert snapshot["web_enabled"] is False
+    assert snapshot["request_count"] == 1
+    assert snapshot["source_requests"][0]["request_id"] == request["request_id"]
+    assert snapshot["materials"] == 1
+    assert snapshot["rule_packs"] == 1
+    assert snapshot["pending_exercise"] == {
+        "prompt": "cat",
+        "kind": "practice",
+        "pack_id": "en-pack-safe",
+        "exercise_id": "exercise-safe",
+        "rule_id": "en_regular_plural_s",
+    }
+    assert "cats" not in str(snapshot)
+    assert "secret source excerpt" not in str(snapshot)
+    snapshot["source_requests"][0]["reason"] = "изменено в UI"
+    snapshot["pending_exercise"]["prompt"] = "изменено в UI"
+    assert tutor.to_dict() == before
+
+
+def test_missing_or_broken_english_tutor_does_not_break_snapshot():
+    agent = _agent("NoEnglishTutor")
+    agent.english_language_tutor = None
+    assert build_life_snapshot(agent)["english_tutor"]["available"] is False
+
+    def explode():
+        raise RuntimeError("EN-наставник недоступен")
+
+    agent.english_language_tutor = SimpleNamespace(get_status=explode)
+    snapshot = build_life_snapshot(agent)["english_tutor"]
+    assert snapshot["available"] is True
+    assert snapshot["approved_sources"] == []
+    assert snapshot["rule_packs"] == 0
+
+
+
+def test_dialogue_snapshot_exposes_only_sanitized_language_diagnostics():
+    from src.core.english_dialogue import (
+        build_english_realization,
+        english_response_references,
+        recognize_english,
+    )
+
+    agent = _agent("DialogueDiagnostics")
+    agent.cycle_count = 7
+    agent.social_attribution.set_stable_dialogue_language("en")
+    agent.social_attribution.resolve_language("What are you doing?")
+    agent.social_attribution.set_response_language("en")
+    recognition = recognize_english("What are you doing?", agent)
+    realization = build_english_realization(agent, recognition)
+    prepared = agent.response_experience.prepare_plan(
+        agent,
+        realization["text"],
+        context=recognition.reply_context,
+        source="test",
+        user_text="What are you doing?",
+        references=english_response_references(recognition),
+        english_realization=realization,
+    )
+    agent.response_experience.register_delivery(
+        "dialogue-diagnostic", prepared["plan"], agent.cycle_count
+    )
+
+    snapshot = build_life_snapshot(agent)["dialogue"]
+
+    assert snapshot == {
+        "available": True,
+        "input_language": "en",
+        "dialogue_language": "en",
+        "response_language": "en",
+        "language_source": "stable_dialogue",
+        "act": "ask_about_self",
+        "rule_id": "about_self",
+        "fallback_policy": "none",
+        "reference_count": 2,
+        "references_verified": True,
+        "profile_id": agent.social_registry.current_profile_id,
+    }
+    assert "What are you doing?" not in str(snapshot)
+    assert "My name is" not in str(snapshot)
+
+
+def test_dialogue_snapshot_is_honest_about_missing_or_legacy_plan():
+    agent = _agent("NoDialogueDiagnostics")
+    empty = build_life_snapshot(agent)["dialogue"]
+    assert empty["available"] is False
+    assert empty["references_verified"] is False
+
+    agent.response_experience.responses["broken"] = {"plan": None}
+    agent.response_experience.latest_response_id = "broken"
+    broken = build_life_snapshot(agent)["dialogue"]
+    assert broken["available"] is False
+
+    agent = _agent("LegacyDialogueDiagnostics")
+    agent.social_attribution.set_stable_dialogue_language("en")
+    agent.social_attribution.resolve_language("Hello")
+    prepared = agent.response_experience.prepare_plan(
+        agent,
+        "Legacy English plan without diagnostic metadata.",
+        context="social_reply",
+        source="test",
+        user_text="Hello",
+    )
+    agent.response_experience.register_delivery(
+        "legacy-dialogue", prepared["plan"], agent.cycle_count
+    )
+    legacy = build_life_snapshot(agent)["dialogue"]
+    assert legacy["available"] is True
+    assert legacy["act"] is None
+    assert legacy["rule_id"] is None
+    assert legacy["fallback_policy"] == "none"

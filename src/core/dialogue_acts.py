@@ -399,6 +399,10 @@ def classify_user_text(
         if marker in normalized:
             return DialogueAct(ACT_ANSWER, marker)
 
+    # Отдельный smalltalk не перехватывает составные вопросы о состоянии.
+    if normalized.strip(" \t\r\n.!?…") == "как ты себя чувствуешь":
+        return DialogueAct(ACT_SOCIAL, "как ты")
+
     for marker in _ABOUT_SELF_MARKERS:
         if marker in normalized:
             return DialogueAct(ACT_ASK_ABOUT_SELF, marker)

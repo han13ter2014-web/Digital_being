@@ -477,10 +477,18 @@ def validate_checkpoint_state(state) -> None:
                         "response_experience.imitation.expressions",
                         "expression profile does not match current social profile",
                     )
+    if state.get("language_concept_links") is not None:
+        from src.core.language_concepts import validate_language_concept_links
+
+        validate_language_concept_links(state["language_concept_links"])
     if state.get("language_tutor") is not None:
         from src.core.language_tutor import validate_language_tutor
 
         validate_language_tutor(state["language_tutor"])
+    if state.get("english_language_tutor") is not None:
+        from src.core.english_language_tutor import validate_english_language_tutor
+
+        validate_english_language_tutor(state["english_language_tutor"])
     if state.get("external_contacts") is not None:
         from src.core.external_contacts import validate_external_contacts
 
@@ -650,6 +658,48 @@ def validate_checkpoint_state(state) -> None:
             if target.get("strategy_id") not in STRATEGY_WHITELIST[context]:
                 _fail(f"{path}.strategy_id", "unknown dialogue strategy")
             _integer(target.get("cycle"), f"{path}.cycle", nonnegative=True)
+        schema_version = learning.get("schema_version")
+        if schema_version is not None and schema_version != 2:
+            _fail("dialogue_learning.schema_version", "unsupported schema version")
+        if schema_version == 2 and not {"active_language", "language_states"} <= set(
+            learning
+        ):
+            _fail("dialogue_learning", "missing versioned language fields")
+        active_language = learning.get("active_language", "ru")
+        if active_language not in {"ru", "en"}:
+            _fail("dialogue_learning.active_language", "unsupported language")
+        language_states = _dict(
+            learning.get("language_states", {}), "dialogue_learning.language_states"
+        )
+        for language_id, payload in language_states.items():
+            path = f"dialogue_learning.language_states.{language_id}"
+            if language_id not in {"ru", "en"} or language_id == active_language:
+                _fail(path, "invalid or duplicate active language state")
+            payload = _dict(payload, path)
+            if payload.get("schema_version") not in {None, 2}:
+                _fail(f"{path}.schema_version", "unsupported schema version")
+            if payload.get("active_language", language_id) != language_id:
+                _fail(f"{path}.active_language", "language state mismatch")
+            if payload.get("language_states"):
+                _fail(f"{path}.language_states", "nested language states are forbidden")
+            flat = {
+                key: value
+                for key, value in payload.items()
+                if key not in {"schema_version", "active_language", "language_states"}
+            }
+            try:
+                validate_checkpoint_state(
+                    {
+                        "dialogue_learning": {
+                            **flat,
+                            "schema_version": 2,
+                            "active_language": language_id,
+                            "language_states": {},
+                        }
+                    }
+                )
+            except ValueError as error:
+                raise ValueError(f"{path}.{error}") from error
     if state.get("emotional_state") is not None:
         emotions = _dict(state["emotional_state"], "emotional_state")
         levels = _dict(emotions.get("levels", {}), "emotional_state.levels")
@@ -696,6 +746,19 @@ def validate_checkpoint_state(state) -> None:
                     _fail(f"{path}.{field}", "expected a string")
             if "cycle" in entry:
                 _integer(entry["cycle"], f"{path}.cycle", nonnegative=True)
+            language_context = entry.get("language_context")
+            if language_context is not None:
+                from src.core.language_context import validate_language_context
+
+                validate_language_context(language_context, f"{path}.language_context")
+                registry = state.get("social_registry")
+                if isinstance(registry, dict) and language_context[
+                    "profile_id"
+                ] != registry.get("current_profile_id"):
+                    _fail(
+                        f"{path}.language_context",
+                        "profile does not match current profile",
+                    )
         if interaction.get("last_human_affect") is not None:
             _affect(
                 interaction["last_human_affect"], "user_interaction.last_human_affect"
@@ -736,11 +799,45 @@ def validate_checkpoint_state(state) -> None:
                 or not question["response_id"].strip()
             ):
                 _fail(f"{path}.response_id", "expected a non-empty string")
+            language_context = question.get("language_context")
+            if language_context is not None:
+                from src.core.language_context import validate_language_context
+
+                validate_language_context(language_context, f"{path}.language_context")
+                registry = state.get("social_registry")
+                if isinstance(registry, dict) and language_context[
+                    "profile_id"
+                ] != registry.get("current_profile_id"):
+                    _fail(
+                        f"{path}.language_context",
+                        "profile does not match current profile",
+                    )
             for field in ("cycle", "sub_question_index"):
                 if field in question:
                     _integer(question[field], f"{path}.{field}", nonnegative=True)
             if "sub_answers" in question:
                 _dict(question["sub_answers"], f"{path}.sub_answers")
+        for index, entry in enumerate(
+            _list(
+                interaction.get("outgoing_messages", []),
+                "user_interaction.outgoing_messages",
+            )
+        ):
+            path = f"user_interaction.outgoing_messages[{index}]"
+            _dict(entry, path)
+            language_context = entry.get("language_context")
+            if language_context is not None:
+                from src.core.language_context import validate_language_context
+
+                validate_language_context(language_context, f"{path}.language_context")
+                registry = state.get("social_registry")
+                if isinstance(registry, dict) and language_context[
+                    "profile_id"
+                ] != registry.get("current_profile_id"):
+                    _fail(
+                        f"{path}.language_context",
+                        "profile does not match current profile",
+                    )
         for field in ("last_question_cycle", "last_user_message_cycle"):
             if interaction.get(field) is not None:
                 _integer(interaction[field], f"user_interaction.{field}")

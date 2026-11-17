@@ -620,3 +620,30 @@ def test_web_proposal_card_hides_id_and_has_no_optimistic_success(controlled_das
     assert "Одобрить" in body and "Отклонить" in body
     assert "Предложение применено" not in body
     assert "status='implemented'" not in body
+
+
+def test_tutor_language_selects_en_command_and_rejects_unknown_language(
+    controlled_dashboard,
+):
+    _, port, _, bus = controlled_dashboard
+
+    status, _ = _post(port, "/api/tutor", {"action": "solve", "language": "en"})
+    assert status == 202
+    assert bus.published[-1] == (
+        Events.USER_COMMAND,
+        {"command": "tutor en solve"},
+        "web",
+    )
+
+    status, _ = _post(port, "/api/tutor", {"action": "exercise"})
+    assert status == 202
+    assert bus.published[-1] == (
+        Events.USER_COMMAND,
+        {"command": "tutor exercise"},
+        "web",
+    )
+
+    before = list(bus.published)
+    status, response = _post(port, "/api/tutor", {"action": "solve", "language": "fr"})
+    assert status == 400 and response["status"] == "rejected"
+    assert bus.published == before

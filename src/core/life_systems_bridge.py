@@ -69,6 +69,7 @@ def associate_expression(
     scope: str = "personal",
     source: str = "explicit",
     confirmed=None,
+    language_id=None,
 ) -> Dict:
     """Создать связь только с реальной целью и отдельным provenance."""
     lexicon = getattr(agent, "associative_lexicon", None)
@@ -87,6 +88,12 @@ def associate_expression(
             return callable(checker) and checker(value)
         return False
 
+    if language_id is None:
+        attribution = getattr(agent, "social_attribution", None)
+        context = (
+            attribution.current_language_context() if attribution is not None else None
+        )
+        language_id = context.dialogue_language if context is not None else "ru"
     return lexicon.associate(
         expression,
         target_kind,
@@ -97,6 +104,7 @@ def associate_expression(
         source=source,
         confirmed=confirmed,
         target_exists=target_exists,
+        language_id=language_id,
     )
 
 
@@ -127,8 +135,18 @@ def observe_user_message(
 
         observe_integrated_user_message(agent, text, int(cycle))
 
+        attribution = getattr(agent, "social_attribution", None)
+        language_context = (
+            attribution.current_language_context() if attribution is not None else None
+        )
+        language_id = (
+            language_context.dialogue_language if language_context is not None else "ru"
+        )
+        unambiguous_language = language_context is None or (
+            language_context.input_language == language_context.dialogue_language
+        )
         lexicon = getattr(agent, "associative_lexicon", None)
-        if lexicon is not None and current:
+        if lexicon is not None and current and unambiguous_language:
             source = "observed_act"
             confirmed = False
             learning = getattr(agent, "dialogue_learning", None)
@@ -144,18 +162,35 @@ def observe_user_message(
                 profile_id=current,
                 source=source,
                 confirmed=confirmed,
+                language_id=language_id,
             )
         experience = getattr(agent, "response_experience", None)
-        if experience is not None and current and getattr(act, "kind", "") == "social":
+        if (
+            experience is not None
+            and current
+            and unambiguous_language
+            and getattr(act, "kind", "") == "social"
+        ):
             from src.core.dialogue_acts import social_reply_kind
 
+            if language_id == "en":
+                normalized = " ".join(str(text).lower().split()).strip(" .!?…")
+                if normalized in {"hello", "hi", "good morning", "good evening"}:
+                    imitation_context = "greeting"
+                elif normalized == "how are you":
+                    imitation_context = "state"
+                else:
+                    imitation_context = "other"
+            else:
+                imitation_context = social_reply_kind(text)
             # Наблюдение не даёт права сразу повторить оборот: уровень и
             # возможность использования определяет SpeechImitation.
             experience.imitation.observe(
                 text,
-                context=social_reply_kind(text),
+                context=imitation_context,
                 profile_id=current,
                 cycle=int(cycle),
+                language_id=language_id,
             )
         return observation
     except Exception as exc:

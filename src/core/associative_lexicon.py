@@ -26,7 +26,9 @@ from src.core.dialogue_acts import (
     ACT_UNKNOWN,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+LANGUAGES = frozenset({"ru", "en"})
 TARGET_KINDS = frozenset({"act", "concept", "context", "episode"})
 ASSOCIATION_SCOPES = frozenset({"personal", "shared"})
 PROVENANCE_SOURCES = frozenset({"observed_act", "user_taught", "explicit"})
@@ -95,15 +97,21 @@ def _observed_tokens(text: str) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _record_key(record: dict) -> tuple[str, str, str]:
-    return record["expression"], record["target_kind"], record["target_id"]
+def _record_key(record: dict) -> tuple[str, str, str, str]:
+    return (
+        record["expression"],
+        record["target_kind"],
+        record["target_id"],
+        record.get("language_id", "ru"),
+    )
 
 
 def validate_associative_lexicon(data, *, expected_scope: Optional[str] = None) -> None:
     """Проверить весь снапшот до изменения живого лексикона."""
     if not isinstance(data, dict):
         _fail("associative_lexicon", "expected a dictionary")
-    if data.get("schema_version") != SCHEMA_VERSION:
+    schema_version = data.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         _fail("associative_lexicon.schema_version", "unsupported schema version")
     records = data.get("records")
     if not isinstance(records, list) or len(records) > MAX_RECORDS:
@@ -113,6 +121,11 @@ def validate_associative_lexicon(data, *, expected_scope: Optional[str] = None) 
         path = f"associative_lexicon.records[{index}]"
         if not isinstance(record, dict):
             _fail(path, "expected a dictionary")
+        language_id = record.get("language_id", "ru")
+        if schema_version >= 2 and "language_id" not in record:
+            _fail(f"{path}.language_id", "required in schema version 2")
+        if language_id not in LANGUAGES:
+            _fail(f"{path}.language_id", "unsupported language")
         expression = record.get("expression")
         if (
             not isinstance(expression, str)
@@ -238,12 +251,15 @@ class AssociativeLexicon:
         source: str = "explicit",
         confirmed: Optional[bool] = None,
         target_exists: Optional[Callable[[str], bool]] = None,
+        language_id: str = "ru",
     ) -> dict:
         """Добавить свидетельство связи; concept/episode требуют проверки."""
         expression = normalize_expression(expression)
         target_id = str(target_id or "").strip()
         profile_id = str(profile_id or "").strip()
         _cycle(cycle)
+        if language_id not in LANGUAGES:
+            raise ValueError("language_id: expected ru or en")
         if not expression or len(expression) > EXPRESSION_MAX_LEN:
             raise ValueError("expression: expected a normalized bounded string")
         if target_kind not in TARGET_KINDS:
@@ -273,7 +289,7 @@ class AssociativeLexicon:
             confirmed = source != "observed_act"
 
         store = self._store(scope)
-        key = (expression, target_kind, target_id)
+        key = (expression, target_kind, target_id, language_id)
         evidence = {"source": source, "profile_id": profile_id, "cycle": cycle}
         record = store.get(key)
         is_new = record is None
@@ -284,6 +300,7 @@ class AssociativeLexicon:
                 "expression": expression,
                 "target_kind": target_kind,
                 "target_id": target_id,
+                "language_id": language_id,
                 "scope": scope,
                 "profile_id": record_profile,
                 "confidence": self._initial_confidence(source),
@@ -321,6 +338,7 @@ class AssociativeLexicon:
         profile_id: str,
         source: str = "observed_act",
         confirmed: bool = False,
+        language_id: str = "ru",
     ) -> list[dict]:
         """Связать реальную реплику и отдельные значимые слова с актом."""
         if act not in ASSOCIABLE_ACTS or act == ACT_UNKNOWN:
@@ -341,6 +359,7 @@ class AssociativeLexicon:
                 profile_id=profile_id,
                 source=source,
                 confirmed=confirmed,
+                language_id=language_id,
             )
             for item in expressions
         ]
@@ -385,9 +404,12 @@ class AssociativeLexicon:
         profile_id: str = "",
         target_kind: Optional[str] = None,
         limit: int = 5,
+        language_id: str = "ru",
     ) -> list[dict]:
-        """Предложить кандидатов для новой формулировки, не меняя акт."""
+        """Предложить кандидатов только активного языка, не меняя акт."""
         _cycle(cycle)
+        if language_id not in LANGUAGES:
+            raise ValueError("language_id: expected ru or en")
         if (
             isinstance(limit, bool)
             or not isinstance(limit, int)
@@ -404,6 +426,8 @@ class AssociativeLexicon:
             stores.append(self._personal)
         for store in stores:
             for record in store.values():
+                if record.get("language_id", "ru") != language_id:
+                    continue
                 if target_kind is not None and record["target_kind"] != target_kind:
                     continue
                 if profile_id and record["scope"] == "personal":
@@ -424,6 +448,7 @@ class AssociativeLexicon:
                 candidate = {
                     "target_kind": record["target_kind"],
                     "target_id": record["target_id"],
+                    "language_id": language_id,
                     "scope": record["scope"],
                     "profile_id": record["profile_id"],
                     "expression": record["expression"],
@@ -478,4 +503,9 @@ class AssociativeLexicon:
     @staticmethod
     def _restore(data, *, expected_scope: str) -> dict:
         validate_associative_lexicon(data, expected_scope=expected_scope)
-        return {_record_key(record): deepcopy(record) for record in data["records"]}
+        restored = {}
+        for original in data["records"]:
+            record = deepcopy(original)
+            record.setdefault("language_id", "ru")
+            restored[_record_key(record)] = record
+        return restored

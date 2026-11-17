@@ -1,0 +1,8 @@
+LESSON: EN PRONOUN I
+LANGUAGE: en
+RULE_ID: en_pronoun_i_capitalization
+RULE_VERSION: 1
+RULE: Capitalize the standalone first-person pronoun i.
+PRACTICE: i am learning -> I am learning
+HELD_OUT: i remember -> I remember
+HELD_OUT: i listen -> I listen

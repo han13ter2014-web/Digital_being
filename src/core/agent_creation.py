@@ -292,11 +292,22 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
 
     self.response_experience = ResponseExperience()
 
+    # Только явно подтверждённые связи английских форм с общими понятиями.
+    from src.core.language_concepts import LanguageConceptLinks
+
+    self.language_concept_links = LanguageConceptLinks()
+
     # Интернет-наставник: отдельные разрешения источников и карантин уроков.
     # Не имеет доступа к Core и не изменяет общий лексикон или цели.
     from src.core.language_tutor import LanguageTutor
 
     self.language_tutor = LanguageTutor()
+
+    # Английский наставник имеет собственные разрешения, rule packs и снапшот.
+    # Он не меняет обычный диалог и не смешивается с русским валидатором.
+    from src.core.english_language_tutor import EnglishLanguageTutor
+
+    self.english_language_tutor = EnglishLanguageTutor()
 
     # Внешние контакты: карантин, проекты и решения владельца.
     # Планировщик получает read-only доступ к ограниченному состоянию агента,

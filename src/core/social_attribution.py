@@ -15,6 +15,13 @@ from src.core.associative_lexicon import (
     validate_associative_lexicon,
 )
 from src.core.dialogue_learning import DialogueLearning
+from src.core.language_context import (
+    LanguageContext,
+    default_language_state,
+    legacy_language_context,
+    resolve_language_context,
+    validate_language_state,
+)
 from src.core.response_experience import (
     ResponseExperience,
     validate_response_experience,
@@ -22,7 +29,8 @@ from src.core.response_experience import (
 from src.core.user_model import UserModel
 from src.perception.user_interaction import UserInteraction
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
 _STATE_FIELDS = (
     "user_model",
     "dialogue_learning",
@@ -36,7 +44,7 @@ def _fail(path: str, message: str) -> None:
     raise ValueError(f"{path}: {message}")
 
 
-def _validate_messages(messages, path: str) -> None:
+def _validate_messages(messages, path: str, profile_id: str) -> None:
     if (
         not isinstance(messages, list)
         or len(messages) > UserInteraction.MESSAGE_HISTORY_MAX
@@ -54,13 +62,23 @@ def _validate_messages(messages, path: str) -> None:
         cycle = entry.get("cycle")
         if isinstance(cycle, bool) or not isinstance(cycle, int) or cycle < 0:
             _fail(f"{entry_path}.cycle", "expected a nonnegative integer")
+        language_context = entry.get("language_context")
+        if language_context is not None:
+            context = LanguageContext.from_dict(
+                language_context, f"{entry_path}.language_context"
+            )
+            if context.profile_id != profile_id:
+                _fail(
+                    f"{entry_path}.language_context", "profile does not match its state"
+                )
 
 
 def validate_social_attribution(data, registry_data) -> None:
     """Проверить все вложенные состояния до восстановления живого агента."""
     if not isinstance(data, dict):
         _fail("social_attribution", "expected a dictionary")
-    if data.get("schema_version") != SCHEMA_VERSION:
+    schema_version = data.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         _fail("social_attribution.schema_version", "unsupported schema version")
     if not isinstance(registry_data, dict):
         _fail("social_attribution", "social_registry is required")
@@ -114,9 +132,19 @@ def validate_social_attribution(data, registry_data) -> None:
                     validate_checkpoint_state({field: payload})
             except ValueError as error:
                 raise ValueError(f"{state_path}.{error}") from error
+        if schema_version >= 2 and "language" not in state:
+            _fail(f"{state_path}.language", "required in schema version 2")
+        language = state.get("language")
+        if language is not None:
+            validate_language_state(language, f"{state_path}.language")
+            last = language["last_context"]
+            if last is not None and last["profile_id"] != profile_id:
+                _fail(f"{state_path}.language.last_context", "profile does not match")
         messages = state["user_interaction"].get("messages")
         if messages is not None:
-            _validate_messages(messages, f"{state_path}.user_interaction.messages")
+            _validate_messages(
+                messages, f"{state_path}.user_interaction.messages", profile_id
+            )
 
 
 class SocialAttribution:
@@ -126,6 +154,8 @@ class SocialAttribution:
         self.agent = agent
         self.active_profile_id = agent.social_registry.current_profile_id
         self.states = {}
+        self._language = default_language_state(legacy=True)
+        self._legacy_default_pending = True
 
     def _capture(self, profile_id: str) -> None:
         if profile_id not in self.agent.social_registry.profiles:
@@ -136,6 +166,7 @@ class SocialAttribution:
             "associative_lexicon": self.agent.associative_lexicon.to_personal_dict(),
             "response_experience": self.agent.response_experience.to_dict(),
             "user_interaction": self.agent.user_interaction.to_personal_dict(),
+            "language": deepcopy(self._language),
         }
 
     def capture_active(self) -> None:
@@ -149,15 +180,80 @@ class SocialAttribution:
             "associative_lexicon": AssociativeLexicon().to_personal_dict(),
             "response_experience": ResponseExperience().to_dict(),
             "user_interaction": interaction.to_personal_dict(),
+            "language": default_language_state(legacy=False),
         }
 
     def _restore(self, profile_id: str) -> None:
         state = self.states.get(profile_id) or self._empty_state()
+        self._legacy_default_pending = "language" not in state
+        self._language = deepcopy(
+            state.get("language") or default_language_state(legacy=True)
+        )
         self.agent.user_model.load_from(state["user_model"])
         self.agent.dialogue_learning.load_from(state["dialogue_learning"])
         self.agent.associative_lexicon.load_personal_from(state["associative_lexicon"])
         self.agent.response_experience.load_from(state["response_experience"])
         self.agent.user_interaction.restore_personal_state(state["user_interaction"])
+        self.agent.user_interaction.set_language_context(self._language["last_context"])
+
+    def current_language_context(self) -> LanguageContext:
+        last = self._language["last_context"]
+        if last is not None:
+            return LanguageContext.from_dict(last)
+        stable = self._language["stable_dialogue_language"]
+        if stable is not None and not self._legacy_default_pending:
+            return LanguageContext(
+                profile_id=self.active_profile_id,
+                input_language="unknown",
+                dialogue_language=stable,
+                response_language="ru",
+                source="stable_dialogue",
+                confidence=None,
+            )
+        return legacy_language_context(self.active_profile_id)
+
+    def resolve_language(self, text) -> LanguageContext:
+        profile = self.agent.social_registry.current_profile()
+        context, stable = resolve_language_context(
+            text,
+            profile_id=self.active_profile_id,
+            preferred_language=profile["preferred_language"],
+            stable_dialogue_language=self._language["stable_dialogue_language"],
+            legacy_default=self._legacy_default_pending,
+        )
+        self._legacy_default_pending = False
+        self._language["stable_dialogue_language"] = stable
+        self._language["last_context"] = context.to_dict()
+        self.agent.user_interaction.set_language_context(self._language["last_context"])
+        return context
+
+    def set_response_language(self, language) -> LanguageContext:
+        """Зафиксировать фактическую realization в контексте текущей реплики."""
+        if language not in {"ru", "en"}:
+            raise ValueError("response_language: expected ru or en")
+        current = self.current_language_context()
+        if language == "en" and current.dialogue_language != "en":
+            raise ValueError("response_language: English requires English dialogue")
+        context = LanguageContext(
+            profile_id=current.profile_id,
+            input_language=current.input_language,
+            dialogue_language=current.dialogue_language,
+            response_language=language,
+            source=current.source,
+            confidence=current.confidence,
+        )
+        self._language["last_context"] = context.to_dict()
+        self.agent.user_interaction.set_language_context(self._language["last_context"])
+        return context
+
+    def set_stable_dialogue_language(self, language) -> None:
+        """Явный внутренний switch; внешний текст этот метод не вызывает."""
+        if language not in {"ru", "en"}:
+            raise ValueError("stable_dialogue_language: expected ru or en")
+        self._legacy_default_pending = False
+        self._language["stable_dialogue_language"] = language
+        self._language["last_context"] = None
+        self.agent.user_interaction.set_language_context(None)
 
     def _sync_attachment(self) -> None:
         attachment = getattr(self.agent, "attachment", None)
@@ -234,13 +330,17 @@ class SocialAttribution:
     def load_from(self, data) -> None:
         validate_social_attribution(data, self.agent.social_registry.to_dict())
         self.states = deepcopy(data["states"])
+        current_profile_id = self.agent.social_registry.current_profile_id
+        legacy_language = "language" not in self.states[current_profile_id]
         empty_lexicon = AssociativeLexicon().to_personal_dict()
         empty_experience = ResponseExperience().to_dict()
         for state in self.states.values():
             state.setdefault("associative_lexicon", deepcopy(empty_lexicon))
             state.setdefault("response_experience", deepcopy(empty_experience))
-        self.active_profile_id = self.agent.social_registry.current_profile_id
+            state.setdefault("language", default_language_state(legacy=True))
+        self.active_profile_id = current_profile_id
         self._restore(self.active_profile_id)
+        self._legacy_default_pending = legacy_language
         self._sync_attachment()
 
     def load_legacy(self) -> None:
@@ -249,5 +349,7 @@ class SocialAttribution:
         registry.current_profile_id = registry.owner_profile_id
         self.active_profile_id = registry.owner_profile_id
         self.states = {}
+        self._language = default_language_state(legacy=True)
+        self._legacy_default_pending = True
         self._capture(self.active_profile_id)
         self._sync_attachment()

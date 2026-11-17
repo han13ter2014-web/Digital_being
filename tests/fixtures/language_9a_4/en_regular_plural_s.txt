@@ -1,0 +1,8 @@
+LESSON: EN REGULAR PLURAL S
+LANGUAGE: en
+RULE_ID: en_regular_plural_s
+RULE_VERSION: 1
+RULE: For the supported regular nouns in this lesson, form the plural by adding -s.
+PRACTICE: cat -> cats
+HELD_OUT: dog -> dogs
+HELD_OUT: book -> books

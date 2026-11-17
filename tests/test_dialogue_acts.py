@@ -51,6 +51,7 @@ from src.core.dialogue_acts import (
         ("Здравствуй, как дела?", ACT_SOCIAL),
         ("Доброе утро!", ACT_SOCIAL),
         ("Как настроение?", ACT_SOCIAL),
+        ("Как ты себя чувствуешь?", ACT_SOCIAL),
         # === вопросы о самой сущности: не smalltalk, честный ответ ===
         ("Как тебя зовут?", ACT_ASK_ABOUT_SELF),
         ("Кто ты такая?", ACT_ASK_ABOUT_SELF),
@@ -71,7 +72,6 @@ from src.core.dialogue_acts import (
         ("Что тебе важно?", ACT_ASK_ABOUT_SELF),
         ("О чём ты думаешь?", ACT_ASK_ABOUT_SELF),
         ("О чем думаешь?", ACT_ASK_ABOUT_SELF),
-        ("Как ты себя чувствуешь?", ACT_ASK_ABOUT_SELF),
         # «ты кто?» — тот же вопрос в другом порядке слов
         ("Ты кто?", ACT_ASK_ABOUT_SELF),
         ("А ты кто?", ACT_ASK_ABOUT_SELF),

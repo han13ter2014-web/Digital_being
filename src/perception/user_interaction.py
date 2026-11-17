@@ -11,6 +11,7 @@ AGENT_MESSAGE в EventBus, чтобы GUI-режим (ChatWindow, Notifier) ви
 вопросы/сообщения агента так же, как и терминальный режим через print().
 """
 
+from copy import deepcopy
 from typing import Dict
 from uuid import uuid4
 
@@ -107,6 +108,9 @@ class UserInteraction:
         # события, чтобы GUI (chat_window) мог их увидеть. Если None —
         # работает как раньше (только print() в stdout, для терминала).
         self._bus = bus
+        # Транзитный контекст текущей входящей реплики; персистентная копия
+        # находится в SocialAttribution, а здесь он только помечает записи.
+        self._language_context = None
 
         self.question_history = []  # История вопросов-ответов
         self.pending_questions = []  # Очередь ожидающих ответов
@@ -142,6 +146,14 @@ class UserInteraction:
             agent.user_interaction.attach_bus(bus)   # <- здесь
         """
         self._bus = bus
+
+    def set_language_context(self, language_context) -> None:
+        self._language_context = deepcopy(language_context)
+
+    def _language_metadata(self) -> dict:
+        if self._language_context is None:
+            return {}
+        return {"language_context": deepcopy(self._language_context)}
 
     def _publish(self, event_name: str, data: dict, priority: int = 1) -> None:
         """Публикация в шину. Тихо игнорирует ошибки — GUI не должен ронять
@@ -229,6 +241,7 @@ class UserInteraction:
             "answer": None,
             "cycle": cycle,
             "priority": self._calculate_priority(question, context),
+            **self._language_metadata(),
             # Новые поля для отслеживания сложного вопроса:
             "complex_question": complex_question,
             "sub_questions": sub_questions or [],
@@ -345,6 +358,11 @@ class UserInteraction:
                         "context": q.get("context", ""),
                         "cycle": q["cycle"],
                         "priority": q["priority"],
+                        **(
+                            {"language_context": deepcopy(q["language_context"])}
+                            if isinstance(q.get("language_context"), dict)
+                            else {}
+                        ),
                     }
                 )
 
@@ -565,6 +583,7 @@ class UserInteraction:
             "cycle": cycle,
             "acknowledged": False,
             "timestamp": None,  # будет установлено снаружи
+            **self._language_metadata(),
         }
 
         self.message_queue.append(message)
@@ -609,6 +628,7 @@ class UserInteraction:
                     "context": context,
                     "cycle": cycle,
                     "agent_name": self.agent_name,
+                    **self._language_metadata(),
                 },
                 priority=2 if msg_type in ("alert", "question") else 1,
             )
@@ -690,6 +710,7 @@ class UserInteraction:
                 "urgency": 0.0,
                 "cycle": cycle,
                 "acknowledged": True,
+                **self._language_metadata(),
             }
         )
         if len(self.message_history) > self.MESSAGE_HISTORY_MAX:
@@ -779,6 +800,11 @@ class UserInteraction:
                     "sub_questions": list(q.get("sub_questions") or []),
                     "sub_question_index": int(q.get("sub_question_index", 0)),
                     "sub_answers": dict(q.get("sub_answers") or {}),
+                    **(
+                        {"language_context": deepcopy(q["language_context"])}
+                        if isinstance(q.get("language_context"), dict)
+                        else {}
+                    ),
                 }
                 for q in self.pending_questions
             ],
@@ -807,6 +833,7 @@ class UserInteraction:
         self.message_queue = []
         self.message_history = []
         self._last_user_message_cycle = None
+        self._language_context = None
         self.dialogue_act_ring.restore([])
         self.last_human_affect = None
         self.last_question_cycle = -self.cooldown_cycles
@@ -866,6 +893,11 @@ class UserInteraction:
                         and not isinstance(cycle, bool)
                         else 0,
                         "priority": str(entry.get("priority") or "medium"),
+                        **(
+                            {"language_context": deepcopy(entry["language_context"])}
+                            if isinstance(entry.get("language_context"), dict)
+                            else {}
+                        ),
                     }
                 )
             self.question_history = restored
@@ -919,6 +951,11 @@ class UserInteraction:
                         "sub_questions": list(entry.get("sub_questions") or []),
                         "sub_question_index": int(entry.get("sub_question_index") or 0),
                         "sub_answers": dict(entry.get("sub_answers") or {}),
+                        **(
+                            {"language_context": deepcopy(entry["language_context"])}
+                            if isinstance(entry.get("language_context"), dict)
+                            else {}
+                        ),
                     }
                 )
             if restored_pending:

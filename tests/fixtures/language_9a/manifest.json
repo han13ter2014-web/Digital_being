@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "catalog_revision": "9a0-r1",
+  "capabilities": [
+    "social",
+    "self_state",
+    "clarification",
+    "anaphora",
+    "feedback",
+    "known_topic",
+    "testimony",
+    "honest_fallback",
+    "mixed_detector",
+    "language_switch",
+    "profile_channel",
+    "persistence",
+    "ui_offline",
+    "provenance_security"
+  ],
+  "files": [
+    {
+      "path": "russian_baseline.json",
+      "split": "russian_baseline",
+      "sha256": "8d38fda91814020544cc71c82b92e97e355a1bae2f40397b48b2e2f113226278"
+    },
+    {
+      "path": "english_practice.json",
+      "split": "english_practice",
+      "sha256": "171da46db4ec2395364ad69c654453bad10410a36363996a5e76a756b92d795a"
+    },
+    {
+      "path": "english_heldout.json",
+      "split": "english_heldout",
+      "sha256": "0f242425245e1c093aa3ffe13150033fad033d247163e5c02fb9898eef0b2693"
+    }
+  ]
+}

@@ -14,7 +14,8 @@ import re
 from typing import Optional
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
 MAX_PROFILES = 128
 MAX_NAME_LENGTH = 40
 MAX_BINDINGS = 8
@@ -168,7 +169,7 @@ def _validate_lineage(lineage, path: str) -> None:
         _fail(f"{path}.life_id", "claimed and verified lineage require a life ID")
 
 
-def _validate_profile(profile, path: str) -> None:
+def _validate_profile(profile, path: str, schema_version: int) -> None:
     if not isinstance(profile, dict):
         _fail(path, "expected a dictionary")
     _uuid(profile.get("profile_id"), f"{path}.profile_id")
@@ -182,6 +183,11 @@ def _validate_profile(profile, path: str) -> None:
     )
     if profile.get("identity_status") not in IDENTITY_STATUSES:
         _fail(f"{path}.identity_status", "unsupported identity status")
+    if schema_version >= 2 and "preferred_language" not in profile:
+        _fail(f"{path}.preferred_language", "required in schema version 2")
+    preferred_language = profile.get("preferred_language")
+    if preferred_language not in {None, "ru", "en"}:
+        _fail(f"{path}.preferred_language", "expected ru, en or null")
     introduced_by = profile.get("introduced_by")
     if introduced_by is not None:
         _uuid(introduced_by, f"{path}.introduced_by")
@@ -207,7 +213,8 @@ def validate_social_registry(data) -> None:
     """Проверить секцию checkpoint до любых мутаций живого агента."""
     if not isinstance(data, dict):
         _fail("social_registry", "expected a dictionary")
-    if data.get("schema_version") != SCHEMA_VERSION:
+    schema_version = data.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         _fail("social_registry.schema_version", "unsupported schema version")
     profiles = data.get("profiles")
     if not isinstance(profiles, dict) or not 1 <= len(profiles) <= MAX_PROFILES:
@@ -215,7 +222,7 @@ def validate_social_registry(data) -> None:
     for key, profile in profiles.items():
         path = f"social_registry.profiles.{key}"
         _uuid(key, path)
-        _validate_profile(profile, path)
+        _validate_profile(profile, path, schema_version)
         if profile["profile_id"] != key:
             _fail(f"{path}.profile_id", "must match the mapping key")
         introduced_by = profile.get("introduced_by")
@@ -265,6 +272,7 @@ class SocialRegistry:
             "kind": kind,
             "display_name": name,
             "identity_status": status,
+            "preferred_language": None,
             "channel_bindings": [
                 {"channel": "local", "external_id": "local", "confidence": 1.0}
             ],
@@ -466,6 +474,15 @@ class SocialRegistry:
             profile["identity_status"] = "self_declared"
             profile["introduced_by"] = self.owner_profile_id
 
+    def set_preferred_language(self, language, *, profile_id=None) -> None:
+        """Явно задать устойчивое предпочтение без распознавания команд."""
+        if language not in {None, "ru", "en"}:
+            raise ValueError("preferred_language: expected ru, en or null")
+        target = profile_id or self.current_profile_id
+        if target not in self.profiles:
+            raise KeyError(target)
+        self.profiles[target]["preferred_language"] = language
+
     def get_status(self) -> dict:
         current = self.profiles[self.current_profile_id]
         return {
@@ -474,6 +491,7 @@ class SocialRegistry:
             "current_profile_id": self.current_profile_id,
             "current_kind": current["kind"],
             "current_display_name": current["display_name"],
+            "current_preferred_language": current["preferred_language"],
         }
 
     def to_dict(self) -> dict:
@@ -488,6 +506,8 @@ class SocialRegistry:
         validate_social_registry(data)
         restored = deepcopy(data)
         self.profiles = restored["profiles"]
+        for profile in self.profiles.values():
+            profile.setdefault("preferred_language", None)
         self.owner_profile_id = restored["owner_profile_id"]
         self.current_profile_id = restored["current_profile_id"]
 

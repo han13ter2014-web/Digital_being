@@ -212,6 +212,96 @@ def _tutor_section(agent: Any) -> Dict[str, Any]:
     }
 
 
+def _english_tutor_section(agent: Any) -> Dict[str, Any]:
+    """Безопасный EN DTO без эталонов, excerpt и изменений Core."""
+    tutor = _own(agent, "english_language_tutor", None)
+    status = _status_of(tutor)
+    approved = _own(tutor, "approved_sources", [])
+    requests = _own(tutor, "source_requests", [])
+    approved = approved if isinstance(approved, list) else []
+    requests = requests if isinstance(requests, list) else []
+    current = status.get("pending_exercise")
+    current = current if isinstance(current, dict) else None
+    searcher = _own(agent, "web_searcher", None)
+    return {
+        "available": tutor is not None,
+        "web_enabled": bool(getattr(searcher, "is_enabled", False)),
+        "approved_sources": deepcopy(approved),
+        "source_requests": deepcopy(requests),
+        "approved_count": len(approved),
+        "request_count": len(requests),
+        "materials": int(status.get("materials", 0) or 0),
+        "rule_packs": int(status.get("rule_packs", 0) or 0),
+        "source_verified": int(status.get("source_verified", 0) or 0),
+        "pending_exercise": (
+            {
+                key: deepcopy(current.get(key))
+                for key in (
+                    "prompt",
+                    "kind",
+                    "pack_id",
+                    "exercise_id",
+                    "rule_id",
+                )
+            }
+            if current is not None
+            else None
+        ),
+    }
+
+
+def _dialogue_section(agent: Any) -> Dict[str, Any]:
+    """Последняя языковая диагностика без текста памяти и содержимого evidence."""
+    section: Dict[str, Any] = {
+        "available": False,
+        "input_language": None,
+        "dialogue_language": None,
+        "response_language": None,
+        "language_source": None,
+        "act": None,
+        "rule_id": None,
+        "fallback_policy": None,
+        "reference_count": 0,
+        "references_verified": False,
+        "profile_id": None,
+    }
+    experience = _own(agent, "response_experience", None)
+    responses = _own(experience, "responses", {})
+    response_id = _own(experience, "latest_response_id", None)
+    if not isinstance(responses, dict) or response_id not in responses:
+        return section
+    record = responses[response_id]
+    plan = record.get("plan") if isinstance(record, dict) else None
+    if not isinstance(plan, dict):
+        return section
+    language = plan.get("language_context")
+    language = language if isinstance(language, dict) else {}
+    realization = plan.get("realization")
+    realization = realization if isinstance(realization, dict) else {}
+    references = plan.get("references")
+    references = references if isinstance(references, list) else []
+    state = plan.get("state")
+    state = state if isinstance(state, dict) else {}
+    section.update(
+        {
+            "available": True,
+            "input_language": deepcopy(language.get("input_language")),
+            "dialogue_language": deepcopy(language.get("dialogue_language")),
+            "response_language": deepcopy(language.get("response_language")),
+            "language_source": deepcopy(language.get("source")),
+            "act": deepcopy(realization.get("act")),
+            "rule_id": deepcopy(realization.get("rule_id")),
+            "fallback_policy": deepcopy(
+                realization.get("fallback_policy", "none")
+            ),
+            "reference_count": len(references),
+            "references_verified": plan.get("provenance_verified") is True,
+            "profile_id": deepcopy(state.get("profile_id")),
+        }
+    )
+    return section
+
+
 def _external_contacts_section(agent: Any) -> Dict[str, Any]:
     """Ограниченный read-only журнал внешних сессий без чужой памяти."""
     manager = _own(agent, "external_contacts", None)
@@ -462,6 +552,8 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "access": _access_section(agent),
         "effector": _effector_section(agent),
         "tutor": _tutor_section(agent),
+        "english_tutor": _english_tutor_section(agent),
+        "dialogue": _dialogue_section(agent),
         "external_contacts": _external_contacts_section(agent),
     }
 

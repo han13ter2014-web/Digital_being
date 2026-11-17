@@ -16,6 +16,15 @@ from src.core.dialogue_acts import (
     ACT_UNKNOWN,
 )
 from src.core.emotional_state import EMOTIONS
+from src.core.english_dialogue import (
+    parse_english_feedback,
+    validate_english_realization_plan,
+)
+from src.core.language_context import (
+    LanguageContext,
+    legacy_language_context,
+    validate_language_context,
+)
 from src.core.speech_imitation import (
     SpeechImitation,
     is_safe_expression,
@@ -23,7 +32,8 @@ from src.core.speech_imitation import (
 )
 from src.core.speech_imitation import validate_speech_imitation as validate_imitation
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
 MAX_RESPONSES = 64
 MAX_REFERENCES = 8
 RESPONSE_ID_MAX_LEN = 160
@@ -35,8 +45,10 @@ PROFILE_ID_MAX_LEN = 160
 RESPONSE_TTL_CYCLES = 50
 CONSOLIDATED_RESPONSE_HISTORY = 32
 
-REFERENCE_KINDS = frozenset({"state", "concept", "episode", "affect"})
-STATE_REFERENCES = frozenset({"name", "cycle_count", "energy", "active_profile"})
+REFERENCE_KINDS = frozenset({"state", "concept", "episode", "affect", "dialogue_act"})
+STATE_REFERENCES = frozenset(
+    {"name", "cycle_count", "energy", "active_profile", "emotional_state"}
+)
 RESPONSE_STATUSES = frozenset({"pending", "observed", "expired"})
 EXPECTED_REACTIONS = frozenset(
     {
@@ -86,8 +98,12 @@ def _text(value, path, limit, *, nonempty=True):
         _fail(path, "expected a bounded string")
 
 
-def parse_generic_feedback(text):
-    normalized = " ".join(str(text or "").lower().split()).strip(" .!…")
+def parse_generic_feedback(text, *, language="ru"):
+    if language == "en":
+        return parse_english_feedback(text)
+    normalized = " ".join(str(text or "").replace("’", "'").lower().split()).strip(
+        " .!…"
+    )
     if not normalized or "?" in normalized or "？" in normalized:
         return None
     return _GENERIC_FEEDBACK.get(normalized)
@@ -132,6 +148,11 @@ def _validate_plan(plan, path="plan") -> None:
         PROFILE_ID_MAX_LEN,
         nonempty=False,
     )
+    language_context = plan.get("language_context")
+    if language_context is not None:
+        validate_language_context(language_context, f"{path}.language_context")
+        if language_context["profile_id"] != state["profile_id"]:
+            _fail(f"{path}.language_context", "profile does not match response state")
     if plan.get("components") != ["deterministic_reply"] and plan.get("components") != [
         "deterministic_reply",
         "borrowed_expression",
@@ -147,13 +168,21 @@ def _validate_plan(plan, path="plan") -> None:
     _text(realization.get("base_text"), f"{path}.realization.base_text", TEXT_MAX_LEN)
     _text(realization.get("text"), f"{path}.realization.text", TEXT_MAX_LEN)
     borrowed = plan.get("borrowed")
+    response_language = (language_context or {}).get("response_language", "ru")
     if borrowed is None:
         if realization["kind"] != "fixed_template" or len(plan["components"]) != 1:
             _fail(f"{path}.borrowed", "missing borrowed component")
     else:
         if not isinstance(borrowed, dict):
             _fail(f"{path}.borrowed", "expected a dictionary")
-        if not is_safe_expression(borrowed.get("expression"), borrowed.get("context")):
+        borrowed_language = borrowed.get("language_id", "ru")
+        if borrowed_language not in {"ru", "en"}:
+            _fail(f"{path}.borrowed.language_id", "unsupported language")
+        if borrowed_language != response_language:
+            _fail(f"{path}.borrowed.language_id", "language does not match the plan")
+        if not is_safe_expression(
+            borrowed.get("expression"), borrowed.get("context"), borrowed_language
+        ):
             _fail(f"{path}.borrowed.expression", "unsafe expression")
         if borrowed["expression"] != normalize_expression(borrowed["expression"]):
             _fail(f"{path}.borrowed.expression", "expected normalized expression")
@@ -170,6 +199,7 @@ def _validate_plan(plan, path="plan") -> None:
             _fail(f"{path}.borrowed.level", "expression is not available for use")
         if realization["kind"] != "borrowed_prefix" or len(plan["components"]) != 2:
             _fail(f"{path}.borrowed", "inconsistent borrowed component")
+    validate_english_realization_plan(plan)
 
 
 def validate_response_plan(plan, path="plan") -> None:
@@ -178,7 +208,10 @@ def validate_response_plan(plan, path="plan") -> None:
 
 
 def validate_response_experience(data) -> None:
-    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+    if (
+        not isinstance(data, dict)
+        or data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS
+    ):
         _fail("response_experience", "unsupported snapshot")
     responses = data.get("responses")
     if not isinstance(responses, list) or len(responses) > MAX_RESPONSES:
@@ -218,6 +251,20 @@ def validate_response_experience(data) -> None:
     if latest is not None and latest not in response_ids:
         _fail("response_experience.latest_response_id", "unknown response ID")
     validate_imitation(data.get("imitation"))
+    by_id = {item["response_id"]: item for item in responses}
+    for response_id, link in data["imitation"]["response_links"].items():
+        response = by_id.get(response_id)
+        if response is None:
+            continue
+        borrowed = response["plan"]["borrowed"]
+        if borrowed is None:
+            _fail("response_experience.imitation.response_links", "unexpected link")
+        expression = link if isinstance(link, str) else link["expression"]
+        language_id = "ru" if isinstance(link, str) else link["language_id"]
+        if expression != borrowed["expression"] or language_id != borrowed.get(
+            "language_id", "ru"
+        ):
+            _fail("response_experience.imitation.response_links", "plan mismatch")
 
 
 class ResponseExperience:
@@ -248,6 +295,15 @@ class ResponseExperience:
             memory = getattr(agent, "long_term_memory", None)
             checker = getattr(memory, "has_episode", None)
             exists = callable(checker) and checker(target_id)
+        elif kind == "dialogue_act":
+            interaction = getattr(agent, "user_interaction", None)
+            ring = getattr(interaction, "dialogue_act_ring", None)
+            exists = ring is not None and any(
+                item.get("kind") == target_id
+                for item in ring.fresh_acts(
+                    getattr(agent, "cycle_count", 0), limit=ring.size
+                )
+            )
         else:
             emotional = getattr(agent, "emotional_state", None)
             exists = float(getattr(emotional, "levels", {}).get(target_id, 0.0)) > 0.0
@@ -323,12 +379,15 @@ class ResponseExperience:
         references=(),
         borrow_context="",
         profile_id="",
+        language_context=None,
+        english_realization=None,
         expire_pending=True,
     ) -> dict:
         """Проверить ссылки и составить план до фактической доставки.
 
         Внешний session-scoped план задаёт профиль явно и не истекает ожидания
         локального собеседника. По умолчанию прежнее поведение не меняется.
+        Английская realization допускается только как проверяемое правило 9A-2.
         """
         cycle = int(agent.cycle_count)
         _cycle(cycle)
@@ -342,14 +401,34 @@ class ResponseExperience:
             raise ValueError("references: expected a bounded sequence")
         clean_references = [self._verify_reference(agent, item) for item in references]
         registry = getattr(agent, "social_registry", None)
-        profile_id = str(
-            profile_id or getattr(registry, "current_profile_id", "") or ""
-        )
+        current_profile_id = str(getattr(registry, "current_profile_id", "") or "")
+        external_profile = bool(profile_id and profile_id != current_profile_id)
+        profile_id = str(profile_id or current_profile_id)
+        if language_context is None and not external_profile:
+            attribution = getattr(agent, "social_attribution", None)
+            if attribution is not None:
+                language_context = attribution.current_language_context().to_dict()
+            elif profile_id:
+                language_context = legacy_language_context(profile_id).to_dict()
+        elif language_context is not None:
+            if isinstance(language_context, LanguageContext):
+                language_context = language_context.to_dict()
+            else:
+                language_context = LanguageContext.from_dict(language_context).to_dict()
+        if english_realization is not None:
+            if not isinstance(english_realization, dict):
+                raise ValueError("english realization: expected a dictionary")
+            if english_realization.get("text") != text:
+                raise ValueError("english realization: input text does not match rule")
+        response_language = (language_context or {}).get("response_language", "ru")
         borrowed = None
         composed = str(text)
         if borrow_context and profile_id:
             candidate = self.imitation.candidate(
-                context=borrow_context, profile_id=profile_id, cycle=cycle
+                context=borrow_context,
+                profile_id=profile_id,
+                cycle=cycle,
+                language_id=response_language,
             )
             if candidate is not None:
                 expression = candidate["expression"]
@@ -357,6 +436,7 @@ class ResponseExperience:
                     "expression": expression,
                     "context": borrow_context,
                     "profile_id": profile_id,
+                    "language_id": response_language,
                     "level": candidate["level"],
                 }
                 composed = expression[:1].upper() + expression[1:] + ". " + composed
@@ -377,6 +457,23 @@ class ResponseExperience:
             "provenance_verified": True,
             "borrowed": None,
         }
+        if english_realization is not None:
+            plan["realization"].update(
+                deepcopy(
+                    {
+                        key: english_realization.get(key)
+                        for key in (
+                            "language_id",
+                            "rule_id",
+                            "fallback_policy",
+                            "act",
+                            "evidence",
+                        )
+                    }
+                )
+            )
+        if language_context is not None:
+            plan["language_context"] = deepcopy(language_context)
         if borrowed is not None:
             plan["components"].append("borrowed_expression")
             plan["realization"]["kind"] = "borrowed_prefix"
@@ -397,6 +494,22 @@ class ResponseExperience:
         if "question" in context or "clarification" in context:
             return "clarify"
         return "answer_from_existing_state"
+
+    @staticmethod
+    def _response_language(record) -> str:
+        plan = record.get("plan") or {}
+        context = plan.get("language_context") or {}
+        return context.get("response_language", "ru")
+
+    def latest_pending(self, *, language_id="ru") -> dict | None:
+        """Найти свежее ожидание активного языка, не закрывая другое."""
+        for record in reversed(list(self.responses.values())):
+            if (
+                record["status"] == "pending"
+                and self._response_language(record) == language_id
+            ):
+                return record
+        return None
 
     def register_delivery(self, response_id, plan, cycle) -> dict:
         """Сохранить ожидание только для фактически отправленного ответа."""
@@ -432,14 +545,18 @@ class ResponseExperience:
                 profile_id=borrowed["profile_id"],
                 response_id=response_id,
                 cycle=cycle,
+                language_id=borrowed.get("language_id", "ru"),
             )
         return deepcopy(record)
 
-    def observe_reply(self, act_kind, cycle) -> dict | None:
+    def observe_reply(self, act_kind, cycle, *, language_id=None) -> dict | None:
         """Зафиксировать обычную реплику без интерпретации её как успеха."""
         self.expire(cycle)
-        response_id = self.latest_response_id
-        record = self.responses.get(response_id)
+        if language_id is None:
+            response_id = self.latest_response_id
+            record = self.responses.get(response_id)
+        else:
+            record = self.latest_pending(language_id=language_id)
         if record is None or record["status"] != "pending":
             return None
         outcome = {
@@ -451,7 +568,9 @@ class ResponseExperience:
         record["outcome"] = outcome
         return deepcopy(record)
 
-    def observe_feedback(self, response_id, feedback, cycle) -> dict | None:
+    def observe_feedback(
+        self, response_id, feedback, cycle, *, language_id=None
+    ) -> dict | None:
         """Применить явный отзыв к ответу и конкретному обороту."""
         self.expire(cycle)
         record = self.responses.get(response_id)
@@ -459,6 +578,8 @@ class ResponseExperience:
             record is None
             or record["status"] != "pending"
             or feedback not in {"support", "opposition"}
+            or language_id is not None
+            and self._response_language(record) != language_id
         ):
             return None
         record["status"] = "observed"
@@ -472,6 +593,7 @@ class ResponseExperience:
                 feedback,
                 profile_id=borrowed["profile_id"],
                 cycle=cycle,
+                language_id=borrowed.get("language_id", "ru"),
             )
         return deepcopy(record)
 

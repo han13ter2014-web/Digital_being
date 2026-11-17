@@ -268,7 +268,12 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert 'id="page-tutor"' in body
     assert body.count('data-page="tutor"') == 2
     assert 'id="tutor-requests"' in body
+    assert 'id="tutor-language"' in body
+    assert '<option value="en">English</option>' in body
     assert "function renderTutor(section)" in body
+    assert "function renderEnglishTutor(section)" in body
+    assert "renderEnglishTutor(life.english_tutor||{})" in body
+    assert "language:selectedTutorLanguage" in body
     assert "sendCommand('/api/tutor'" in body
     assert "До вашего подтверждения источник не загружается" in body
     assert 'id="page-contacts"' in body

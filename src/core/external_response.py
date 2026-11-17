@@ -29,6 +29,11 @@ from src.core.response_experience import (
     parse_generic_feedback,
     validate_response_plan,
 )
+from src.core.english_dialogue import (
+    build_english_realization,
+    recognize_english,
+)
+from src.core.language_context import resolve_language_context
 
 RESPONSE_SCHEMA_VERSION = 1
 MAX_EXPERIENCE_CANDIDATES = 2
@@ -77,6 +82,9 @@ _INSTRUCTION_MARKERS = (
     "покажи ключ",
     "system prompt",
     "developer message",
+    "ignore previous instructions",
+    "reveal memory",
+    "run command",
 )
 _SEMANTIC_STOPWORDS = frozenset(
     {
@@ -339,6 +347,33 @@ class ExternalResponsePlanner:
         act, text, context, references, semantic_key, generic = self._decision(
             session, source, history
         )
+        language_context = None
+        english_realization = None
+        stable_language = session.get("dialogue_language")
+        if stable_language in {"ru", "en"}:
+            language_context, _ = resolve_language_context(
+                source["text"],
+                profile_id=session["profile_id"],
+                stable_dialogue_language=stable_language,
+            )
+            if stable_language == "en" and language_context.input_language == "en":
+                recognition = recognize_english(source["text"], self.agent)
+                if recognition.rule_id == "instruction_boundary":
+                    act = recognition.act
+                    context = recognition.reply_context
+                    references = []
+                    semantic_key = "instruction_boundary"
+                    generic = True
+                    english_realization = build_english_realization(
+                        self.agent, recognition
+                    )
+                    text = english_realization["text"]
+                    language_context, _ = resolve_language_context(
+                        source["text"],
+                        profile_id=session["profile_id"],
+                        stable_dialogue_language="en",
+                        response_language="en",
+                    )
         prepared = experience.prepare_plan(
             self.agent,
             text,
@@ -347,6 +382,8 @@ class ExternalResponsePlanner:
             user_text=source["text"],
             references=references,
             profile_id=session["profile_id"],
+            language_context=language_context,
+            english_realization=english_realization,
             expire_pending=False,
         )
         return {

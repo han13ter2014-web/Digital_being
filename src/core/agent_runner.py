@@ -66,6 +66,7 @@ from src.core.dialogue_acts import (
     ACT_HUMAN_AFFECT,
     ACT_REQUEST,
     ACT_SOCIAL,
+    ACT_UNKNOWN,
     SOCIAL_KIND_GREETING,
     SOCIAL_KIND_STATE,
     DialogueAct,
@@ -87,6 +88,13 @@ from src.core.dialogue_strategies import (
     preference_from_context,
 )
 from src.core.response_experience import parse_generic_feedback
+from src.core.english_dialogue import (
+    build_english_realization,
+    english_feedback_realization,
+    english_response_references,
+    recognize_english,
+    unsupported_english_recognition,
+)
 from src.core.human_affect import (
     AFFECT_LABELS,
     attachment_testimony_weight,
@@ -434,6 +442,7 @@ class AgentRunner:
         # Явная смена говорящего происходит до социальных наблюдений и обучения:
         # знакомство гостя не должно быть записано прежнему пользователю.
         registry = getattr(self.agent, "social_registry", None)
+        attribution = getattr(self.agent, "social_attribution", None)
         if registry is not None:
             from src.core.social_registry import process_introduction
 
@@ -446,9 +455,11 @@ class AgentRunner:
                 pending_question=pending,
                 naming_phase=getattr(naming, "phase", "none"),
             )
-            attribution = getattr(self.agent, "social_attribution", None)
             if attribution is not None:
                 attribution.sync_active_profile()
+                # 9A-1: контекст создаётся один раз после атрибуции профиля.
+                # Он описывает реплику, но пока не меняет recognition/realization.
+                attribution.resolve_language(text)
             if introduction is not None:
                 if interaction is not None:
                     interaction.receive_user_message(text, cycle=self.agent.cycle_count)
@@ -467,14 +478,48 @@ class AgentRunner:
         # без изменений — безопасный fallback сохранён.
         # «Собеседник-7»: обученные маркеры участвуют в классификации
         # (после статических таблиц).
-        act = classify_user_text(
-            text,
-            learned=self._learned_markers(),
-            learned_affect=self._learned_affect(),
-            cycle=self.agent.cycle_count,
-            testimony_weight=attachment_testimony_weight(
-                getattr(self.agent, "attachment", None)
-            ),
+        language_context = (
+            attribution.current_language_context()
+            if getattr(self.agent, "social_attribution", None) is not None
+            else None
+        )
+        if language_context is not None:
+            self.agent.dialogue_learning.set_language(
+                language_context.dialogue_language
+            )
+        english = (
+            recognize_english(text, self.agent)
+            if language_context is not None
+            and language_context.dialogue_language == "en"
+            and language_context.input_language == "en"
+            else None
+        )
+        if english is not None:
+            act = english.act
+        else:
+            act = classify_user_text(
+                text,
+                learned=self._learned_markers(),
+                learned_affect=self._learned_affect(),
+                cycle=self.agent.cycle_count,
+                testimony_weight=attachment_testimony_weight(
+                    getattr(self.agent, "attachment", None)
+                ),
+            )
+        if (
+            english is None
+            and language_context is not None
+            and language_context.dialogue_language == "ru"
+            and language_context.input_language == "mixed"
+            and act.kind in {ACT_UNKNOWN, ACT_ASK_ABOUT_SELF}
+        ):
+            act = DialogueAct(ACT_UNKNOWN, act.matched_marker)
+        mixed_unknown = (
+            english is None
+            and language_context is not None
+            and language_context.dialogue_language == "ru"
+            and language_context.input_language == "mixed"
+            and act.kind == ACT_UNKNOWN
         )
 
         # Один вход — одно социальное наблюдение, включая ранние двери и
@@ -582,7 +627,14 @@ class AgentRunner:
                         experience = getattr(self.agent, "response_experience", None)
                         if experience is not None:
                             experience.observe_feedback(
-                                target["response_id"], feedback, self.agent.cycle_count
+                                target["response_id"],
+                                feedback,
+                                self.agent.cycle_count,
+                                language_id=(
+                                    language_context.dialogue_language
+                                    if language_context is not None
+                                    else "ru"
+                                ),
                             )
                         reply = "Приняла и сохранила твою оценку этого ответа."
                     else:
@@ -599,18 +651,42 @@ class AgentRunner:
         # ожидания или при составной фразе этот контур ничего не перехватывает.
         experience = getattr(self.agent, "response_experience", None)
         if experience is not None:
-            response_id = experience.latest_response_id
-            pending_response = experience.responses.get(response_id)
-            feedback = parse_generic_feedback(text)
+            current_language = (
+                language_context.dialogue_language
+                if language_context is not None
+                else "ru"
+            )
+            pending_response = experience.latest_pending(language_id=current_language)
+            response_id = (pending_response or {}).get("response_id")
+            feedback = parse_generic_feedback(text, language=current_language)
+            response_language = (
+                (pending_response or {}).get("plan", {}).get("language_context")
+            )
+            language_matches = response_language is None or (
+                language_context is not None
+                and response_language["profile_id"] == language_context.profile_id
+                and response_language["response_language"] == current_language
+            )
             if (
                 feedback is not None
                 and pending_response is not None
-                and pending_response["status"] == "pending"
+                and language_matches
             ):
                 observed = experience.observe_feedback(
-                    response_id, feedback, self.agent.cycle_count
+                    response_id,
+                    feedback,
+                    self.agent.cycle_count,
+                    language_id=current_language,
                 )
                 if observed is not None:
+                    realization = None
+                    reply = "Приняла и сохранила твою оценку этого ответа."
+                    feedback_context = "dialogue_feedback"
+                    if language_context.dialogue_language == "en":
+                        self.agent.social_attribution.set_response_language("en")
+                        realization = english_feedback_realization()
+                        reply = realization["text"]
+                        feedback_context = "social_reply"
                     if interaction is not None:
                         interaction.receive_user_message(
                             text, cycle=self.agent.cycle_count
@@ -619,15 +695,23 @@ class AgentRunner:
                     if user_model is not None:
                         user_model.observe(text, cycle=self.agent.cycle_count)
                     await self._reply_to_user(
-                        "Приняла и сохранила твою оценку этого ответа.",
-                        context="dialogue_feedback",
+                        reply,
+                        context=feedback_context,
                         source="response_experience",
                         user_text=text,
+                        english_realization=realization,
                     )
                     return
-            # Любая другая реплика — наблюдаемый результат, но не успех и не
-            # поддержка заимствованного оборота.
-            experience.observe_reply(act.kind, self.agent.cycle_count)
+            # Любая другая реплика закрывает ожидание только своего языка.
+            experience.observe_reply(
+                act.kind, self.agent.cycle_count, language_id=current_language
+            )
+
+        # 9A-2: отдельный ограниченный контур не попадает в русские обучающие
+        # двери и не превращает незнакомую английскую реплику в учебный вопрос.
+        if english is not None:
+            await self._handle_english_dialogue(english, pending, text)
+            return
 
         # P2, этап 3: scoped правило возникает только после отдельного pending.
         preference_request = parse_preference_request(text)
@@ -1052,7 +1136,10 @@ class AgentRunner:
         user_model = getattr(self.agent, "user_model", None)
         if user_model is not None:
             user_model.observe(text, cycle=self.agent.cycle_count)
-        if learning is not None:
+        # Смешанная неизвестная реплика дошла сюда только после всех
+        # содержательных дверей. Не создаём по одному латинскому фрагменту
+        # учебный pending, а завершаем её честным русским fallback ниже.
+        if learning is not None and not mixed_unknown:
             candidate = learning.observe(text, cycle=self.agent.cycle_count)
             if candidate is None:
                 candidate = learning.immediate_candidate(
@@ -1115,10 +1202,17 @@ class AgentRunner:
                     learning.mark_proposed(self.agent.cycle_count)
                     return
 
+        unknown_reply = (
+            "Я не нашла проверенной опоры для ответа на эту смешанную реплику. "
+            "Переформулируй, пожалуйста, проще по-русски."
+            if mixed_unknown
+            else "Я тебя слышу, но пока не понимаю, о чём это. Расскажешь подробнее?"
+        )
         await self._reply_to_user(
-            "Я тебя слышу, но пока не понимаю, о чём это. " "Расскажешь подробнее?",
+            unknown_reply,
             context="unknown_reply",
             source="dialogue_acts",
+            user_text=text,
         )
 
     def _resolve_dialogue_follow_up(self, text, pending):
@@ -1320,7 +1414,7 @@ class AgentRunner:
                 experience = getattr(self.agent, "response_experience", None)
                 if experience is not None:
                     experience.observe_feedback(
-                        response_id, feedback, self.agent.cycle_count
+                        response_id, feedback, self.agent.cycle_count, language_id="ru"
                     )
                 reply = (
                     "Приняла: фразу не стала учить, а твою оценку учебного "
@@ -1384,6 +1478,51 @@ class AgentRunner:
             reply, context="dialogue_learning", source="dialogue_learning"
         )
 
+    async def _handle_english_dialogue(self, recognition, pending, text) -> None:
+        """Обработать ограниченный английский акт без русских обучающих дверей."""
+        attribution = getattr(self.agent, "social_attribution", None)
+        if attribution is None:
+            raise ValueError("English dialogue requires social attribution")
+        attribution.set_response_language("en")
+
+        interaction = getattr(self.agent, "user_interaction", None)
+        if interaction is not None:
+            interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+        user_model = getattr(self.agent, "user_model", None)
+        if user_model is not None:
+            user_model.observe(text, cycle=self.agent.cycle_count)
+
+        if recognition.rule_id == "user_testimony":
+            recorder = getattr(self.agent, "record_user_answer", None)
+            saved = (
+                recorder(recognition.concept_id, text, self.agent.cycle_count)
+                if callable(recorder)
+                else None
+            )
+            if not saved:
+                recognition = unsupported_english_recognition(recognition)
+
+        realization = build_english_realization(
+            self.agent, recognition, pending=pending
+        )
+        await self._reply_to_user(
+            realization["text"],
+            context=recognition.reply_context,
+            source="dialogue_acts",
+            user_text=text,
+            dialogue_topic=recognition.concept_id,
+            dialogue_entities=(
+                (recognition.concept_id,) if recognition.concept_id else ()
+            ),
+            response_references=english_response_references(recognition),
+            borrow_context=(
+                recognition.social_kind
+                if recognition.rule_id in {"social_greeting", "social_state"}
+                else ""
+            ),
+            english_realization=realization,
+        )
+
     async def _reply_to_user(
         self,
         text: str,
@@ -1396,6 +1535,7 @@ class AgentRunner:
         dialogue_affect=None,
         response_references=(),
         borrow_context="",
+        english_realization=None,
     ) -> str | None:
         """Составить план, доставить реплику и зарегистрировать её ID.
 
@@ -1414,6 +1554,7 @@ class AgentRunner:
                 user_text=user_text,
                 references=response_references,
                 borrow_context=borrow_context,
+                english_realization=english_realization,
             )
             text = prepared["text"]
             plan = prepared["plan"]
@@ -3092,14 +3233,139 @@ class AgentRunner:
             return self._handle_delamain_command(cmd_raw)
         return f"❓ Неизвестная команда: /{cmd}. Введите /help."
 
+    def _handle_english_tutor_command(self, cmd_raw: str) -> str:
+        """Управлять отдельным EN-наставником только от имени владельца."""
+        registry = getattr(self.agent, "social_registry", None)
+        if (
+            registry is not None
+            and registry.current_profile_id != registry.owner_profile_id
+        ):
+            return (
+                "⚠️ Английским наставником управляет только владелец локального канала."
+            )
+        tutor = getattr(self.agent, "english_language_tutor", None)
+        if tutor is None:
+            return "⚠️ Английский наставник не подключён."
+
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=3)
+        action = parts[2].lower() if len(parts) > 2 else "status"
+        rest = parts[3].strip() if len(parts) > 3 else ""
+        usage = (
+            "Использование: /tutor en [allow|read|revoke <HTTPS URL> | "
+            "approve|approve_read|reject <request_id> | exercise | solve]"
+        )
+        try:
+            if action == "status" and not rest:
+                status = tutor.get_status()
+                return (
+                    "📚 Английский наставник:\n"
+                    f"   Разрешено источников: {status['approved_sources']}\n"
+                    f"   Запросов сущности: {status['source_requests']}\n"
+                    f"   Материалов в карантине: {status['materials']}\n"
+                    f"   Наборов правил: {status['rule_packs']}; "
+                    f"подтверждено источником: {status['source_verified']}\n"
+                    f"   Текущее упражнение: {'да' if status['pending'] else 'нет'}\n"
+                    "   Подтверждение относится к одному источнику, не ко всей норме."
+                )
+            if action in {"approve", "approve_read", "reject"}:
+                if not rest:
+                    return f"Использование: /tutor en {action} <request_id>"
+                if action == "approve_read":
+                    searcher = getattr(self.agent, "web_searcher", None)
+                    if searcher is None:
+                        return "⚠️ Web-поиск не настроен; запрос остаётся ожидающим."
+                    if not searcher.is_enabled:
+                        return "⚠️ Интернет-поиск выключен; запрос не разрешён и не прочитан."
+                result = tutor.resolve_source_request(rest, approved=action != "reject")
+                if result["status"] == "not_found":
+                    return "📚 Запрос не найден или уже обработан."
+                if result["status"] == "limit_reached":
+                    return "⚠️ Достигнут предел источников; запрос остаётся ожидающим."
+                if action == "reject":
+                    return "📚 Запрос отклонён; источник не разрешён и не загружен."
+                if action == "approve":
+                    return "📚 Источник разрешён без загрузки."
+                rest = result["url"]
+                action = "read"
+            if action in {"allow", "read", "revoke"}:
+                if not rest:
+                    return f"Использование: /tutor en {action} <HTTPS URL>"
+                if action == "allow":
+                    result = tutor.approve_source(rest)
+                    messages = {
+                        "approved": "Источник разрешён. Теперь: /tutor en read <URL>.",
+                        "already_approved": "Источник уже разрешён.",
+                        "limit_reached": "Достигнут предел разрешённых источников.",
+                    }
+                    return f"📚 {messages[result['status']]}"
+                if action == "revoke":
+                    result = tutor.revoke_source(rest)
+                    if result["status"] == "not_approved":
+                        return "📚 Источник не был разрешён."
+                    return (
+                        "📚 Разрешение отозвано; сохранённые правила доступны офлайн."
+                    )
+
+                searcher = getattr(self.agent, "web_searcher", None)
+                if searcher is None:
+                    return "⚠️ Web-поиск не настроен."
+                if not searcher.is_enabled:
+                    return "⚠️ Интернет-поиск выключен (/web on чтобы включить)."
+                result = tutor.ingest(
+                    rest,
+                    cycle=self.agent.cycle_count,
+                    fetcher=searcher.open_page,
+                )
+                status = result["status"]
+                if status == "quarantined_rule_pack":
+                    return (
+                        "📚 Набор правил сохранён в карантине; команды из текста "
+                        "не выполнялись.\n"
+                        "Самостоятельное задание: /tutor en exercise"
+                    )
+                if status == "duplicate":
+                    return "📚 Этот материал уже сохранён; повтор не усиливает уверенность."
+                if status == "permission_denied":
+                    return "⚠️ Сначала разрешите источник: /tutor en allow <URL>."
+                if status == "rejected":
+                    return f"📚 Материал отклонён: {result.get('error', 'ошибка формата')}."
+                if status == "limit_reached":
+                    return "⚠️ Достигнут предел сохранённых материалов или правил."
+                return f"🌐 Не удалось прочитать источник ({status})."
+            if action == "exercise" and not rest:
+                result = tutor.begin_exercise()
+                if result["status"] == "no_exercise":
+                    return (
+                        "📚 Нет доступных заданий. Сначала прочитайте разрешённый урок."
+                    )
+                return (
+                    f"📚 Задание ({result['kind']}): {result['prompt']}\n"
+                    "Примени правило. Эталон скрыт до /tutor en solve."
+                )
+            if action == "solve" and not rest:
+                result = tutor.solve_pending(cycle=self.agent.cycle_count)
+                if result["status"] == "no_pending":
+                    return "📚 Нет текущего задания. Начните: /tutor en exercise."
+                return (
+                    f"📚 Мой ответ: {result['answer']}; эталон: {result['expected']}.\n"
+                    f"Результат: {result['status']}; набор правил: {result['pack_status']}."
+                )
+            return usage
+        except ValueError as exc:
+            return f"⚠️ {exc}"
+
     def _handle_tutor_command(self, cmd_raw: str) -> str:
         """Управлять наставником; чтение страницы возможно только через /web."""
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        if len(parts) > 1 and parts[1].lower() == "en":
+            return self._handle_english_tutor_command(cmd_raw)
+
         tutor = getattr(self.agent, "language_tutor", None)
         if tutor is None:
             return "⚠️ Языковой наставник не подключён."
 
-        body = cmd_raw.strip().lstrip("/").strip()
-        parts = body.split(maxsplit=2)
         action = parts[1].lower() if len(parts) > 1 else "status"
         rest = parts[2].strip() if len(parts) > 2 else ""
         usage = (
@@ -4199,6 +4465,9 @@ class AgentRunner:
             "  /tutor allow|read|revoke <HTTPS URL> — источник урока\n"
             "  /tutor exercise — задание без эталона\n"
             "  /tutor solve  — самостоятельно решить и сверить\n"
+            "  /tutor en   — статус английского наставника\n"
+            "  /tutor en allow|read|revoke <HTTPS URL> — EN-источник\n"
+            "  /tutor en exercise|solve — EN-упражнение и сверка\n"
             "  /external  — внешние сессии и ожидающие решения\n"
             "  /external start <имя> — ручной внешний разговор\n"
             "  /external ingest <id> | <текст> — карантинная реплика\n"
