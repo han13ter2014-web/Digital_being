@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "catalog_revision": "9b2-r1",
+  "catalog_revision": "9b3-r1",
   "split": "chinese_heldout",
   "scenarios": [
     {
       "scenario_id": "zh_h_social_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "social"
@@ -65,7 +65,7 @@
     },
     {
       "scenario_id": "zh_h_social_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "social"
@@ -125,7 +125,7 @@
     },
     {
       "scenario_id": "zh_h_self_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "self_state"
@@ -185,7 +185,7 @@
     },
     {
       "scenario_id": "zh_h_self_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "self_state"
@@ -245,7 +245,7 @@
     },
     {
       "scenario_id": "zh_h_clarify_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "clarification"
@@ -313,7 +313,7 @@
     },
     {
       "scenario_id": "zh_h_clarify_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "clarification"
@@ -381,7 +381,7 @@
     },
     {
       "scenario_id": "zh_h_anaphora_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "anaphora"
@@ -457,7 +457,7 @@
     },
     {
       "scenario_id": "zh_h_anaphora_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "anaphora"
@@ -533,7 +533,7 @@
     },
     {
       "scenario_id": "zh_h_feedback_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "feedback"
@@ -599,7 +599,7 @@
     },
     {
       "scenario_id": "zh_h_feedback_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "feedback"
@@ -665,7 +665,7 @@
     },
     {
       "scenario_id": "zh_h_known_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "known_topic"
@@ -735,7 +735,7 @@
     },
     {
       "scenario_id": "zh_h_known_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "known_topic"
@@ -805,7 +805,7 @@
     },
     {
       "scenario_id": "zh_h_testimony_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "testimony"
@@ -873,7 +873,7 @@
     },
     {
       "scenario_id": "zh_h_testimony_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "testimony"
@@ -941,7 +941,7 @@
     },
     {
       "scenario_id": "zh_h_fallback_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "honest_fallback"
@@ -1001,7 +1001,7 @@
     },
     {
       "scenario_id": "zh_h_fallback_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "honest_fallback"
@@ -1061,7 +1061,7 @@
     },
     {
       "scenario_id": "zh_h_mixed_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "mixed_detector"
@@ -1121,7 +1121,7 @@
     },
     {
       "scenario_id": "zh_h_mixed_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "mixed_detector"
@@ -1181,7 +1181,7 @@
     },
     {
       "scenario_id": "zh_h_switch_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "language_switch"
@@ -1280,7 +1280,7 @@
     },
     {
       "scenario_id": "zh_h_switch_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "language_switch"
@@ -1379,7 +1379,7 @@
     },
     {
       "scenario_id": "zh_h_profiles",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "profile_channel"
@@ -1472,7 +1472,7 @@
     },
     {
       "scenario_id": "zh_h_external_injection",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "profile_channel"
@@ -1535,7 +1535,7 @@
     },
     {
       "scenario_id": "zh_h_restart",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "persistence"
@@ -1577,7 +1577,7 @@
         "language_source": "stable_dialogue",
         "act": "social",
         "topic_policy": "none",
-        "reference_policy": "state:name,cycle_count",
+        "reference_policy": "state:emotional_state",
         "fallback_policy": "none",
         "reply_context": "social_reply",
         "required_text": [],
@@ -1595,7 +1595,7 @@
     },
     {
       "scenario_id": "zh_h_legacy",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "persistence"
@@ -1655,7 +1655,7 @@
     },
     {
       "scenario_id": "zh_h_ui_locale",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "ui_offline"
@@ -1715,7 +1715,7 @@
     },
     {
       "scenario_id": "zh_h_offline",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "ui_offline"
@@ -1775,7 +1775,7 @@
     },
     {
       "scenario_id": "zh_h_translation_memory",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "provenance_security"
@@ -1835,7 +1835,7 @@
     },
     {
       "scenario_id": "zh_h_local_injection",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "provenance_security"
@@ -1895,7 +1895,7 @@
     },
     {
       "scenario_id": "zh_h_script_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "han_script"
@@ -1955,7 +1955,7 @@
     },
     {
       "scenario_id": "zh_h_script_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "han_script"
@@ -2015,7 +2015,7 @@
     },
     {
       "scenario_id": "zh_h_segmentation_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "segmentation"
@@ -2075,7 +2075,7 @@
     },
     {
       "scenario_id": "zh_h_segmentation_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_heldout",
       "tags": [
         "segmentation"

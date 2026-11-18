@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "catalog_revision": "9b2-r1",
+  "catalog_revision": "9b3-r1",
   "split": "chinese_practice",
   "scenarios": [
     {
       "scenario_id": "zh_p_social_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "social"
@@ -65,7 +65,7 @@
     },
     {
       "scenario_id": "zh_p_social_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "social"
@@ -125,7 +125,7 @@
     },
     {
       "scenario_id": "zh_p_self_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "self_state"
@@ -185,7 +185,7 @@
     },
     {
       "scenario_id": "zh_p_self_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "self_state"
@@ -245,7 +245,7 @@
     },
     {
       "scenario_id": "zh_p_clarify_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "clarification"
@@ -313,7 +313,7 @@
     },
     {
       "scenario_id": "zh_p_clarify_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "clarification"
@@ -381,7 +381,7 @@
     },
     {
       "scenario_id": "zh_p_anaphora_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "anaphora"
@@ -457,7 +457,7 @@
     },
     {
       "scenario_id": "zh_p_anaphora_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "anaphora"
@@ -533,7 +533,7 @@
     },
     {
       "scenario_id": "zh_p_feedback_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "feedback"
@@ -599,7 +599,7 @@
     },
     {
       "scenario_id": "zh_p_feedback_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "feedback"
@@ -665,7 +665,7 @@
     },
     {
       "scenario_id": "zh_p_known_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "known_topic"
@@ -735,7 +735,7 @@
     },
     {
       "scenario_id": "zh_p_known_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "known_topic"
@@ -805,7 +805,7 @@
     },
     {
       "scenario_id": "zh_p_testimony_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "testimony"
@@ -873,7 +873,7 @@
     },
     {
       "scenario_id": "zh_p_testimony_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "testimony"
@@ -941,7 +941,7 @@
     },
     {
       "scenario_id": "zh_p_fallback_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "honest_fallback"
@@ -1001,7 +1001,7 @@
     },
     {
       "scenario_id": "zh_p_fallback_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "honest_fallback"
@@ -1061,7 +1061,7 @@
     },
     {
       "scenario_id": "zh_p_mixed_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "mixed_detector"
@@ -1121,7 +1121,7 @@
     },
     {
       "scenario_id": "zh_p_mixed_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "mixed_detector"
@@ -1181,7 +1181,7 @@
     },
     {
       "scenario_id": "zh_p_switch_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "language_switch"
@@ -1280,7 +1280,7 @@
     },
     {
       "scenario_id": "zh_p_switch_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "language_switch"
@@ -1379,7 +1379,7 @@
     },
     {
       "scenario_id": "zh_p_profiles",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "profile_channel"
@@ -1472,7 +1472,7 @@
     },
     {
       "scenario_id": "zh_p_external_injection",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "profile_channel"
@@ -1535,7 +1535,7 @@
     },
     {
       "scenario_id": "zh_p_restart",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "persistence"
@@ -1595,7 +1595,7 @@
     },
     {
       "scenario_id": "zh_p_legacy",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "persistence"
@@ -1655,7 +1655,7 @@
     },
     {
       "scenario_id": "zh_p_ui_locale",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "ui_offline"
@@ -1715,7 +1715,7 @@
     },
     {
       "scenario_id": "zh_p_offline",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "ui_offline"
@@ -1775,7 +1775,7 @@
     },
     {
       "scenario_id": "zh_p_translation_memory",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "provenance_security"
@@ -1835,7 +1835,7 @@
     },
     {
       "scenario_id": "zh_p_local_injection",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "provenance_security"
@@ -1895,7 +1895,7 @@
     },
     {
       "scenario_id": "zh_p_script_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "han_script"
@@ -1955,7 +1955,7 @@
     },
     {
       "scenario_id": "zh_p_script_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "han_script"
@@ -2015,7 +2015,7 @@
     },
     {
       "scenario_id": "zh_p_segmentation_01",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "segmentation"
@@ -2075,7 +2075,7 @@
     },
     {
       "scenario_id": "zh_p_segmentation_02",
-      "revision": "9b2-r1",
+      "revision": "9b3-r1",
       "split": "chinese_practice",
       "tags": [
         "segmentation"

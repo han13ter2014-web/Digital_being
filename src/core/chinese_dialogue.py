@@ -175,7 +175,7 @@ def recognize_chinese(text, agent) -> ChineseRecognition:
             "social_reply",
             feedback=feedback,
         )
-    if normalized in {"你好", "你好，世界", "嗨，很高兴见到你"}:
+    if normalized in {"你好", "你好，世界", "你好，客人", "嗨，很高兴见到你"}:
         return ChineseRecognition(
             DialogueAct(ACT_SOCIAL, normalized),
             "social_greeting",
@@ -189,7 +189,7 @@ def recognize_chinese(text, agent) -> ChineseRecognition:
             "social_reply",
             social_kind="farewell",
         )
-    if normalized in {"你好吗", "你感觉怎么样"}:
+    if normalized in {"你好吗", "你感觉怎么样", "你的心情怎么样", "你最近过得怎么样"}:
         return ChineseRecognition(
             DialogueAct(ACT_SOCIAL, normalized),
             "social_state",
@@ -200,6 +200,7 @@ def recognize_chinese(text, agent) -> ChineseRecognition:
         "你在做什么",
         "你现在在做什么",
         "你现在正在做什么",
+        "你现在在忙什么",
         "此刻你正在忙什么",
     }:
         return ChineseRecognition(
