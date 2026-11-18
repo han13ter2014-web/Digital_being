@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.core.agent_emotional import EMOTION_ACTION_BIAS
 from src.core.emotional_state import (
     CALM_BASELINE,
     DECAY_PER_CYCLE,
@@ -519,3 +520,28 @@ def test_combined_bias_is_bounded():
     report = agent._apply_emotional_bias(candidates)
     assert candidates[0]["strength"] == pytest.approx(0.75)
     assert report["shifted"][0]["factor"] == 1.5
+
+
+def test_creative_forms_share_emotional_bias():
+    creative_emotions = [
+        emotion
+        for emotion, weights in EMOTION_ACTION_BIAS.items()
+        if "create_draft" in weights
+    ]
+    assert creative_emotions
+
+    for emotion in creative_emotions:
+        state = EmotionalState()
+        state.levels[emotion] = 1.0
+        candidates = [
+            {"action": action, "strength": 0.5}
+            for action in ("create_draft", "draw", "compose_music")
+        ]
+
+        _FakeAgent(state, cycle=3)._apply_emotional_bias(candidates)
+
+        strengths = {item["action"]: item["strength"] for item in candidates}
+        assert strengths["draw"] == pytest.approx(strengths["create_draft"]), emotion
+        assert strengths["compose_music"] == pytest.approx(
+            strengths["create_draft"]
+        ), emotion

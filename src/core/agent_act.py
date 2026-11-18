@@ -503,11 +503,35 @@ def act_impl(
         drawn = handler() if handler else None
         topic = (drawn or {}).get("target") or ""
         action = (drawn or {}).get("text") or action
+        if (
+            drawn is not None
+            and drawn.get("revision_created") is True
+            and isinstance(drawn.get("work_id"), str)
+            and drawn["work_id"]
+            and type(drawn.get("revision")) is int
+            and drawn["revision"] >= 1
+        ):
+            confirmed_result = True
+            result_description = (
+                f"рисунок {drawn['work_id']} редакция {drawn['revision']}"
+            )
     elif action_type == "compose_music":
         handler = getattr(self, "_act_compose_music", None)
         composed = handler() if handler else None
         topic = (composed or {}).get("target") or ""
         action = (composed or {}).get("text") or action
+        if (
+            composed is not None
+            and composed.get("revision_created") is True
+            and isinstance(composed.get("work_id"), str)
+            and composed["work_id"]
+            and type(composed.get("revision")) is int
+            and composed["revision"] >= 1
+        ):
+            confirmed_result = True
+            result_description = (
+                f"мелодия {composed['work_id']} редакция {composed['revision']}"
+            )
     elif action_type == "listen_music":
         handler = getattr(self, "_act_listen_music", None)
         params = (intention or {}).get("params", {})

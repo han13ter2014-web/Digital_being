@@ -114,6 +114,14 @@ EMOTION_ACTION_BIAS: Dict[str, Dict[str, float]] = {
     "overwhelm": {"rest": 1.35, "deep_rest": 1.25, "wait": 1.2, "explore": 0.8},
 }
 
+# P3-C-1: переживание окрашивает общий творческий порыв, а не даёт тексту
+# скрытое преимущество перед рисованием и музыкой до истории форм.
+for _action_bias in EMOTION_ACTION_BIAS.values():
+    _creative_bias = _action_bias.get("create_draft")
+    if _creative_bias is not None:
+        _action_bias["draw"] = _creative_bias
+        _action_bias["compose_music"] = _creative_bias
+
 
 def _emotions_from_death_risk_impl(self, death_result: Dict) -> None:
     """«Эмоции-2»: сигнал риска структуры → страх.

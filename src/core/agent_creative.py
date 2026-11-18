@@ -166,6 +166,11 @@ def _act_draw_impl(self) -> Dict:
         thumb = art_thumbnail(updated)
         return {
             "target": updated["theme"],
+            # art_step уже записал и проверил новую редакцию; dispatcher
+            # использует эти additive-поля как узкое доказательство результата.
+            "revision_created": True,
+            "work_id": updated["id"],
+            "revision": updated["revision"],
             "text": (
                 f"Ответ: нарисовала «{updated['theme']}», редакция "
                 f"{updated['revision']} ({updated['palette']})\n{thumb}"
@@ -254,6 +259,11 @@ def _act_compose_music_impl(self) -> Dict:
         notation = music_notation(updated)
         return {
             "target": updated["theme"],
+            # Как и для рисования: успех следует из фактически записанной
+            # music_step редакции, а не из текста или самого вызова действия.
+            "revision_created": True,
+            "work_id": updated["id"],
+            "revision": updated["revision"],
             "text": (
                 f"Ответ: сочинила мелодию «{updated['theme']}», редакция "
                 f"{updated['revision']} ({updated['mood']})\n{notation}"

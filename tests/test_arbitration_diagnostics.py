@@ -44,6 +44,7 @@ def test_exact_tie_preserves_input_order_and_exposes_intention_context():
         "allowed_count": 2,
         "stopped_count": 0,
         "winner_input_index": 0,
+        "tie_break": "input_order",
         "exact_tie": True,
         "tied_input_indices": [0, 1],
     }
@@ -84,6 +85,7 @@ def test_lower_score_and_stop_diagnostics_do_not_change_selection():
         "allowed_count": 2,
         "stopped_count": 1,
         "winner_input_index": 1,
+        "tie_break": "none",
         "exact_tie": False,
         "tied_input_indices": [1],
     }
@@ -105,6 +107,7 @@ def test_empty_and_all_stopped_rounds_have_explicit_diagnostics():
         "allowed_count": 0,
         "stopped_count": 1,
         "winner_input_index": None,
+        "tie_break": "none",
         "exact_tie": False,
         "tied_input_indices": [],
     }

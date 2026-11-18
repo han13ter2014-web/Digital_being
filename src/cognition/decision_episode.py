@@ -77,7 +77,7 @@ def _rest_baseline(agent):
     }
 
 
-def _creative_intention(agent, action, selection, entry):
+def creative_intention(agent, action, selection, entry):
     """Снять намерение с реальной работы, не выбирая и не изменяя её."""
     form = CREATIVE_FORMS.get(action)
     if form is None:
@@ -158,7 +158,7 @@ def begin_decision_episode(agent, entry, selection=None):
         "satisfaction": "not_applicable" if criterion == "none" else "pending",
         "resolution": "none",
     }
-    creative = _creative_intention(agent, action, selection, entry)
+    creative = creative_intention(agent, action, selection, entry)
     if creative is not None:
         episode["creative_intention"] = creative
     entry["decision_episode"] = episode
@@ -233,6 +233,27 @@ def finish_decision_episode(
             episode["satisfaction"] = "not_applicable"
             episode["resolution"] = "none"
             return episode
+
+    creative = episode.get("creative_intention")
+    if isinstance(creative, dict) and isinstance(activity_after, dict):
+        # Замысел остаётся снимком до act(); фактическая работа записывается
+        # отдельно, чтобы следующее продолжение могло сослаться на этот эпизод.
+        work_id = activity_after.get("id")
+        revision = activity_after.get("revision")
+        work_status = activity_after.get("status")
+        if (
+            isinstance(work_id, str)
+            and work_id
+            and type(revision) is int
+            and revision >= 1
+            and work_status in {"active", "left"}
+        ):
+            episode["creative_result"] = {
+                "form": creative["form"],
+                "work_id": work_id,
+                "revision": revision,
+                "status": work_status,
+            }
 
     satisfied = _satisfied(agent, entry, outcome, activity_before, activity_after)
     episode["satisfaction"] = "satisfied" if satisfied else "pending"
@@ -347,9 +368,25 @@ def validate_decision_episode(episode, entry):
             or baseline["max_energy"] <= 0
         ):
             raise ValueError(f"{path}.baseline.max_energy")
-    # Поле additive: старые decision episodes без него остаются валидными.
+    # Поля additive: старые decision episodes без них остаются валидными.
     if episode.get("creative_intention") is not None:
         _validate_creative_intention(episode["creative_intention"], entry)
+    result = episode.get("creative_result")
+    if result is not None:
+        result_path = f"{path}.creative_result"
+        intention = episode.get("creative_intention")
+        if not isinstance(result, dict) or not isinstance(intention, dict):
+            raise ValueError(f"{result_path}: нужны словари результата и намерения")
+        if entry.get("status") != "performed":
+            raise ValueError(f"{result_path}: исполнение не подтверждено")
+        if result.get("form") != intention.get("form"):
+            raise ValueError(f"{result_path}.form")
+        if not isinstance(result.get("work_id"), str) or not result["work_id"]:
+            raise ValueError(f"{result_path}.work_id")
+        if type(result.get("revision")) is not int or result["revision"] < 1:
+            raise ValueError(f"{result_path}.revision")
+        if result.get("status") not in {"active", "left"}:
+            raise ValueError(f"{result_path}.status")
     satisfaction = episode.get("satisfaction")
     if satisfaction not in SATISFACTIONS:
         raise ValueError(f"{path}.satisfaction")

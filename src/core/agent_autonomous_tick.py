@@ -338,7 +338,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             expanded_candidates.extend(creative_choices(self, candidate))
         else:
             expanded_candidates.append(candidate)
-    candidates = expanded_candidates
+    from src.cognition.creative_history import with_creative_history
+
+    candidates = with_creative_history(self, expanded_candidates)
 
     # === ФИЛЬТР ДОСТУПНОСТИ ===
     # Не предлагаем арбитру то, что сейчас физически нельзя выполнить:

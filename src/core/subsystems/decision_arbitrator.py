@@ -365,6 +365,27 @@ class DecisionArbitrator:
                 "continuation_of": (
                     continuation_of if isinstance(continuation_of, str) else None
                 ),
+                "creative_form": (
+                    params.get("creative_form")
+                    if params.get("creative_form") in {"text", "art", "music"}
+                    else None
+                ),
+                "creative_operation": (
+                    params.get("creative_operation")
+                    if params.get("creative_operation") in {"new", "continue", "leave"}
+                    else None
+                ),
+                "creative_work_id": (
+                    params.get("creative_work_id")
+                    if isinstance(params.get("creative_work_id"), str)
+                    else None
+                ),
+                "creative_last_cycle": (
+                    params.get("creative_last_cycle")
+                    if type(params.get("creative_last_cycle")) is int
+                    and params["creative_last_cycle"] >= 0
+                    else None
+                ),
                 "base_combined_score": round(entry["base_combined_score"], 3),
                 "predicted_effect_probability": simulation.get(
                     "predicted_effect_probability"
@@ -387,13 +408,47 @@ class DecisionArbitrator:
             if allowed
             else []
         )
+        best = allowed[0] if allowed else None
+        tie_break = "none"
+
+        def creative_history(entry):
+            params = entry["candidate"].get("params") or {}
+            if not isinstance(params, dict):
+                return None
+            form = params.get("creative_form")
+            if form not in {"text", "art", "music"}:
+                return None
+            last_cycle = params.get("creative_last_cycle")
+            if type(last_cycle) is not int or last_cycle < 0:
+                last_cycle = None
+            return form, last_cycle
+
+        if len(tied) > 1:
+            tie_break = "input_order"
+            # P3-C-1: история различает только разные формы творчества.
+            # Любые равенства с нетворческим победителем и внутри одной
+            # формы сохраняют прежний стабильный входной порядок.
+            if creative_history(best) is not None:
+                creative_tied = [
+                    entry for entry in tied if creative_history(entry) is not None
+                ]
+                if len({creative_history(entry)[0] for entry in creative_tied}) > 1:
+
+                    def history_order(entry):
+                        _form, last_cycle = creative_history(entry)
+                        return (0, 0) if last_cycle is None else (1, last_cycle)
+
+                    best = min(creative_tied, key=history_order)
+                    tie_break = "creative_history"
+
         choice_diagnostics = {
             "candidate_count": len(evaluations),
             "allowed_count": len(allowed),
             "stopped_count": len(evaluations) - len(allowed),
-            "winner_input_index": allowed[0]["input_index"] if allowed else None,
+            "winner_input_index": best["input_index"] if best else None,
             "exact_tie": len(tied) > 1,
             "tied_input_indices": [entry["input_index"] for entry in tied],
+            "tie_break": tie_break,
         }
         if not allowed:
             return {
@@ -408,7 +463,6 @@ class DecisionArbitrator:
                 "all_evaluations": [public_evaluation(entry) for entry in evaluations],
                 "choice_diagnostics": choice_diagnostics,
             }
-        best = allowed[0]
         best_candidate = best["candidate"]
         best_verdict = best["verdict"]
         reasoning = f"Выбрано: {best_candidate['action']} (источник: {best_candidate['source']}, score: {best['combined_score']:.2f}). {best_verdict['reasoning']}"

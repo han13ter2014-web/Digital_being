@@ -1173,7 +1173,15 @@ class UnifiedMotivationSystem:
                 hint for hint in action_hints[:4] if _executable_action(hint)
             ]
             for rank, action_hint in enumerate(action_hints):
-                hint_strength = strength * 0.8 * (1.0 if rank == 0 else 0.7)
+                # P3-C-1: формы одного творческого порыва не получают разную
+                # силу только из-за порядка в списке. Остальные ранги прежние.
+                same_creative_impulse = drive.name == "creativity" and action_hint in {
+                    "creative_act",
+                    "draw",
+                    "compose_music",
+                }
+                rank_factor = 1.0 if rank == 0 or same_creative_impulse else 0.7
+                hint_strength = strength * 0.8 * rank_factor
                 candidates.append(
                     {
                         "source": "motivation",
