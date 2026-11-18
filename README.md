@@ -33,6 +33,7 @@ read-only оболочка, где можно увидеть, что реаль�
 
 ```text
 DigitalBeing_Setup_v0.2.0.exe
+SHA-256: D1959FA617DF1E5F266173922AA75F066EF838E2C90FD252B8CDBC5229B66F07
 ```
 
 Запуск из исходников (Python 3.10+):

@@ -35,6 +35,7 @@ Windows 安装包 — [GitHub Releases](https://github.com/han13ter2014-web/Digi
 
 ```text
 DigitalBeing_Setup_v0.2.0.exe
+SHA-256: D1959FA617DF1E5F266173922AA75F066EF838E2C90FD252B8CDBC5229B66F07
 ```
 
 从源码运行（Python 3.10+）：
