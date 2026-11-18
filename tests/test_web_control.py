@@ -291,6 +291,19 @@ def controlled_dashboard():
         (
             "/api/social",
             {
+                "action": "session",
+                "channel_id": "channel-1",
+                "conversation_id": "private-a",
+                "duration_sec": 1800,
+                "poll_interval_sec": 0.5,
+                "initiative_after_sec": 60,
+            },
+            Events.USER_COMMAND,
+            {"command": "social session channel-1 private-a 1800 0.5 60"},
+        ),
+        (
+            "/api/social",
+            {
                 "action": "draft",
                 "channel_id": "channel-1",
                 "inbound_message_id": "inbound-1",
@@ -330,7 +343,15 @@ def controlled_dashboard():
                 Events.USER_COMMAND,
                 {"command": f"social {action} channel-1"},
             )
-            for action in ("receive", "revoke", "stop")
+            for action in (
+                "receive",
+                "revoke",
+                "stop",
+                "pause",
+                "resume",
+                "manual",
+                "session-stop",
+            )
         ],
     ],
 )
@@ -425,6 +446,31 @@ def test_web_publishes_exact_tk_event(
                 "min_interval_sec": 0,
             },
         ),
+        *[
+            (
+                "/api/social",
+                {
+                    "action": "session",
+                    "channel_id": "channel-1",
+                    "conversation_id": "private-a",
+                    "duration_sec": 1800,
+                    "poll_interval_sec": 0.5,
+                    "initiative_after_sec": 60,
+                    key: value,
+                },
+            )
+            for key, value in (
+                ("duration_sec", 0),
+                ("duration_sec", 3601),
+                ("duration_sec", True),
+                ("duration_sec", float("nan")),
+                ("poll_interval_sec", 0),
+                ("poll_interval_sec", 61),
+                ("initiative_after_sec", 0),
+                ("initiative_after_sec", 901),
+                ("initiative_after_sec", "60"),
+            )
+        ],
         (
             "/api/social",
             {"action": "create", "provider": "bad provider", "account_id": "a"},

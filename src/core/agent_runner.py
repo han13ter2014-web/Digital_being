@@ -50,6 +50,7 @@ from src.core.external_adapters import (
     create_external_adapter,
 )
 from src.core.external_dialogue import ExternalDialogueController
+from src.core.social_sessions import SocialSessionController
 from src.core.telegram_channel import TelegramChannelError, create_social_adapter
 from src.core.stimulus_selector import (
     TRAIL_GOAL_PRIORITY_PROB,
@@ -360,9 +361,11 @@ class AgentRunner:
         self._last_user_message_at = 0  # время последнего сообщения пользователя
         # Живые контроллеры не сериализуются: restart никогда не возобновляет API.
         self._external_dialogues: Dict[str, ExternalDialogueController] = {}
+        self._social_sessions: Dict[str, SocialSessionController] = {}
         self._external_adapter_factory = create_external_adapter
         self._social_adapter_factory = create_social_adapter
         self.agent._external_dialogue_controllers = self._external_dialogues
+        self.agent._social_session_controllers = self._social_sessions
 
         # Дедупликация стимулов: не повторять один и тот же вопрос
         # чаще, чем раз в STIMULUS_COOLDOWN_TICKS тиков (см. docs/BASELINE.md).
@@ -2461,7 +2464,10 @@ class AgentRunner:
 
     async def stop(self) -> None:
         """Обработать принятые сообщения, остановить адаптеры и сохраниться."""
-        controllers = list(self._external_dialogues.values())
+        controllers = [
+            *self._external_dialogues.values(),
+            *self._social_sessions.values(),
+        ]
         for controller in controllers:
             controller.stop("остановка жизненного цикла")
         if controllers:
@@ -2471,7 +2477,9 @@ class AgentRunner:
                     timeout=40.0,
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"[{self.name}] Таймаут остановки внешних диалогов")
+                logger.warning(
+                    f"[{self.name}] Таймаут остановки внешних и социальных сессий"
+                )
         webhooks = getattr(self.agent, "webhooks", None)
         stop_webhooks = getattr(webhooks, "stop", None)
         if callable(stop_webhooks):
@@ -3822,8 +3830,20 @@ class AgentRunner:
             account_id=channel["account_id"],
         )
 
+    def _social_session(self, channel: dict) -> SocialSessionController:
+        channel_id = channel["channel_id"]
+        controller = self._social_sessions.get(channel_id)
+        if controller is None:
+            controller = SocialSessionController(
+                self.agent.social_channels,
+                self._social_adapter(channel),
+                cycle=lambda: self.agent.cycle_count,
+            )
+            self._social_sessions[channel_id] = controller
+        return controller
+
     def _handle_social_command(self, cmd_raw: str) -> str:
-        """Owner-only управление; Telegram receive/send выполняются только вручную."""
+        """Owner-only ручной sandbox и явно запущенные bounded-сессии."""
         manager = getattr(self.agent, "social_channels", None)
         registry = getattr(self.agent, "social_registry", None)
         if manager is None or registry is None:
@@ -3838,6 +3858,8 @@ class AgentRunner:
         usage = (
             "Использование: /social [status | create <provider> | <account_id> | "
             "[external_person|external_ai] | grant <channel_id> | <JSON> | "
+            "session <channel_id> <conversation_id> [duration] [poll] [initiative] | "
+            "pause|resume|manual|session-stop <channel_id> | "
             "draft <channel_id> <inbound_message_id> | edit <draft_id> | <текст> | "
             "approve|reject <draft_id> | receive <channel_id> | "
             "send <channel_id> <draft_id> | revoke|stop <channel_id>]"
@@ -3845,12 +3867,64 @@ class AgentRunner:
         try:
             if action == "status" and not rest:
                 status = manager.get_status()
+                workers = sum(
+                    controller.get_status()["state"]
+                    in {"running", "pausing", "stopping"}
+                    for controller in self._social_sessions.values()
+                )
                 return (
                     "🛡 Социальные каналы:\n"
                     f"   Каналов: {status['channels']}; активных: {status['active']}\n"
                     f"   Сообщений: {status['messages']}; проектов: {status['pending_drafts']}\n"
-                    f"   Отправлено с receipt: {status['sent']}; worker-ов: 0\n"
+                    f"   Отправлено с receipt: {status['sent']}; worker-ов: {workers}\n"
                     "   Автоматическое возобновление отсутствует."
+                )
+            if action == "session" and rest:
+                arguments = rest.split()
+                if not 2 <= len(arguments) <= 5:
+                    return usage
+                channel_id, conversation_id = arguments[:2]
+                channel = manager.get_channel(channel_id)
+                if channel is None:
+                    return "🛡 Сессия: канал не найден."
+                numbers = [float(value) for value in arguments[2:]]
+                duration = numbers[0] if numbers else 1800.0
+                poll = numbers[1] if len(numbers) > 1 else 5.0
+                initiative = numbers[2] if len(numbers) > 2 else 60.0
+                result = self._social_session(channel).start(
+                    channel_id,
+                    conversation_id,
+                    duration_sec=duration,
+                    poll_interval_sec=poll,
+                    initiative_after_sec=initiative,
+                )
+                return (
+                    f"🛡 Сессия: {result['status']}; состояние {result.get('state', 'idle')}; "
+                    f"conversation {conversation_id}. Автовозобновление отключено."
+                )
+            if action in {"pause", "resume", "manual", "session-stop"}:
+                if not rest or " " in rest:
+                    return usage
+                controller = self._social_sessions.get(rest)
+                if controller is None:
+                    return "🛡 Сессия: не найдена; restart её не возобновляет."
+                if action == "pause":
+                    result = controller.pause()
+                elif action == "resume":
+                    result = controller.resume()
+                elif action == "manual":
+                    result = controller.manual_takeover()
+                else:
+                    result = controller.stop()
+                result_status = result["status"]
+                if result_status == "pausing":
+                    result_status = {
+                        "pause": "paused requested",
+                        "manual": "manual requested",
+                    }.get(action, result_status)
+                return (
+                    f"🛡 Сессия: {result_status}; "
+                    f"состояние {result.get('state', controller.state)}."
                 )
             if action == "create" and rest:
                 fields = [item.strip() for item in rest.split("|")]
@@ -4856,6 +4930,14 @@ class AgentRunner:
             "dialogue_journal": {
                 "backend": self._dialogue_journal_backend,
                 "last_error": self._dialogue_journal_error,
+            },
+            "social_sessions": {
+                "workers": sum(
+                    controller.get_status()["state"]
+                    in {"running", "pausing", "stopping"}
+                    for controller in self._social_sessions.values()
+                ),
+                "automatic_resume": False,
             },
         }
 

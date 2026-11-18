@@ -382,6 +382,25 @@ def test_send_uses_only_exact_approved_revision_and_verifies_telegram_receipt():
     assert transport.calls[1]["url"].endswith("/sendMessage")
 
 
+def test_telegram_initiative_omits_reply_parameters_and_checks_exact_receipt():
+    transport = FrozenTransport(RESPONSES["send_success"])
+    adapter = _adapter(transport)
+
+    sent = adapter.send(
+        channel_id="fixture-channel",
+        conversation_id="777",
+        message_id="out-initiative",
+        in_reply_to=None,
+        text="Exact owner reply",
+    )
+
+    assert sent["status"] == "sent"
+    assert transport.calls[0]["payload"] == {
+        "chat_id": 777,
+        "text": "Exact owner reply",
+    }
+
+
 def test_telegram_receipt_mismatch_is_not_delivery_and_does_not_leak_details():
     manager = _manager()
     channel_id = _create(manager)

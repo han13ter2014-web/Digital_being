@@ -448,7 +448,7 @@ def _external_contacts_section(agent: Any) -> Dict[str, Any]:
 
 
 def _social_channels_section(agent: Any) -> Dict[str, Any]:
-    """Ограниченный журнал соцканалов; credentials и worker здесь отсутствуют."""
+    """Ограниченный журнал и sanitized runtime-сессии без credentials."""
     manager = _own(agent, "social_channels", None)
     registry = _own(agent, "social_registry", None)
     section: Dict[str, Any] = {
@@ -456,6 +456,7 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
         "can_manage": False,
         "channel_count": 0,
         "active": 0,
+        "active_sessions": 0,
         "messages": 0,
         "pending_drafts": 0,
         "sent": 0,
@@ -464,6 +465,44 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
         "journal_limit": 12,
         "channels": [],
     }
+    controllers = _own(agent, "_social_session_controllers", {})
+    controllers = controllers if isinstance(controllers, dict) else {}
+    session_snapshots: Dict[str, Dict[str, Any]] = {}
+    session_fields = (
+        "session_id",
+        "channel_id",
+        "conversation_id",
+        "grant_version",
+        "state",
+        "in_flight",
+        "started_at",
+        "deadline",
+        "remaining_sec",
+        "duration_sec",
+        "poll_interval_sec",
+        "initiative_after_sec",
+        "received",
+        "sent",
+        "initiatives_sent",
+        "last_error",
+        "pause_reason",
+        "automatic_resume",
+    )
+    for channel_id, controller in controllers.items():
+        try:
+            raw_session = controller.get_status()
+        except Exception:  # pragma: no cover - защита UI
+            continue
+        if not isinstance(raw_session, dict):
+            continue
+        snapshot = {key: deepcopy(raw_session.get(key)) for key in session_fields}
+        snapshot["automatic_resume"] = False
+        session_snapshots[str(channel_id)] = snapshot
+        state = snapshot.get("state")
+        if state in {"running", "pausing", "stopping", "paused", "manual"}:
+            section["active_sessions"] += 1
+        if state in {"running", "pausing", "stopping"}:
+            section["workers"] += 1
     if manager is None:
         return section
     section["can_manage"] = bool(
@@ -515,6 +554,7 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
             continue
         if not isinstance(detail, dict):
             continue
+        channel_id = str(raw_channel["channel_id"])
         raw_messages = detail.get("messages")
         raw_messages = raw_messages if isinstance(raw_messages, list) else []
         item = {
@@ -536,6 +576,9 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
                 "pending_draft",
             )
         }
+        item["session"] = session_snapshots.get(
+            channel_id, {"state": "idle", "automatic_resume": False}
+        )
         item["message_count"] = len(raw_messages)
         item["messages"] = [
             {key: deepcopy(message.get(key)) for key in message_fields}

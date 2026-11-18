@@ -251,24 +251,22 @@ class TelegramChannelAdapter:
         chat_id = int(conversation_id)
         if not _positive_id(chat_id):
             raise TelegramChannelError("invalid_conversation")
-        if not isinstance(in_reply_to, str) or not in_reply_to.isdecimal():
-            raise TelegramChannelError("invalid_reply_target")
-        reply_id = int(in_reply_to)
-        if not _positive_id(reply_id):
-            raise TelegramChannelError("invalid_reply_target")
+        reply_id = None
+        if in_reply_to is not None:
+            if not isinstance(in_reply_to, str) or not in_reply_to.isdecimal():
+                raise TelegramChannelError("invalid_reply_target")
+            reply_id = int(in_reply_to)
+            if not _positive_id(reply_id):
+                raise TelegramChannelError("invalid_reply_target")
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
             raise TelegramChannelError("invalid_outgoing_text")
-        response = self._call(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "reply_parameters": {
-                    "message_id": reply_id,
-                    "allow_sending_without_reply": False,
-                },
-            },
-        )
+        payload = {"chat_id": chat_id, "text": text}
+        if reply_id is not None:
+            payload["reply_parameters"] = {
+                "message_id": reply_id,
+                "allow_sending_without_reply": False,
+            }
+        response = self._call("sendMessage", payload)
         result = response.get("result")
         if not isinstance(result, Mapping):
             raise TelegramChannelError("invalid_response")

@@ -48,6 +48,12 @@ CONTROL_EVENT_KINDS = frozenset(
         "rejected",
         "sent",
         "send_failed",
+        "session_started",
+        "session_paused",
+        "session_resumed",
+        "session_manual",
+        "session_stopped",
+        "session_completed",
     }
 )
 _PROVIDER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -301,12 +307,14 @@ def _validate_message(message, path: str) -> None:
     if message.get("text_sha256") != _hash_text(message["text"]):
         _fail(f"{path}.text_sha256", "text hash does not match")
     _cycle(message.get("cycle"), f"{path}.cycle")
-    if (
-        not isinstance(message.get("session_context"), list)
-        or message["session_context"]
-    ):
-        _fail(f"{path}.session_context", "9D-0 permits only an empty minimal context")
+    context = message.get("session_context")
+    if not isinstance(context, list) or len(context) > 4:
+        _fail(f"{path}.session_context", "expected bounded session provenance")
+    for index, item in enumerate(context):
+        _identifier(item, f"{path}.session_context[{index}]")
     if message["direction"] == "inbound":
+        if context:
+            _fail(f"{path}.session_context", "inbound claim cannot own a session")
         if message.get("status") != "quarantined":
             _fail(f"{path}.status", "inbound claims remain quarantined")
         if message.get("claim_type") != "external_social_claim":
@@ -325,9 +333,21 @@ def _validate_message(message, path: str) -> None:
     if message.get("claim_type") is not None:
         _fail(f"{path}.claim_type", "outbound draft is not an external claim")
     _identifier(message.get("based_on"), f"{path}.based_on")
-    _identifier(message.get("in_reply_to"), f"{path}.in_reply_to")
-    if message.get("origin") not in {"deterministic", "owner_edit"}:
+    origin = message.get("origin")
+    if origin not in {
+        "deterministic",
+        "owner_edit",
+        "session_reply",
+        "session_initiative",
+    }:
         _fail(f"{path}.origin", "unsupported draft origin")
+    if origin == "session_initiative":
+        if message.get("in_reply_to") is not None:
+            _fail(f"{path}.in_reply_to", "initiative is not a reply")
+    else:
+        _identifier(message.get("in_reply_to"), f"{path}.in_reply_to")
+    if origin in {"session_reply", "session_initiative"} and not context:
+        _fail(f"{path}.session_context", "session send requires provenance")
     revision = message.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         _fail(f"{path}.revision", "expected a positive integer")
@@ -455,7 +475,14 @@ def validate_social_channels(data, registry_data) -> None:
                         "profile_id",
                     )
                 )
-                or message["in_reply_to"] != source["external_message_id"]
+                or (
+                    message["origin"] == "session_initiative"
+                    and message["in_reply_to"] is not None
+                )
+                or (
+                    message["origin"] != "session_initiative"
+                    and message["in_reply_to"] != source["external_message_id"]
+                )
             ):
                 _fail(f"{path}.based_on", "draft escaped its inbound scope")
             if (
@@ -1036,6 +1063,90 @@ class SocialChannelManager:
             "grant_version": None,
             "error": None,
             "session_context": [],
+        }
+        self.messages.append(draft)
+        channel["last_cycle"] = max(channel["last_cycle"], cycle)
+        self._record(channel_id, "draft_created", cycle)
+        return {"status": "draft", **deepcopy(draft)}
+
+    def create_initiative(
+        self,
+        channel_id: str,
+        source_message_id: str,
+        *,
+        session_id: str,
+        text: str,
+        reason: str,
+        cycle: int,
+    ) -> dict:
+        """Создать одну инициативу из реального prior private context."""
+        _cycle(cycle)
+        _identifier(session_id, "session_id")
+        _text(text, "text", MAX_TEXT_CHARS)
+        _identifier(reason, "reason", 80)
+        channel = self._channel(channel_id)
+        if channel is None:
+            return {"status": "not_found", "channel_id": channel_id}
+        if channel["status"] != "active":
+            return {"status": "channel_stopped", "channel_id": channel_id}
+        source = self._message(source_message_id)
+        if (
+            source is None
+            or source["direction"] != "inbound"
+            or source["channel_id"] != channel_id
+            or source["visibility"] != "private"
+        ):
+            return {"status": "not_found", "message_id": source_message_id}
+        profile = self.registry.profiles.get(source["profile_id"])
+        if profile is None or profile["kind"] == "unknown":
+            return {"status": "identity_required", "message_id": source_message_id}
+        grant = channel["grant"]
+        if (
+            not grant["draft"]
+            or source["conversation_id"] not in grant["conversation_ids"]
+        ):
+            return {"status": "permission_denied", "channel_id": channel_id}
+        if any(
+            item["direction"] == "outbound"
+            and item["based_on"] == source_message_id
+            and item["origin"] == "session_initiative"
+            for item in self.messages
+        ):
+            return {"status": "initiative_exists", "channel_id": channel_id}
+        if any(
+            item["channel_id"] == channel_id
+            and item["conversation_id"] == source["conversation_id"]
+            and item["status"] in ACTIVE_DRAFT_STATUSES
+            for item in self.messages
+        ):
+            return {"status": "draft_pending", "channel_id": channel_id}
+        if (
+            len(self.messages) >= MAX_MESSAGES
+            or sum(item["channel_id"] == channel_id for item in self.messages)
+            >= MAX_MESSAGES_PER_CHANNEL
+        ):
+            return {"status": "limit_reached", "channel_id": channel_id}
+        draft = {
+            "message_id": f"out-{uuid4()}",
+            "channel_id": channel_id,
+            "conversation_id": source["conversation_id"],
+            "author_id": source["author_id"],
+            "profile_id": source["profile_id"],
+            "direction": "outbound",
+            "claim_type": None,
+            "status": "draft",
+            "visibility": "private",
+            "text": text,
+            "text_sha256": _hash_text(text),
+            "cycle": cycle,
+            "external_message_id": None,
+            "based_on": source["message_id"],
+            "in_reply_to": None,
+            "origin": "session_initiative",
+            "revision": 1,
+            "grant_version": None,
+            "error": None,
+            "session_context": [f"session:{session_id}", reason],
         }
         self.messages.append(draft)
         channel["last_cycle"] = max(channel["last_cycle"], cycle)
