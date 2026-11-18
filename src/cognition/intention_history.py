@@ -41,7 +41,7 @@ def begin_intention(agent, selection):
     begin_evidence_goal(agent, entry)
     from src.cognition.decision_episode import begin_decision_episode
 
-    begin_decision_episode(agent, entry)
+    begin_decision_episode(agent, entry, selection)
     history.append(entry)
     del history[:-LIMIT]
     return entry

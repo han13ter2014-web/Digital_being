@@ -36,6 +36,12 @@ ACTIVITY_ATTRS = {
     "draw": "_art_work",
     "compose_music": "_music_work",
 }
+CREATIVE_FORMS = {
+    "create_draft": "text",
+    "draw": "art",
+    "compose_music": "music",
+}
+CREATIVE_OPERATIONS = {"new", "continue", "leave"}
 SATISFACTIONS = {"pending", "satisfied", "not_applicable"}
 RESOLUTIONS = {"none", "continue", "wait", "let_go"}
 
@@ -71,7 +77,61 @@ def _rest_baseline(agent):
     }
 
 
-def begin_decision_episode(agent, entry):
+def _creative_intention(agent, action, selection, entry):
+    """Снять намерение с реальной работы, не выбирая и не изменяя её."""
+    form = CREATIVE_FORMS.get(action)
+    if form is None:
+        return None
+    params = selection.get("params", {}) if isinstance(selection, dict) else {}
+    if not isinstance(params, dict):
+        params = {}
+    state = getattr(agent, ACTIVITY_ATTRS[action], None)
+    if not isinstance(state, dict):
+        state = None
+    operation = "continue"
+
+    if action == "create_draft":
+        requested = params.get("draft_mode", "continue")
+        if requested in CREATIVE_OPERATIONS:
+            operation = requested
+        identifier = params.get("draft_id")
+        if operation == "new":
+            state = None
+        elif isinstance(identifier, str):
+            catalog = getattr(agent, "_creative_catalog", {})
+            selected = catalog.get(identifier) if isinstance(catalog, dict) else None
+            if isinstance(selected, dict):
+                state = selected
+            elif not isinstance(state, dict) or state.get("id") != identifier:
+                state = {"id": identifier, "revision": 0, "status": None}
+    else:
+        if action == "draw":
+            from src.cognition.local_art import ART_LIMIT as revision_limit
+        else:
+            from src.cognition.local_music import MUSIC_LIMIT as revision_limit
+        if state is not None and (
+            state.get("status", "active") == "left"
+            or state.get("revision", 0) >= revision_limit
+        ):
+            operation = "new"
+            state = None
+
+    if state is None and operation == "continue":
+        operation = "new"
+    revision = state.get("revision", 0) if state is not None else 0
+    status = state.get("status") if state is not None else None
+    return {
+        "schema_version": 1,
+        "form": form,
+        "operation": operation,
+        "work_id": state.get("id") if state is not None else None,
+        "revision": revision if type(revision) is int and revision >= 0 else 0,
+        "status": status if isinstance(status, str) else None,
+        "reason": entry.get("reason", ""),
+    }
+
+
+def begin_decision_episode(agent, entry, selection=None):
     """Создать ожидание до ``act()``; существующую запись не переписывать."""
     if entry.get("decision_episode") is not None:
         return entry["decision_episode"]
@@ -98,6 +158,9 @@ def begin_decision_episode(agent, entry):
         "satisfaction": "not_applicable" if criterion == "none" else "pending",
         "resolution": "none",
     }
+    creative = _creative_intention(agent, action, selection, entry)
+    if creative is not None:
+        episode["creative_intention"] = creative
     entry["decision_episode"] = episode
     return episode
 
@@ -196,6 +259,43 @@ def _finite_number(value):
     )
 
 
+def _validate_creative_intention(intention, entry):
+    path = "intention_history.decision_episode.creative_intention"
+    if not isinstance(intention, dict):
+        raise ValueError(f"{path}: нужен словарь")
+    if (
+        type(intention.get("schema_version")) is not int
+        or intention["schema_version"] != 1
+    ):
+        raise ValueError(f"{path}.schema_version")
+    action = {"creative_act": "create_draft"}.get(
+        entry.get("action"), entry.get("action")
+    )
+    expected_form = CREATIVE_FORMS.get(action)
+    if expected_form is None or intention.get("form") != expected_form:
+        raise ValueError(f"{path}.form")
+    if intention.get("operation") not in CREATIVE_OPERATIONS:
+        raise ValueError(f"{path}.operation")
+    work_id = intention.get("work_id")
+    if work_id is not None and not isinstance(work_id, str):
+        raise ValueError(f"{path}.work_id")
+    revision = intention.get("revision")
+    if type(revision) is not int or revision < 0:
+        raise ValueError(f"{path}.revision")
+    if intention.get("status") not in {None, "active", "left"}:
+        raise ValueError(f"{path}.status")
+    if not isinstance(intention.get("reason"), str):
+        raise ValueError(f"{path}.reason")
+    if intention["reason"] != entry.get("reason", ""):
+        raise ValueError(f"{path}.reason: не совпадает с намерением")
+    if intention["operation"] == "new" and (
+        work_id is not None or revision != 0 or intention.get("status") is not None
+    ):
+        raise ValueError(
+            f"{path}.operation: новая работа не принимает старое состояние"
+        )
+
+
 def validate_decision_episode(episode, entry):
     """Проверить границы checkpoint и тождество контракта с намерением."""
     path = "intention_history.decision_episode"
@@ -247,6 +347,9 @@ def validate_decision_episode(episode, entry):
             or baseline["max_energy"] <= 0
         ):
             raise ValueError(f"{path}.baseline.max_energy")
+    # Поле additive: старые decision episodes без него остаются валидными.
+    if episode.get("creative_intention") is not None:
+        _validate_creative_intention(episode["creative_intention"], entry)
     satisfaction = episode.get("satisfaction")
     if satisfaction not in SATISFACTIONS:
         raise ValueError(f"{path}.satisfaction")
