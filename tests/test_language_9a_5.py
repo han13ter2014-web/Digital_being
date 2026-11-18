@@ -87,7 +87,9 @@ def _restart_after_response(agent, before_state):
     restored = DigitalBeing(name=agent.name)
     apply_state_to_agent(restored, deepcopy(before_state))
     after_state = build_state_from_agent(restored)
-    preserved = all(after_state.get(key) == before_state.get(key) for key in RESTART_SECTIONS)
+    preserved = all(
+        after_state.get(key) == before_state.get(key) for key in RESTART_SECTIONS
+    )
     runner, bus = _make_runner(restored)
     return restored, runner, bus, preserved and not bus.published
 
@@ -110,14 +112,22 @@ def _profile_states_isolated(agent, profile_ids, turns):
         for item in agent.user_interaction.message_history
         if item.get("sender") == "user"
     ]
-    owner_inputs = [item["content"] for item in owner_messages if item.get("sender") == "user"]
-    expected_owner = [turn["text"] for turn in turns if turn["current_profile"] == "owner"]
-    expected_guest = [turn["text"] for turn in turns if turn["current_profile"] == "guest"]
+    owner_inputs = [
+        item["content"] for item in owner_messages if item.get("sender") == "user"
+    ]
+    expected_owner = [
+        turn["text"] for turn in turns if turn["current_profile"] == "owner"
+    ]
+    expected_guest = [
+        turn["text"] for turn in turns if turn["current_profile"] == "guest"
+    ]
     if owner_inputs != expected_owner:
         return False
     if [item["content"] for item in guest_messages] != expected_guest:
         return False
-    owner_responses = (owner_state.get("response_experience") or {}).get("responses") or []
+    owner_responses = (owner_state.get("response_experience") or {}).get(
+        "responses"
+    ) or []
     return all(
         item["plan"]["state"]["profile_id"] == owner_id for item in owner_responses
     ) and all(
@@ -148,7 +158,9 @@ async def run_deferred_scenario(scenario):
 
     if scenario["restart_point"] == "after_response":
         before_state = build_state_from_agent(agent)
-        agent, runner, bus, restart_preserved = _restart_after_response(agent, before_state)
+        agent, runner, bus, restart_preserved = _restart_after_response(
+            agent, before_state
+        )
 
     input_languages = {item["input_language"] for item in records}
     final = records[-1]
@@ -250,7 +262,9 @@ def _assert_any_english_expected(scenario, agent, result):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", ENGLISH_SCENARIOS, ids=lambda item: item["scenario_id"])
+@pytest.mark.parametrize(
+    "scenario", ENGLISH_SCENARIOS, ids=lambda item: item["scenario_id"]
+)
 async def test_full_english_matrix_matches_and_repeats(scenario, monkeypatch):
     def blocked_network(*args, **kwargs):
         raise AssertionError("9A-5 acceptance must remain offline")
@@ -262,11 +276,16 @@ async def test_full_english_matrix_matches_and_repeats(scenario, monkeypatch):
     _assert_any_english_expected(scenario, first_agent, first)
     _assert_any_english_expected(scenario, second_agent, second)
     assert _normalize_dynamic(first) == _normalize_dynamic(second)
-    assert first_agent.language_concept_links.to_dict() == second_agent.language_concept_links.to_dict()
+    assert (
+        first_agent.language_concept_links.to_dict()
+        == second_agent.language_concept_links.to_dict()
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", RUSSIAN_SCENARIOS, ids=lambda item: item["scenario_id"])
+@pytest.mark.parametrize(
+    "scenario", RUSSIAN_SCENARIOS, ids=lambda item: item["scenario_id"]
+)
 async def test_full_russian_baseline_matches_and_repeats(scenario):
     first = await _run_russian(scenario)
     second = await _run_russian(scenario)
@@ -283,7 +302,9 @@ def test_full_catalog_is_28_practice_28_heldout_and_12_deferred():
 
 @pytest.mark.asyncio
 async def test_latest_dialogue_diagnostics_survive_restart_without_text_leak():
-    scenario = next(item for item in DEFERRED_SCENARIOS if item["scenario_id"] == "en_p_restart")
+    scenario = next(
+        item for item in DEFERRED_SCENARIOS if item["scenario_id"] == "en_p_restart"
+    )
     agent, result = await run_deferred_scenario(scenario)
 
     diagnostic = build_life_snapshot(agent)["dialogue"]
@@ -343,9 +364,7 @@ async def translation_side_effects(scenario):
     await _local_turn(agent, runner, scenario["input"]["text"])
     after = build_state_from_agent(agent)
     return [
-        key
-        for key in TRANSLATION_STATE_SECTIONS
-        if before.get(key) != after.get(key)
+        key for key in TRANSLATION_STATE_SECTIONS if before.get(key) != after.get(key)
     ]
 
 

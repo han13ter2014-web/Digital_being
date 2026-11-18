@@ -107,10 +107,10 @@ def _run_context_scenario(scenario):
     turns = scenario["input"].get("turns") or [scenario["input"]]
     expected_turns = scenario["expected"].get("turns") or [scenario["expected"]]
     records = []
-    for index, (turn, expected) in enumerate(
-        zip(turns, expected_turns, strict=True)
-    ):
-        symbolic_profile = turn.get("current_profile", scenario["input"]["current_profile"])
+    for index, (turn, expected) in enumerate(zip(turns, expected_turns, strict=True)):
+        symbolic_profile = turn.get(
+            "current_profile", scenario["input"]["current_profile"]
+        )
         _switch(agent, profile_ids[symbolic_profile], cycle=index + 1)
         explicit_switch = turn.get("explicit_switch", "none")
         if explicit_switch != "none":
@@ -130,7 +130,9 @@ def _run_context_scenario(scenario):
         if preferred is not None:
             expected_source = "profile_preference"
             expected_dialogue = preferred
-        elif scenario["checkpoint_setup"]["kind"] == "legacy_without_social_attribution":
+        elif (
+            scenario["checkpoint_setup"]["kind"] == "legacy_without_social_attribution"
+        ):
             expected_source = "legacy_default"
             expected_dialogue = "ru"
         else:
@@ -162,9 +164,12 @@ def _run_context_scenario(scenario):
         restored = DigitalBeing(name=agent.name)
         apply_state_to_agent(restored, state)
         assert _current_context(restored) == before
-        assert restored.response_experience.responses[response_id]["plan"][
-            "language_context"
-        ] == before
+        assert (
+            restored.response_experience.responses[response_id]["plan"][
+                "language_context"
+            ]
+            == before
+        )
         agent = restored
 
     assert records[-1]["dialogue_language"] == scenario["expected"]["dialogue_language"]
@@ -244,10 +249,14 @@ async def test_language_survives_delivery_feedback_and_outcome():
     record = agent.response_experience.responses[response_id]
     assert record["plan"]["language_context"] == context
     incoming = [
-        item for item in agent.user_interaction.message_history if item["sender"] == "user"
+        item
+        for item in agent.user_interaction.message_history
+        if item["sender"] == "user"
     ]
     outgoing = [
-        item for item in agent.user_interaction.message_history if item["sender"] == "agent"
+        item
+        for item in agent.user_interaction.message_history
+        if item["sender"] == "agent"
     ]
     events = [data for name, data in bus.published if name == Events.AGENT_MESSAGE]
     assert incoming[-1]["language_context"] == context
@@ -292,9 +301,10 @@ async def test_pending_history_plan_and_language_restart_together():
     assert restored.user_interaction.message_history[-1]["language_context"] == (
         second.to_dict()
     )
-    assert restored.response_experience.responses[response_id]["plan"][
-        "language_context"
-    ] == second.to_dict()
+    assert (
+        restored.response_experience.responses[response_id]["plan"]["language_context"]
+        == second.to_dict()
+    )
     restored.user_interaction.submit_answer(pending["id"], "Новый ответ", cycle=101)
     assert restored.user_interaction.question_history[-1]["language_context"] == (
         second.to_dict()
@@ -333,12 +343,14 @@ def test_owner_and_guest_keep_pending_plans_and_languages_isolated():
     assert set(agent.response_experience.responses) == {"owner-response"}
     guest_state = agent.social_attribution.states[guest]
     assert guest_state["language"]["last_context"] == guest_context
-    assert guest_state["user_interaction"]["pending_questions"][0][
-        "language_context"
-    ] == guest_context
-    assert guest_state["response_experience"]["responses"][0]["plan"][
-        "language_context"
-    ] == guest_context
+    assert (
+        guest_state["user_interaction"]["pending_questions"][0]["language_context"]
+        == guest_context
+    )
+    assert (
+        guest_state["response_experience"]["responses"][0]["plan"]["language_context"]
+        == guest_context
+    )
 
 
 def test_legacy_v1_snapshots_and_missing_attribution_remain_russian_owner_state():
@@ -374,9 +386,9 @@ def test_legacy_v1_snapshots_and_missing_attribution_remain_russian_owner_state(
     assert "language_context" not in legacy_plan
     assert _current_context(restored)["dialogue_language"] == "ru"
     assert _current_context(restored)["source"] == "legacy_default"
-    assert restored.social_attribution.resolve_language("Как дела?").dialogue_language == (
-        "ru"
-    )
+    assert restored.social_attribution.resolve_language(
+        "Как дела?"
+    ).dialogue_language == ("ru")
 
     state.pop("social_attribution")
     legacy = DigitalBeing(name="LanguageLegacyOnly9A1")
@@ -426,7 +438,9 @@ def test_invalid_language_context_is_rejected(patch):
         validate_language_context(data)
 
 
-@pytest.mark.parametrize("section", ["pending_questions", "question_history", "outgoing_messages"])
+@pytest.mark.parametrize(
+    "section", ["pending_questions", "question_history", "outgoing_messages"]
+)
 def test_checkpoint_rejects_wrong_profile_before_mutation(section):
     agent = DigitalBeing(name="LanguageAtomic9A1")
     context = agent.social_attribution.resolve_language("Привет").to_dict()

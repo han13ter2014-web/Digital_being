@@ -48,13 +48,14 @@ from src.core.event_bus import Events
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "language_9a"
 MANIFEST = json.loads((FIXTURE_DIR / "manifest.json").read_text(encoding="utf-8"))
 CATALOGS = {
-    entry["split"]: json.loads((FIXTURE_DIR / entry["path"]).read_text(encoding="utf-8"))
+    entry["split"]: json.loads(
+        (FIXTURE_DIR / entry["path"]).read_text(encoding="utf-8")
+    )
     for entry in MANIFEST["files"]
 }
 RUSSIAN_SCENARIOS = CATALOGS["russian_baseline"]["scenarios"]
 ENGLISH_SCENARIOS = (
-    CATALOGS["english_practice"]["scenarios"]
-    + CATALOGS["english_heldout"]["scenarios"]
+    CATALOGS["english_practice"]["scenarios"] + CATALOGS["english_heldout"]["scenarios"]
 )
 CAPABILITIES = tuple(MANIFEST["capabilities"])
 CHECKPOINT_SECTIONS = (
@@ -161,7 +162,8 @@ def test_manifest_schema_hashes_and_unique_ids():
     for entry in MANIFEST["files"]:
         path = FIXTURE_DIR / entry["path"]
         assert path.name == entry["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"]
+        canonical_bytes = path.read_text(encoding="utf-8").encode("utf-8")
+        assert hashlib.sha256(canonical_bytes).hexdigest() == entry["sha256"]
         catalog = CATALOGS[entry["split"]]
         assert catalog["schema_version"] == MANIFEST["schema_version"]
         assert catalog["catalog_revision"] == MANIFEST["catalog_revision"]
@@ -202,10 +204,14 @@ def test_english_splits_cover_capabilities_without_text_overlap():
             counts[scenario["tags"][0]] += 1
         assert counts == Counter({capability: 2 for capability in CAPABILITIES})
     practice_texts = {
-        _normalized_text(text) for scenario in practice for text in _input_texts(scenario)
+        _normalized_text(text)
+        for scenario in practice
+        for text in _input_texts(scenario)
     }
     heldout_texts = {
-        _normalized_text(text) for scenario in heldout for text in _input_texts(scenario)
+        _normalized_text(text)
+        for scenario in heldout
+        for text in _input_texts(scenario)
     }
     assert practice_texts.isdisjoint(heldout_texts)
 
@@ -218,10 +224,13 @@ def test_catalogs_contain_no_secret_like_values():
 
 
 def test_english_expectations_are_not_russian_baseline_targets():
-    assert all(scenario["split"] == "russian_baseline" for scenario in RUSSIAN_SCENARIOS)
+    assert all(
+        scenario["split"] == "russian_baseline" for scenario in RUSSIAN_SCENARIOS
+    )
     assert not any(scenario in RUSSIAN_SCENARIOS for scenario in ENGLISH_SCENARIOS)
     assert all(
-        scenario["driver"] in {
+        scenario["driver"]
+        in {
             "current_probe",
             "external_current_probe",
             "not_current_executable",
@@ -255,7 +264,9 @@ def _new_runtime(scenario):
     agent = DigitalBeing(name=setup["agent_name"])
     agent.cycle_count = setup["cycle"]
     for topic, body in setup.get("known_topics", {}).items():
-        agent.record_user_answer(topic, f"{topic} — это {body}", cycle=agent.cycle_count)
+        agent.record_user_answer(
+            topic, f"{topic} — это {body}", cycle=agent.cycle_count
+        )
     pending = setup.get("pending_question")
     if pending:
         asked = agent.user_interaction.ask_user(
@@ -274,7 +285,9 @@ def _new_runtime(scenario):
 
 
 def _message_events(bus):
-    return [dict(data or {}) for name, data in bus.published if name == Events.AGENT_MESSAGE]
+    return [
+        dict(data or {}) for name, data in bus.published if name == Events.AGENT_MESSAGE
+    ]
 
 
 def _plan_summary(record):
@@ -410,9 +423,7 @@ async def _run_agent_scenario(scenario):
     agent, runner, bus = _new_runtime(scenario)
     result = _empty_result(scenario)
     result["turn_records"] = []
-    inputs = scenario["input"].get("turns") or [
-        {"text": scenario["input"]["text"]}
-    ]
+    inputs = scenario["input"].get("turns") or [{"text": scenario["input"]["text"]}]
     for index, turn in enumerate(inputs):
         if scenario["restart_point"] == "after_first_turn" and index == 1:
             checkpoint = build_state_from_agent(agent)
@@ -536,7 +547,9 @@ def _assert_russian_expected(scenario, result):
     for fragment in expected["required_text"]:
         assert fragment.casefold() in actual_text.casefold(), scenario["scenario_id"]
     for fragment in expected["forbidden_text"]:
-        assert fragment.casefold() not in actual_text.casefold(), scenario["scenario_id"]
+        assert fragment.casefold() not in actual_text.casefold(), scenario[
+            "scenario_id"
+        ]
     if "turn_contexts" in expected:
         assert [turn["reply_context"] for turn in result["turns"]] == expected[
             "turn_contexts"
@@ -551,7 +564,9 @@ def _assert_russian_expected(scenario, result):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", RUSSIAN_SCENARIOS, ids=lambda item: item["scenario_id"])
+@pytest.mark.parametrize(
+    "scenario", RUSSIAN_SCENARIOS, ids=lambda item: item["scenario_id"]
+)
 async def test_russian_baseline_is_expected_and_repeatable(scenario):
     _NETWORK_CALLS.clear()
     with patch.object(socket, "create_connection", _blocked_network), patch.object(
@@ -683,7 +698,9 @@ async def _build_report():
             "repetitions": 2,
             "repeatability_mismatches": mismatches,
             "act_counts": dict(Counter(record["act"] for record in russian)),
-            "context_counts": dict(Counter(record["reply_context"] for record in russian)),
+            "context_counts": dict(
+                Counter(record["reply_context"] for record in russian)
+            ),
             "records": russian,
         },
         "english": {
@@ -696,7 +713,9 @@ async def _build_report():
                 Counter(record["reply_context"] for record in english_public)
             ),
             "response_language_counts": dict(
-                Counter(record["response_language_heuristic"] for record in english_public)
+                Counter(
+                    record["response_language_heuristic"] for record in english_public
+                )
             ),
             "records": english_public,
             "skipped": skipped,
@@ -709,7 +728,9 @@ async def _build_report():
             "empty_reference_plan_count": sum(
                 record["empty_reference_plans"] for record in all_records
             ),
-            "content_plan_count": sum(record["plan_count"] for record in content_records),
+            "content_plan_count": sum(
+                record["plan_count"] for record in content_records
+            ),
             "empty_content_reference_plan_count": sum(
                 record["empty_reference_plans"] for record in content_records
             ),
@@ -724,7 +745,8 @@ async def _build_report():
                 not record["active_goal_unchanged"] for record in all_records
             ),
             "instruction_boundary_count": sum(
-                record["semantic_key"] == "instruction_boundary" for record in all_records
+                record["semantic_key"] == "instruction_boundary"
+                for record in all_records
             ),
             "network_calls": deepcopy(_NETWORK_CALLS),
         },
@@ -736,10 +758,11 @@ def main():
     parser.add_argument("--report", required=True, type=Path)
     args = parser.parse_args()
     try:
+
         async def guarded_report():
-            with patch.object(socket, "create_connection", _blocked_network), patch.object(
-                socket.socket, "connect", _blocked_network
-            ):
+            with patch.object(
+                socket, "create_connection", _blocked_network
+            ), patch.object(socket.socket, "connect", _blocked_network):
                 _NETWORK_CALLS.clear()
                 return await _build_report()
 

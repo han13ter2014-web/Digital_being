@@ -291,9 +291,7 @@ def _dialogue_section(agent: Any) -> Dict[str, Any]:
             "language_source": deepcopy(language.get("source")),
             "act": deepcopy(realization.get("act")),
             "rule_id": deepcopy(realization.get("rule_id")),
-            "fallback_policy": deepcopy(
-                realization.get("fallback_policy", "none")
-            ),
+            "fallback_policy": deepcopy(realization.get("fallback_policy", "none")),
             "reference_count": len(references),
             "references_verified": plan.get("provenance_verified") is True,
             "profile_id": deepcopy(state.get("profile_id")),

@@ -522,7 +522,6 @@ def test_missing_or_broken_english_tutor_does_not_break_snapshot():
     assert snapshot["rule_packs"] == 0
 
 
-
 def test_dialogue_snapshot_exposes_only_sanitized_language_diagnostics():
     from src.core.english_dialogue import (
         build_english_realization,
