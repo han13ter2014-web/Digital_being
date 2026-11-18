@@ -49,7 +49,7 @@ def test_wheel_contains_runtime_packages_and_bootstrap_resources(tmp_path):
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = set(wheel.namelist())
         entry_points = wheel.read(
-            "digital_being-0.1.6.dist-info/entry_points.txt"
+            "digital_being-0.2.0.dist-info/entry_points.txt"
         ).decode("utf-8")
 
     expected = {

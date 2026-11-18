@@ -39,8 +39,7 @@ been done and what has not worked.
 A ready Windows installer — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest):
 
 ```text
-DigitalBeing_Setup_v0.1.6.exe
-SHA-256: 0863B1B4B0BAB22F4E20681383D9F69F149AE59C835376A845F8E42009280543
+DigitalBeing_Setup_v0.2.0.exe
 ```
 
 Running from source (Python 3.10+):
@@ -160,13 +159,14 @@ map of everything else.
 
 ## Status
 
-Current package version: **0.1.6** — [release v0.1.6](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.6).
+Current package version: **0.2.0** — [release v0.2.0](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.2.0).
 
-Version 0.1.6 refreshes the cyberpunk Tk shell and local web interface, adds
-localized static labels, and strengthens goal memory, motivation, security,
-and recovery. A new entity still starts without an inherited name or someone
-else's memory: the installer contains only seed knowledge, and live `data/`
-is excluded from git and builds.
+Version 0.2.0 adds musical and creative experience, dialogue working memory,
+English and Chinese language paths, voice input and output, conversation
+profiles, bounded external AI dialogue, and owner-controlled Telegram sessions.
+The project is now licensed under AGPL-3.0-only. A new entity still starts
+without an inherited name or someone else's memory: live `data/` is excluded
+from git and builds.
 
 The project does not claim to have proven consciousness or subjectivity. It
 builds a verifiable model of state, memory, choice, experience, and bounded

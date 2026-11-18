@@ -34,8 +34,7 @@ Digital Being 是一个关于「可观察的数字生命」的实验。它不是
 Windows 安装包 — [GitHub Releases](https://github.com/han13ter2014-web/Digital_being/releases/latest)：
 
 ```text
-DigitalBeing_Setup_v0.1.6.exe
-SHA-256：0863B1B4B0BAB22F4E20681383D9F69F149AE59C835376A845F8E42009280543
+DigitalBeing_Setup_v0.2.0.exe
 ```
 
 从源码运行（Python 3.10+）：
@@ -144,11 +143,11 @@ python -m pytest -q tests/test_acceptance_life_cycle.py
 
 ## 状态
 
-当前包版本：**0.1.6** — [v0.1.6 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.1.6)。
+当前包版本：**0.2.0** — [v0.2.0 发布页](https://github.com/han13ter2014-web/Digital_being/releases/tag/v0.2.0)。
 
-v0.1.6 更新了赛博朋克风格的 Tk 外壳和本地网页界面，加入静态标签本地化，
-并增强目标记忆、动机、安全性与恢复能力。新实体仍不会继承他人的名字或记忆：
-安装包仅包含基础知识，实时 `data/` 已从 git 和构建中排除。
+v0.2.0 加入音乐与创作经验、对话工作记忆、英语和中文语言路径、语音输入与输出、
+对话者档案、受限的外部 AI 对话以及由用户控制的 Telegram 会话。项目现已采用
+AGPL-3.0-only。新实体仍不会继承他人的名字或记忆：实时 `data/` 已从 git 和构建中排除。
 
 本项目不声称证明了意识或主观性。它构建的是可验证的状态、记忆、选择、
 经验与受限行动的模型。
