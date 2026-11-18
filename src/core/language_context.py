@@ -3,6 +3,8 @@
 Resolver по умолчанию сохраняет совместимый ``response_language=ru``.
 Этап 9A-2 меняет его на ``en`` только после успешного входа в ограниченный
 английский dialogue/fallback контур, не переписывая профильное предпочтение.
+Этап 9B-1 добавляет Han-детекцию и ``zh`` в dialogue-метаданные, но не разрешает
+китайскую realization: ``response_language`` по-прежнему ограничен RU/EN.
 """
 
 from __future__ import annotations
@@ -11,8 +13,9 @@ import math
 import re
 from dataclasses import dataclass
 
-INPUT_LANGUAGES = frozenset({"ru", "en", "mixed", "unknown"})
-DIALOGUE_LANGUAGES = frozenset({"ru", "en"})
+INPUT_LANGUAGES = frozenset({"ru", "en", "zh", "mixed", "unknown"})
+DIALOGUE_LANGUAGES = frozenset({"ru", "en", "zh"})
+RESPONSE_LANGUAGES = frozenset({"ru", "en"})
 LANGUAGE_SOURCES = frozenset(
     {"profile_preference", "stable_dialogue", "limited_detector", "legacy_default"}
 )
@@ -21,6 +24,7 @@ _PROFILE_ID_MAX_LEN = 160
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 _CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE)
 _LATIN_RE = re.compile(r"[a-z]", re.IGNORECASE)
+_HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
 
 def _fail(path: str, message: str) -> None:
@@ -38,14 +42,18 @@ def detect_language(text) -> tuple[str, float]:
     if not isinstance(text, str):
         _fail("text", "expected a string")
     cleaned = _URL_RE.sub(" ", text)
-    cyrillic = len(_CYRILLIC_RE.findall(cleaned))
-    latin = len(_LATIN_RE.findall(cleaned))
-    total = cyrillic + latin
+    counts = {
+        "ru": len(_CYRILLIC_RE.findall(cleaned)),
+        "en": len(_LATIN_RE.findall(cleaned)),
+        "zh": len(_HAN_RE.findall(cleaned)),
+    }
+    total = sum(counts.values())
     if total == 0:
         return "unknown", 0.0
-    if cyrillic and latin:
-        return "mixed", round(min(cyrillic, latin) / total, 6)
-    return ("ru" if cyrillic else "en"), 1.0
+    present = [count for count in counts.values() if count]
+    if len(present) > 1:
+        return "mixed", round(min(present) / total, 6)
+    return next(language for language, count in counts.items() if count), 1.0
 
 
 @dataclass(frozen=True)
@@ -77,7 +85,7 @@ class LanguageContext:
         _language(
             self.response_language,
             "language_context.response_language",
-            allowed=DIALOGUE_LANGUAGES,
+            allowed=RESPONSE_LANGUAGES,
         )
         if self.source not in LANGUAGE_SOURCES:
             _fail("language_context.source", "unsupported language source")
@@ -191,7 +199,7 @@ def resolve_language_context(
     _language(
         response_language,
         "response_language",
-        allowed=DIALOGUE_LANGUAGES,
+        allowed=RESPONSE_LANGUAGES,
     )
     input_language, detection_confidence = detect_language(text)
     if preferred_language is not None:

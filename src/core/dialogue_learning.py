@@ -163,9 +163,9 @@ class DialogueLearning:
         }
 
     def set_language(self, language_id: str) -> None:
-        """Активировать независимый опыт RU/EN без потери прежнего языка."""
-        if language_id not in {"ru", "en"}:
-            raise ValueError("language_id: expected ru or en")
+        """Активировать независимый опыт RU/EN/ZH без потери прежнего языка."""
+        if language_id not in {"ru", "en", "zh"}:
+            raise ValueError("language_id: expected ru, en or zh")
         if language_id == self.active_language:
             return
         self._language_states[self.active_language] = self._language_state()
@@ -506,7 +506,7 @@ class DialogueLearning:
         if not isinstance(data, dict):
             return
         self.active_language = data.get("active_language", "ru")
-        if self.active_language not in {"ru", "en"}:
+        if self.active_language not in {"ru", "en", "zh"}:
             self.active_language = "ru"
         self._language_states = {}
         # Старый checkpoint без подсекции означает пустую strategy-память,
@@ -586,7 +586,7 @@ class DialogueLearning:
         if isinstance(states, dict):
             for language_id, state in states.items():
                 if (
-                    language_id not in {"ru", "en"}
+                    language_id not in {"ru", "en", "zh"}
                     or language_id == self.active_language
                     or not isinstance(state, dict)
                 ):

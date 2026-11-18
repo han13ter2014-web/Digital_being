@@ -248,8 +248,8 @@ class SocialAttribution:
 
     def set_stable_dialogue_language(self, language) -> None:
         """Явный внутренний switch; внешний текст этот метод не вызывает."""
-        if language not in {"ru", "en"}:
-            raise ValueError("stable_dialogue_language: expected ru or en")
+        if language not in {"ru", "en", "zh"}:
+            raise ValueError("stable_dialogue_language: expected ru, en or zh")
         self._legacy_default_pending = False
         self._language["stable_dialogue_language"] = language
         self._language["last_context"] = None

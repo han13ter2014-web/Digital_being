@@ -186,8 +186,8 @@ def _validate_profile(profile, path: str, schema_version: int) -> None:
     if schema_version >= 2 and "preferred_language" not in profile:
         _fail(f"{path}.preferred_language", "required in schema version 2")
     preferred_language = profile.get("preferred_language")
-    if preferred_language not in {None, "ru", "en"}:
-        _fail(f"{path}.preferred_language", "expected ru, en or null")
+    if preferred_language not in {None, "ru", "en", "zh"}:
+        _fail(f"{path}.preferred_language", "expected ru, en, zh or null")
     introduced_by = profile.get("introduced_by")
     if introduced_by is not None:
         _uuid(introduced_by, f"{path}.introduced_by")
@@ -476,8 +476,8 @@ class SocialRegistry:
 
     def set_preferred_language(self, language, *, profile_id=None) -> None:
         """Явно задать устойчивое предпочтение без распознавания команд."""
-        if language not in {None, "ru", "en"}:
-            raise ValueError("preferred_language: expected ru, en or null")
+        if language not in {None, "ru", "en", "zh"}:
+            raise ValueError("preferred_language: expected ru, en, zh or null")
         target = profile_id or self.current_profile_id
         if target not in self.profiles:
             raise KeyError(target)

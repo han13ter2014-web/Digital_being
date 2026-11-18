@@ -666,14 +666,14 @@ def validate_checkpoint_state(state) -> None:
         ):
             _fail("dialogue_learning", "missing versioned language fields")
         active_language = learning.get("active_language", "ru")
-        if active_language not in {"ru", "en"}:
+        if active_language not in {"ru", "en", "zh"}:
             _fail("dialogue_learning.active_language", "unsupported language")
         language_states = _dict(
             learning.get("language_states", {}), "dialogue_learning.language_states"
         )
         for language_id, payload in language_states.items():
             path = f"dialogue_learning.language_states.{language_id}"
-            if language_id not in {"ru", "en"} or language_id == active_language:
+            if language_id not in {"ru", "en", "zh"} or language_id == active_language:
                 _fail(path, "invalid or duplicate active language state")
             payload = _dict(payload, path)
             if payload.get("schema_version") not in {None, 2}:
