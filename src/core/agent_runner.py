@@ -3224,6 +3224,9 @@ class AgentRunner:
         # === Внешние контакты: только владелец и ручное одобрение ===
         if cmd == "external" or cmd.startswith("external "):
             return self._handle_external_command(cmd_raw)
+        # === Соцканалы 9D: только владелец, без ingress/send/auto команд ===
+        if cmd == "social" or cmd.startswith("social "):
+            return self._handle_social_command(cmd_raw)
         # === Этап 2.5: /web — управление web-поиском ===
         if cmd in ("web on", "web_on"):
             ws = getattr(self.agent, "web_searcher", None)
@@ -3800,6 +3803,124 @@ class AgentRunner:
         except ExternalAdapterError as exc:
             return f"⚠️ Внешний канал отклонён: {exc.code}."
         except ValueError as exc:
+            return f"⚠️ {exc}"
+
+    def _handle_social_command(self, cmd_raw: str) -> str:
+        """Owner-only управление соцканалами; внешний ingress и send закрыты."""
+        manager = getattr(self.agent, "social_channels", None)
+        registry = getattr(self.agent, "social_registry", None)
+        if manager is None or registry is None:
+            return "⚠️ Контур социальных каналов не подключён."
+        if registry.current_profile_id != registry.owner_profile_id:
+            return "⚠️ Социальными каналами управляет только владелец локального канала."
+        body = cmd_raw.strip().lstrip("/").strip()
+        parts = body.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else "status"
+        rest = parts[2].strip() if len(parts) > 2 else ""
+        cycle = self.agent.cycle_count
+        usage = (
+            "Использование: /social [status | create <provider> | <account_id> | "
+            "[external_person|external_ai] | grant <channel_id> | <JSON> | "
+            "draft <channel_id> <inbound_message_id> | edit <draft_id> | <текст> | "
+            "approve|reject <draft_id> | revoke|stop <channel_id>]"
+        )
+        try:
+            if action == "status" and not rest:
+                status = manager.get_status()
+                return (
+                    "🛡 Социальные каналы:\n"
+                    f"   Каналов: {status['channels']}; активных: {status['active']}\n"
+                    f"   Сообщений: {status['messages']}; проектов: {status['pending_drafts']}\n"
+                    f"   Отправлено с receipt: {status['sent']}; worker-ов: 0\n"
+                    "   Автоматическое возобновление отсутствует."
+                )
+            if action == "create" and rest:
+                fields = [item.strip() for item in rest.split("|")]
+                if len(fields) not in {2, 3} or not all(fields[:2]):
+                    return usage
+                provider, account_id = fields[:2]
+                kind = fields[2] if len(fields) == 3 else "external_person"
+                result = manager.create_channel(
+                    provider=provider,
+                    account_id=account_id,
+                    default_author_kind=kind,
+                    cycle=cycle,
+                )
+                if result["status"] == "created":
+                    return (
+                        f"🛡 Социальный канал создан: {result['channel_id']}.\n"
+                        "Все разрешения выключены; задайте отдельный grant."
+                    )
+                if result["status"] == "exists":
+                    return "🛡 Такой provider/account уже привязан к каналу."
+                return "⚠️ Достигнут предел социальных каналов."
+            if action == "grant" and rest:
+                channel_id, separator, raw_policy = rest.partition("|")
+                channel_id = channel_id.strip()
+                if not channel_id or not separator:
+                    return usage
+                policy = json.loads(raw_policy)
+                expected = {
+                    "conversation_ids",
+                    "receive",
+                    "draft",
+                    "reply",
+                    "max_messages",
+                    "max_replies",
+                    "min_interval_sec",
+                }
+                if not isinstance(policy, dict) or set(policy) != expected:
+                    return "⚠️ Grant должен содержать ровно все политики 9D-0."
+                result = manager.update_grant(channel_id, cycle=cycle, **policy)
+                if result["status"] in {"updated", "unchanged"}:
+                    return (
+                        f"🛡 Grant: версия {result['grant_version']} "
+                        f"({result['status']}). Прежние одобрения при изменении сняты."
+                    )
+            elif action == "draft" and rest:
+                arguments = rest.split()
+                if len(arguments) != 2:
+                    return usage
+                result = manager.create_draft(arguments[0], arguments[1], cycle=cycle)
+            elif action == "edit" and rest:
+                draft_id, separator, text = rest.partition("|")
+                if not draft_id.strip() or not separator or not text.strip():
+                    return usage
+                result = manager.edit_draft(draft_id.strip(), text.strip(), cycle=cycle)
+            elif action in {"approve", "reject"} and rest and " " not in rest:
+                if action == "approve":
+                    result = manager.approve(rest, cycle=cycle)
+                else:
+                    result = manager.reject(rest, cycle=cycle)
+            elif action in {"revoke", "stop"} and rest and " " not in rest:
+                if action == "revoke":
+                    result = manager.revoke(
+                        rest, cycle=cycle, reason="отозвано владельцем"
+                    )
+                else:
+                    result = manager.stop(
+                        rest, cycle=cycle, reason="остановлено владельцем"
+                    )
+            else:
+                return usage
+            status = result.get("status", "error")
+            messages = {
+                "draft": "📝 Проект создан; одобрение ещё не дано.",
+                "draft_pending": "📝 Сначала закройте текущий проект этого диалога.",
+                "approved": "✅ Точная ревизия одобрена для текущей версии grant.",
+                "already_approved": "✅ Эта ревизия уже одобрена.",
+                "rejected": "🚫 Проект отклонён; отправка запрещена.",
+                "revoked": "🛑 Grant отозван; ожидающие проекты отброшены.",
+                "stopped": "🛑 Канал остановлен; очередь не дренируется.",
+                "already_stopped": "🛑 Канал уже остановлен.",
+                "permission_denied": "⚠️ Текущий grant не разрешает это действие.",
+                "identity_required": "⚠️ Без достоверного author ID проект не создаётся.",
+                "not_found": "🛡 Канал или сообщение не найдены.",
+                "channel_stopped": "🛑 Остановленный канал не принимает изменения.",
+                "limit_reached": "⚠️ Достигнут предел локального журнала.",
+            }
+            return messages.get(status, f"🛡 Результат: {status}.")
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
             return f"⚠️ {exc}"
 
     def _handle_access_command(self, cmd: str) -> str:

@@ -319,6 +319,11 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
         response_planner=ExternalResponsePlanner(self)
     )
 
+    # Provider-neutral соцканалы: отдельные grants и карантин, без worker/API.
+    from src.core.social_channels import SocialChannelManager
+
+    self.social_channels = SocialChannelManager(self.social_registry)
+
     # Персональные снапшоты диалога и обучения для текущего собеседника.
     from src.core.social_attribution import SocialAttribution
 

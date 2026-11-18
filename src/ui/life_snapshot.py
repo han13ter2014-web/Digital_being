@@ -447,6 +447,114 @@ def _external_contacts_section(agent: Any) -> Dict[str, Any]:
     return section
 
 
+def _social_channels_section(agent: Any) -> Dict[str, Any]:
+    """Ограниченный журнал соцканалов; credentials и worker здесь отсутствуют."""
+    manager = _own(agent, "social_channels", None)
+    registry = _own(agent, "social_registry", None)
+    section: Dict[str, Any] = {
+        "available": manager is not None,
+        "can_manage": False,
+        "channel_count": 0,
+        "active": 0,
+        "messages": 0,
+        "pending_drafts": 0,
+        "sent": 0,
+        "workers": 0,
+        "automatic_resume": False,
+        "journal_limit": 12,
+        "channels": [],
+    }
+    if manager is None:
+        return section
+    section["can_manage"] = bool(
+        registry is not None
+        and getattr(registry, "owner_profile_id", None) is not None
+        and getattr(registry, "current_profile_id", None)
+        == getattr(registry, "owner_profile_id", None)
+    )
+    status = _status_of(manager)
+    for key in ("active", "messages", "pending_drafts", "sent"):
+        try:
+            section[key] = int(status.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            section[key] = 0
+    try:
+        section["channel_count"] = int(status.get("channels", 0) or 0)
+    except (TypeError, ValueError):
+        section["channel_count"] = 0
+    getter = getattr(manager, "get_channel", None)
+    raw_channels = _own(manager, "channels", [])
+    if not callable(getter) or not isinstance(raw_channels, list):
+        return section
+    message_fields = (
+        "message_id",
+        "direction",
+        "claim_type",
+        "status",
+        "text",
+        "text_sha256",
+        "cycle",
+        "conversation_id",
+        "author_id",
+        "profile_id",
+        "visibility",
+        "external_message_id",
+        "based_on",
+        "in_reply_to",
+        "origin",
+        "revision",
+        "grant_version",
+        "error",
+    )
+    for raw_channel in raw_channels:
+        if not isinstance(raw_channel, dict) or not raw_channel.get("channel_id"):
+            continue
+        try:
+            detail = getter(str(raw_channel["channel_id"]))
+        except Exception:  # pragma: no cover - защита UI
+            continue
+        if not isinstance(detail, dict):
+            continue
+        raw_messages = detail.get("messages")
+        raw_messages = raw_messages if isinstance(raw_messages, list) else []
+        item = {
+            key: deepcopy(detail.get(key))
+            for key in (
+                "channel_id",
+                "provider",
+                "account_id",
+                "default_author_kind",
+                "status",
+                "created_cycle",
+                "last_cycle",
+                "stopped_cycle",
+                "stop_reason",
+                "grant",
+                "received_count",
+                "sent_count",
+                "last_sent_at",
+                "pending_draft",
+            )
+        }
+        item["message_count"] = len(raw_messages)
+        item["messages"] = [
+            {key: deepcopy(message.get(key)) for key in message_fields}
+            for message in raw_messages[-section["journal_limit"] :]
+            if isinstance(message, dict)
+        ]
+        item["control_events"] = [
+            {
+                key: deepcopy(event.get(key))
+                for key in ("kind", "cycle", "reason")
+            }
+            for event in _own(manager, "control_events", [])
+            if isinstance(event, dict)
+            and event.get("channel_id") == raw_channel["channel_id"]
+        ][-12:]
+        section["channels"].append(item)
+    return section
+
+
 def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, Any]:
     """Собрать снимок жизни существа для интерфейса.
 
@@ -553,6 +661,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "english_tutor": _english_tutor_section(agent),
         "dialogue": _dialogue_section(agent),
         "external_contacts": _external_contacts_section(agent),
+        "social_channels": _social_channels_section(agent),
     }
 
 

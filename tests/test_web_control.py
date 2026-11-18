@@ -255,6 +255,77 @@ def controlled_dashboard():
                 "clear",
             )
         ],
+        (
+            "/api/social",
+            {
+                "action": "create",
+                "provider": " fake ",
+                "account_id": " fixture-account ",
+                "author_kind": "external_person",
+            },
+            Events.USER_COMMAND,
+            {"command": "social create fake | fixture-account | external_person"},
+        ),
+        (
+            "/api/social",
+            {
+                "action": "grant",
+                "channel_id": "channel-1",
+                "conversation_ids": [" private-a ", "group-a"],
+                "receive": True,
+                "draft": True,
+                "reply": False,
+                "max_messages": 8,
+                "max_replies": 2,
+                "min_interval_sec": 1.5,
+            },
+            Events.USER_COMMAND,
+            {
+                "command": (
+                    'social grant channel-1 | {"conversation_ids":["private-a","group-a"],'
+                    '"receive":true,"draft":true,"reply":false,"max_messages":8,'
+                    '"max_replies":2,"min_interval_sec":1.5}'
+                )
+            },
+        ),
+        (
+            "/api/social",
+            {
+                "action": "draft",
+                "channel_id": "channel-1",
+                "inbound_message_id": "inbound-1",
+            },
+            Events.USER_COMMAND,
+            {"command": "social draft channel-1 inbound-1"},
+        ),
+        (
+            "/api/social",
+            {
+                "action": "edit",
+                "draft_id": "draft-1",
+                "text": "  Точная\nредакция | владельца  ",
+            },
+            Events.USER_COMMAND,
+            {"command": "social edit draft-1 | Точная\nредакция | владельца"},
+        ),
+        *[
+            (
+                "/api/social",
+                {"action": action, "draft_id": "draft-1"},
+                Events.USER_COMMAND,
+                {"command": f"social {action} draft-1"},
+            )
+            for action in ("approve", "reject")
+        ],
+        *[
+            (
+                "/api/social",
+                {"action": action, "channel_id": "channel-1"},
+                Events.USER_COMMAND,
+                {"command": f"social {action} channel-1"},
+            )
+            for action in ("revoke", "stop")
+        ],
     ],
 )
 def test_web_publishes_exact_tk_event(
@@ -315,6 +386,41 @@ def test_web_publishes_exact_tk_event(
                 ("min_interval_sec", "2"),
             )
         ],
+        *[
+            ("/api/social", {"action": action, "channel_id": "channel-1"})
+            for action in ("send", "ingest", "auto")
+        ],
+        ("/api/social", {"action": "grant", "channel_id": "channel-1"}),
+        (
+            "/api/social",
+            {
+                "action": "grant",
+                "channel_id": "channel-1",
+                "conversation_ids": ["private-a", "private-a"],
+                "receive": True,
+                "draft": True,
+                "reply": False,
+                "max_messages": 8,
+                "max_replies": 2,
+                "min_interval_sec": 0,
+            },
+        ),
+        (
+            "/api/social",
+            {
+                "action": "grant",
+                "channel_id": "channel-1",
+                "conversation_ids": [],
+                "receive": "true",
+                "draft": True,
+                "reply": False,
+                "max_messages": 8,
+                "max_replies": 2,
+                "min_interval_sec": 0,
+            },
+        ),
+        ("/api/social", {"action": "create", "provider": "bad provider", "account_id": "a"}),
+        ("/api/social", {"action": "edit", "draft_id": "draft-1", "text": "  "}),
     ],
 )
 def test_invalid_commands_never_reach_bus(controlled_dashboard, path, body):
@@ -339,6 +445,10 @@ def test_standalone_is_honest_and_never_accepts_mutations():
             ("/api/access", {"key": "network", "state": "off"}),
             ("/api/tutor", {"action": "exercise"}),
             ("/api/external", {"action": "start", "name": "DeepSeek"}),
+            (
+                "/api/social",
+                {"action": "create", "provider": "fake", "account_id": "fixture"},
+            ),
         ):
             status, response = _post(port, path, body)
             assert status == 503 and response["status"] == "unavailable"

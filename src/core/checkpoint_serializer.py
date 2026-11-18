@@ -247,6 +247,12 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
             if getattr(agent, "external_contacts", None) is not None
             else None
         ),
+        # Соцканалы не содержат credentials, worker-ов или автономных решений.
+        "social_channels": (
+            agent.social_channels.to_dict()
+            if getattr(agent, "social_channels", None) is not None
+            else None
+        ),
         # Персональные контексты всех профилей; top-level поля выше остаются
         # снапшотом активного собеседника для совместимости старого чтения.
         "social_attribution": (
@@ -435,6 +441,7 @@ _INPLACE_RESTORE_PATHS = (
     ("language_tutor",),
     ("english_language_tutor",),
     ("external_contacts",),
+    ("social_channels",),
     ("emotional_state",),
     ("interoception",),
     ("interoception", "state"),
@@ -1035,6 +1042,17 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
             saved_contacts
             if isinstance(saved_contacts, dict)
             else ExternalContactManager().to_dict(),
+            agent.social_registry.to_dict(),
+        )
+
+    if getattr(agent, "social_channels", None) is not None:
+        from src.core.social_channels import SocialChannelManager
+
+        saved_channels = state.get("social_channels")
+        agent.social_channels.load_from(
+            saved_channels
+            if isinstance(saved_channels, dict)
+            else SocialChannelManager(agent.social_registry).to_dict(),
             agent.social_registry.to_dict(),
         )
 

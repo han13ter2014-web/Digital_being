@@ -14,13 +14,20 @@ import re
 from typing import Optional
 from uuid import UUID, uuid4
 
-SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 MAX_PROFILES = 128
 MAX_NAME_LENGTH = 40
 MAX_BINDINGS = 8
 PROFILE_KINDS = frozenset(
-    {"local_owner", "local_person", "digital_being", "external_ai", "unknown"}
+    {
+        "local_owner",
+        "local_person",
+        "digital_being",
+        "external_ai",
+        "external_person",
+        "unknown",
+    }
 )
 IDENTITY_STATUSES = frozenset({"self_declared", "observed", "verified", "unknown"})
 _ACTIVE_NAMING_PHASES = frozenset({"awaiting_name", "considering", "renaming_pending"})
@@ -309,25 +316,28 @@ class SocialRegistry:
         self.current_profile_id = profile_id
         return profile_id
 
-    def create_external_ai(
+    def _create_external(
         self,
         name: str,
         *,
+        kind: str,
         provider: str,
         external_id: str,
-        cycle: int = 0,
+        cycle: int,
+        allow_empty_name: bool = False,
     ) -> str:
-        """Создать внешний профиль без смены локального собеседника и прав.
-
-        Повторный контакт с тем же стабильным идентификатором использует
-        существующий профиль. Само имя идентичность не доказывает.
-        """
-        _text(name, "display_name", max_length=MAX_NAME_LENGTH)
+        """Повторно использовать только совместимый provider/author binding."""
+        _text(
+            name,
+            "display_name",
+            max_length=MAX_NAME_LENGTH,
+            allow_empty=allow_empty_name,
+        )
         _text(provider, "provider", max_length=64)
         _text(external_id, "external_id", max_length=128)
         _cycle(cycle, "cycle")
         for profile_id, profile in self.profiles.items():
-            if profile["kind"] != "external_ai":
+            if profile["kind"] != kind:
                 continue
             for binding in profile["channel_bindings"]:
                 if (
@@ -341,7 +351,7 @@ class SocialRegistry:
         profile_id = str(uuid4())
         profile = self._profile(
             profile_id,
-            "external_ai",
+            kind,
             name=name,
             introduced_by=self.owner_profile_id,
             cycle=cycle,
@@ -349,6 +359,57 @@ class SocialRegistry:
         profile["channel_bindings"] = [
             {"channel": provider, "external_id": external_id, "confidence": 1.0}
         ]
+        self.profiles[profile_id] = profile
+        return profile_id
+
+    def create_external_ai(
+        self,
+        name: str,
+        *,
+        provider: str,
+        external_id: str,
+        cycle: int = 0,
+    ) -> str:
+        """Создать внешний ИИ-профиль без смены локального собеседника."""
+        return self._create_external(
+            name,
+            kind="external_ai",
+            provider=provider,
+            external_id=external_id,
+            cycle=cycle,
+        )
+
+    def create_external_person(
+        self,
+        name: str = "",
+        *,
+        provider: str,
+        external_id: str,
+        cycle: int = 0,
+    ) -> str:
+        """Профиль удалённого автора, а не доказательство человеческой природы."""
+        return self._create_external(
+            name,
+            kind="external_person",
+            provider=provider,
+            external_id=external_id,
+            cycle=cycle,
+            allow_empty_name=True,
+        )
+
+    def create_external_unknown(self, *, cycle: int = 0) -> str:
+        """Изолированный unknown-контекст без стабильной внешней привязки."""
+        _cycle(cycle, "cycle")
+        if len(self.profiles) >= MAX_PROFILES:
+            raise ValueError("social registry profile limit reached")
+        profile_id = str(uuid4())
+        profile = self._profile(
+            profile_id,
+            "unknown",
+            introduced_by=self.owner_profile_id,
+            cycle=cycle,
+        )
+        profile["channel_bindings"] = []
         self.profiles[profile_id] = profile
         return profile_id
 

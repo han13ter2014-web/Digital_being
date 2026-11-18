@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "revision": "9d0-r1",
+  "provider": "fake",
+  "account_id": "fixture-account",
+  "network": "forbidden",
+  "credentials": "none",
+  "envelopes_file": "envelopes.json",
+  "notes": "Synthetic provider-neutral envelopes; no real people, accounts or services."
+}

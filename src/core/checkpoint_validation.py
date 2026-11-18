@@ -495,6 +495,12 @@ def validate_checkpoint_state(state) -> None:
         validate_external_contacts(
             state["external_contacts"], state.get("social_registry")
         )
+    if state.get("social_channels") is not None:
+        from src.core.social_channels import validate_social_channels
+
+        validate_social_channels(
+            state["social_channels"], state.get("social_registry")
+        )
     if state.get("social_attribution") is not None:
         from src.core.social_attribution import validate_social_attribution
 
