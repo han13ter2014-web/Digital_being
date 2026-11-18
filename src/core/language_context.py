@@ -3,8 +3,9 @@
 Resolver по умолчанию сохраняет совместимый ``response_language=ru``.
 Этап 9A-2 меняет его на ``en`` только после успешного входа в ограниченный
 английский dialogue/fallback контур, не переписывая профильное предпочтение.
-Этап 9B-1 добавляет Han-детекцию и ``zh`` в dialogue-метаданные, но не разрешает
-китайскую realization: ``response_language`` по-прежнему ограничен RU/EN.
+Этап 9B-1 добавляет Han-детекцию и ``zh`` в dialogue-метаданные. Этап 9B-2
+разрешает ``response_language=zh`` только вместе с проверенной китайской
+realization; сама Han-детекция по-прежнему не меняет язык ответа.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 
 INPUT_LANGUAGES = frozenset({"ru", "en", "zh", "mixed", "unknown"})
 DIALOGUE_LANGUAGES = frozenset({"ru", "en", "zh"})
-RESPONSE_LANGUAGES = frozenset({"ru", "en"})
+RESPONSE_LANGUAGES = frozenset({"ru", "en", "zh"})
 LANGUAGE_SOURCES = frozenset(
     {"profile_preference", "stable_dialogue", "limited_detector", "legacy_default"}
 )

@@ -229,11 +229,11 @@ class SocialAttribution:
 
     def set_response_language(self, language) -> LanguageContext:
         """Зафиксировать фактическую realization в контексте текущей реплики."""
-        if language not in {"ru", "en"}:
-            raise ValueError("response_language: expected ru or en")
+        if language not in {"ru", "en", "zh"}:
+            raise ValueError("response_language: expected ru, en or zh")
         current = self.current_language_context()
-        if language == "en" and current.dialogue_language != "en":
-            raise ValueError("response_language: English requires English dialogue")
+        if language in {"en", "zh"} and current.dialogue_language != language:
+            raise ValueError("response_language: response requires matching dialogue")
         context = LanguageContext(
             profile_id=current.profile_id,
             input_language=current.input_language,

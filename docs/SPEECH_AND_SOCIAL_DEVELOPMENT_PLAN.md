@@ -1,6 +1,6 @@
 # ТЗ: развитие речи, социальные профили и внешние контакты
 
-Статус: этап 0 согласован, этапы 1–7, 8A–8D, 9A-0–9A-5, подготовительный baseline 9B-0 и context-only этап 9B-1 реализованы и проверены. Английский контур прошёл полную frozen offline-матрицу EN 56/56 и русский baseline RU 14/14 с повторяемостью, restart, изоляцией профилей, legacy и полным regression. Это ограниченная поддержка зафиксированных сценариев, а не свободное владение английским; правила наставника не применяются к обычному диалогу. 9B-0 зафиксировал Chinese 32 practice + 32 held-out и текущие ограничения без реализации китайских ответов. 9B-1 добавил Han-детекцию, `zh` в языковой контекст, профили и checkpoint-совместимость, но не китайские recognition/realization. Живой `data/` не изменялся. Внешний RUFP использовался только в отдельно разрешённых изолированных прогонах 8C и 8D и остаётся временным стендом. Этапы 9B-2–9D требуют отдельного согласования; commit и push выполняются только по явному разрешению владельца.
+Статус: этап 0 согласован, этапы 1–7, 8A–8D, 9A-0–9A-5, baseline 9B-0, context-only этап 9B-1 и ограниченный китайский диалог 9B-2 реализованы и проверены. Английский контур прошёл полную frozen offline-матрицу EN 56/56 и русский baseline RU 14/14 с повторяемостью, restart, изоляцией профилей, legacy и полным regression. Китайский контур 9B-2 прошёл 52/52 текущих expected-сценариев ревизии `9b2-r1`; 12 deferred остаются context-only, поэтому полная матрица ZH 64/64 ещё не завершена. Это ограниченная поддержка зафиксированных сценариев, а не свободное владение языками; правила наставника не применяются к обычному диалогу. Живой `data/` не изменялся. Внешний RUFP использовался только в отдельно разрешённых изолированных прогонах 8C и 8D и остаётся временным стендом. Последующие этапы 9B и 9C–9D требуют отдельного согласования; commit и push выполняются только по явному разрешению владельца.
 
 ## 1. Основное решение
 
@@ -1049,6 +1049,18 @@ restart_point: отсутствует | до ответа | после отве�
 Профильный regression 9A/9B: **152 passed**. Полный regression: **3501 passed, 2 skipped за 367,20 с**, падений нет. Повторный автономный baseline: RU 14 и Chinese 52 current probes + 12 deferred, повторы без расхождений; будущие expected не становятся эталоном. ZH-ответов по-прежнему 0; unverified plans, profile-isolation failures, active-goal mutations и network calls — 0. Ruff и `git diff --check` прошли. Отчёты: `tmp/language_9b_1/report.md` и `baseline_report.json`.
 
 Не расширялись китайские recognition/realization, смысловая сегментация, `AssociativeLexicon`, `SpeechImitation`, cross-language concepts, внешний ZH-контур и UI. Традиционное письмо отдельно не заявляется. Русский fallback в текущих probes остаётся characterization, а не принятой целью следующих этапов. Живой `data/`, сеть/API, commit и push не использовались.
+
+##### 9B.3. Ограниченный китайский диалог 9B-2
+
+**Статус:** реализованы ограниченные китайские recognition/realization/fallback для social, self-state, clarification/anaphora, feedback, known topic и простого testimony. Это не свободный китайский и не завершение полной матрицы 9B: 52 текущих сценария проходят expected-приёмку, а 12 deferred остаются context-only до завершающего этапа.
+
+Добавлен `src/core/chinese_dialogue.py`. `response_language="zh"` допускается только при совпадающем диалоговом языке и проверенной realization; перед доставкой повторно вычисляются текст из evidence, references, акт и fallback. Китайские borrowed expressions не разрешены. Known topic и testimony используют только подтверждённые `LanguageConceptLinks` с `language_id="zh"`; testimony сохраняется как свидетельство, а не безусловный факт. Внешний planner получает только ZH instruction-boundary fallback: входные инструкции не исполняются, память и активная цель не изменяются.
+
+С разрешения владельца выпущена ревизия fixtures `9b2-r1`. В `zh_p_testimony_02` и `zh_h_testimony_02` исправлена подтверждённая форма `数字` на соответствующую входу `记忆`; в `zh_h_offline` reference policy приведён к `state:emotional_state` для вопроса о самочувствии; в `zh_h_segmentation_02` входной язык исправлен на `zh`, поскольку принятый детектор удаляет URL до подсчёта письменностей. Входные реплики, split, прочие expected и русский baseline не изменены; SHA-256 пересчитаны. Машинная запись ревизии — `tmp/language_9b_2/fixture_revision.json`.
+
+Test-first до реализации завершился ожидаемым `ModuleNotFoundError`. До ревизии fixtures было 69 passed и четыре согласованных выше конфликта; после ревизии `tests/test_language_9b_2.py` — **73 passed**, включая 52/52 текущих Chinese probes, повторы, RU 14/14, checkpoint и tamper. Профильный набор 9A-2/9B — **184 passed**. Полный regression — **3574 passed, 2 skipped за 367,14 с**, падений нет. Ruff, Ruff format и `git diff --check` прошли. Повторный baseline: RU 14, Chinese 52 current + 12 deferred, повторы без расхождений, unverified plans, profile/goal failures и network calls — 0. Baseline остаётся characterization и не заменяет expected-приёмку 9B-2.
+
+Не добавлялись свободный перевод, традиционное письмо, китайские ассоциации/подражание, наставник, внешние API или UI locale. Сеть и живой `data/` не использовались. Отчёты — `tmp/language_9b_2/report.md`, `baseline_report.json` и `fixture_revision.json`.
 
 ## 15. Тесты и критерии приёмки
 

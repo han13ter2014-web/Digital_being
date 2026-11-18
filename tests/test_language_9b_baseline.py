@@ -151,7 +151,7 @@ def _input_texts(scenario):
 
 def test_manifest_schema_hashes_and_unique_ids():
     assert MANIFEST["schema_version"] == 1
-    assert MANIFEST["catalog_revision"] == "9b0-r1"
+    assert MANIFEST["catalog_revision"] == "9b2-r1"
     assert MANIFEST["script_scope"] == "simplified_chinese_only"
     assert len(MANIFEST["files"]) == 3
     assert set(CATALOGS) == {

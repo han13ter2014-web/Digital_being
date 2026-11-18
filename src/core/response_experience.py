@@ -15,6 +15,10 @@ from src.core.dialogue_acts import (
     ACT_FOLLOW_UP,
     ACT_UNKNOWN,
 )
+from src.core.chinese_dialogue import (
+    parse_chinese_feedback,
+    validate_chinese_realization_plan,
+)
 from src.core.emotional_state import EMOTIONS
 from src.core.english_dialogue import (
     parse_english_feedback,
@@ -101,6 +105,8 @@ def _text(value, path, limit, *, nonempty=True):
 def parse_generic_feedback(text, *, language="ru"):
     if language == "en":
         return parse_english_feedback(text)
+    if language == "zh":
+        return parse_chinese_feedback(text)
     normalized = " ".join(str(text or "").replace("’", "'").lower().split()).strip(
         " .!…"
     )
@@ -200,6 +206,7 @@ def _validate_plan(plan, path="plan") -> None:
         if realization["kind"] != "borrowed_prefix" or len(plan["components"]) != 2:
             _fail(f"{path}.borrowed", "inconsistent borrowed component")
     validate_english_realization_plan(plan)
+    validate_chinese_realization_plan(plan)
 
 
 def validate_response_plan(plan, path="plan") -> None:
@@ -381,13 +388,14 @@ class ResponseExperience:
         profile_id="",
         language_context=None,
         english_realization=None,
+        chinese_realization=None,
         expire_pending=True,
     ) -> dict:
         """Проверить ссылки и составить план до фактической доставки.
 
         Внешний session-scoped план задаёт профиль явно и не истекает ожидания
         локального собеседника. По умолчанию прежнее поведение не меняется.
-        Английская realization допускается только как проверяемое правило 9A-2.
+        Языковая realization допускается только как проверяемое правило.
         """
         cycle = int(agent.cycle_count)
         _cycle(cycle)
@@ -415,11 +423,18 @@ class ResponseExperience:
                 language_context = language_context.to_dict()
             else:
                 language_context = LanguageContext.from_dict(language_context).to_dict()
+        if english_realization is not None and chinese_realization is not None:
+            raise ValueError("language realization: expected only one language rule")
         if english_realization is not None:
             if not isinstance(english_realization, dict):
                 raise ValueError("english realization: expected a dictionary")
             if english_realization.get("text") != text:
                 raise ValueError("english realization: input text does not match rule")
+        if chinese_realization is not None:
+            if not isinstance(chinese_realization, dict):
+                raise ValueError("chinese realization: expected a dictionary")
+            if chinese_realization.get("text") != text:
+                raise ValueError("chinese realization: input text does not match rule")
         response_language = (language_context or {}).get("response_language", "ru")
         borrowed = None
         composed = str(text)
@@ -457,11 +472,12 @@ class ResponseExperience:
             "provenance_verified": True,
             "borrowed": None,
         }
-        if english_realization is not None:
+        language_realization = english_realization or chinese_realization
+        if language_realization is not None:
             plan["realization"].update(
                 deepcopy(
                     {
-                        key: english_realization.get(key)
+                        key: language_realization.get(key)
                         for key in (
                             "language_id",
                             "rule_id",

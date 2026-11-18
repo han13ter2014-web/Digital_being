@@ -88,6 +88,13 @@ from src.core.dialogue_strategies import (
     preference_from_context,
 )
 from src.core.response_experience import parse_generic_feedback
+from src.core.chinese_dialogue import (
+    build_chinese_realization,
+    chinese_feedback_realization,
+    chinese_response_references,
+    recognize_chinese,
+    unsupported_chinese_recognition,
+)
 from src.core.english_dialogue import (
     build_english_realization,
     english_feedback_realization,
@@ -494,8 +501,17 @@ class AgentRunner:
             and language_context.input_language == "en"
             else None
         )
+        chinese = (
+            recognize_chinese(text, self.agent)
+            if language_context is not None
+            and language_context.dialogue_language == "zh"
+            and language_context.input_language in {"zh", "mixed"}
+            else None
+        )
         if english is not None:
             act = english.act
+        elif chinese is not None:
+            act = chinese.act
         else:
             act = classify_user_text(
                 text,
@@ -508,6 +524,7 @@ class AgentRunner:
             )
         if (
             english is None
+            and chinese is None
             and language_context is not None
             and language_context.dialogue_language == "ru"
             and language_context.input_language == "mixed"
@@ -516,6 +533,7 @@ class AgentRunner:
             act = DialogueAct(ACT_UNKNOWN, act.matched_marker)
         mixed_unknown = (
             english is None
+            and chinese is None
             and language_context is not None
             and language_context.dialogue_language == "ru"
             and language_context.input_language == "mixed"
@@ -679,13 +697,19 @@ class AgentRunner:
                     language_id=current_language,
                 )
                 if observed is not None:
-                    realization = None
+                    english_realization = None
+                    chinese_realization = None
                     reply = "Приняла и сохранила твою оценку этого ответа."
                     feedback_context = "dialogue_feedback"
                     if language_context.dialogue_language == "en":
                         self.agent.social_attribution.set_response_language("en")
-                        realization = english_feedback_realization()
-                        reply = realization["text"]
+                        english_realization = english_feedback_realization()
+                        reply = english_realization["text"]
+                        feedback_context = "social_reply"
+                    elif language_context.dialogue_language == "zh":
+                        self.agent.social_attribution.set_response_language("zh")
+                        chinese_realization = chinese_feedback_realization()
+                        reply = chinese_realization["text"]
                         feedback_context = "social_reply"
                     if interaction is not None:
                         interaction.receive_user_message(
@@ -699,7 +723,8 @@ class AgentRunner:
                         context=feedback_context,
                         source="response_experience",
                         user_text=text,
-                        english_realization=realization,
+                        english_realization=english_realization,
+                        chinese_realization=chinese_realization,
                     )
                     return
             # Любая другая реплика закрывает ожидание только своего языка.
@@ -707,10 +732,12 @@ class AgentRunner:
                 act.kind, self.agent.cycle_count, language_id=current_language
             )
 
-        # 9A-2: отдельный ограниченный контур не попадает в русские обучающие
-        # двери и не превращает незнакомую английскую реплику в учебный вопрос.
+        # Ограниченные языковые контуры не попадают в русские обучающие двери.
         if english is not None:
             await self._handle_english_dialogue(english, pending, text)
+            return
+        if chinese is not None:
+            await self._handle_chinese_dialogue(chinese, pending, text)
             return
 
         # P2, этап 3: scoped правило возникает только после отдельного pending.
@@ -1523,6 +1550,48 @@ class AgentRunner:
             english_realization=realization,
         )
 
+    async def _handle_chinese_dialogue(self, recognition, pending, text) -> None:
+        """Обработать ограниченный китайский акт без русских обучающих дверей."""
+        attribution = getattr(self.agent, "social_attribution", None)
+        if attribution is None:
+            raise ValueError("Chinese dialogue requires social attribution")
+        attribution.set_response_language("zh")
+
+        interaction = getattr(self.agent, "user_interaction", None)
+        if interaction is not None:
+            interaction.receive_user_message(text, cycle=self.agent.cycle_count)
+        user_model = getattr(self.agent, "user_model", None)
+        if user_model is not None:
+            user_model.observe(text, cycle=self.agent.cycle_count)
+
+        if recognition.rule_id == "user_testimony":
+            recorder = getattr(self.agent, "record_user_answer", None)
+            saved = (
+                recorder(recognition.concept_id, text, self.agent.cycle_count)
+                if callable(recorder)
+                else None
+            )
+            if not saved:
+                recognition = unsupported_chinese_recognition(recognition)
+
+        realization = build_chinese_realization(
+            self.agent, recognition, pending=pending
+        )
+        await self._reply_to_user(
+            realization["text"],
+            context=recognition.reply_context,
+            source="dialogue_acts",
+            user_text=text,
+            dialogue_topic=recognition.concept_id,
+            dialogue_entities=(
+                (recognition.concept_id,) if recognition.concept_id else ()
+            ),
+            response_references=chinese_response_references(
+                recognition, pending=pending
+            ),
+            chinese_realization=realization,
+        )
+
     async def _reply_to_user(
         self,
         text: str,
@@ -1536,6 +1605,7 @@ class AgentRunner:
         response_references=(),
         borrow_context="",
         english_realization=None,
+        chinese_realization=None,
     ) -> str | None:
         """Составить план, доставить реплику и зарегистрировать её ID.
 
@@ -1555,6 +1625,7 @@ class AgentRunner:
                 references=response_references,
                 borrow_context=borrow_context,
                 english_realization=english_realization,
+                chinese_realization=chinese_realization,
             )
             text = prepared["text"]
             plan = prepared["plan"]

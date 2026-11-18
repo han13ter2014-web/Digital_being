@@ -14,7 +14,7 @@ MAX_LINKS = 128
 MAX_CONCEPT_ID = 160
 MAX_SURFACE_FORM = 80
 MAX_PROVENANCE = 160
-LANGUAGES = frozenset({"en"})
+LANGUAGES = frozenset({"en", "zh"})
 
 
 def _fail(path, message):

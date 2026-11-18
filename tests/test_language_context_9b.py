@@ -1,8 +1,8 @@
-"""9B-1: Han-детекция и китайский контекст без ZH recognition/realization.
+"""9B-1/9B-2: Han-детекция, китайский контекст и границы realization.
 
-Двенадцать отложенных сценариев 9B-0 выполняются только как context-only
-проверки. Их будущие ожидания китайского ответа здесь намеренно не assert-ятся.
-Frozen fixtures не изменяются; сеть и живой data/ не используются.
+Двенадцать отложенных сценариев выполняются только как context-only проверки.
+Их будущие ожидания китайского ответа здесь намеренно не assert-ятся. Каталоги
+применяются единой ревизией 9b2-r1; сеть и живой data/ не используются.
 """
 
 from __future__ import annotations
@@ -221,21 +221,26 @@ def test_zh_preference_stable_dialogue_and_detector_keep_russian_response():
     )
 
 
-def test_zh_is_not_a_realization_language():
-    with pytest.raises(ValueError, match="response_language"):
-        LanguageContext(
-            profile_id="owner",
-            input_language="zh",
-            dialogue_language="zh",
-            response_language="zh",
-            source="limited_detector",
-            confidence=1.0,
-        )
-    agent = DigitalBeing(name="LanguageRealizationBoundary9B1")
-    agent.social_attribution.set_stable_dialogue_language("zh")
-    agent.social_attribution.resolve_language("你好")
+def test_zh_realization_requires_matching_dialogue():
+    context = LanguageContext(
+        profile_id="owner",
+        input_language="zh",
+        dialogue_language="zh",
+        response_language="zh",
+        source="limited_detector",
+        confidence=1.0,
+    )
+    assert context.response_language == "zh"
+    agent = DigitalBeing(name="LanguageRealizationBoundary9B2")
+    agent.social_attribution.set_stable_dialogue_language("ru")
+    agent.social_attribution.resolve_language("Привет")
     with pytest.raises(ValueError, match="response_language"):
         agent.social_attribution.set_response_language("zh")
+    agent.social_attribution.set_stable_dialogue_language("zh")
+    agent.social_attribution.resolve_language("你好")
+    resolved = agent.social_attribution.set_response_language("zh")
+    assert resolved.dialogue_language == "zh"
+    assert resolved.response_language == "zh"
 
 
 def test_dialogue_learning_preserves_independent_zh_state_and_restart():
@@ -256,8 +261,8 @@ def test_dialogue_learning_preserves_independent_zh_state_and_restart():
 
 
 @pytest.mark.asyncio
-async def test_agent_runner_accepts_zh_context_without_zh_realization():
-    agent = DigitalBeing(name="LanguageRunner9B1")
+async def test_agent_runner_uses_checked_zh_realization():
+    agent = DigitalBeing(name="LanguageRunner9B2")
     agent.social_attribution.set_stable_dialogue_language("zh")
     runner, _ = _make_runner(agent)
 
@@ -267,7 +272,12 @@ async def test_agent_runner_accepts_zh_context_without_zh_realization():
     assert agent.dialogue_learning.active_language == "zh"
     assert context.input_language == "zh"
     assert context.dialogue_language == "zh"
-    assert context.response_language == "ru"
+    assert context.response_language == "zh"
+    plan = agent.response_experience.responses[
+        agent.response_experience.latest_response_id
+    ]["plan"]
+    assert plan["realization"]["language_id"] == "zh"
+    assert plan["realization"]["rule_id"] == "social_greeting"
 
 
 @pytest.mark.parametrize(

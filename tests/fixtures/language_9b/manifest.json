@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_revision": "9b0-r1",
+  "catalog_revision": "9b2-r1",
   "script_scope": "simplified_chinese_only",
   "capabilities": [
     "social",
@@ -29,12 +29,12 @@
     {
       "path": "chinese_practice.json",
       "split": "chinese_practice",
-      "sha256": "0db6174cc8aae300eedbaa1be2c8f213b902633db7ba73c9da7f9c0a1e9c1de6"
+      "sha256": "ce366a9c028473ebd13975651801b1b78c3d5b7e1e3081c916639a109e44a0ed"
     },
     {
       "path": "chinese_heldout.json",
       "split": "chinese_heldout",
-      "sha256": "4cc796ae1fb955f418cd20482f5f7d348f05194786d75ea3158064edaff575c9"
+      "sha256": "42ff3078fec1e5694500ce954c963ad2242b0c3b75749dbaf095e5fe3a2037f4"
     }
   ]
 }

@@ -29,6 +29,10 @@ from src.core.response_experience import (
     parse_generic_feedback,
     validate_response_plan,
 )
+from src.core.chinese_dialogue import (
+    build_chinese_realization,
+    recognize_chinese,
+)
 from src.core.english_dialogue import (
     build_english_realization,
     recognize_english,
@@ -349,8 +353,9 @@ class ExternalResponsePlanner:
         )
         language_context = None
         english_realization = None
+        chinese_realization = None
         stable_language = session.get("dialogue_language")
-        if stable_language in {"ru", "en"}:
+        if stable_language in {"ru", "en", "zh"}:
             language_context, _ = resolve_language_context(
                 source["text"],
                 profile_id=session["profile_id"],
@@ -374,6 +379,27 @@ class ExternalResponsePlanner:
                         stable_dialogue_language="en",
                         response_language="en",
                     )
+            if stable_language == "zh" and language_context.input_language in {
+                "zh",
+                "mixed",
+            }:
+                recognition = recognize_chinese(source["text"], self.agent)
+                if recognition.rule_id == "instruction_boundary":
+                    act = recognition.act
+                    context = recognition.reply_context
+                    references = []
+                    semantic_key = "instruction_boundary"
+                    generic = True
+                    chinese_realization = build_chinese_realization(
+                        self.agent, recognition
+                    )
+                    text = chinese_realization["text"]
+                    language_context, _ = resolve_language_context(
+                        source["text"],
+                        profile_id=session["profile_id"],
+                        stable_dialogue_language="zh",
+                        response_language="zh",
+                    )
         prepared = experience.prepare_plan(
             self.agent,
             text,
@@ -384,6 +410,7 @@ class ExternalResponsePlanner:
             profile_id=session["profile_id"],
             language_context=language_context,
             english_realization=english_realization,
+            chinese_realization=chinese_realization,
             expire_pending=False,
         )
         return {
