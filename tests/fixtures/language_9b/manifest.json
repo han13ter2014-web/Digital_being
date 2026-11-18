@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "catalog_revision": "9b0-r1",
+  "script_scope": "simplified_chinese_only",
+  "capabilities": [
+    "social",
+    "self_state",
+    "clarification",
+    "anaphora",
+    "feedback",
+    "known_topic",
+    "testimony",
+    "honest_fallback",
+    "mixed_detector",
+    "language_switch",
+    "profile_channel",
+    "persistence",
+    "ui_offline",
+    "provenance_security",
+    "han_script",
+    "segmentation"
+  ],
+  "files": [
+    {
+      "path": "../language_9a/russian_baseline.json",
+      "split": "russian_baseline",
+      "sha256": "5081f2d4ada2dcf9452116114190447bab156ee2ea673ce241f3338df361e5d7"
+    },
+    {
+      "path": "chinese_practice.json",
+      "split": "chinese_practice",
+      "sha256": "0db6174cc8aae300eedbaa1be2c8f213b902633db7ba73c9da7f9c0a1e9c1de6"
+    },
+    {
+      "path": "chinese_heldout.json",
+      "split": "chinese_heldout",
+      "sha256": "4cc796ae1fb955f418cd20482f5f7d348f05194786d75ea3158064edaff575c9"
+    }
+  ]
+}
