@@ -1,0 +1,114 @@
+{
+  "empty": {
+    "ok": true,
+    "result": []
+  },
+  "private_text": {
+    "ok": true,
+    "result": [
+      {
+        "update_id": 100,
+        "message": {
+          "message_id": 10,
+          "from": {
+            "id": 555,
+            "is_bot": false,
+            "first_name": "Fixture User",
+            "username": "fixture_user"
+          },
+          "chat": {
+            "id": 777,
+            "type": "private",
+            "first_name": "Fixture User"
+          },
+          "date": 1700000000,
+          "text": "Привет из frozen fixture"
+        }
+      }
+    ]
+  },
+  "mixed_out_of_scope": {
+    "ok": true,
+    "result": [
+      {
+        "update_id": 101,
+        "message": {
+          "message_id": 11,
+          "from": {"id": 555, "is_bot": false, "first_name": "Fixture User"},
+          "chat": {"id": -900, "type": "group", "title": "Fixture group"},
+          "date": 1700000001,
+          "text": "Group text must be ignored"
+        }
+      },
+      {
+        "update_id": 102,
+        "message": {
+          "message_id": 12,
+          "from": {"id": 555, "is_bot": false, "first_name": "Fixture User"},
+          "chat": {"id": 777, "type": "private"},
+          "date": 1700000002,
+          "photo": [{"file_id": "synthetic-photo", "width": 1, "height": 1}]
+        }
+      },
+      {
+        "update_id": 103,
+        "message": {
+          "message_id": 13,
+          "from": {"id": 556, "is_bot": false, "first_name": "Other Fixture"},
+          "chat": {"id": 888, "type": "private"},
+          "date": 1700000003,
+          "text": "Out-of-scope private text must be ignored"
+        }
+      }
+    ]
+  },
+  "malformed_private": {
+    "ok": true,
+    "result": [
+      {
+        "update_id": 104,
+        "message": {
+          "message_id": 14,
+          "chat": {"id": 777, "type": "private"},
+          "date": 1700000004,
+          "text": "Missing stable author must not be acknowledged"
+        }
+      }
+    ]
+  },
+  "public_post": {
+    "ok": true,
+    "result": [
+      {
+        "update_id": 105,
+        "channel_post": {
+          "message_id": 15,
+          "chat": {"id": -901, "type": "channel"},
+          "date": 1700000005,
+          "text": "Public text must be ignored"
+        }
+      }
+    ]
+  },
+  "send_success": {
+    "ok": true,
+    "result": {
+      "message_id": 900,
+      "from": {"id": 424242, "is_bot": true, "first_name": "Fixture Bot"},
+      "chat": {"id": 777, "type": "private"},
+      "date": 1700000010,
+      "text": "Exact owner reply",
+      "reply_to_message": {"message_id": 10}
+    }
+  },
+  "send_wrong_chat": {
+    "ok": true,
+    "result": {
+      "message_id": 901,
+      "from": {"id": 424242, "is_bot": true, "first_name": "Fixture Bot"},
+      "chat": {"id": 888, "type": "private"},
+      "date": 1700000011,
+      "text": "Exact owner reply"
+    }
+  }
+}

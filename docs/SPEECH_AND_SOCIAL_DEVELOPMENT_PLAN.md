@@ -1103,6 +1103,20 @@ fake provider envelope
 
 Реальный sandbox одного провайдера, ограниченный autonomous reply и любая публичная публикация являются последующими самостоятельно согласуемыми этапами, а не скрытой частью 9D-0.
 
+##### 9D-1. Ручной Telegram private sandbox
+
+**Статус:** реализован offline-контракт Telegram Bot API с frozen synthetic fixtures. Реальный Telegram API, настоящий bot token и живой `data/` в разработке и тестах не использовались. Это не включение автономного общения.
+
+- `TelegramChannelAdapter` использует только фиксированный HTTPS endpoint `api.telegram.org`, POST `getUpdates` с `timeout=0` и `sendMessage`. Redirect запрещён, размер ответа ограничен 256 КиБ, сетевой timeout — максимум 30 секунд. Произвольный provider или endpoint не принимается.
+- Bot token лениво читается по `credential_ref="DigitalBeing/telegram"` через существующий `provider_api_key`: fallback — Windows Credential Manager, либо `TELEGRAM_API_KEY`. В checkpoint, Web и EventBus сохраняется только не-secret reference; сам token в команды и поля UI не передаётся. `account_id` Telegram-канала — числовой ID бота для сверки receipt.
+- `/social receive <channel_id>` и Web «Принять один раз» выполняют один bounded batch до 32 updates. Нет long-poll worker, webhook, автоматического resume или вызова receive из жизненного цикла.
+- Принимаются только private text updates в явном `conversation_ids` scope. Group, public post, media/non-text и private вне scope явно игнорируются без создания профиля. Принятый текст остаётся `external_social_claim`, а не командой или доказанным фактом.
+- `update_cursor` хранит последний подтверждённый update ID. Quarantined, duplicate и явно ignored update подтверждаются; malformed/spoofed update, достигнутый лимит и ошибка transport/credential не подтверждают проблемный update. Старый 9D-0 checkpoint без additive-полей мигрирует без потери конфигурации.
+- `/social send <channel_id> <draft_id>` и Web «Отправить одобренное» повторно используют 9D-0 проверки SHA-256, `grant_version`, conversation scope, reply budget и интервала. `sendMessage` привязан к исходному `message_id` через `reply_parameters` без fallback без reply. Receipt считается sent только при совпадении bot/account, private chat, точного текста и локальных channel/conversation/draft ID.
+- HTTP 401/403/429, timeout, malformed JSON, oversized response и receipt mismatch дают ограниченные безопасные коды; URL с token, тело ответа и текст реплики в ошибку не копируются. Ошибка не считается доставкой и не запускает retry.
+- Управление доступно только текущему локальному владельцу. Web не принимает token, произвольный outgoing text или действия `ingest`, `auto`, `resume`. Группы, публичные посты, медиа, пересылка и массовые рассылки не реализованы.
+- Профильный набор 9D-0/9D-1 и Web: **170 passed**. Полная приёмка и фактические итоги статических гейтов зафиксированы в `docs/09D-1_acceptance.md`. После отдельного явного разрешения владельца изолированный live-smoke подтвердил один private receive и один exact owner-approved send с совпавшим receipt; sanitized-результат — в `docs/09D-1_live_smoke.md`.
+
 Ни одна из этих частей не разблокируется автоматически по завершении 9A.
 
 ##### 9B.1. Детальный объём и baseline 9B-0

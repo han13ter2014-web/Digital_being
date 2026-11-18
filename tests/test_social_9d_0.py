@@ -709,11 +709,10 @@ async def test_runner_social_commands_are_owner_only_and_have_no_ingest_or_auto(
     assert "только владелец" in denied
 
 
-def test_web_exposes_only_owner_social_controls_without_provider_tokens_or_send():
+def test_web_exposes_only_owner_social_controls_without_provider_tokens_or_ingress():
     assert 'id="social-channel-list"' in DASHBOARD_HTML
     assert "function renderSocialChannels(section)" in DASHBOARD_HTML
     assert "sendCommand('/api/social'" in DASHBOARD_HTML
-    assert "action:'send'" not in DASHBOARD_HTML
     assert "action:'ingest'" not in DASHBOARD_HTML
     assert "social-token" not in DASHBOARD_HTML
     assert "social-cookie" not in DASHBOARD_HTML

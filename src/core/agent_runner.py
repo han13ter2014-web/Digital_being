@@ -50,6 +50,7 @@ from src.core.external_adapters import (
     create_external_adapter,
 )
 from src.core.external_dialogue import ExternalDialogueController
+from src.core.telegram_channel import TelegramChannelError, create_social_adapter
 from src.core.stimulus_selector import (
     TRAIL_GOAL_PRIORITY_PROB,
     is_open_question_stimulus,
@@ -360,6 +361,7 @@ class AgentRunner:
         # Живые контроллеры не сериализуются: restart никогда не возобновляет API.
         self._external_dialogues: Dict[str, ExternalDialogueController] = {}
         self._external_adapter_factory = create_external_adapter
+        self._social_adapter_factory = create_social_adapter
         self.agent._external_dialogue_controllers = self._external_dialogues
 
         # Дедупликация стимулов: не повторять один и тот же вопрос
@@ -3232,7 +3234,7 @@ class AgentRunner:
         # === Внешние контакты: только владелец и ручное одобрение ===
         if cmd == "external" or cmd.startswith("external "):
             return self._handle_external_command(cmd_raw)
-        # === Соцканалы 9D: только владелец, без ingress/send/auto команд ===
+        # === Соцканалы 9D: владелец, ручной receive/send, без auto ===
         if cmd == "social" or cmd.startswith("social "):
             return self._handle_social_command(cmd_raw)
         # === Этап 2.5: /web — управление web-поиском ===
@@ -3813,8 +3815,15 @@ class AgentRunner:
         except ValueError as exc:
             return f"⚠️ {exc}"
 
+    def _social_adapter(self, channel: dict):
+        return self._social_adapter_factory(
+            channel["provider"],
+            credential_ref=channel["credential_ref"],
+            account_id=channel["account_id"],
+        )
+
     def _handle_social_command(self, cmd_raw: str) -> str:
-        """Owner-only управление соцканалами; внешний ingress и send закрыты."""
+        """Owner-only управление; Telegram receive/send выполняются только вручную."""
         manager = getattr(self.agent, "social_channels", None)
         registry = getattr(self.agent, "social_registry", None)
         if manager is None or registry is None:
@@ -3830,7 +3839,8 @@ class AgentRunner:
             "Использование: /social [status | create <provider> | <account_id> | "
             "[external_person|external_ai] | grant <channel_id> | <JSON> | "
             "draft <channel_id> <inbound_message_id> | edit <draft_id> | <текст> | "
-            "approve|reject <draft_id> | revoke|stop <channel_id>]"
+            "approve|reject <draft_id> | receive <channel_id> | "
+            "send <channel_id> <draft_id> | revoke|stop <channel_id>]"
         )
         try:
             if action == "status" and not rest:
@@ -3900,6 +3910,33 @@ class AgentRunner:
                     result = manager.approve(rest, cycle=cycle)
                 else:
                     result = manager.reject(rest, cycle=cycle)
+            elif action == "receive" and rest and " " not in rest:
+                channel = manager.get_channel(rest)
+                if channel is None:
+                    result = {"status": "not_found", "channel_id": rest}
+                else:
+                    result = manager.receive(
+                        rest, adapter=self._social_adapter(channel), cycle=cycle
+                    )
+            elif action == "send" and rest:
+                arguments = rest.split()
+                if len(arguments) != 2:
+                    return usage
+                channel_id, draft_id = arguments
+                channel = manager.get_channel(channel_id)
+                draft = manager._message(draft_id)
+                if channel is None or draft is None:
+                    result = {"status": "not_found", "message_id": draft_id}
+                else:
+                    result = manager.send(
+                        channel_id,
+                        draft_id,
+                        adapter=self._social_adapter(channel),
+                        cycle=cycle,
+                        now=time.time(),
+                        expected_text_sha256=draft["text_sha256"],
+                        expected_grant_version=draft["grant_version"],
+                    )
             elif action in {"revoke", "stop"} and rest and " " not in rest:
                 if action == "revoke":
                     result = manager.revoke(
@@ -3912,6 +3949,23 @@ class AgentRunner:
             else:
                 return usage
             status = result.get("status", "error")
+            if status == "received":
+                return (
+                    f"📥 Принято в карантин: {result['received']}; "
+                    f"дубликатов: {result['duplicates']}; "
+                    f"проигнорировано вне scope: {result['ignored']}."
+                )
+            if status == "no_updates":
+                return "📥 Новых Telegram updates нет; cursor не изменён."
+            if status == "transport_error":
+                return f"⚠️ Telegram receive не выполнен: {result['error']}."
+            if status == "sent":
+                return "📤 Отправлено одобренное сообщение; точный receipt подтверждён."
+            if status == "send_failed":
+                return (
+                    "⚠️ Telegram не подтвердил точную доставку; "
+                    "сообщение не считается отправленным."
+                )
             messages = {
                 "draft": "📝 Проект создан; одобрение ещё не дано.",
                 "draft_pending": "📝 Сначала закройте текущий проект этого диалога.",
@@ -3926,8 +3980,19 @@ class AgentRunner:
                 "not_found": "🛡 Канал или сообщение не найдены.",
                 "channel_stopped": "🛑 Остановленный канал не принимает изменения.",
                 "limit_reached": "⚠️ Достигнут предел локального журнала.",
+                "approval_required": "⚠️ Требуется одобрение точной текущей ревизии.",
+                "approval_mismatch": "⚠️ Хеш текста изменился; нужно новое одобрение.",
+                "grant_mismatch": "⚠️ Версия grant изменилась; нужно новое одобрение.",
+                "scope_mismatch": "⚠️ Проект не принадлежит выбранному каналу.",
+                "rate_limited": "⚠️ Минимальный интервал отправки ещё не истёк.",
+                "invalid_update": "⚠️ Telegram update отклонён; cursor не подтверждён.",
+                "invalid_limit": "⚠️ Некорректный предел ручного приёма.",
+                "credential_required": "⚠️ Не задана безопасная ссылка на credential.",
+                "unsupported_provider": "⚠️ Ручной receive/send поддержан только для Telegram.",
             }
             return messages.get(status, f"🛡 Результат: {status}.")
+        except TelegramChannelError as exc:
+            return f"⚠️ Telegram канал отклонён: {exc.code}."
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             return f"⚠️ {exc}"
 

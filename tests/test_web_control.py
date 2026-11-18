@@ -317,6 +317,12 @@ def controlled_dashboard():
             )
             for action in ("approve", "reject")
         ],
+        (
+            "/api/social",
+            {"action": "send", "channel_id": "channel-1", "draft_id": "draft-1"},
+            Events.USER_COMMAND,
+            {"command": "social send channel-1 draft-1"},
+        ),
         *[
             (
                 "/api/social",
@@ -324,7 +330,7 @@ def controlled_dashboard():
                 Events.USER_COMMAND,
                 {"command": f"social {action} channel-1"},
             )
-            for action in ("revoke", "stop")
+            for action in ("receive", "revoke", "stop")
         ],
     ],
 )
@@ -388,7 +394,7 @@ def test_web_publishes_exact_tk_event(
         ],
         *[
             ("/api/social", {"action": action, "channel_id": "channel-1"})
-            for action in ("send", "ingest", "auto")
+            for action in ("ingest", "auto")
         ],
         ("/api/social", {"action": "grant", "channel_id": "channel-1"}),
         (

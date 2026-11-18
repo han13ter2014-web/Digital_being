@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "revision": "9d1-r1",
+  "provider": "telegram",
+  "account_id": "424242",
+  "network": "forbidden",
+  "credentials": "synthetic-only",
+  "responses_file": "responses.json",
+  "notes": "Frozen synthetic Telegram Bot API responses; no real token, person, chat or service data."
+}

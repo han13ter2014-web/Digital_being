@@ -2,7 +2,7 @@
 
 Входящие реплики остаются ``external_social_claim``. ``ChannelGrant`` разрешает
 приём, проект и отправку независимо; ``reply`` применим только к конкретному
-owner-approved draft. Здесь нет worker-а, credential storage или provider API.
+owner-approved draft. Здесь нет worker-а или секретов; provider API вынесен в adapter.
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ CONTROL_EVENT_KINDS = frozenset(
     }
 )
 _PROVIDER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+TELEGRAM_CREDENTIAL_REF = "DigitalBeing/telegram"
+MAX_UPDATE_CURSOR = 2**63 - 1
 _CHANNEL_KEYS = frozenset(
     {
         "channel_id",
@@ -66,6 +68,8 @@ _CHANNEL_KEYS = frozenset(
         "received_count",
         "sent_count",
         "last_sent_at",
+        "credential_ref",
+        "update_cursor",
     }
 )
 _GRANT_KEYS = frozenset(
@@ -242,6 +246,19 @@ def _validate_channel(channel, path: str) -> None:
     _uuid(channel.get("channel_id"), f"{path}.channel_id")
     _provider(channel.get("provider"))
     _identifier(channel.get("account_id"), f"{path}.account_id", MAX_EXTERNAL_ID_CHARS)
+    credential_ref = channel.get("credential_ref")
+    update_cursor = channel.get("update_cursor")
+    if channel.get("provider") == "telegram":
+        if credential_ref != TELEGRAM_CREDENTIAL_REF:
+            _fail(f"{path}.credential_ref", "unsupported Telegram credential reference")
+        if update_cursor is not None and (
+            isinstance(update_cursor, bool)
+            or not isinstance(update_cursor, int)
+            or not 0 <= update_cursor <= MAX_UPDATE_CURSOR
+        ):
+            _fail(f"{path}.update_cursor", "expected a bounded Telegram update ID")
+    elif credential_ref is not None or update_cursor is not None:
+        _fail(path, "credential_ref and update_cursor are Telegram-only")
     if channel.get("default_author_kind") not in AUTHOR_KINDS:
         _fail(f"{path}.default_author_kind", "unsupported external author kind")
     if channel.get("status") not in CHANNEL_STATUSES:
@@ -334,10 +351,26 @@ def _validate_message(message, path: str) -> None:
         _fail(f"{path}.error", "only failed send can contain an error")
 
 
+def _normalized_snapshot(data) -> dict:
+    """Миграция additive-полей 9D-1 без изменения переданного checkpoint."""
+    restored = deepcopy(data)
+    if isinstance(restored, dict) and isinstance(restored.get("channels"), list):
+        for channel in restored["channels"]:
+            if not isinstance(channel, dict):
+                continue
+            is_telegram = channel.get("provider") == "telegram"
+            channel.setdefault(
+                "credential_ref", TELEGRAM_CREDENTIAL_REF if is_telegram else None
+            )
+            channel.setdefault("update_cursor", None)
+    return restored
+
+
 def validate_social_channels(data, registry_data) -> None:
     """Проверить весь snapshot и profile scope до мутаций живого агента."""
     if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
         _fail("social_channels", "unsupported snapshot")
+    data = _normalized_snapshot(data)
     if set(data) != {"schema_version", "channels", "messages", "control_events"}:
         _fail("social_channels", "unexpected or missing fields")
     channels = data.get("channels")
@@ -468,7 +501,7 @@ def validate_social_channels(data, registry_data) -> None:
 
 
 class SocialChannelManager:
-    """Каналы, grants, карантин и точная owner-approved fake-отправка."""
+    """Каналы, grants, карантин и точная owner-approved отправка через adapter."""
 
     def __init__(self, registry) -> None:
         self.registry = registry
@@ -534,6 +567,10 @@ class SocialChannelManager:
             "received_count": 0,
             "sent_count": 0,
             "last_sent_at": None,
+            "credential_ref": (
+                TELEGRAM_CREDENTIAL_REF if provider == "telegram" else None
+            ),
+            "update_cursor": None,
         }
         self.channels.append(channel)
         self._record(channel_id, "created", cycle)
@@ -784,6 +821,142 @@ class SocialChannelManager:
         channel["last_cycle"] = max(channel["last_cycle"], cycle)
         self._record(channel["channel_id"], "received", cycle)
         return {"status": "quarantined", **deepcopy(message)}
+
+    def receive(self, channel_id: str, *, adapter, cycle: int, limit: int = 16) -> dict:
+        """Выполнить один manual Telegram batch и подтвердить обработанные updates."""
+        _cycle(cycle)
+        channel = self._channel(channel_id)
+        if channel is None:
+            return {"status": "not_found", "channel_id": channel_id}
+        if channel["status"] != "active":
+            return {"status": "channel_stopped", "channel_id": channel_id}
+        if channel["provider"] != "telegram":
+            return {"status": "unsupported_provider", "channel_id": channel_id}
+        grant = channel["grant"]
+        if not grant["receive"] or not grant["conversation_ids"]:
+            return {"status": "permission_denied", "channel_id": channel_id}
+        if channel.get("credential_ref") != TELEGRAM_CREDENTIAL_REF:
+            return {"status": "credential_required", "channel_id": channel_id}
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 32
+        ):
+            return {"status": "invalid_limit", "channel_id": channel_id}
+        cursor = channel["update_cursor"]
+        offset = cursor + 1 if cursor is not None else None
+        try:
+            updates = adapter.get_updates(offset=offset, limit=limit)
+        except Exception as exc:
+            code = getattr(exc, "code", "transport_failed")
+            allowed = {
+                "authentication_failed",
+                "credential_unavailable",
+                "invalid_cursor",
+                "invalid_response",
+                "invalid_update",
+                "network_error",
+                "provider_rejected",
+                "provider_unavailable",
+                "rate_limited",
+                "redirect_rejected",
+                "response_too_large",
+                "timeout",
+                "transport_failed",
+                "unexpected_http_status",
+                "http_error",
+            }
+            return {
+                "status": "transport_error",
+                "error": code if code in allowed else "transport_failed",
+            }
+        if not isinstance(updates, list) or len(updates) > limit:
+            return {"status": "transport_error", "error": "invalid_response"}
+
+        received = 0
+        duplicates = 0
+        ignored = 0
+        message_ids = []
+        previous_id = None
+        required = {
+            "update_id",
+            "kind",
+            "conversation_id",
+            "author_id",
+            "message_id",
+            "text",
+            "display_name",
+        }
+        for update in updates:
+            if not isinstance(update, dict):
+                return {"status": "invalid_update", "error": "invalid_update"}
+            update_id = update.get("update_id")
+            if (
+                isinstance(update_id, bool)
+                or not isinstance(update_id, int)
+                or not 0 <= update_id <= MAX_UPDATE_CURSOR
+                or (previous_id is not None and update_id <= previous_id)
+            ):
+                return {"status": "invalid_update", "error": "invalid_update"}
+            previous_id = update_id
+            if cursor is not None and update_id <= cursor:
+                duplicates += 1
+                continue
+            kind = update.get("kind")
+            if kind == "ignored":
+                if set(update) != {"update_id", "kind", "reason"} or not isinstance(
+                    update.get("reason"), str
+                ):
+                    return {"status": "invalid_update", "error": "invalid_update"}
+                ignored += 1
+            elif kind == "private_text":
+                if set(update) != required:
+                    return {"status": "invalid_update", "error": "invalid_update"}
+                if update["conversation_id"] not in grant["conversation_ids"]:
+                    ignored += 1
+                else:
+                    envelope = {
+                        "channel_id": channel_id,
+                        "provider": "telegram",
+                        "account_id": channel["account_id"],
+                        "conversation_id": update["conversation_id"],
+                        "author_id": update["author_id"],
+                        "author_kind": channel["default_author_kind"],
+                        "display_name": update["display_name"],
+                        "message_id": update["message_id"],
+                        "visibility": "private",
+                        "text": update["text"],
+                    }
+                    try:
+                        result = self.ingest(envelope, cycle=cycle)
+                    except (KeyError, TypeError, ValueError):
+                        return {"status": "invalid_update", "error": "invalid_update"}
+                    if result["status"] not in {"quarantined", "duplicate"}:
+                        return {
+                            **result,
+                            "received": received,
+                            "duplicates": duplicates,
+                            "ignored": ignored,
+                            "message_ids": message_ids,
+                            "update_cursor": channel["update_cursor"],
+                        }
+                    if result["status"] == "duplicate":
+                        duplicates += 1
+                    else:
+                        received += 1
+                    message_ids.append(result["message_id"])
+            else:
+                return {"status": "invalid_update", "error": "invalid_update"}
+            channel["update_cursor"] = update_id
+            channel["last_cycle"] = max(channel["last_cycle"], cycle)
+        return {
+            "status": "received" if updates else "no_updates",
+            "received": received,
+            "duplicates": duplicates,
+            "ignored": ignored,
+            "message_ids": message_ids,
+            "update_cursor": channel["update_cursor"],
+        }
 
     @staticmethod
     def _draft_text(text: str) -> str:
@@ -1061,8 +1234,8 @@ class SocialChannelManager:
         }
 
     def load_from(self, data, registry_data) -> None:
-        validate_social_channels(data, registry_data)
-        restored = deepcopy(data)
+        restored = _normalized_snapshot(data)
+        validate_social_channels(restored, registry_data)
         for message in restored["messages"]:
             if message["status"] == "approved":
                 message["status"] = "draft"
