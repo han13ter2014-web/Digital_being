@@ -169,7 +169,11 @@ def _cycle(value, path: str = "cycle") -> int:
 
 
 def _count(value, path: str, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= maximum
+    ):
         _fail(path, f"expected an integer from 0 to {maximum}")
     return value
 
@@ -280,7 +284,10 @@ def _validate_message(message, path: str) -> None:
     if message.get("text_sha256") != _hash_text(message["text"]):
         _fail(f"{path}.text_sha256", "text hash does not match")
     _cycle(message.get("cycle"), f"{path}.cycle")
-    if not isinstance(message.get("session_context"), list) or message["session_context"]:
+    if (
+        not isinstance(message.get("session_context"), list)
+        or message["session_context"]
+    ):
         _fail(f"{path}.session_context", "9D-0 permits only an empty minimal context")
     if message["direction"] == "inbound":
         if message.get("status") != "quarantined":
@@ -307,10 +314,16 @@ def _validate_message(message, path: str) -> None:
     revision = message.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         _fail(f"{path}.revision", "expected a positive integer")
-    _optional_identifier(message.get("external_message_id"), f"{path}.external_message_id")
+    _optional_identifier(
+        message.get("external_message_id"), f"{path}.external_message_id"
+    )
     grant_version = message.get("grant_version")
     if message["status"] in {"approved", "send_failed", "sent"}:
-        if isinstance(grant_version, bool) or not isinstance(grant_version, int) or grant_version < 1:
+        if (
+            isinstance(grant_version, bool)
+            or not isinstance(grant_version, int)
+            or grant_version < 1
+        ):
             _fail(f"{path}.grant_version", "approved draft requires a grant version")
     elif grant_version is not None:
         _fail(f"{path}.grant_version", "unapproved draft cannot retain approval scope")
@@ -330,7 +343,9 @@ def validate_social_channels(data, registry_data) -> None:
     channels = data.get("channels")
     if not isinstance(channels, list) or len(channels) > MAX_CHANNELS:
         _fail("social_channels.channels", "expected a bounded list")
-    profiles = registry_data.get("profiles", {}) if isinstance(registry_data, dict) else {}
+    profiles = (
+        registry_data.get("profiles", {}) if isinstance(registry_data, dict) else {}
+    )
     if channels and not profiles:
         _fail("social_channels", "social_registry is required")
     channel_by_id = {}
@@ -374,7 +389,9 @@ def validate_social_channels(data, registry_data) -> None:
             _fail(f"{path}.cycle", "message precedes its channel")
         profile = profiles.get(message["profile_id"])
         if profile is None or profile.get("kind") not in AUTHOR_KINDS | {"unknown"}:
-            _fail(f"{path}.profile_id", "message requires an external or unknown profile")
+            _fail(
+                f"{path}.profile_id", "message requires an external or unknown profile"
+            )
         if message["direction"] == "inbound":
             inbound_counts[channel_id] += 1
             external_key = (channel_id, message["external_message_id"])
@@ -398,19 +415,30 @@ def validate_social_channels(data, registry_data) -> None:
                 or source["direction"] != "inbound"
                 or any(
                     source[field] != message[field]
-                    for field in ("channel_id", "conversation_id", "author_id", "profile_id")
+                    for field in (
+                        "channel_id",
+                        "conversation_id",
+                        "author_id",
+                        "profile_id",
+                    )
                 )
                 or message["in_reply_to"] != source["external_message_id"]
             ):
                 _fail(f"{path}.based_on", "draft escaped its inbound scope")
-            if message["grant_version"] is not None and message["grant_version"] > channel["grant"]["grant_version"]:
+            if (
+                message["grant_version"] is not None
+                and message["grant_version"] > channel["grant"]["grant_version"]
+            ):
                 _fail(f"{path}.grant_version", "approval exceeds current grant")
             draft_key = (channel_id, message["conversation_id"])
             if message["status"] in ACTIVE_DRAFT_STATUSES:
                 if draft_key in active_drafts:
                     _fail(path, "multiple active drafts in one conversation")
                 active_drafts.add(draft_key)
-            if channel["status"] == "stopped" and message["status"] in ACTIVE_DRAFT_STATUSES:
+            if (
+                channel["status"] == "stopped"
+                and message["status"] in ACTIVE_DRAFT_STATUSES
+            ):
                 _fail(path, "stopped channel cannot retain an active draft")
             if message["status"] == "sent":
                 sent_counts[channel_id] += 1
@@ -542,8 +570,14 @@ class SocialChannelManager:
         }
         _validate_grant(candidate, "grant")
         candidate["min_interval_sec"] = float(candidate["min_interval_sec"])
-        comparable = {key: value for key, value in candidate.items() if key != "grant_version"}
-        current = {key: value for key, value in channel["grant"].items() if key != "grant_version"}
+        comparable = {
+            key: value for key, value in candidate.items() if key != "grant_version"
+        }
+        current = {
+            key: value
+            for key, value in channel["grant"].items()
+            if key != "grant_version"
+        }
         if comparable == current:
             return {"status": "unchanged", **deepcopy(channel["grant"])}
         candidate["grant_version"] += 1
@@ -559,7 +593,10 @@ class SocialChannelManager:
 
     def _close_drafts(self, channel_id: str, cycle: int) -> None:
         for message in self.messages:
-            if message["channel_id"] == channel_id and message["status"] in ACTIVE_DRAFT_STATUSES:
+            if (
+                message["channel_id"] == channel_id
+                and message["status"] in ACTIVE_DRAFT_STATUSES
+            ):
                 message["status"] = "stopped"
                 message["grant_version"] = None
                 message["cycle"] = cycle
@@ -621,7 +658,10 @@ class SocialChannelManager:
         _text(clean["text"], "envelope.text", MAX_TEXT_CHARS)
         kind = clean.get("author_kind", "external_person")
         if kind not in AUTHOR_KINDS:
-            _fail("envelope.author_kind", "external text cannot claim another identity kind")
+            _fail(
+                "envelope.author_kind",
+                "external text cannot claim another identity kind",
+            )
         clean["author_kind"] = kind
         display_name = clean.get("display_name", "")
         _text(display_name, "envelope.display_name", MAX_NAME_CHARS, nonempty=False)
@@ -689,12 +729,17 @@ class SocialChannelManager:
                 "text": duplicate["text"],
             }
             if any(event[key] != value for key, value in expected.items()):
-                raise ValueError("envelope.message_id: replay does not match original claim")
+                raise ValueError(
+                    "envelope.message_id: replay does not match original claim"
+                )
             return {**deepcopy(duplicate), "status": "duplicate"}
         grant = channel["grant"]
         if channel["status"] != "active":
             return {"status": "channel_stopped", "channel_id": channel["channel_id"]}
-        if not grant["receive"] or event["conversation_id"] not in grant["conversation_ids"]:
+        if (
+            not grant["receive"]
+            or event["conversation_id"] not in grant["conversation_ids"]
+        ):
             return {"status": "permission_denied", "channel_id": channel["channel_id"]}
         if (
             len(self.messages) >= MAX_MESSAGES
@@ -752,7 +797,9 @@ class SocialChannelManager:
             "или доказанный факт. Могу обсудить его осторожно."
         )
 
-    def create_draft(self, channel_id: str, inbound_message_id: str, *, cycle: int) -> dict:
+    def create_draft(
+        self, channel_id: str, inbound_message_id: str, *, cycle: int
+    ) -> dict:
         _cycle(cycle)
         channel = self._channel(channel_id)
         if channel is None:
@@ -760,14 +807,21 @@ class SocialChannelManager:
         if channel["status"] != "active":
             return {"status": "channel_stopped", "channel_id": channel_id}
         source = self._message(inbound_message_id)
-        if source is None or source["direction"] != "inbound" or source["channel_id"] != channel_id:
+        if (
+            source is None
+            or source["direction"] != "inbound"
+            or source["channel_id"] != channel_id
+        ):
             return {"status": "not_found", "message_id": inbound_message_id}
         if source["profile_id"] not in self.registry.profiles:
             return {"status": "identity_required", "message_id": inbound_message_id}
         if self.registry.profiles[source["profile_id"]]["kind"] == "unknown":
             return {"status": "identity_required", "message_id": inbound_message_id}
         grant = channel["grant"]
-        if not grant["draft"] or source["conversation_id"] not in grant["conversation_ids"]:
+        if (
+            not grant["draft"]
+            or source["conversation_id"] not in grant["conversation_ids"]
+        ):
             return {"status": "permission_denied", "channel_id": channel_id}
         active = next(
             (
@@ -781,9 +835,11 @@ class SocialChannelManager:
         )
         if active is not None:
             return {**deepcopy(active), "status": "draft_pending"}
-        if len(self.messages) >= MAX_MESSAGES or sum(
-            item["channel_id"] == channel_id for item in self.messages
-        ) >= MAX_MESSAGES_PER_CHANNEL:
+        if (
+            len(self.messages) >= MAX_MESSAGES
+            or sum(item["channel_id"] == channel_id for item in self.messages)
+            >= MAX_MESSAGES_PER_CHANNEL
+        ):
             return {"status": "limit_reached", "channel_id": channel_id}
         text = self._draft_text(source["text"])
         draft = {
@@ -855,7 +911,10 @@ class SocialChannelManager:
             return {"status": "permission_denied", "message_id": draft_id}
         if draft["text_sha256"] != _hash_text(draft["text"]):
             return {"status": "approval_mismatch", "message_id": draft_id}
-        if draft["status"] == "approved" and draft["grant_version"] == channel["grant"]["grant_version"]:
+        if (
+            draft["status"] == "approved"
+            and draft["grant_version"] == channel["grant"]["grant_version"]
+        ):
             return {**deepcopy(draft), "status": "already_approved"}
         draft["status"] = "approved"
         draft["grant_version"] = channel["grant"]["grant_version"]
@@ -902,7 +961,10 @@ class SocialChannelManager:
         if channel["status"] != "active":
             return {"status": "channel_stopped", "message_id": draft_id}
         grant = channel["grant"]
-        if not grant["reply"] or draft["conversation_id"] not in grant["conversation_ids"]:
+        if (
+            not grant["reply"]
+            or draft["conversation_id"] not in grant["conversation_ids"]
+        ):
             return {"status": "permission_denied", "message_id": draft_id}
         if draft["status"] != "approved":
             return {"status": "approval_required", "message_id": draft_id}
@@ -931,16 +993,22 @@ class SocialChannelManager:
                 in_reply_to=draft["in_reply_to"],
                 text=draft["text"],
             )
-            if not isinstance(receipt, dict) or receipt.get("status") != "sent" or any(
-                receipt.get(field) != draft[field]
-                for field in ("channel_id", "conversation_id", "message_id")
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("status") != "sent"
+                or any(
+                    receipt.get(field) != draft[field]
+                    for field in ("channel_id", "conversation_id", "message_id")
+                )
             ):
                 raise ValueError("adapter did not confirm exact delivery")
             external_message_id = receipt.get("external_message_id")
             _optional_identifier(external_message_id, "receipt.external_message_id")
         except Exception as exc:
             draft["status"] = "send_failed"
-            draft["error"] = f"{type(exc).__name__}: adapter did not confirm exact delivery"
+            draft["error"] = (
+                f"{type(exc).__name__}: adapter did not confirm exact delivery"
+            )
             draft["cycle"] = cycle
             channel["last_cycle"] = max(channel["last_cycle"], cycle)
             self._record(channel_id, "send_failed", cycle)

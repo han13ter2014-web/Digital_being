@@ -419,7 +419,10 @@ def test_web_publishes_exact_tk_event(
                 "min_interval_sec": 0,
             },
         ),
-        ("/api/social", {"action": "create", "provider": "bad provider", "account_id": "a"}),
+        (
+            "/api/social",
+            {"action": "create", "provider": "bad provider", "account_id": "a"},
+        ),
         ("/api/social", {"action": "edit", "draft_id": "draft-1", "text": "  "}),
     ],
 )

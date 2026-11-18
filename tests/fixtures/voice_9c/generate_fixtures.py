@@ -62,16 +62,24 @@ def render() -> dict[str, bytes]:
         "sample_width_bytes": 2,
         "frames": FRAME_COUNT,
         "scenarios": [
-            _scenario("ru_transport", "ru_tone.wav", "Проверка голосового ввода", 0.75, ru_audio),
-            _scenario("en_transport", "en_tone.wav", "Voice input check", 0.5, en_audio),
+            _scenario(
+                "ru_transport",
+                "ru_tone.wav",
+                "Проверка голосового ввода",
+                0.75,
+                ru_audio,
+            ),
+            _scenario(
+                "en_transport", "en_tone.wav", "Voice input check", 0.5, en_audio
+            ),
         ],
     }
     return {
         "ru_tone.wav": ru_audio,
         "en_tone.wav": en_audio,
-        "manifest.json": (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode(
-            "utf-8"
-        ),
+        "manifest.json": (
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+        ).encode("utf-8"),
     }
 
 

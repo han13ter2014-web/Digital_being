@@ -1636,7 +1636,9 @@ class AgentRunner:
                 try:
                     voice.speak_response(text)
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("voice delivery failed: %s", exc)
+                    logging.getLogger(__name__).warning(
+                        "voice delivery failed: %s", exc
+                    )
 
         webhooks = getattr(self.agent, "webhooks", None)
         if webhooks is not None:

@@ -655,9 +655,7 @@ class ChatWindow:
     # ============================================================
 
     def _build_voice_controls(self, parent) -> None:
-        available = bool(
-            self._voice_input is not None and self._voice_input.enabled
-        )
+        available = bool(self._voice_input is not None and self._voice_input.enabled)
         self._voice_record_button = tk.Button(
             parent,
             text="🎤 Говорить",
@@ -807,9 +805,7 @@ class ChatWindow:
             if result.confidence is not None
             else "неизвестна"
         )
-        self._set_voice_status(
-            f"Проверьте текст · уверенность: {confidence}"
-        )
+        self._set_voice_status(f"Проверьте текст · уверенность: {confidence}")
 
     def _apply_voice_error(self, message: str) -> None:
         self._voice_processing = False

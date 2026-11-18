@@ -180,9 +180,7 @@ async def test_web_auto_toggle_and_status_reflect_actual_output():
     state = _state_with_responses()
     output = _FakeOutput()
 
-    response = await handle_voice_auto(
-        _json_request(state, output, {"enabled": True})
-    )
+    response = await handle_voice_auto(_json_request(state, output, {"enabled": True}))
     status = await handle_voice_status(_json_request(state, output, {}))
     payload = json.loads(status.text)
 
@@ -197,9 +195,7 @@ async def test_web_auto_toggle_rejects_non_boolean():
     state = _state_with_responses()
     output = _FakeOutput()
 
-    response = await handle_voice_auto(
-        _json_request(state, output, {"enabled": "yes"})
-    )
+    response = await handle_voice_auto(_json_request(state, output, {"enabled": "yes"}))
 
     assert response.status == 400
     assert output.auto_enabled is False

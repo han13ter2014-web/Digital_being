@@ -968,9 +968,7 @@ async def handle_voice_auto(request: Any) -> Any:
     try:
         output.set_auto(enabled)
     except PermissionError as exc:
-        return _json_response(
-            {"status": "rejected", "message": str(exc)}, status=403
-        )
+        return _json_response({"status": "rejected", "message": str(exc)}, status=403)
     return _json_response(
         {
             "status": "updated",
@@ -1011,13 +1009,9 @@ async def handle_voice_speak(request: Any) -> Any:
     try:
         await asyncio.to_thread(output.speak, text)
     except PermissionError as exc:
-        return _json_response(
-            {"status": "rejected", "message": str(exc)}, status=403
-        )
+        return _json_response({"status": "rejected", "message": str(exc)}, status=403)
     except (ValueError, RuntimeError) as exc:
-        return _json_response(
-            {"status": "rejected", "message": str(exc)}, status=422
-        )
+        return _json_response({"status": "rejected", "message": str(exc)}, status=422)
     return _json_response(
         {
             "status": "started",
@@ -1038,7 +1032,10 @@ async def handle_voice_transcribe(request: Any) -> Any:
             status=403,
         )
     content_length = getattr(request, "content_length", None)
-    if content_length is not None and content_length > VoiceInputService.MAX_AUDIO_BYTES:
+    if (
+        content_length is not None
+        and content_length > VoiceInputService.MAX_AUDIO_BYTES
+    ):
         return _json_response(
             {"status": "rejected", "message": "аудиозапись слишком велика"},
             status=413,
@@ -1061,17 +1058,11 @@ async def handle_voice_transcribe(request: Any) -> Any:
         )
     try:
         audio = await request.read()
-        result = await asyncio.to_thread(
-            service.transcribe_bytes, audio, suffix=suffix
-        )
+        result = await asyncio.to_thread(service.transcribe_bytes, audio, suffix=suffix)
     except PermissionError as exc:
-        return _json_response(
-            {"status": "rejected", "message": str(exc)}, status=403
-        )
+        return _json_response({"status": "rejected", "message": str(exc)}, status=403)
     except ValueError as exc:
-        return _json_response(
-            {"status": "rejected", "message": str(exc)}, status=400
-        )
+        return _json_response({"status": "rejected", "message": str(exc)}, status=400)
     except Exception:
         logger.exception("Локальное распознавание голосового ввода не удалось")
         return _json_response(
@@ -1380,7 +1371,11 @@ async def handle_social(request: Any) -> Any:
                 raise CommandError("conversation_ids должен быть ограниченным списком")
             clean_scopes = []
             for scope in scopes:
-                if not isinstance(scope, str) or not scope.strip() or len(scope.strip()) > 160:
+                if (
+                    not isinstance(scope, str)
+                    or not scope.strip()
+                    or len(scope.strip()) > 160
+                ):
                     raise CommandError("некорректный conversation_id")
                 clean_scopes.append(scope.strip())
             if len(set(clean_scopes)) != len(clean_scopes):
@@ -1392,7 +1387,11 @@ async def handle_social(request: Any) -> Any:
                 policy[key] = data[key]
             for key, maximum in (("max_messages", 64), ("max_replies", 64)):
                 value = data.get(key)
-                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not 0 <= value <= maximum
+                ):
                     raise CommandError(f"поле {key} вне допустимых пределов")
                 policy[key] = value
             interval = data.get("min_interval_sec")
@@ -1412,7 +1411,11 @@ async def handle_social(request: Any) -> Any:
         elif action == "edit":
             draft_id = field(data, "draft_id")
             text = data.get("text")
-            if not isinstance(text, str) or not text.strip() or len(text.strip()) > 4000:
+            if (
+                not isinstance(text, str)
+                or not text.strip()
+                or len(text.strip()) > 4000
+            ):
                 raise CommandError("текст проекта пуст или длиннее 4000 символов")
             command = f"social edit {draft_id} | {text.strip()}"
         elif action in SOCIAL_DRAFT_ACTIONS:

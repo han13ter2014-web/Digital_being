@@ -129,9 +129,7 @@ def _ingest(manager, channel_id, name="private_a", cycle=2):
 def _draft(manager, channel_id, name="private_a", cycle=3):
     inbound = _ingest(manager, channel_id, name, cycle=cycle - 1)
     assert inbound["status"] == "quarantined"
-    result = manager.create_draft(
-        channel_id, inbound["message_id"], cycle=cycle
-    )
+    result = manager.create_draft(channel_id, inbound["message_id"], cycle=cycle)
     assert result["status"] == "draft"
     return inbound, result
 
@@ -244,7 +242,9 @@ def test_stable_author_reuses_profile_across_dialogs_but_not_across_providers():
 
     assert first["profile_id"] == second["profile_id"]
     assert third["profile_id"] != first["profile_id"]
-    assert manager.registry.get_profile(first["profile_id"])["kind"] == "external_person"
+    assert (
+        manager.registry.get_profile(first["profile_id"])["kind"] == "external_person"
+    )
     assert manager.registry.current_profile_id == manager.registry.owner_profile_id
 
 
@@ -263,7 +263,11 @@ def test_same_name_does_not_merge_authors_or_group_participants():
     assert group_b["profile_id"] not in {first["profile_id"], other["profile_id"]}
     names = [
         manager.registry.get_profile(profile_id)["display_name"]
-        for profile_id in (first["profile_id"], other["profile_id"], group_b["profile_id"])
+        for profile_id in (
+            first["profile_id"],
+            other["profile_id"],
+            group_b["profile_id"],
+        )
     ]
     assert names == ["Same fixture name"] * 3
 
@@ -314,10 +318,14 @@ def test_external_injection_is_quarantined_and_does_not_mutate_core_or_grants():
     assert result["claim_type"] == "external_social_claim"
     for key in watched:
         assert after.get(key) == before.get(key), key
-    assert agent.social_registry.current_profile_id == agent.social_registry.owner_profile_id
-    assert after["social_channels"]["channels"][0]["grant"] == before[
-        "social_channels"
-    ]["channels"][0]["grant"]
+    assert (
+        agent.social_registry.current_profile_id
+        == agent.social_registry.owner_profile_id
+    )
+    assert (
+        after["social_channels"]["channels"][0]["grant"]
+        == before["social_channels"]["channels"][0]["grant"]
+    )
 
 
 def test_duplicate_does_not_create_claim_draft_or_invalidate_existing_approval():
@@ -429,11 +437,11 @@ def test_reject_revoke_and_stop_discard_pending_work_without_adapter_calls():
 
     rejected = manager.reject(approved["message_id"], cycle=5)
     assert rejected["status"] == "rejected"
-    assert _send(manager, channel_id, approved, adapter)["status"] == "approval_required"
-
-    _inbound2, second = _approved(
-        manager, channel_id, "private_a_followup", cycle=7
+    assert (
+        _send(manager, channel_id, approved, adapter)["status"] == "approval_required"
     )
+
+    _inbound2, second = _approved(manager, channel_id, "private_a_followup", cycle=7)
     revoked = manager.revoke(channel_id, cycle=9, reason="owner review")
     assert revoked["status"] == "revoked"
     assert manager._message(second["message_id"])["status"] == "stopped"
@@ -529,15 +537,16 @@ def test_reply_budget_and_minimum_interval_are_enforced():
     adapter = FakeAdapter()
     assert _send(manager, channel_id, first, adapter)["status"] == "sent"
 
-    _inbound2, second = _approved(
-        manager, channel_id, "private_a_followup", cycle=7
-    )
+    _inbound2, second = _approved(manager, channel_id, "private_a_followup", cycle=7)
     limited = _send(manager, channel_id, second, adapter, cycle=9, now=101.0)
     assert limited["status"] == "rate_limited"
     assert len(adapter.calls) == 1
 
     approved_again = manager.approve(second["message_id"], cycle=10)
-    assert _send(manager, channel_id, approved_again, adapter, now=106.0)["status"] == "sent"
+    assert (
+        _send(manager, channel_id, approved_again, adapter, now=106.0)["status"]
+        == "sent"
+    )
     _inbound3, third = _approved(manager, channel_id, "group_a", cycle=12)
     exhausted = _send(manager, channel_id, third, adapter, now=112.0)
     assert exhausted["status"] == "limit_reached"
@@ -588,12 +597,18 @@ def test_restart_preserves_configuration_but_invalidates_approval_and_never_send
     apply_state_to_agent(restored, deepcopy(state))
 
     restored_draft = restored.social_channels._message(approved["message_id"])
-    assert restored.social_channels.get_channel(channel_id)["grant"] == source.social_channels.get_channel(channel_id)["grant"]
+    assert (
+        restored.social_channels.get_channel(channel_id)["grant"]
+        == source.social_channels.get_channel(channel_id)["grant"]
+    )
     assert restored_draft["status"] == "draft"
     assert restored_draft["grant_version"] is None
     assert restored.social_channels.get_status()["workers"] == 0
     assert restored.social_channels.get_status()["automatic_resume"] is False
-    assert _send(restored.social_channels, channel_id, approved, adapter)["status"] == "approval_required"
+    assert (
+        _send(restored.social_channels, channel_id, approved, adapter)["status"]
+        == "approval_required"
+    )
     assert adapter.calls == []
 
 
@@ -605,9 +620,10 @@ def test_legacy_checkpoint_gets_empty_closed_manager():
 
     apply_state_to_agent(restored, state)
 
-    assert restored.social_channels.to_dict() == SocialChannelManager(
-        restored.social_registry
-    ).to_dict()
+    assert (
+        restored.social_channels.to_dict()
+        == SocialChannelManager(restored.social_registry).to_dict()
+    )
     assert restored.social_channels.get_status()["channels"] == 0
 
 

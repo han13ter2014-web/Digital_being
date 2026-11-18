@@ -543,10 +543,7 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
             if isinstance(message, dict)
         ]
         item["control_events"] = [
-            {
-                key: deepcopy(event.get(key))
-                for key in ("kind", "cycle", "reason")
-            }
+            {key: deepcopy(event.get(key)) for key in ("kind", "cycle", "reason")}
             for event in _own(manager, "control_events", [])
             if isinstance(event, dict)
             and event.get("channel_id") == raw_channel["channel_id"]

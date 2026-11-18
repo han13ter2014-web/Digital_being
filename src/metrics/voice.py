@@ -87,9 +87,9 @@ def _result_from_segments(
         )
 
     total_weight = sum(weight for _, weight in weighted_logprobs)
-    average_logprob = sum(
-        value * weight for value, weight in weighted_logprobs
-    ) / total_weight
+    average_logprob = (
+        sum(value * weight for value, weight in weighted_logprobs) / total_weight
+    )
     confidence = min(1.0, max(0.0, math.exp(average_logprob)))
     return STTResult(
         text=text,
@@ -178,9 +178,7 @@ class VoiceEngine(ABC):
         """Распознать речь и сохранить фактические метрики движка."""
         ...
 
-    def hear(
-        self, timeout: float = 5.0, blocking: bool = True
-    ) -> Optional[STTResult]:
+    def hear(self, timeout: float = 5.0, blocking: bool = True) -> Optional[STTResult]:
         """Распознать речь с микрофона. По умолчанию блокирующий."""
         if not self.enabled or not self.capabilities.get("stt", False):
             return None

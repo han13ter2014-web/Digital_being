@@ -73,9 +73,7 @@ class _FixtureSTT(VoiceEngine):
     def transcribe_file(self, audio):
         self.streams.append(audio)
         digest = hashlib.sha256(audio.read()).hexdigest()
-        scenario = next(
-            (item for item in SCENARIOS if item["sha256"] == digest), None
-        )
+        scenario = next((item for item in SCENARIOS if item["sha256"] == digest), None)
         if scenario is None:
             return None
         expected = scenario["fake_stt"]
@@ -215,9 +213,7 @@ def test_restart_disables_autoplay_and_drops_tts_history(monkeypatch):
         engine["spoken_count"] == 0
         for engine in restored.voice_router.status()["engines"]
     )
-    assert restored.voice_router.speak_response(
-        PRIVATE_MARKER, blocking=True
-    ) is False
+    assert restored.voice_router.speak_response(PRIVATE_MARKER, blocking=True) is False
 
 
 def test_restart_requires_permissions_again_without_stt_or_tts(monkeypatch):
@@ -331,9 +327,9 @@ def main():
     parser.add_argument("--report", required=True, type=Path)
     args = parser.parse_args()
     try:
-        with patch.object(socket, "create_connection", side_effect=AssertionError), patch.object(
-            socket.socket, "connect", side_effect=AssertionError
-        ):
+        with patch.object(
+            socket, "create_connection", side_effect=AssertionError
+        ), patch.object(socket.socket, "connect", side_effect=AssertionError):
             report = build_acceptance_report()
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(
