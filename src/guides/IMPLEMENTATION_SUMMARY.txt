@@ -38,9 +38,11 @@ AgentCooperationHub создаётся per-instance, без глобальног
 карантинируются и не попадают в память или цели Core.
 
 MetricsCollector хранит ряды в памяти без автоматической записи на диск.
-I18n доступен локально. VoiceRouter включён, использует доступные локальные
-TTS/STT и console-fallback. WebhookManager запускает worker только при
-настроенных Telegram/Discord endpoint-ах и останавливает его вместе с runner.
+I18n доступен локально. VoiceRouter по умолчанию выключен; TTS и STT требуют
+независимых разрешений DIGITAL_BEING_VOICE_TTS=1 и DIGITAL_BEING_VOICE_STT=1.
+Console-fallback не считается звуковым TTS. WebhookManager запускает worker
+только при настроенных Telegram/Discord endpoint-ах и останавливает его вместе
+с runner.
 
 4. EFFECTOR И РАЗВИТИЕ
 

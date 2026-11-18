@@ -17,6 +17,7 @@ from src.metrics.webhooks import (
     create_default_manager,
 )
 from src.metrics.voice import (
+    STTResult,
     VoiceEngine,
     ConsoleVoiceEngine,
     PyttsxVoiceEngine,
@@ -42,6 +43,7 @@ __all__ = [
     "WebhookManager",
     "create_default_manager",
     # Voice (3.2)
+    "STTResult",
     "VoiceEngine",
     "ConsoleVoiceEngine",
     "PyttsxVoiceEngine",

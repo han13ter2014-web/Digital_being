@@ -21,6 +21,7 @@ from queue import Queue, Empty
 from typing import Optional
 
 from src.core.event_bus import EventBus, Events
+from src.metrics.voice_input import PushToTalkSession
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ class ChatWindow:
         agent_name: str = "DigitalBeing",
         *,
         hide_on_close: bool = True,
+        voice_input=None,
+        voice_output=None,
     ):
         """
         Args:
@@ -89,6 +92,16 @@ class ChatWindow:
         self.bus = bus
         self.agent_name = agent_name
         self._hide_on_close = bool(hide_on_close)
+        self._voice_input = voice_input
+        self._voice_output = voice_output
+        self._voice_session = None
+        self._voice_processing = False
+        self._voice_record_button = None
+        self._voice_status_label = None
+        self._latest_voice_response = None
+        self._voice_replay_button = None
+        self._voice_auto_check = None
+        self._voice_auto_var = None
 
         self._root: Optional["tk.Tk"] = None
         self._thread: Optional[threading.Thread] = None
@@ -256,7 +269,8 @@ class ChatWindow:
         content = data.get("content", "")
 
         if content:
-            self._incoming_queue.put(("agent", content))
+            # Только фактически опубликованная реплика доступна для replay.
+            self._incoming_queue.put(("agent_response", content))
 
     async def _on_agent_web_result(self, event) -> None:
         """Этап 2.5: агент нашёл ответ в интернете (Wikipedia).
@@ -374,7 +388,8 @@ class ChatWindow:
         self._tk_mainloop()
 
     def hide(self) -> None:
-        """Скрыть окно (без уничтожения)."""
+        """Скрыть окно и немедленно прекратить активную запись."""
+        self._cancel_voice()
         if self._root is not None:
             try:
                 self._root.after(0, self._root.withdraw)
@@ -472,6 +487,7 @@ class ChatWindow:
             activeforeground="#ffffff",
         )
         send_btn.pack(side=tk.LEFT, padx=(4, 0))
+        self._build_voice_controls(input_frame)
 
         # === Кнопка "Свернуть в трей" ===
         min_btn = tk.Button(
@@ -566,12 +582,25 @@ class ChatWindow:
         мог добавить свои виды сообщений, не копируя цикл опроса.
         """
         if kind == "__close__":
+            self._cancel_voice()
             self._poll_running = False
             self._destroy_root()
+        elif kind == "__voice_result__":
+            session, result = data
+            if self._voice_session is session:
+                self._apply_voice_result(result)
+        elif kind == "__voice_error__":
+            session, message = data
+            if self._voice_session is session:
+                self._apply_voice_error(str(message))
         elif kind == "__show__":
             self._show_window()
         elif kind == "user":
             self._append_user(data)
+        elif kind == "agent_response":
+            self._latest_voice_response = str(data)
+            self._append_agent(data)
+            self._refresh_voice_output_controls()
         elif kind == "agent":
             self._append_agent(data)
         elif kind == "system":
@@ -620,6 +649,179 @@ class ChatWindow:
 
     def _append_error(self, text: str) -> None:
         self._append("❌ Ошибка:", text, tag="error")
+
+    # ============================================================
+    # Голосовой ввод: только запись и предпросмотр, без автодоставки
+    # ============================================================
+
+    def _build_voice_controls(self, parent) -> None:
+        available = bool(
+            self._voice_input is not None and self._voice_input.enabled
+        )
+        self._voice_record_button = tk.Button(
+            parent,
+            text="🎤 Говорить",
+            bg="#3a3a3a",
+            fg="#e0e0e0",
+            activebackground="#4a4a4a",
+            activeforeground="#ffffff",
+            state=tk.NORMAL if available else tk.DISABLED,
+        )
+        self._voice_record_button.pack(side=tk.RIGHT, padx=(4, 0))
+        self._voice_record_button.bind("<ButtonPress-1>", self._on_voice_press)
+        self._voice_record_button.bind("<ButtonRelease-1>", self._on_voice_release)
+        self._voice_status_label = tk.Label(
+            parent,
+            text="Голос доступен" if available else "Голос выключен",
+            bg="#2a2a2a",
+            fg="#e0e0e0" if available else "#888888",
+        )
+        self._voice_status_label.pack(side=tk.RIGHT, padx=4)
+
+        output_available = bool(
+            self._voice_output is not None and self._voice_output.enabled
+        )
+        self._voice_replay_button = tk.Button(
+            parent,
+            text="🔊 Озвучить",
+            command=self._speak_latest_response,
+            bg="#3a3a3a",
+            fg="#e0e0e0",
+            activebackground="#4a4a4a",
+            activeforeground="#ffffff",
+            state=tk.DISABLED,
+        )
+        self._voice_replay_button.pack(side=tk.RIGHT, padx=(4, 0))
+        self._voice_auto_var = tk.BooleanVar(
+            value=bool(self._voice_output and self._voice_output.auto_enabled)
+        )
+        self._voice_auto_check = tk.Checkbutton(
+            parent,
+            text="Авто",
+            variable=self._voice_auto_var,
+            command=self._on_voice_auto_toggle,
+            bg="#2a2a2a",
+            fg="#e0e0e0" if output_available else "#888888",
+            activebackground="#2a2a2a",
+            activeforeground="#ffffff",
+            selectcolor="#3a3a3a",
+            state=tk.NORMAL if output_available else tk.DISABLED,
+        )
+        self._voice_auto_check.pack(side=tk.RIGHT, padx=4)
+        self._refresh_voice_output_controls()
+
+    def _refresh_voice_output_controls(self) -> None:
+        output = getattr(self, "_voice_output", None)
+        available = bool(output is not None and output.enabled)
+        replay = getattr(self, "_voice_replay_button", None)
+        if replay is not None:
+            replay.configure(
+                state=(
+                    tk.NORMAL
+                    if available and getattr(self, "_latest_voice_response", None)
+                    else tk.DISABLED
+                )
+            )
+        auto_check = getattr(self, "_voice_auto_check", None)
+        if auto_check is not None:
+            auto_check.configure(state=tk.NORMAL if available else tk.DISABLED)
+        auto_var = getattr(self, "_voice_auto_var", None)
+        if auto_var is not None and output is not None:
+            auto_var.set(output.auto_enabled)
+
+    def _speak_latest_response(self) -> None:
+        text = getattr(self, "_latest_voice_response", None)
+        output = getattr(self, "_voice_output", None)
+        if not text or output is None:
+            self._set_voice_status("Нет опубликованного ответа для озвучивания")
+            return
+        try:
+            output.speak(text)
+        except Exception as exc:
+            self._set_voice_status(str(exc))
+            return
+        self._set_voice_status("Озвучивание опубликованного ответа запущено")
+
+    def _on_voice_auto_toggle(self) -> None:
+        output = getattr(self, "_voice_output", None)
+        var = getattr(self, "_voice_auto_var", None)
+        if output is None or var is None:
+            return
+        try:
+            output.set_auto(bool(var.get()))
+        except Exception as exc:
+            var.set(output.auto_enabled)
+            self._set_voice_status(str(exc))
+            return
+        self._set_voice_status(
+            "Автоматическое озвучивание включено"
+            if output.auto_enabled
+            else "Автоматическое озвучивание выключено"
+        )
+        self._refresh_voice_output_controls()
+
+    def _set_voice_status(self, text: str) -> None:
+        if self._voice_status_label is not None:
+            self._voice_status_label.configure(text=text)
+
+    def _on_voice_press(self, _event=None) -> None:
+        if self._voice_processing or self._voice_session is not None:
+            return
+        try:
+            session = PushToTalkSession(self._voice_input)
+            session.start()
+        except Exception as exc:
+            self._set_voice_status(str(exc))
+            return
+        self._voice_session = session
+        self._set_voice_status("● Запись — отпустите кнопку")
+
+    def _on_voice_release(self, _event=None) -> None:
+        session = self._voice_session
+        if session is None or not session.recording:
+            return
+        self._voice_processing = True
+        self._set_voice_status("Распознаю…")
+        threading.Thread(
+            target=self._finish_voice_session,
+            args=(session,),
+            daemon=True,
+            name=f"VoiceInput-{self.agent_name}",
+        ).start()
+
+    def _finish_voice_session(self, session) -> None:
+        try:
+            result = session.stop()
+        except Exception as exc:
+            self._incoming_queue.put(("__voice_error__", (session, str(exc))))
+            return
+        self._incoming_queue.put(("__voice_result__", (session, result)))
+
+    def _apply_voice_result(self, result) -> None:
+        self._voice_processing = False
+        self._voice_session = None
+        if self._input_var is not None:
+            self._input_var.set(result.text)
+        confidence = (
+            f"{round(result.confidence * 100)}%"
+            if result.confidence is not None
+            else "неизвестна"
+        )
+        self._set_voice_status(
+            f"Проверьте текст · уверенность: {confidence}"
+        )
+
+    def _apply_voice_error(self, message: str) -> None:
+        self._voice_processing = False
+        self._voice_session = None
+        self._set_voice_status(f"Ошибка: {message}")
+
+    def _cancel_voice(self) -> None:
+        session = getattr(self, "_voice_session", None)
+        self._voice_session = None
+        if session is not None:
+            session.cancel()
+        self._voice_processing = False
 
     # ============================================================
     # Отправка сообщений

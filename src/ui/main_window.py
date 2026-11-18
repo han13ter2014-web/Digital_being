@@ -67,6 +67,8 @@ class MainWindow(ChatWindow):
         *,
         enabled_controls: bool = True,
         hide_on_close: bool = False,
+        voice_input=None,
+        voice_output=None,
     ):
         """
         Args:
@@ -78,7 +80,13 @@ class MainWindow(ChatWindow):
                 выхода. По умолчанию False: без трея спрятанное окно
                 вернуть нечем.
         """
-        super().__init__(bus, agent_name, hide_on_close=hide_on_close)
+        super().__init__(
+            bus,
+            agent_name,
+            hide_on_close=hide_on_close,
+            voice_input=voice_input,
+            voice_output=voice_output,
+        )
         self._enabled_controls = bool(enabled_controls)
         self._language = i18n.load_saved_language()
         self._language_var = None
@@ -4029,6 +4037,7 @@ class MainWindow(ChatWindow):
             cursor="hand2",
         )
         self._dialog_send_button.pack(side=tk.RIGHT, fill=tk.Y)
+        self._build_voice_controls(input_frame)
         self._input_entry = tk.Entry(
             input_frame,
             textvariable=self._input_var,

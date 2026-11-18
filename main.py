@@ -548,6 +548,11 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
             if subsystem is not None and hasattr(subsystem, "user_interaction"):
                 subsystem.user_interaction = user_interaction
 
+        from src.metrics.voice_input import VoiceInputService
+        from src.metrics.voice_output import VoiceOutputService
+
+        voice_input = VoiceInputService(agent.voice_router)
+        voice_output = VoiceOutputService(agent.voice_router)
         window = None
         # Отчёт о зрелости не нуждается в окне: не создаём Tk зря.
         wants_report = getattr(args, "maturity", False) or getattr(
@@ -561,6 +566,8 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
                 agent.name,
                 # Без трея прятать окно нельзя: вернуть его нечем.
                 hide_on_close=False,
+                voice_input=voice_input,
+                voice_output=voice_output,
             )
 
         dashboard = None
@@ -570,7 +577,11 @@ def build_runtime(args: argparse.Namespace, env) -> Runtime:
 
                 if AIOHTTP_AVAILABLE:
                     dashboard = WebDashboard(
-                        host="127.0.0.1", port=args.web_port, bus=bus
+                        host="127.0.0.1",
+                        port=args.web_port,
+                        bus=bus,
+                        voice_input=voice_input,
+                        voice_output=voice_output,
                     )
                 else:
                     logger.warning("aiohttp не установлен; веб отключён, Tk работает")

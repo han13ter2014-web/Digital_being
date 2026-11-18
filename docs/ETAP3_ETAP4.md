@@ -299,18 +299,23 @@ graceful fallback:
 ```python
 from src.metrics import create_default_router
 
-router = create_default_router()      # только Console
-router.speak("Привет!")               # печатает "🔊 Привет!"
+router = create_default_router()      # оба канала выключены
+router.speak("Привет!")               # False, никакого вывода
 
-# Если установлен pyttsx3:
-router = create_default_router(allow_pyttsx3=True)
-# Если установлен faster-whisper + sounddevice:
-router = create_default_router(allow_whisper=True)
+# Явное разрешение TTS; без pyttsx3 доступен только текстовый Console fallback:
+router = create_default_router(tts_enabled=True, allow_pyttsx3=True)
+router.speak("Привет!")
 
-# Маршрутизация автоматическая — первый подходящий движок.
-router.speak("Привет!")  # через pyttsx3, если есть, иначе Console
-text = router.hear(timeout=5.0)  # через whisper
+# STT включается отдельно; hear возвращает STTResult или None:
+router = create_default_router(stt_enabled=True, allow_whisper=True)
+result = router.hear(timeout=5.0)
+if result is not None:
+    print(result.text, result.confidence, result.confidence_basis)
 ```
+
+Для production-сущности те же разрешения задаются переменными
+`DIGITAL_BEING_VOICE_TTS=1` и `DIGITAL_BEING_VOICE_STT=1`. Console перечисляется
+в `status()["text_fallback"]`, но не в `status()["audible_tts"]`.
 
 **Защита от зависаний:** `PyttsxVoiceEngine` оборачивает `pyttsx3.init()`
 в try/except — если модуль не установлен, движок просто молчит.

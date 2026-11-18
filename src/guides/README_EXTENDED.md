@@ -101,10 +101,10 @@ report = agent.evolution_analyzer.generate_self_report()
 
 - `agent.metrics` — временные ряды в памяти;
 - `agent.i18n` — локализация;
-- `agent.voice_router` — включён; доступные локальные движки имеют приоритет над console-fallback;
+- `agent.voice_router` — по умолчанию выключен; TTS и STT требуют независимых разрешений `DIGITAL_BEING_VOICE_TTS=1` и `DIGITAL_BEING_VOICE_STT=1`;
 - `agent.webhooks` — worker запускается только при настроенных endpoint-ах.
 
-Ответы пользователю передаются в голос и webhooks перед обычной доставкой в диалог. Без endpoint-ов сетевых отправок нет.
+Опубликованные ответы доступны для ручного или явно включённого автоматического озвучивания через разрешённый TTS. Console-fallback обозначен в статусе отдельно от звукового TTS. Webhooks работают только при настроенных endpoint-ах.
 
 ## Проверка и документы
 

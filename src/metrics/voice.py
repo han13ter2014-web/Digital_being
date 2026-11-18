@@ -27,13 +27,77 @@ Digital Being — текстовое существо, и голос для не
 """
 
 import logging
+import math
 import os
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class STTResult:
+    """Результат STT с измеренной оценкой, а не предполагаемой уверенностью.
+
+    ``confidence`` остаётся ``None``, если движок не предоставил оценку.
+    ``confidence_basis`` называет исходную метрику: это не утверждение о
+    калиброванной вероятности правильности всей фразы.
+    """
+
+    text: str
+    confidence: Optional[float]
+    confidence_basis: Optional[str]
+    engine: str
+    model: Optional[str] = None
+
+
+def _result_from_segments(
+    segments: Iterable[Any], *, engine: str, model: Optional[str]
+) -> Optional[STTResult]:
+    """Собрать текст и прозрачную оценку из фактических segment-метрик."""
+    rows = list(segments)
+    text = " ".join(str(getattr(seg, "text", "")).strip() for seg in rows).strip()
+    if not text:
+        return None
+
+    weighted_logprobs = []
+    for segment in rows:
+        value = getattr(segment, "avg_logprob", None)
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            continue
+        start = getattr(segment, "start", None)
+        end = getattr(segment, "end", None)
+        duration = (
+            float(end) - float(start)
+            if isinstance(start, (int, float)) and isinstance(end, (int, float))
+            else 1.0
+        )
+        weighted_logprobs.append((float(value), max(duration, 0.0) or 1.0))
+
+    if not weighted_logprobs:
+        return STTResult(
+            text=text,
+            confidence=None,
+            confidence_basis=None,
+            engine=engine,
+            model=model,
+        )
+
+    total_weight = sum(weight for _, weight in weighted_logprobs)
+    average_logprob = sum(
+        value * weight for value, weight in weighted_logprobs
+    ) / total_weight
+    confidence = min(1.0, max(0.0, math.exp(average_logprob)))
+    return STTResult(
+        text=text,
+        confidence=confidence,
+        confidence_basis="faster_whisper_avg_logprob_exp",
+        engine=engine,
+        model=model,
+    )
 
 
 # ============================================================
@@ -110,11 +174,13 @@ class VoiceEngine(ABC):
     # ----------------------------------------------------------------
 
     @abstractmethod
-    def _listen(self, timeout: float = 5.0) -> Optional[str]:
-        """Реализация распознавания речи. Возвращает распознанный текст."""
+    def _listen(self, timeout: float = 5.0) -> Optional[STTResult]:
+        """Распознать речь и сохранить фактические метрики движка."""
         ...
 
-    def hear(self, timeout: float = 5.0, blocking: bool = True) -> Optional[str]:
+    def hear(
+        self, timeout: float = 5.0, blocking: bool = True
+    ) -> Optional[STTResult]:
         """Распознать речь с микрофона. По умолчанию блокирующий."""
         if not self.enabled or not self.capabilities.get("stt", False):
             return None
@@ -127,6 +193,10 @@ class VoiceEngine(ABC):
             self._error_count += 1
             logger.warning(f"[voice:{self.name}] hear error: {e}")
             return None
+
+    def transcribe_file(self, audio: Any) -> Optional[STTResult]:
+        """Распознать файл или binary stream, если движок это поддерживает."""
+        return None
 
     # ----------------------------------------------------------------
     # Статус
@@ -155,7 +225,7 @@ class ConsoleVoiceEngine(VoiceEngine):
     """
 
     name = "console"
-    capabilities = {"tts": True, "stt": False}
+    capabilities = {"tts": True, "stt": False, "audible": False}
 
     def __init__(self, *, enabled: bool = True, prefix: str = "🔊") -> None:
         super().__init__(enabled=enabled)
@@ -177,7 +247,7 @@ class ConsoleVoiceEngine(VoiceEngine):
                 pass
         return True
 
-    def _listen(self, timeout: float = 5.0) -> Optional[str]:
+    def _listen(self, timeout: float = 5.0) -> Optional[STTResult]:
         return None  # Console не умеет слушать
 
     def get_log(self) -> List[str]:
@@ -198,7 +268,7 @@ class PyttsxVoiceEngine(VoiceEngine):
     """
 
     name = "pyttsx3"
-    capabilities = {"tts": True, "stt": False}
+    capabilities = {"tts": True, "stt": False, "audible": True}
 
     def __init__(
         self, *, enabled: bool = True, rate: int = 175, voice_id: Optional[str] = None
@@ -238,7 +308,7 @@ class PyttsxVoiceEngine(VoiceEngine):
             logger.warning(f"[voice:pyttsx3] synth error: {e}")
             return False
 
-    def _listen(self, timeout: float = 5.0) -> Optional[str]:
+    def _listen(self, timeout: float = 5.0) -> Optional[STTResult]:
         return None
 
     def list_voices(self) -> List[Dict[str, str]]:
@@ -269,7 +339,7 @@ class WhisperSTTEngine(VoiceEngine):
     """
 
     name = "whisper"
-    capabilities = {"tts": False, "stt": True}
+    capabilities = {"tts": False, "stt": True, "audible": False}
 
     def __init__(self, *, enabled: bool = True, model_size: str = "base") -> None:
         super().__init__(enabled=enabled)
@@ -292,11 +362,11 @@ class WhisperSTTEngine(VoiceEngine):
     ) -> bool:
         return False  # Whisper — только STT
 
-    def _listen(self, timeout: float = 5.0) -> Optional[str]:
+    def _listen(self, timeout: float = 5.0) -> Optional[STTResult]:
         if not self._model:
             return None
         try:
-            # Захватываем аудио с микрофона
+            # 9C-1 заменит фиксированное окно на явный push-to-talk адаптер.
             import sounddevice as sd  # type: ignore
             import numpy as np  # noqa: F401 — проверка наличия numpy для распознавания
 
@@ -311,9 +381,10 @@ class WhisperSTTEngine(VoiceEngine):
             sd.wait()
             audio = audio.flatten()
 
-            segments, info = self._model.transcribe(audio, beam_size=5)
-            text = " ".join(seg.text.strip() for seg in segments).strip()
-            return text or None
+            segments, _ = self._model.transcribe(audio, beam_size=5)
+            return _result_from_segments(
+                segments, engine=self.name, model=self._model_size
+            )
         except ImportError:
             logger.debug("[voice:whisper] sounddevice/numpy не установлены")
             return None
@@ -321,14 +392,15 @@ class WhisperSTTEngine(VoiceEngine):
             logger.warning(f"[voice:whisper] listen error: {e}")
             return None
 
-    def transcribe_file(self, audio_path: str) -> Optional[str]:
-        """Распознать аудиофайл (offline)."""
+    def transcribe_file(self, audio_path: Any) -> Optional[STTResult]:
+        """Распознать offline путь или binary stream с confidence."""
         if not self._model:
             return None
         try:
             segments, _ = self._model.transcribe(audio_path, beam_size=5)
-            text = " ".join(seg.text.strip() for seg in segments).strip()
-            return text or None
+            return _result_from_segments(
+                segments, engine=self.name, model=self._model_size
+            )
         except Exception as e:
             logger.warning(f"[voice:whisper] file error: {e}")
             return None
@@ -340,30 +412,74 @@ class WhisperSTTEngine(VoiceEngine):
 
 
 class VoiceRouter:
-    """Маршрутизатор, выключенный до явного разрешения владельца."""
+    """Маршрутизатор с независимыми разрешениями TTS и STT."""
 
-    def __init__(self, *, enabled: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        enabled: bool = False,
+        tts_enabled: Optional[bool] = None,
+        stt_enabled: Optional[bool] = None,
+    ) -> None:
         self._engines: List[VoiceEngine] = []
         self._lock = threading.RLock()
-        self.enabled = bool(enabled)
+        self.tts_enabled = bool(enabled if tts_enabled is None else tts_enabled)
+        self.stt_enabled = bool(enabled if stt_enabled is None else stt_enabled)
+        # Разрешение TTS не означает согласие на автоматическое озвучивание.
+        self.auto_speak_enabled = False
+
+    @property
+    def enabled(self) -> bool:
+        """Голосовой контур активен, если разрешён хотя бы один канал."""
+        return self.tts_enabled or self.stt_enabled
+
+    @enabled.setter
+    def enabled(self, enabled: bool) -> None:
+        """Сохранить совместимость прежнего публичного атрибута."""
+        self.set_enabled(enabled)
+
+    def _apply_permissions(self, engine: VoiceEngine) -> None:
+        engine.enabled = bool(
+            (self.tts_enabled and engine.capabilities.get("tts"))
+            or (self.stt_enabled and engine.capabilities.get("stt"))
+        )
 
     def set_enabled(self, enabled: bool) -> None:
+        """Совместимый общий переключатель: меняет оба канала сразу."""
         with self._lock:
-            self.enabled = bool(enabled)
+            self.tts_enabled = bool(enabled)
+            self.stt_enabled = bool(enabled)
             for engine in self._engines:
-                engine.enabled = self.enabled
+                self._apply_permissions(engine)
+
+    def set_tts_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self.tts_enabled = bool(enabled)
+            for engine in self._engines:
+                self._apply_permissions(engine)
+
+    def set_stt_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self.stt_enabled = bool(enabled)
+            for engine in self._engines:
+                self._apply_permissions(engine)
 
     def add(self, engine: VoiceEngine) -> None:
         with self._lock:
-            engine.enabled = self.enabled
+            self._apply_permissions(engine)
             self._engines.append(engine)
 
     def list_engines(self) -> List[str]:
         with self._lock:
             return [e.name for e in self._engines]
 
+    def set_auto_speak(self, enabled: bool) -> None:
+        """Включить автоматический вывод только по явной команде владельца."""
+        with self._lock:
+            self.auto_speak_enabled = bool(enabled)
+
     def speak(self, text: str, **kwargs: Any) -> bool:
-        if not self.enabled:
+        if not self.tts_enabled:
             return False
         with self._lock:
             engines = list(self._engines)
@@ -372,8 +488,14 @@ class VoiceRouter:
                 return engine.speak(text, **kwargs)
         return False
 
-    def hear(self, timeout: float = 5.0, **kwargs: Any) -> Optional[str]:
-        if not self.enabled:
+    def speak_response(self, text: str, **kwargs: Any) -> bool:
+        """Озвучить проверенный ответ только в включённом audible auto-режиме."""
+        if not self.auto_speak_enabled or not self.status().get("audible_tts"):
+            return False
+        return self.speak(text, **kwargs)
+
+    def hear(self, timeout: float = 5.0, **kwargs: Any) -> Optional[STTResult]:
+        if not self.stt_enabled:
             return None
         with self._lock:
             engines = list(self._engines)
@@ -382,18 +504,48 @@ class VoiceRouter:
                 return engine.hear(timeout=timeout, **kwargs)
         return None
 
+    def transcribe_file(self, audio: Any) -> Optional[STTResult]:
+        """Распознать записанный ввод без обращения к микрофону."""
+        if not self.stt_enabled:
+            return None
+        with self._lock:
+            engines = list(self._engines)
+        for engine in engines:
+            if engine.enabled and engine.capabilities.get("stt"):
+                return engine.transcribe_file(audio)
+        return None
+
     def status(self) -> Dict[str, Any]:
         with self._lock:
             engines = list(self._engines)
-            enabled = self.enabled
+            tts_enabled = self.tts_enabled
+            stt_enabled = self.stt_enabled
+        available_tts = [
+            e.name
+            for e in engines
+            if tts_enabled and e.enabled and e.capabilities.get("tts")
+        ]
         return {
-            "enabled": enabled,
+            "enabled": tts_enabled or stt_enabled,
+            "tts_enabled": tts_enabled,
+            "stt_enabled": stt_enabled,
+            "auto_speak": self.auto_speak_enabled,
             "engines": [e.status() for e in engines],
-            "available_tts": [
-                e.name for e in engines if enabled and e.capabilities.get("tts")
-            ],
+            "available_tts": available_tts,
             "available_stt": [
-                e.name for e in engines if enabled and e.capabilities.get("stt")
+                e.name
+                for e in engines
+                if stt_enabled and e.enabled and e.capabilities.get("stt")
+            ],
+            "audible_tts": [
+                e.name
+                for e in engines
+                if e.name in available_tts and e.capabilities.get("audible", False)
+            ],
+            "text_fallback": [
+                e.name
+                for e in engines
+                if e.name in available_tts and not e.capabilities.get("audible", False)
             ],
         }
 
@@ -404,22 +556,30 @@ class VoiceRouter:
 
 
 def create_default_router(
-    *, allow_pyttsx3: bool = False, allow_whisper: bool = False, enabled: bool = False
+    *,
+    allow_pyttsx3: bool = False,
+    allow_whisper: bool = False,
+    enabled: bool = False,
+    tts_enabled: Optional[bool] = None,
+    stt_enabled: Optional[bool] = None,
 ) -> VoiceRouter:
-    """Создать роутер с реальными движками в приоритете и console-fallback."""
-    router = VoiceRouter(enabled=enabled)
-    if enabled and allow_pyttsx3:
+    """Создать только явно разрешённые движки и console-fallback."""
+    router = VoiceRouter(
+        enabled=enabled, tts_enabled=tts_enabled, stt_enabled=stt_enabled
+    )
+    if router.tts_enabled and allow_pyttsx3:
         try:
             router.add(PyttsxVoiceEngine(enabled=True))
         except Exception:
             pass
-    if enabled and allow_whisper:
+    if router.stt_enabled and allow_whisper:
         router.add(WhisperSTTEngine(enabled=True))
-    router.add(ConsoleVoiceEngine(enabled=enabled))
+    router.add(ConsoleVoiceEngine(enabled=router.tts_enabled))
     return router
 
 
 __all__ = [
+    "STTResult",
     "VoiceEngine",
     "ConsoleVoiceEngine",
     "PyttsxVoiceEngine",

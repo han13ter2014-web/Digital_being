@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "catalog_revision": "9c3-r1",
+  "fixture_kind": "synthetic_pcm_transport_only",
+  "sample_rate": 16000,
+  "channels": 1,
+  "sample_width_bytes": 2,
+  "frames": 1600,
+  "scenarios": [
+    {
+      "scenario_id": "ru_transport",
+      "audio": "ru_tone.wav",
+      "sha256": "f658d6924f4ea97e1558ac2eb8f0e2daa26cd4687fa381d7967afd976f32ad75",
+      "real_speech": false,
+      "fake_stt": {
+        "text": "Проверка голосового ввода",
+        "confidence": 0.75
+      }
+    },
+    {
+      "scenario_id": "en_transport",
+      "audio": "en_tone.wav",
+      "sha256": "fc8ffa02b483b4d509be7969abf23d2df6d32286f22e59ec93e0a834224d425f",
+      "real_speech": false,
+      "fake_stt": {
+        "text": "Voice input check",
+        "confidence": 0.5
+      }
+    }
+  ]
+}

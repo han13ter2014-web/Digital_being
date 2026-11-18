@@ -39,6 +39,10 @@ except ImportError:  # необязательная зависимость: Tk �
 logger = logging.getLogger(__name__)
 STATE_KEY: web.AppKey = web.AppKey("state", Any) if AIOHTTP_AVAILABLE else None
 BUS_KEY: web.AppKey = web.AppKey("bus", Any) if AIOHTTP_AVAILABLE else None
+VOICE_KEY: web.AppKey = web.AppKey("voice_input", Any) if AIOHTTP_AVAILABLE else None
+VOICE_OUTPUT_KEY: web.AppKey = (
+    web.AppKey("voice_output", Any) if AIOHTTP_AVAILABLE else None
+)
 
 DIALOGUE_EVENTS = (
     "agent_question",
@@ -241,7 +245,7 @@ main{width:100%;max-width:1600px;min-height:100dvh;margin:0 auto;padding:16px 16
 <div class="card span-12"><p class="eyebrow">Только конкретная ревизия · без send в Web</p><h2>Проект социального ответа</h2><form id="social-edit-form" class="control-stack"><label for="social-edit-text">Точная редакция</label><textarea id="social-edit-text" class="needs-core social-draft-action" maxlength="4000" disabled placeholder="Активного проекта нет"></textarea><div class="controls"><button id="social-draft-create" class="control-button needs-core social-draft-action" type="button" disabled>Проект к последней реплике</button><button class="control-button needs-core social-draft-action" type="submit" disabled>Сохранить изменения</button><button id="social-approve" class="control-button needs-core social-draft-action" type="button" disabled>Одобрить</button><button id="social-reject" class="control-button needs-core social-draft-action danger" type="button" disabled>Отклонить</button></div></form><p class="notice">Новая реплика, edit, изменение grant и restart инвалидируют прежнее одобрение. Web не отправляет сообщения и не принимает внешний ingress.</p><p class="feedback" id="social-feedback" role="status"></p></div>
 </div></section>
 <section id="page-access" class="page" aria-label="Доступы"><div class="grid"><div class="card span-6"><p class="eyebrow">Границы возможностей</p><h2>Разрешения · фактическое состояние</h2><div id="access-list" class="rows"></div><p class="notice">Кнопка отправляет существующую команду доступа. Индикация изменится только после фактического снимка.</p><p class="feedback" id="access-feedback" role="status"></p></div><div class="card span-6"><p class="eyebrow">Исполнение команд</p><h2>Действия</h2><div id="effector-list" class="rows"></div></div></div></section>
-<section id="page-dialogue" class="page" aria-label="Диалог"><div class="card"><div class="panel-heading"><div><p class="eyebrow">Живой поток</p><h2><span class="status-dot"></span>Диалог</h2></div><span class="status-badge">SSE · ПОРЯДОК</span></div><p class="notice">Сообщение уходит через событие пользователя. Лента пополняется только событием шины; после переподключения продолжается с последнего номера.</p><div id="proposal-list" aria-live="polite"></div><div id="dialogue-feed" class="list" aria-live="polite"></div><form id="dialogue-form" class="control-stack"><label for="dialogue-input">Сообщение сущности</label><textarea id="dialogue-input" class="needs-core" maxlength="8000" required disabled placeholder="Ядро не подключено"></textarea><div class="control-line"><button id="dialogue-send" class="control-button needs-core" type="submit" disabled>Отправить</button><span id="dialogue-feedback" class="feedback" role="status"></span></div></form></div></section>
+<section id="page-dialogue" class="page" aria-label="Диалог"><div class="card"><div class="panel-heading"><div><p class="eyebrow">Живой поток</p><h2><span class="status-dot"></span>Диалог</h2></div><span class="status-badge">SSE · ПОРЯДОК</span></div><p class="notice">Сообщение уходит через событие пользователя. Лента пополняется только событием шины; после переподключения продолжается с последнего номера.</p><div id="proposal-list" aria-live="polite"></div><div id="dialogue-feed" class="list" aria-live="polite"></div><form id="dialogue-form" class="control-stack"><label for="dialogue-input">Сообщение сущности</label><textarea id="dialogue-input" class="needs-core" maxlength="8000" required disabled placeholder="Ядро не подключено"></textarea><div class="control-line"><button id="voice-record" class="control-button" type="button" disabled>🎤 Удерживать</button><span id="voice-status" class="feedback" role="status">Голос выключен</span><button id="voice-replay" class="control-button" type="button" disabled>🔊 Озвучить ответ</button><label><input id="voice-auto" type="checkbox" disabled> Автоозвучивание</label><span id="voice-output-status" class="feedback" role="status">Звуковой TTS недоступен</span><button id="dialogue-send" class="control-button needs-core" type="submit" disabled>Отправить</button><span id="dialogue-feedback" class="feedback" role="status"></span></div></form></div></section>
 <footer class="page-footer"><span>Digital Being · обсерватория</span><span>Данные приходят из снимков состояния; изменения — только через разрешённые события</span></footer>
 </main></div>
 <script>
@@ -290,7 +294,7 @@ const emotions=life.emotions||{},levels=emotions.levels||{};$('emotion-dominant'
 const body=life.body||{};$('fatigue').textContent=label(body.fatigue_level||'—');rows('body-rows',[['Усталость',number(body.fatigue)],['АТФ',number(body.atp)],['АТФ, доля',number(body.atp_ratio)],['Глюкоза',number(body.glucose)],['Митохондрии',number(body.mitochondrial_health)],['Нужен отдых',t(body.needs_rest?'да':'нет')]]);const activity=life.now?.activity;$('now-activity').replaceChildren(node('h3',activity?`${label(activity.action)} · ${label(activity.target)}`:t('Свободный цикл')),node('div',activity?label(activity.reason||activity.source):t('Нет активного намерения'),'muted'));$('motivation').textContent=formatJSON(life.motivation||{});const intents=$('intentions');intents.replaceChildren();for(const item of (life.intentions?.recent||[]).slice(-8).reverse()){const e=node('div','','entry');e.append(node('div',`${label(item.action)} · ${label(item.target)}`),node('div',`${label(item.status)} · ${t('цикл')} ${value(item.cycle)}`,'meta'));intents.append(e)}if(!intents.children.length)intents.append(node('div',t('Пока нет записанных намерений'),'empty'));
 renderAccess(life.access||{});renderProposals(life.proposals||{});renderTutor(life.tutor||{});renderEnglishTutor(life.english_tutor||{});renderExternal(life.external_contacts||{});renderSocialChannels(life.social_channels||{});const effectorRows=[...Object.entries(life.effector?.counts||{}).map(([key,item])=>[field(key),item]),['Последняя ошибка',life.effector?.last_error]];if(life.access?.workspace)effectorRows.unshift(['Рабочая область',life.access.workspace.path]);rows('effector-list',effectorRows);renderActivities(life.activities||{});}catch(e){console.warn(e)}}
 function renderActivities(a){const box=$('activity-cards');box.replaceChildren();for(const [key,title] of [['creative','Тексты'],['art','Рисунки'],['music','Музыка'],['game','Игра'],['guess_game','Угадывание']]){const card=node('div','','card span-6');card.append(node('h2',t(title)));const item=a[key];if(item&&typeof item==='object'&&!Array.isArray(item)){const count=item.count??((key==='game'||key==='guess_game')?t('активна'):'—');card.append(node('div',label(count),'big'));const pre=node('pre',formatJSON(item));card.append(pre)}else card.append(node('div',label(item),'muted'));box.append(card)}if(!box.children.length)box.append(node('div',t('Нет данных'),'empty'))}
-async function refreshControl(){try{const c=await getJSON('/api/control');latestControl=c;document.querySelectorAll('.needs-core').forEach(el=>{el.disabled=!c.bus_connected});document.querySelectorAll('.proposal-action').forEach(el=>{el.disabled=!c.bus_connected||$('proposal-list').dataset.awaiting==='1'});document.querySelectorAll('.tutor-action,.tutor-request-action').forEach(el=>{el.disabled=!c.bus_connected||!latestTutorAvailable});$('core-connection').textContent=t(c.bus_connected?'Ядро подключено. Команды идут через шину событий; ответ здесь означает только приём события.':'Ядро не подключено. Это автономный предпросмотр: команды отключены.');$('core-connection').classList.toggle('connection-off',!c.bus_connected);$('sidebar-state').textContent=t(c.bus_connected?'Ядро подключено':'Ядро не подключено');$('connection-dot').style.background=c.bus_connected?'var(--green)':'var(--amber)';$('dialogue-input').placeholder=t(c.bus_connected?'Напишите сообщение…':'Ядро не подключено');$('pause-button').disabled=!c.bus_connected||c.paused!==false;$('resume-button').disabled=!c.bus_connected||c.paused!==true;$('dream-button').disabled=!c.bus_connected||c.life_state!=='alive';$('terminate-button').disabled=!c.bus_connected||c.life_state!=='alive';$('wake-button').disabled=!c.bus_connected||c.life_state!=='dormant';if(c.speed_mode&&document.activeElement!==$('speed-mode'))$('speed-mode').value=c.speed_mode;const save=c.last_save_at?new Date(c.last_save_at*1000).toLocaleTimeString(language==='zh'?'zh-CN':language):'—';rows('control-facts',[['Фактическая пауза',c.paused===null||c.paused===undefined?'—':t(c.paused?'да':'нет')],['Фактический темп',c.speed_mode],['Состояние жизни',c.life_state],['Последнее сохранение',c.last_save_ok===null||c.last_save_ok===undefined?t('ещё не было'):`${save} · ${t(c.last_save_ok?'успешно':'ошибка')}`]]);const prompt=c.life_prompt;$('life-panel').hidden=!prompt;if(prompt){if(renderedRequestId!==prompt.request_id){$('life-confirm-input').value='';renderedRequestId=prompt.request_id}$('life-title').textContent=t(prompt.kind==='terminate'?'Подтверждение необратимого ухода':'Подтверждение сна');$('life-description').textContent=prompt.description||t('Ядро ожидает явное подтверждение.');$('life-request-id').textContent=prompt.request_id;$('life-phrase').textContent=prompt.phrase||'—'}else renderedRequestId=null;const result=c.life_result;$('life-result').textContent=result?`${t(result.ok?'Результат: успешно':'Результат: отклонено')} · ${result.message||''}`:'';$('life-result').classList.toggle('error',!!result&&!result.ok);renderAccess(c.access||{});updateExternalControls();updateSocialControls()}catch(e){feedback('command-feedback',e.message,true)}}
+async function refreshControl(){try{const c=await getJSON('/api/control');latestControl=c;document.querySelectorAll('.needs-core').forEach(el=>{el.disabled=!c.bus_connected});document.querySelectorAll('.proposal-action').forEach(el=>{el.disabled=!c.bus_connected||$('proposal-list').dataset.awaiting==='1'});document.querySelectorAll('.tutor-action,.tutor-request-action').forEach(el=>{el.disabled=!c.bus_connected||!latestTutorAvailable});$('core-connection').textContent=t(c.bus_connected?'Ядро подключено. Команды идут через шину событий; ответ здесь означает только приём события.':'Ядро не подключено. Это автономный предпросмотр: команды отключены.');$('core-connection').classList.toggle('connection-off',!c.bus_connected);$('sidebar-state').textContent=t(c.bus_connected?'Ядро подключено':'Ядро не подключено');$('connection-dot').style.background=c.bus_connected?'var(--green)':'var(--amber)';$('dialogue-input').placeholder=t(c.bus_connected?'Напишите сообщение…':'Ядро не подключено');$('pause-button').disabled=!c.bus_connected||c.paused!==false;$('resume-button').disabled=!c.bus_connected||c.paused!==true;$('dream-button').disabled=!c.bus_connected||c.life_state!=='alive';$('terminate-button').disabled=!c.bus_connected||c.life_state!=='alive';$('wake-button').disabled=!c.bus_connected||c.life_state!=='dormant';if(c.speed_mode&&document.activeElement!==$('speed-mode'))$('speed-mode').value=c.speed_mode;const save=c.last_save_at?new Date(c.last_save_at*1000).toLocaleTimeString(language==='zh'?'zh-CN':language):'—';rows('control-facts',[['Фактическая пауза',c.paused===null||c.paused===undefined?'—':t(c.paused?'да':'нет')],['Фактический темп',c.speed_mode],['Состояние жизни',c.life_state],['Последнее сохранение',c.last_save_ok===null||c.last_save_ok===undefined?t('ещё не было'):`${save} · ${t(c.last_save_ok?'успешно':'ошибка')}`]]);const prompt=c.life_prompt;$('life-panel').hidden=!prompt;if(prompt){if(renderedRequestId!==prompt.request_id){$('life-confirm-input').value='';renderedRequestId=prompt.request_id}$('life-title').textContent=t(prompt.kind==='terminate'?'Подтверждение необратимого ухода':'Подтверждение сна');$('life-description').textContent=prompt.description||t('Ядро ожидает явное подтверждение.');$('life-request-id').textContent=prompt.request_id;$('life-phrase').textContent=prompt.phrase||'—'}else renderedRequestId=null;const result=c.life_result;$('life-result').textContent=result?`${t(result.ok?'Результат: успешно':'Результат: отклонено')} · ${result.message||''}`:'';$('life-result').classList.toggle('error',!!result&&!result.ok);renderAccess(c.access||{});updateExternalControls();updateSocialControls();updateVoiceOutputControls()}catch(e){feedback('command-feedback',e.message,true)}}
 async function refreshDiary(){try{const d=await getJSON(`/api/diary?offset=${diaryOffset}&limit=${diaryLimit}`),list=$('diary-list');list.replaceChildren();for(const item of d.episodes){const e=node('div','','entry');e.append(node('time',`${t('цикл')} ${value(item.ts)} · ${label(item.action)} · ${t(item.ok?'завершено':'не завершено')}`));const args=item.args?.target?` · ${label(item.args.target)}`:'';e.append(node('p',`${value(item.task)}${args}`));if(item.error)e.append(node('div',String(item.error),'warn'));list.append(e)}if(!d.episodes.length)list.append(node('div',t('Записей в этом окне нет'),'empty'));$('diary-cache').textContent=t('В кэше только для чтения: {stored} из максимум {limit}. Более старые записи могут существовать вне кэша.').replace('{stored}',d.stored).replace('{limit}',d.cache_limit);$('diary-position').textContent=`${d.returned?d.offset+1:0}–${d.offset+d.returned} / ${d.stored}`;$('diary-prev').disabled=d.offset===0;$('diary-next').disabled=!d.has_more}catch(e){console.warn(e)}}
 const GRAPH_NS='http://www.w3.org/2000/svg';
 let graphData={nodes:[],edges:[]},graphPositions={},graphSize={w:0,h:0},graphZoom=1,graphPan={x:0,y:0},graphSelected=null,graphHovered=null,graphGesture=null;
@@ -394,8 +398,8 @@ function graphPointerEnd(event){if(!graphPointers.has(event.pointerId))return;co
 }
 $('graph').addEventListener('pointerup',graphPointerEnd);$('graph').addEventListener('pointercancel',graphPointerEnd);
 if(window.ResizeObserver){const observer=new ResizeObserver(()=>{if(!$('page-graph').classList.contains('active'))return;const w=Math.round($('graph').clientWidth),h=Math.round($('graph').clientHeight);if(w&&h&&(w!==graphSize.w||h!==graphSize.h))graphRender()});observer.observe($('graph'))}
-function addDialogue(item){if(!item||item.sequence<=lastSequence)return;if(item.sequence>lastSequence+1){startDialogue();return}lastSequence=item.sequence;if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${label(item.kind)}`),node('p',item.text||formatJSON(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
-async function startDialogue(){try{if(eventSource){eventSource.close();eventSource=null}const d=await getJSON('/api/dialogue?limit=50');$('dialogue-feed').replaceChildren();lastSequence=d.events.length?d.events[0].sequence-1:0;for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
+function addDialogue(item){if(!item||item.sequence<=lastSequence)return;if(item.sequence>lastSequence+1){startDialogue();return}lastSequence=item.sequence;if(item.kind==='life_prompt'||item.kind==='life_result'){refreshControl();return}if(item.kind==='agent'&&String(item.text||'').trim()){latestVoiceResponseSequence=item.sequence;updateVoiceOutputControls()}const e=node('div','',`entry dialogue-${item.kind==='user'?'user':item.kind==='thought'?'thought':'agent'}`);e.append(node('time',`${item.time||''} · #${item.sequence} · ${label(item.kind)}`),node('p',item.text||formatJSON(item.data||{})));$('dialogue-feed').prepend(e);while($('dialogue-feed').children.length>100)$('dialogue-feed').lastChild.remove()}
+async function startDialogue(){try{if(eventSource){eventSource.close();eventSource=null}const d=await getJSON('/api/dialogue?limit=50');$('dialogue-feed').replaceChildren();latestVoiceResponseSequence=null;lastSequence=d.events.length?d.events[0].sequence-1:0;for(const item of d.events)addDialogue(item);connectDialogue()}catch(e){setTimeout(startDialogue,3000)}}
 function connectDialogue(){if(eventSource)eventSource.close();eventSource=new EventSource(`/stream/dialogue?after=${lastSequence}`);eventSource.onmessage=e=>{try{addDialogue(JSON.parse(e.data))}catch(err){console.warn(err)}};eventSource.onerror=()=>{/* EventSource reconnects with Last-Event-ID; sequence also deduplicates. */}}
 const PAGE_COPY={
  now:['Сейчас','Спокойный фон','Сущность наблюдает, размышляет и выбирает следующий шаг.'],
@@ -430,13 +434,22 @@ for(const action of ['revoke','stop'])$(`social-${action}`).onclick=()=>socialCh
 $('social-draft-create').onclick=()=>{const channel=selectedSocialChannel(),inbound=[...(channel?.messages||[])].reverse().find(item=>item.direction==='inbound');if(!inbound){feedback('social-feedback',t('В канале нет входящей реплики'),true);return}socialChannelCommand('draft',{inbound_message_id:inbound.message_id})};
 $('social-edit-form').onsubmit=e=>{e.preventDefault();const pending=selectedSocialChannel()?.pending_draft,text=$('social-edit-text').value.trim();if(!pending){feedback('social-feedback',t('Активного проекта нет'),true);return}if(!text){feedback('social-feedback',t('Текст ответа не должен быть пустым'),true);return}sendCommand('/api/social',{action:'edit',draft_id:pending.message_id,text},'social-feedback')};
 for(const action of ['approve','reject'])$(`social-${action}`).onclick=()=>{const pending=selectedSocialChannel()?.pending_draft;if(!pending){feedback('social-feedback',t('Активного проекта нет'),true);return}sendCommand('/api/social',{action,draft_id:pending.message_id},'social-feedback')};
+let voiceStream=null,voiceRecorder=null,voiceChunks=[],voiceHeld=false,voiceCancelled=false,voiceTranscribing=false,latestVoiceAvailable=false,latestVoiceOutputAvailable=false,latestVoiceAuto=false,latestVoiceResponseSequence=null,voiceOutputBusy=false;
+function stopVoiceTracks(){if(voiceStream){voiceStream.getTracks().forEach(track=>track.stop());voiceStream=null}}
+function updateVoiceOutputControls(){const connected=latestControl?.bus_connected===true;$('voice-replay').disabled=!connected||!latestVoiceOutputAvailable||latestVoiceResponseSequence===null||voiceOutputBusy;$('voice-auto').disabled=!connected||!latestVoiceOutputAvailable||voiceOutputBusy;if(!voiceOutputBusy)$('voice-auto').checked=latestVoiceAuto}
+async function refreshVoiceStatus(){try{const status=await getJSON('/api/voice');latestVoiceAvailable=status.enabled===true;latestVoiceOutputAvailable=status.tts_enabled===true;latestVoiceAuto=status.auto_speak===true;latestVoiceResponseSequence=status.latest_response_sequence??null;$('voice-status').textContent=t(latestVoiceAvailable?'Удерживайте кнопку для записи':'Локальный STT недоступен');$('voice-output-status').textContent=t(latestVoiceOutputAvailable?(latestVoiceAuto?'Автоозвучивание включено':'Готов к озвучиванию по команде'):'Звуковой TTS недоступен')}catch(error){latestVoiceAvailable=false;latestVoiceOutputAvailable=false;latestVoiceAuto=false;$('voice-status').textContent=error.message;$('voice-output-status').textContent=error.message}finally{$('voice-record').disabled=!latestControl?.bus_connected||!latestVoiceAvailable||voiceTranscribing;updateVoiceOutputControls()}}
+async function startVoiceRecording(){if(voiceRecorder||voiceTranscribing||!latestControl?.bus_connected||!latestVoiceAvailable)return;voiceHeld=true;voiceCancelled=false;if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){$('voice-status').textContent=t('Браузер не поддерживает запись');return}try{voiceStream=await navigator.mediaDevices.getUserMedia({audio:true});if(!voiceHeld){stopVoiceTracks();return}voiceChunks=[];voiceRecorder=new MediaRecorder(voiceStream);voiceRecorder.ondataavailable=event=>{if(event.data.size)voiceChunks.push(event.data)};voiceRecorder.onstop=async()=>{stopVoiceTracks();const cancelled=voiceCancelled,blob=new Blob(voiceChunks,{type:voiceRecorder?.mimeType||'audio/webm'});voiceRecorder=null;voiceChunks=[];if(cancelled){$('voice-status').textContent=t('Запись отменена');return}voiceTranscribing=true;$('voice-record').disabled=true;$('voice-status').textContent=t('Распознаю…');try{const response=await fetch('/api/voice/transcribe',{method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob});const result=await response.json();if(!response.ok)throw new Error(result.message||t('Не удалось распознать речь'));if(voiceCancelled){$('voice-status').textContent=t('Запись отменена');return}$('dialogue-input').value=result.text;const confidence=result.confidence===null||result.confidence===undefined?t('неизвестна'):`${Math.round(result.confidence*100)}%`;$('voice-status').textContent=`${t('Проверьте текст перед отправкой')} · ${confidence}`;$('dialogue-input').focus()}catch(error){$('voice-status').textContent=error.message}finally{voiceTranscribing=false;$('voice-record').disabled=!latestControl?.bus_connected||!latestVoiceAvailable}};voiceRecorder.start();$('voice-status').textContent=t('● Запись — отпустите кнопку')}catch(error){voiceHeld=false;stopVoiceTracks();$('voice-status').textContent=error.message}}
+function stopVoiceRecording(cancel=false){voiceHeld=false;voiceCancelled=cancel;if(voiceRecorder&&voiceRecorder.state!=='inactive')voiceRecorder.stop();else stopVoiceTracks()}
+$('voice-replay').onclick=async()=>{if(latestVoiceResponseSequence===null||voiceOutputBusy)return;voiceOutputBusy=true;updateVoiceOutputControls();try{const result=await postJSON('/api/voice/speak',{sequence:latestVoiceResponseSequence});feedback('voice-output-status',result.message)}catch(error){feedback('voice-output-status',error.message,true)}finally{voiceOutputBusy=false;updateVoiceOutputControls()}};
+$('voice-auto').onchange=async event=>{if(voiceOutputBusy)return;const requested=event.target.checked;voiceOutputBusy=true;updateVoiceOutputControls();try{const result=await postJSON('/api/voice/auto',{enabled:requested});latestVoiceAuto=result.auto_speak===true;feedback('voice-output-status',result.message)}catch(error){feedback('voice-output-status',error.message,true);await refreshVoiceStatus()}finally{voiceOutputBusy=false;updateVoiceOutputControls()}};
+$('voice-record').onpointerdown=event=>{event.preventDefault();startVoiceRecording()};window.addEventListener('pointerup',()=>stopVoiceRecording(false));window.addEventListener('pointercancel',()=>stopVoiceRecording(true));window.addEventListener('blur',()=>stopVoiceRecording(true));
 $('dialogue-form').onsubmit=async e=>{e.preventDefault();const input=$('dialogue-input'),text=input.value.trim();if(!text){feedback('dialogue-feedback',t('Сообщение не должно быть пустым'),true);return}const result=await sendCommand('/api/dialogue',{text},'dialogue-feedback');if(result){input.value='';input.focus()}};
 $('life-confirm-form').onsubmit=e=>{e.preventDefault();const prompt=latestControl?.life_prompt;if(!prompt){feedback('life-result',t('Активного запроса ядра нет'),true);return}sendCommand('/api/control/life/confirm',{request_id:prompt.request_id,phrase:$('life-confirm-input').value},'life-result')};$('life-cancel-button').onclick=()=>{const prompt=latestControl?.life_prompt;if(prompt)sendCommand('/api/control/life/cancel',{request_id:prompt.request_id},'life-result')};
 function applyTheme(theme){const cyber=theme==='cyber';document.body.classList.toggle('cyber-theme',cyber);$('theme-toggle').setAttribute('aria-pressed',String(cyber));$('theme-label').textContent=t(cyber?'Светлая тема':'Киберпанк');document.querySelector('meta[name="theme-color"]').content=cyber?'#07090c':'#f7f9fb'}
 let initialTheme='cyber';try{const saved=localStorage.getItem('digital-being-theme');if(saved==='light'||saved==='cyber')initialTheme=saved}catch(error){/* Приватный режим может запретить localStorage. */}
 applyTheme(initialTheme);$('theme-toggle').onclick=()=>{const next=document.body.classList.contains('cyber-theme')?'light':'cyber';applyTheme(next);try{localStorage.setItem('digital-being-theme',next)}catch(error){/* Тема продолжит работать без сохранения. */}};
 $('language-select').onchange=event=>applyLanguage(event.target.value);applyLanguage(language,false);
-refreshNow();refreshControl();refreshDiary();refreshGraph();startDialogue();setInterval(refreshNow,3000);setInterval(refreshControl,1000);setInterval(refreshGraph,5000);
+refreshNow();refreshControl();refreshVoiceStatus();refreshDiary();refreshGraph();startDialogue();setInterval(refreshNow,3000);setInterval(refreshControl,1000);setInterval(refreshGraph,5000);
 </script></body></html>"""
 DASHBOARD_HTML = DASHBOARD_HTML.replace("__I18N_JSON__", i18n.language_json())
 
@@ -743,6 +756,30 @@ class SharedState:
             "history_gap": bool(after is not None and oldest and after < oldest - 1),
         }
 
+    def response_text(self, sequence: int) -> Optional[str]:
+        """Вернуть только опубликованный ответ сущности, не текст клиента."""
+        with self._lock:
+            item = next(
+                (event for event in self._events if event["sequence"] == sequence),
+                None,
+            )
+            if item is None or item.get("kind") != "agent":
+                return None
+            text = str(item.get("text") or "").strip()
+            return text or None
+
+    def latest_response_sequence(self) -> Optional[int]:
+        with self._lock:
+            return next(
+                (
+                    event["sequence"]
+                    for event in reversed(self._events)
+                    if event.get("kind") == "agent"
+                    and str(event.get("text") or "").strip()
+                ),
+                None,
+            )
+
 
 def _json_response(data: Any, status: int = 200) -> Any:
     return web.json_response(data, status=status, headers={"Cache-Control": "no-store"})
@@ -893,6 +930,164 @@ async def handle_dialogue_send(request: Any) -> Any:
             {"status": "rejected", "message": str(exc)}, status=exc.status
         )
     return _publish_event(request, Events.USER_MESSAGE, {"text": text})
+
+
+async def handle_voice_status(request: Any) -> Any:
+    service = request.app.get(VOICE_KEY)
+    output = request.app.get(VOICE_OUTPUT_KEY)
+    state = request.app.get(STATE_KEY)
+    return _json_response(
+        {
+            "enabled": bool(service is not None and service.enabled),
+            "tts_enabled": bool(output is not None and output.enabled),
+            "auto_speak": bool(output is not None and output.auto_enabled),
+            "latest_response_sequence": (
+                state.latest_response_sequence() if state is not None else None
+            ),
+        }
+    )
+
+
+async def handle_voice_auto(request: Any) -> Any:
+    """Изменить только режим вывода; содержание ответов остаётся в Core."""
+    try:
+        data = await _read_json_object(request)
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            raise CommandError("enabled должен быть boolean")
+    except CommandError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
+    output = request.app.get(VOICE_OUTPUT_KEY)
+    if output is None:
+        return _json_response(
+            {"status": "unavailable", "message": "звуковой TTS недоступен"},
+            status=503,
+        )
+    try:
+        output.set_auto(enabled)
+    except PermissionError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=403
+        )
+    return _json_response(
+        {
+            "status": "updated",
+            "auto_speak": output.auto_enabled,
+            "message": (
+                "автоматическое озвучивание включено"
+                if output.auto_enabled
+                else "автоматическое озвучивание выключено"
+            ),
+        }
+    )
+
+
+async def handle_voice_speak(request: Any) -> Any:
+    """Озвучить журнальную реплику по sequence; произвольный текст не принимается."""
+    try:
+        data = await _read_json_object(request)
+        sequence = data.get("sequence")
+        if type(sequence) is not int or sequence < 1:
+            raise CommandError("sequence должен быть положительным целым")
+    except CommandError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=exc.status
+        )
+    state = request.app.get(STATE_KEY)
+    text = state.response_text(sequence) if state is not None else None
+    if text is None:
+        return _json_response(
+            {"status": "not_found", "message": "опубликованный ответ не найден"},
+            status=404,
+        )
+    output = request.app.get(VOICE_OUTPUT_KEY)
+    if output is None:
+        return _json_response(
+            {"status": "unavailable", "message": "звуковой TTS недоступен"},
+            status=503,
+        )
+    try:
+        await asyncio.to_thread(output.speak, text)
+    except PermissionError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=403
+        )
+    except (ValueError, RuntimeError) as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=422
+        )
+    return _json_response(
+        {
+            "status": "started",
+            "sequence": sequence,
+            "message": "озвучивание опубликованного ответа запущено",
+        }
+    )
+
+
+async def handle_voice_transcribe(request: Any) -> Any:
+    """Вернуть предпросмотр STT; этот endpoint не публикует USER_MESSAGE."""
+    from src.metrics.voice_input import VoiceInputService
+
+    service = request.app.get(VOICE_KEY)
+    if service is None or not service.enabled:
+        return _json_response(
+            {"status": "rejected", "message": "локальный STT выключен"},
+            status=403,
+        )
+    content_length = getattr(request, "content_length", None)
+    if content_length is not None and content_length > VoiceInputService.MAX_AUDIO_BYTES:
+        return _json_response(
+            {"status": "rejected", "message": "аудиозапись слишком велика"},
+            status=413,
+        )
+    content_type = request.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    suffix = {
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/wave": ".wav",
+        "audio/webm": ".webm",
+        "audio/ogg": ".ogg",
+        "audio/flac": ".flac",
+        "audio/mpeg": ".mp3",
+        "audio/mp4": ".m4a",
+    }.get(content_type)
+    if suffix is None:
+        return _json_response(
+            {"status": "rejected", "message": "неподдерживаемый формат аудио"},
+            status=415,
+        )
+    try:
+        audio = await request.read()
+        result = await asyncio.to_thread(
+            service.transcribe_bytes, audio, suffix=suffix
+        )
+    except PermissionError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=403
+        )
+    except ValueError as exc:
+        return _json_response(
+            {"status": "rejected", "message": str(exc)}, status=400
+        )
+    except Exception:
+        logger.exception("Локальное распознавание голосового ввода не удалось")
+        return _json_response(
+            {"status": "rejected", "message": "локальное распознавание не удалось"},
+            status=422,
+        )
+    return _json_response(
+        {
+            "status": "preview",
+            "text": result.text,
+            "confidence": result.confidence,
+            "confidence_basis": result.confidence_basis,
+            "engine": result.engine,
+            "model": result.model,
+        }
+    )
 
 
 async def handle_control(request: Any) -> Any:
@@ -1422,6 +1617,8 @@ class WebDashboard:
         port: int = DEFAULT_PORT,
         state: Optional[SharedState] = None,
         bus: Optional[Any] = None,
+        voice_input: Optional[Any] = None,
+        voice_output: Optional[Any] = None,
     ) -> None:
         if not AIOHTTP_AVAILABLE:
             raise RuntimeError("aiohttp не установлен; веб отключён, Tk может работать")
@@ -1430,6 +1627,8 @@ class WebDashboard:
         self.host, self.port = host, port
         self.state = state or SharedState()
         self.bus = bus
+        self.voice_input = voice_input
+        self.voice_output = voice_output
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.BaseSite] = None
         self._thread: Optional[threading.Thread] = None
@@ -1494,9 +1693,13 @@ class WebDashboard:
                 self._loop.close()
 
     def _install_app(self, loop: asyncio.AbstractEventLoop) -> None:
-        app = web.Application()
+        from src.metrics.voice_input import VoiceInputService
+
+        app = web.Application(client_max_size=VoiceInputService.MAX_AUDIO_BYTES)
         app[STATE_KEY] = self.state
         app[BUS_KEY] = self.bus
+        app[VOICE_KEY] = self.voice_input
+        app[VOICE_OUTPUT_KEY] = self.voice_output
         app.router.add_get("/", handle_index)
         app.router.add_get("/health", handle_health)
         app.router.add_get("/metrics", handle_metrics)
@@ -1505,6 +1708,10 @@ class WebDashboard:
         app.router.add_get("/api/diary", handle_diary)
         app.router.add_get("/api/dialogue", handle_dialogue)
         app.router.add_post("/api/dialogue", handle_dialogue_send)
+        app.router.add_get("/api/voice", handle_voice_status)
+        app.router.add_post("/api/voice/transcribe", handle_voice_transcribe)
+        app.router.add_post("/api/voice/speak", handle_voice_speak)
+        app.router.add_post("/api/voice/auto", handle_voice_auto)
         app.router.add_get("/api/control", handle_control)
         app.router.add_post("/api/control/pause", handle_pause)
         app.router.add_post("/api/control/resume", handle_resume)

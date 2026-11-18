@@ -17,14 +17,17 @@ def initialize_auxiliary_adapters(agent) -> None:
     agent.metrics = MetricsCollector(agent_name=agent.name, persist_dir=None)
     agent.cooperation_hub = AgentCooperationHub()
     agent.cooperation_hub.register_agent(agent)
-    # Голос разрешён владельцем. Реальные TTS/STT используются, если их
-    # зависимости установлены; console остаётся детерминированным fallback.
-    # Тесты не инициализируют аудиоустройства и не загружают модели.
+    # 9C-0: каналы независимы и выключены до явного разрешения владельца.
+    # Тесты не инициализируют аудиоустройства и не загружают модели даже при
+    # установленных флагах; console остаётся детерминированным TTS-fallback.
     test_mode = os.environ.get("DIGITAL_BEING_TEST_MODE") == "1"
+    tts_enabled = os.environ.get("DIGITAL_BEING_VOICE_TTS") == "1"
+    stt_enabled = os.environ.get("DIGITAL_BEING_VOICE_STT") == "1"
     agent.voice_router = create_default_router(
-        enabled=True,
-        allow_pyttsx3=not test_mode,
-        allow_whisper=not test_mode,
+        tts_enabled=tts_enabled,
+        stt_enabled=stt_enabled,
+        allow_pyttsx3=tts_enabled and not test_mode,
+        allow_whisper=stt_enabled and not test_mode,
     )
     # Worker нужен только при реально настроенных Telegram/Discord endpoint-ах.
     agent.webhooks = create_default_manager()

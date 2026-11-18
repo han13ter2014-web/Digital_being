@@ -1630,12 +1630,14 @@ class AgentRunner:
             text = prepared["text"]
             plan = prepared["plan"]
 
-        voice = getattr(self.agent, "voice_router", None)
-        if voice is not None:
-            try:
-                voice.speak(text)
-            except Exception as exc:
-                logging.getLogger(__name__).warning("voice delivery failed: %s", exc)
+        def speak_published_response() -> None:
+            voice = getattr(self.agent, "voice_router", None)
+            if voice is not None and hasattr(voice, "speak_response"):
+                try:
+                    voice.speak_response(text)
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("voice delivery failed: %s", exc)
+
         webhooks = getattr(self.agent, "webhooks", None)
         if webhooks is not None:
             try:
@@ -1654,6 +1656,8 @@ class AgentRunner:
                 context=context,
                 cycle=self.agent.cycle_count,
             )
+            if message_id:
+                speak_published_response()
             self._record_dialogue_reply(
                 interaction,
                 text,
@@ -1675,6 +1679,8 @@ class AgentRunner:
                 context=context,
                 cycle=self.agent.cycle_count,
             )
+            if message_id:
+                speak_published_response()
             self._record_dialogue_reply(
                 interaction,
                 text,

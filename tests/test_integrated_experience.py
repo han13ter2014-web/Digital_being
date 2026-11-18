@@ -152,8 +152,8 @@ def test_auxiliary_adapters_are_local_and_process_messages_autonomously():
     second = DigitalBeing(name="AuxiliarySecond")
 
     assert first.cooperation_hub is not second.cooperation_hub
-    assert first.voice_router.status()["enabled"] is True
-    assert first.voice_router.status()["available_tts"]
+    assert first.voice_router.status()["enabled"] is False
+    assert first.voice_router.status()["available_tts"] == []
     # Без настроенных endpoint-ов сетевой worker не нужен.
     assert first.webhooks.status()["worker_alive"] is False
     assert first.metrics._persist_dir is None
