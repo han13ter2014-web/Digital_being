@@ -1,8 +1,9 @@
 """Ограниченные поведенческие советчики собственной аппаратной нагрузки.
 
 Советчики читают уже накопленный per-life опыт, но не создают действия, цели,
-награды или эндокринные события. Разрешены два раздельных эффекта: 4A ослабляет
-уже предложенные тяжёлые кандидаты после устойчивой свежей own_load, а 6B
+награды или эндокринные события. Разрешены три раздельных эффекта: 4A ослабляет
+уже предложенные тяжёлые кандидаты после устойчивой свежей own_load, 7B делает
+это после подтверждённой physical-перегрузки в общем с 4A бюджете, а 6B
 ограниченно усиливает существующий телесный deep_rest после серии 5 + 5.
 """
 
@@ -339,10 +340,257 @@ def apply_own_recovery_advice(
     return report
 
 
+def _neutral_physical_evidence(reason: str) -> Dict:
+    return {
+        "eligible": False,
+        "reason": reason,
+        "duration_cycles": 0,
+        "risk": None,
+        "experienced": None,
+        "confidence": 0.0,
+        "factor": 1.0,
+    }
+
+
+def _current_physical_risk(observation: Dict) -> float | None:
+    """Текущий нагрев/power limit; GPU utilization сюда не входит."""
+    channels = observation.get("channels")
+    if not isinstance(channels, dict):
+        return None
+    risks = []
+    for name in ("gpu_temperature", "cpu_temperature", "gpu_power"):
+        channel = channels.get(name)
+        if not isinstance(channel, dict) or channel.get("status") != "available":
+            continue
+        value = channel.get("value")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            continue
+        value = float(value)
+        if name == "gpu_power":
+            if not 0.0 <= value <= 2.0:
+                continue
+            risk = value
+        else:
+            if not 0.0 <= value <= 150.0:
+                continue
+            risk = (value - 60.0) / 40.0
+        risks.append(min(1.0, max(0.0, risk)))
+    return max(risks) if risks else None
+
+
+def _physical_history_state(entry: Dict) -> Dict | None:
+    states = entry.get("states")
+    if not isinstance(states, dict):
+        return None
+    state = states.get("physical_strain")
+    if (
+        not isinstance(state, dict)
+        or state.get("origin") != "unknown"
+        or state.get("reason") != "observed_physical_channels"
+        or not _finite_unit(state.get("value"))
+        or float(state["value"]) < _OWN_LOAD_THRESHOLD
+        or not _finite_unit(state.get("confidence"))
+        or float(state["confidence"]) <= 0.0
+    ):
+        return None
+    return state
+
+
+def physical_strain_evidence(observer) -> Dict:
+    """Прочитать существующий physical-опыт без доступа к кандидатам."""
+    if observer is None:
+        return _neutral_physical_evidence("no_observer")
+    observation = getattr(observer, "latest_observation", None)
+    history = getattr(observer, "history", None)
+    if not isinstance(observation, dict) or not isinstance(history, list):
+        return _neutral_physical_evidence("insufficient_physical_evidence")
+    current_risk = _current_physical_risk(observation)
+    if current_risk is None:
+        return _neutral_physical_evidence("waiting_for_fresh_physical_channels")
+    if current_risk < _OWN_LOAD_THRESHOLD:
+        return _neutral_physical_evidence("insufficient_sustained_physical_strain")
+
+    current = _physical_history_state({"states": getattr(observer, "states", None)})
+    slow_states = getattr(observer, "slow_states", None)
+    slow = slow_states.get("physical") if isinstance(slow_states, dict) else None
+    duration = slow.get("sustained_cycles") if isinstance(slow, dict) else None
+    if (
+        current is None
+        or not isinstance(slow, dict)
+        or slow.get("strain_active") is not True
+        or isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or duration < _REQUIRED_CYCLES
+    ):
+        return _neutral_physical_evidence("insufficient_sustained_physical_strain")
+
+    expected_cycle = _cycle(observation)
+    if expected_cycle is None:
+        return _neutral_physical_evidence("insufficient_physical_evidence")
+    confirmed = 0
+    for entry in reversed(history):
+        if not isinstance(entry, dict) or _cycle(entry) != expected_cycle:
+            return _neutral_physical_evidence("noncontiguous_physical_evidence")
+        if _physical_history_state(entry) is None:
+            return _neutral_physical_evidence("insufficient_sustained_physical_strain")
+        confirmed += 1
+        if confirmed == _REQUIRED_CYCLES:
+            break
+        expected_cycle -= 1
+    if confirmed < _REQUIRED_CYCLES:
+        return _neutral_physical_evidence("insufficient_sustained_physical_strain")
+
+    domain_personal = getattr(observer, "domain_personal", None)
+    domains = getattr(domain_personal, "domains", None)
+    domain = domains.get("physical") if isinstance(domains, dict) else None
+    episode = domain.get("current_episode") if isinstance(domain, dict) else None
+    experience = domain.get("latest") if isinstance(domain, dict) else None
+    if (
+        not isinstance(episode, dict)
+        or not isinstance(episode.get("strain_cycle"), int)
+        or isinstance(episode.get("strain_cycle"), bool)
+        or episode.get("fresh_high_cycles", 0) < _REQUIRED_CYCLES
+        or not isinstance(experience, dict)
+        or experience.get("freshness") != "fresh"
+        or experience.get("reason") != "observed_physical_channels"
+        or not _finite_unit(experience.get("risk"))
+        or not _finite_unit(experience.get("experienced"))
+        or float(experience["risk"]) < _OWN_LOAD_THRESHOLD
+    ):
+        return _neutral_physical_evidence("physical_experience_unavailable")
+
+    risk = float(experience["risk"])
+    experienced = float(experience["experienced"])
+    confidence = float(current["confidence"])
+    return {
+        "eligible": True,
+        "reason": "confirmed_physical_strain",
+        "duration_cycles": duration,
+        "risk": risk,
+        "experienced": experienced,
+        "confidence": confidence,
+        "factor": 1.0 - _MAX_STRENGTH_REDUCTION * experienced * confidence,
+    }
+
+
+def physical_strain_behavior_report(observer, mode: str = "shadow") -> Dict:
+    """Sanitized shadow-отчёт без доступа к кандидатам и их изменения."""
+    mode = str(mode)
+    evidence = physical_strain_evidence(observer)
+    if mode == "shadow":
+        reason = "shadow_only" if evidence["eligible"] else evidence["reason"]
+    elif mode == "advisor":
+        reason = "advisor_requires_candidates"
+    else:
+        reason = "unsupported_mode"
+    return {
+        "mode": mode,
+        "active": False,
+        **evidence,
+        "reason": reason,
+        "adjustments": [],
+    }
+
+
+def apply_physical_strain_advice(
+    candidates: List[Dict],
+    observer,
+    normalize_action: Callable,
+    *,
+    input_strengths: List | None = None,
+) -> Dict:
+    """Ослабить тяжёлые кандидаты в общем с 4A бюджете не более 25 %."""
+    evidence = physical_strain_evidence(observer)
+    report = {
+        "mode": "advisor",
+        "active": False,
+        **evidence,
+        "adjustments": [],
+    }
+    if not evidence["eligible"]:
+        return report
+
+    cycle = _cycle(getattr(observer, "latest_observation", None))
+    if (
+        cycle is not None
+        and getattr(observer, "_physical_advisor_applied_cycle", None) == cycle
+    ):
+        report["reason"] = "duplicate_cycle"
+        return report
+
+    if input_strengths is None:
+        originals = [candidate.get("strength", 0.5) for candidate in candidates]
+    else:
+        if len(input_strengths) != len(candidates):
+            raise ValueError("physical advisor input strength count mismatch")
+        originals = list(input_strengths)
+
+    pending = []
+    matched = False
+    for input_index, (candidate, original) in enumerate(zip(candidates, originals)):
+        action = normalize_action(candidate.get("action"))
+        if action not in HEAVY_ACTIONS:
+            continue
+        before = candidate.get("strength", 0.5)
+        if (
+            isinstance(original, bool)
+            or not isinstance(original, (int, float))
+            or not math.isfinite(float(original))
+            or float(original) <= 0.0
+            or isinstance(before, bool)
+            or not isinstance(before, (int, float))
+            or not math.isfinite(float(before))
+            or float(before) <= 0.0
+        ):
+            continue
+        matched = True
+        original = float(original)
+        before = float(before)
+        # 4A уже мог изменить current strength. Считаем от исходной силы и
+        # выбираем только более сильную одну скидку, а не произведение двух.
+        target = max(original * 0.75, original * evidence["factor"])
+        after = max(original * 0.75, min(before, target))
+        if after >= before:
+            continue
+        pending.append((candidate, after))
+        report["adjustments"].append(
+            {
+                "input_index": input_index,
+                "action": str(candidate.get("action") or "unknown"),
+                "source": str(candidate.get("source") or "unknown"),
+                "before_strength": original,
+                "after_strength": after,
+                "factor": evidence["factor"],
+            }
+        )
+    if not pending:
+        report["reason"] = (
+            "shared_budget_already_applied" if matched else "no_matching_candidates"
+        )
+        return report
+
+    # Сначала полный расчёт и runtime-дедупликация, затем одна серия записей.
+    # Отметка не входит в checkpoint и не создаёт новой схемы.
+    if cycle is not None:
+        setattr(observer, "_physical_advisor_applied_cycle", cycle)
+    for candidate, after in pending:
+        candidate["strength"] = after
+    report["active"] = True
+    report["reason"] = "applied"
+    return report
+
+
 __all__ = [
     "apply_own_load_advice",
     "apply_own_recovery_advice",
+    "apply_physical_strain_advice",
     "own_load_advice",
     "own_recovery_behavior_report",
     "own_recovery_evidence",
+    "physical_strain_behavior_report",
+    "physical_strain_evidence",
 ]

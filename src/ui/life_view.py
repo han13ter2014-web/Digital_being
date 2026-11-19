@@ -471,6 +471,45 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
                     f" · {entry.get('source') or 'unknown'}",
                 )
             )
+    physical = hardware.get("physical_behavior")
+    if "physical_behavior" not in hardware:
+        physical_mode = T("Shadow · без влияния на выбор")
+    elif not isinstance(physical, dict):
+        physical_mode = T("Нет данных")
+    elif physical.get("mode") == "advisor":
+        physical_mode = T("Advisor · ограниченное влияние на выбор")
+    else:
+        physical_mode = T("Shadow · без влияния на выбор")
+    rows.append((f"{T('Физическая защита')} · {T('Режим')}", physical_mode))
+    if isinstance(physical, dict):
+        rows.extend(
+            [
+                (
+                    f"{T('Физическая защита')} · {T('Активность')}",
+                    T("да" if physical.get("active") is True else "нет"),
+                ),
+                (
+                    f"{T('Физическая защита')} · {T('Причина')}",
+                    str(physical.get("reason") or T("Нет данных")),
+                ),
+                (
+                    f"{T('Физическая защита')} · {T('Серия')}",
+                    str(physical.get("duration_cycles", 0)),
+                ),
+            ]
+        )
+        for entry in (physical.get("adjustments") or [])[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                (
+                    f"{T('Поправка')} · {entry.get('action') or 'unknown'}",
+                    f"{_hormonal_number(entry.get('before_strength'), language)}"
+                    f" → {_hormonal_number(entry.get('after_strength'), language)}"
+                    f" · ×{_hormonal_number(entry.get('factor'), language)}"
+                    f" · {entry.get('source') or 'unknown'}",
+                )
+            )
     return rows
 
 

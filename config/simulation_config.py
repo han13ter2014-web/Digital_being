@@ -93,6 +93,11 @@ class SimulationConfig:
     # серии: до +10% силы, но не выше 1.1. Новых действий и наград нет.
     HARDWARE_RECOVERY_BEHAVIOR_MODE = "shadow"
 
+    # === Защита при физической перегрузке: этапы 7A–7B ===
+    # shadow — только sanitized отчёт подтверждённого physical_strain;
+    # advisor — общая с 4A скидка до 25 % для существующих тяжёлых кандидатов.
+    HARDWARE_PHYSICAL_BEHAVIOR_MODE = "shadow"
+
     # === Гормональная проекция ===
     # shadow — только наблюдение; advisor — одна поправка до ±10% силы уже
     # предложенных кандидатов от личного baseline с ограниченной evidence-шкалой.

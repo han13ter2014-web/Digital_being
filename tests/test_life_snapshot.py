@@ -660,6 +660,7 @@ def test_hardware_snapshot_is_explicit_when_observer_is_absent_or_broken():
         "initialized": False,
         "reason": "not_initialized",
         "recovery_behavior": None,
+        "physical_behavior": None,
     }
 
     def explode():
@@ -1318,3 +1319,152 @@ def test_hardware_rows_show_actual_recovery_advisor_and_restart_absence():
     del hardware["recovery_behavior"]
     legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
     assert "Восстановление · Режим: Shadow · без влияния на выбор" in legacy
+
+
+def test_physical_behavior_snapshot_is_bounded_and_not_persisted():
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    agent = _agent("PhysicalBehaviorSnapshot")
+    runtime = {
+        "mode": "advisor",
+        "active": True,
+        "eligible": True,
+        "reason": "applied",
+        "duration_cycles": 5,
+        "risk": 1.0,
+        "experienced": 0.8,
+        "confidence": 2.0 / 3.0,
+        "factor": 0.85,
+        "adjustments": [
+            {
+                "input_index": index,
+                "action": "explore",
+                "source": "motivation",
+                "before_strength": 0.8,
+                "after_strength": 0.68,
+                "factor": 0.85,
+                "private": "C:/private/goal text",
+            }
+            for index in range(5)
+        ],
+        "raw_error": "C:/private/sensor failure",
+    }
+    agent.hardware_physical_behavior_last = runtime
+
+    behavior = build_life_snapshot(agent)["hardware"]["physical_behavior"]
+
+    assert set(behavior) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "duration_cycles",
+        "risk",
+        "experienced",
+        "confidence",
+        "factor",
+        "adjustments",
+    }
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True and behavior["eligible"] is True
+    assert behavior["reason"] == "applied"
+    assert behavior["duration_cycles"] == 5
+    assert behavior["risk"] == 1.0
+    assert behavior["experienced"] == 0.8
+    assert behavior["confidence"] == 2.0 / 3.0
+    assert behavior["factor"] == 0.85
+    assert len(behavior["adjustments"]) == 3
+    assert [row["input_index"] for row in behavior["adjustments"]] == [2, 3, 4]
+    assert all(
+        set(row)
+        == {
+            "input_index",
+            "action",
+            "source",
+            "before_strength",
+            "after_strength",
+            "factor",
+        }
+        for row in behavior["adjustments"]
+    )
+    assert "C:/private" not in str(behavior)
+    behavior["adjustments"][0]["action"] = "tampered"
+    assert runtime["adjustments"][2]["action"] == "explore"
+
+    state = build_state_from_agent(agent)
+    assert "hardware_physical_behavior_last" not in state
+    restored = _agent("PhysicalBehaviorRestart")
+    apply_state_to_agent(restored, state)
+    assert not hasattr(restored, "hardware_physical_behavior_last")
+    restarted = build_life_snapshot(restored)["hardware"]
+    assert restarted["initialized"] is True
+    assert restarted["physical_behavior"] is None
+
+
+def test_hardware_rows_show_actual_physical_advisor_and_restart_absence():
+    from src.ui.life_view import hardware_rows
+
+    hardware = {
+        "initialized": True,
+        "physical_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "duration_cycles": 5,
+            "risk": 1.0,
+            "experienced": 0.8,
+            "confidence": 2.0 / 3.0,
+            "factor": 0.85,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "explore",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.68,
+                    "factor": 0.85,
+                }
+            ],
+        },
+    }
+    snapshot = {"hardware": hardware}
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert (
+        "Физическая защита · Режим: Advisor · ограниченное влияние на выбор" in russian
+    )
+    assert "Физическая защита · Активность: да" in russian
+    assert "Физическая защита · Причина: applied" in russian
+    assert "Физическая защита · Серия: 5" in russian
+    assert "Поправка · explore: 0.80 → 0.68 · ×0.85 · motivation" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert (
+        "Physical protection · Mode: Advisor · bounded influence on choices" in english
+    )
+    assert "Physical protection · Activity: yes" in english
+    assert "Physical protection · Series: 5" in english
+    assert "Adjustment · explore: 0.80 → 0.68 · ×0.85 · motivation" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "物理保护 · 模式: 顾问 · 对选择的有限影响" in chinese
+    assert "物理保护 · 活动: 是" in chinese
+    assert "物理保护 · 系列: 5" in chinese
+    assert "调整 · explore: 0.80 → 0.68 · ×0.85 · motivation" in chinese
+
+    hardware["physical_behavior"] = None
+    restarted = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Физическая защита · Режим: Нет данных" in restarted
+    assert "Поправка · explore" not in restarted
+
+    del hardware["physical_behavior"]
+    legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Физическая защита · Режим: Shadow · без влияния на выбор" in legacy

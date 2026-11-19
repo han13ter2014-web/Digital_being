@@ -573,3 +573,52 @@ def test_hardware_recovery_behavior_is_read_only_and_localized(dashboard):
     assert payload["texts"]["zh"]["Восстановление"] == "恢复"
     assert payload["texts"]["en"]["Серия"] == "Series"
     assert payload["texts"]["zh"]["Серия"] == "系列"
+
+
+def test_hardware_physical_behavior_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    hardware = {
+        "initialized": True,
+        "physical_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "duration_cycles": 5,
+            "risk": 1.0,
+            "experienced": 0.8,
+            "confidence": 2.0 / 3.0,
+            "factor": 0.85,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "explore",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.68,
+                    "factor": 0.85,
+                }
+            ],
+        },
+    }
+    life["hardware"] = hardware
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hardware") == {"hardware": hardware}
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert "h.physical_behavior" in body
+    assert "Физическая защита" in body
+    assert "physical.duration_cycles" in body
+    assert "entry.before_strength" in body
+    assert "entry.after_strength" in body
+    assert "set_physical" not in body
+    assert "train_physical" not in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["texts"]["en"]["Физическая защита"] == "Physical protection"
+    assert payload["texts"]["zh"]["Физическая защита"] == "物理保护"
+    assert payload["texts"]["en"]["Серия"] == "Series"
+    assert payload["texts"]["zh"]["Серия"] == "系列"

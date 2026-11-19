@@ -2045,3 +2045,560 @@ def test_recovery_advisor_differential_for_six_hundred_cycles_and_restarts(
     validate_hardware_interoception(
         advisor_agent.hardware_interoception.to_checkpoint()
     )
+
+
+def test_physical_behavior_shadow_requires_sustained_thermal_or_power_evidence():
+    from src.core.hardware_behavior import physical_strain_behavior_report
+
+    gpu_only = HardwareInteroception()
+    for cycle in range(5):
+        _observe_physical(gpu_only, cycle, gpu_utilization=100.0, gpu_memory=1.0)
+    assert physical_strain_behavior_report(gpu_only)["eligible"] is False
+
+    observer = HardwareInteroception()
+    for cycle in range(4):
+        _observe_physical(observer, cycle, gpu_temperature=100.0, gpu_power=0.95)
+        early = physical_strain_behavior_report(observer)
+        assert early["active"] is False
+        assert early["eligible"] is False
+        assert early["reason"] == "insufficient_sustained_physical_strain"
+        assert early["adjustments"] == []
+
+    _observe_physical(observer, 4, gpu_temperature=100.0, gpu_power=0.95)
+    before = observer.to_checkpoint()
+    report = physical_strain_behavior_report(observer)
+
+    assert set(report) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "duration_cycles",
+        "risk",
+        "experienced",
+        "confidence",
+        "factor",
+        "adjustments",
+    }
+    assert report["mode"] == "shadow"
+    assert report["active"] is False
+    assert report["eligible"] is True
+    assert report["reason"] == "shadow_only"
+    assert report["duration_cycles"] == 5
+    assert report["risk"] == pytest.approx(1.0)
+    assert report["experienced"] == pytest.approx(1.0)
+    assert 0.0 < report["confidence"] <= 1.0
+    assert report["factor"] == pytest.approx(
+        1.0 - 0.25 * report["experienced"] * report["confidence"]
+    )
+    assert 0.75 <= report["factor"] < 1.0
+    assert report["adjustments"] == []
+    assert observer.states["physical_strain"]["origin"] == "unknown"
+    assert observer.to_checkpoint() == before
+
+    advisor = physical_strain_behavior_report(observer, "advisor")
+    assert advisor["active"] is False
+    assert advisor["eligible"] is True
+    assert advisor["reason"] == "advisor_requires_candidates"
+    assert advisor["adjustments"] == []
+    assert observer.to_checkpoint() == before
+
+
+def test_physical_behavior_rejects_gaps_sensor_loss_and_restart_without_fresh_data():
+    from src.core.hardware_behavior import physical_strain_behavior_report
+
+    observer = HardwareInteroception()
+    for cycle in (0, 1, 2, 3, 100):
+        _observe_physical(observer, cycle, gpu_temperature=100.0, gpu_power=0.95)
+    gap = physical_strain_behavior_report(observer)
+    assert gap["active"] is False
+    assert gap["eligible"] is False
+    assert gap["reason"] == "noncontiguous_physical_evidence"
+
+    for cycle in range(101, 105):
+        _observe_physical(observer, cycle, gpu_temperature=100.0, gpu_power=0.95)
+    assert physical_strain_behavior_report(observer)["eligible"] is True
+
+    restored = HardwareInteroception.from_checkpoint(observer.to_checkpoint())
+    restored_before = restored.to_checkpoint()
+    waiting = physical_strain_behavior_report(restored)
+    assert waiting["active"] is False
+    assert waiting["eligible"] is False
+    assert waiting["reason"] == "waiting_for_fresh_physical_channels"
+    assert restored.to_checkpoint() == restored_before
+
+    _observe_physical(observer, 105)
+    loss = physical_strain_behavior_report(observer)
+    assert loss["active"] is False
+    assert loss["eligible"] is False
+    assert loss["reason"] == "waiting_for_fresh_physical_channels"
+
+    non_physical = HardwareInteroception()
+    for cycle in range(5):
+        non_physical.observe(
+            _high_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.01),
+            physical_status=_physical(gpu_utilization=100.0),
+        )
+    assert physical_strain_behavior_report(non_physical)["eligible"] is False
+    assert non_physical.states["physical_strain"]["origin"] == "unknown"
+
+
+def test_physical_advisor_activation_has_no_upstream_or_candidate_drift(monkeypatch):
+    from src.core.agent_body import HEAVY_ACTIONS
+
+    source = DigitalBeing(name="PhysicalBehaviorShadowSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    shadow = DigitalBeing(name="PhysicalBehaviorShadow")
+    advisor = DigitalBeing(name="PhysicalBehaviorAdvisor")
+    unknown = DigitalBeing(name="PhysicalBehaviorUnknown")
+    for agent in (shadow, advisor, unknown):
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        for name in ("dopamine", "oxytocin", "cortisol"):
+            agent.hormonal_system.hormones[name] = 1.0
+            agent.hormonal_system.profile.values[name]["sample_count"] = 20
+
+    current = {
+        "resources": _low_resources(),
+        "physical": _physical(gpu_temperature=100.0, gpu_power=0.95),
+    }
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage()
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_physical_sensors",
+        lambda: current["physical"],
+    )
+    monkeypatch.setattr(
+        "config.simulation_config.SIM_CONFIG.HORMONAL_BEHAVIOR_MODE", "advisor"
+    )
+
+    def run(agent, mode):
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_PHYSICAL_BEHAVIOR_MODE",
+            mode,
+            raising=False,
+        )
+        random.seed(7007)
+        np.random.seed(7007)
+        trace = []
+        reports = []
+        for _ in range(6):
+            report = agent.autonomous_tick()
+            reports.append(report)
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return trace, reports
+
+    shadow_trace, shadow_reports = run(shadow, "shadow")
+    advisor_trace, advisor_reports = run(advisor, "advisor")
+    unknown_trace, unknown_reports = run(unknown, "unsupported")
+
+    assert advisor_trace[:4] == shadow_trace[:4]
+    assert unknown_trace == shadow_trace
+    assert [report["hardware_interoception"] for report in advisor_reports] == [
+        report["hardware_interoception"] for report in shadow_reports
+    ]
+    assert all(
+        report["hardware_physical_behavior"]["active"] is False
+        and report["hardware_physical_behavior"]["adjustments"] == []
+        for report in [*shadow_reports, *advisor_reports[:4], *unknown_reports]
+    )
+    activation = advisor_reports[4]["hardware_physical_behavior"]
+    assert activation["mode"] == "advisor"
+    assert activation["active"] is True
+    assert activation["eligible"] is True
+    assert activation["reason"] == "applied"
+    assert activation["adjustments"]
+    for report in advisor_reports:
+        if report["hardware_physical_behavior"]["active"]:
+            assert all(
+                item["action"] not in HEAVY_ACTIONS
+                for item in report["hormonal_behavior"]["adjustments"]
+            )
+    shadow_choice = shadow_reports[4]["arbitrator"]["all_evaluations"]
+    advisor_choice = advisor_reports[4]["arbitrator"]["all_evaluations"]
+    assert [
+        (item["input_index"], item["action"], item["source"]) for item in advisor_choice
+    ] == [
+        (item["input_index"], item["action"], item["source"]) for item in shadow_choice
+    ]
+    assert unknown_reports[-1]["hardware_physical_behavior"]["reason"] == (
+        "unsupported_mode"
+    )
+    assert "hardware_physical_behavior" not in build_state_from_agent(shadow)
+    assert (
+        shadow.hardware_physical_behavior_last
+        == shadow_reports[-1]["hardware_physical_behavior"]
+    )
+    assert (
+        shadow.hardware_physical_behavior_last
+        is not shadow_reports[-1]["hardware_physical_behavior"]
+    )
+
+
+def test_physical_advisor_changes_only_existing_heavy_candidates_once():
+    from src.core.hardware_behavior import apply_physical_strain_advice
+
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe_physical(observer, cycle, gpu_temperature=100.0, gpu_power=0.95)
+    candidates = [
+        {"action": "explore", "source": "motivation", "strength": 0.8},
+        {"action": "synthesis", "source": "active_goal", "strength": 0.6},
+        {"action": "communicate", "source": "social", "strength": 0.8},
+        {
+            "action": "process_stimulus",
+            "source": "external_attention",
+            "strength": 0.85,
+            "params": {"user_initiated": True},
+        },
+        {"action": "repair", "source": "maintenance", "strength": 0.9},
+        {"action": "wait", "source": "deliberate_pause", "strength": 0.3},
+        {"action": "hypothesis", "source": "invalid_negative", "strength": -0.2},
+        {"action": "reflection", "source": "zero", "strength": 0.0},
+    ]
+    original_actions = [candidate["action"] for candidate in candidates]
+    input_strengths = [candidate["strength"] for candidate in candidates]
+    checkpoint = observer.to_checkpoint()
+
+    report = apply_physical_strain_advice(
+        candidates,
+        observer,
+        lambda action: action,
+        input_strengths=input_strengths,
+    )
+
+    assert report["active"] is True
+    assert report["eligible"] is True
+    assert report["reason"] == "applied"
+    assert [candidate["action"] for candidate in candidates] == original_actions
+    assert [item["action"] for item in report["adjustments"]] == [
+        "explore",
+        "synthesis",
+    ]
+    assert candidates[0]["strength"] == pytest.approx(0.8 * report["factor"])
+    assert candidates[1]["strength"] == pytest.approx(0.6 * report["factor"])
+    assert candidates[2]["strength"] == 0.8
+    assert candidates[3]["strength"] == 0.85
+    assert candidates[4]["strength"] == 0.9
+    assert candidates[5]["strength"] == 0.3
+    assert candidates[6]["strength"] == -0.2
+    assert candidates[7]["strength"] == 0.0
+    assert report["factor"] >= 0.75
+    assert observer.to_checkpoint() == checkpoint
+
+    strengths = [candidate["strength"] for candidate in candidates]
+    duplicate = apply_physical_strain_advice(
+        candidates,
+        observer,
+        lambda action: action,
+        input_strengths=input_strengths,
+    )
+    assert duplicate["active"] is False
+    assert duplicate["eligible"] is True
+    assert duplicate["reason"] == "duplicate_cycle"
+    assert duplicate["adjustments"] == []
+    assert [candidate["strength"] for candidate in candidates] == strengths
+    assert observer.to_checkpoint() == checkpoint
+
+
+def test_physical_advisor_shares_one_strength_budget_with_own_load():
+    from src.core.hardware_behavior import apply_physical_strain_advice
+
+    def confirmed_observer():
+        observer = HardwareInteroception()
+        for cycle in range(5):
+            observer.observe(
+                _high_resources(),
+                cycle=cycle,
+                storage_status=_storage(),
+                physical_status=_physical(gpu_temperature=100.0, gpu_power=0.95),
+            )
+        return observer
+
+    # Ослабленный привыканием own_load даёт меньшую скидку, чем physical.
+    observer = confirmed_observer()
+    observer.personal.latest_experience["own_load"]["experienced"] = 0.1
+    candidates = [
+        {"action": "explore", "source": "motivation", "strength": 0.8},
+        {"action": "communicate", "source": "social", "strength": 0.8},
+    ]
+    input_strengths = [0.8, 0.8]
+    own = apply_own_load_advice(candidates, observer, lambda action: action)
+    own_after = candidates[0]["strength"]
+    physical = apply_physical_strain_advice(
+        candidates,
+        observer,
+        lambda action: action,
+        input_strengths=input_strengths,
+    )
+    assert own["active"] is True
+    assert physical["active"] is True
+    assert physical["factor"] < own["factor"]
+    assert candidates[0]["strength"] == pytest.approx(0.8 * physical["factor"])
+    assert candidates[0]["strength"] < own_after
+    assert candidates[0]["strength"] > own_after * physical["factor"]
+    assert candidates[0]["strength"] >= 0.8 * 0.75
+    assert candidates[1]["strength"] == 0.8
+
+    # Если own_load уже снизил сильнее, повторной physical-скидки нет.
+    observer = confirmed_observer()
+    candidates = [{"action": "explore", "source": "motivation", "strength": 0.8}]
+    own = apply_own_load_advice(candidates, observer, lambda action: action)
+    own_after = candidates[0]["strength"]
+    physical = apply_physical_strain_advice(
+        candidates,
+        observer,
+        lambda action: action,
+        input_strengths=[0.8],
+    )
+    assert own["active"] is True
+    assert own["factor"] < physical["factor"]
+    assert physical["active"] is False
+    assert physical["reason"] == "shared_budget_already_applied"
+    assert physical["adjustments"] == []
+    assert candidates[0]["strength"] == own_after
+    assert candidates[0]["strength"] >= 0.8 * 0.75
+
+
+def test_physical_advisor_application_is_atomic_and_checkpoint_neutral():
+    from src.core.hardware_behavior import apply_physical_strain_advice
+
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe_physical(observer, cycle, gpu_temperature=100.0, gpu_power=0.95)
+    candidates = [
+        {"action": "explore", "strength": 0.8},
+        {"action": "synthesis", "strength": 0.6},
+    ]
+    checkpoint = observer.to_checkpoint()
+
+    def fail_on_second(action):
+        if action == "synthesis":
+            raise ValueError("normalization failed")
+        return action
+
+    with pytest.raises(ValueError, match="normalization failed"):
+        apply_physical_strain_advice(
+            candidates,
+            observer,
+            fail_on_second,
+            input_strengths=[0.8, 0.6],
+        )
+    assert [candidate["strength"] for candidate in candidates] == [0.8, 0.6]
+    assert observer.to_checkpoint() == checkpoint
+
+
+def test_physical_advisor_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    from src.core.agent_body import HEAVY_ACTIONS
+
+    source = DigitalBeing(name="PhysicalAdvisorLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    current = {
+        "resources": _low_resources(),
+        "physical": _physical(gpu_temperature=100.0, gpu_power=0.95),
+    }
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_physical_sensors",
+        lambda: current["physical"],
+    )
+
+    pre_emotional_traces = {}
+    current_trace_key = {"mode": None}
+    original_emotional_bias = DigitalBeing._apply_emotional_bias
+
+    def capture_pre_emotional(self, candidates):
+        mode = current_trace_key["mode"]
+        snapshot = deepcopy(candidates)
+        for candidate in snapshot:
+            params = candidate.get("params") or {}
+            if params.get("continuation_of") is not None:
+                params["continuation_of"] = "present"
+        pre_emotional_traces.setdefault(mode, []).append(snapshot)
+        return original_emotional_bias(self, candidates)
+
+    monkeypatch.setattr(DigitalBeing, "_apply_emotional_bias", capture_pre_emotional)
+
+    def run(mode):
+        current_trace_key["mode"] = mode
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_PHYSICAL_BEHAVIOR_MODE",
+            mode,
+        )
+        random.seed(70029)
+        np.random.seed(70029)
+        agent = DigitalBeing(name=f"PhysicalAdvisorLong_{mode}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        trace = []
+        eligible_cycles = []
+        applied_cycles = []
+        adjustment_history = {}
+        restart_absence = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                assert "hardware_physical_behavior_last" not in state
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                assert not hasattr(restored, "hardware_physical_behavior_last")
+                restart_absence += 1
+                restored.web_searcher.toggle(False)
+                agent = restored
+            current["physical"] = (
+                _physical(gpu_temperature=100.0, gpu_power=0.95)
+                if (cycle // 20) % 2 == 0
+                else _physical(gpu_temperature=45.0, gpu_power=0.2)
+            )
+            report = agent.autonomous_tick()
+            behavior = report["hardware_physical_behavior"]
+            assert agent.hardware_physical_behavior_last == behavior
+            assert agent.hardware_physical_behavior_last is not behavior
+            expected_eligible = (cycle // 20) % 2 == 0 and cycle % 20 >= 4
+            assert behavior["eligible"] is expected_eligible
+            if expected_eligible:
+                eligible_cycles.append(cycle)
+            if behavior["active"] is True:
+                applied_cycles.append(cycle)
+                adjustment_history[cycle] = deepcopy(behavior["adjustments"])
+            else:
+                assert behavior["adjustments"] == []
+            evaluations = report["arbitrator"].get("all_evaluations") or []
+            input_indices = {entry["input_index"] for entry in evaluations}
+            seen_indices = set()
+            for entry in behavior["adjustments"]:
+                assert agent._normalize_action(entry["action"]) in HEAVY_ACTIONS
+                assert entry["before_strength"] > 0.0
+                assert entry["after_strength"] == pytest.approx(
+                    entry["before_strength"] * entry["factor"]
+                )
+                assert entry["after_strength"] >= entry["before_strength"] * 0.75
+                assert entry["input_index"] in input_indices
+                assert entry["input_index"] not in seen_indices
+                seen_indices.add(entry["input_index"])
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        pre_emotional = pre_emotional_traces[mode]
+        assert len(pre_emotional) == len(trace) == 600
+        for entry, candidates in zip(trace, pre_emotional):
+            entry["pre_emotional_candidates"] = candidates
+        return (
+            agent,
+            trace,
+            eligible_cycles,
+            applied_cycles,
+            restart_absence,
+            adjustment_history,
+        )
+
+    shadow_agent, shadow_trace, _, shadow_applied, shadow_restarts, _ = run("shadow")
+    (
+        advisor_agent,
+        advisor_trace,
+        expected_eligible,
+        advisor_applied,
+        advisor_restarts,
+        adjustments,
+    ) = run("advisor")
+
+    assert shadow_agent.cycle_count == advisor_agent.cycle_count == 600
+    assert shadow_restarts == advisor_restarts == 2
+    assert shadow_applied == []
+    assert advisor_applied
+    assert set(advisor_applied) <= set(expected_eligible)
+    diverged = False
+    first_choice_difference = None
+    choice_differences = []
+    evaluation_differences = []
+    for cycle, (observed, expected) in enumerate(zip(advisor_trace, shadow_trace)):
+        if observed["action"] != expected["action"]:
+            if first_choice_difference is None:
+                assert cycle in advisor_applied, cycle
+                first_choice_difference = cycle
+            choice_differences.append(cycle)
+        if not diverged and cycle not in advisor_applied:
+            assert observed == expected, cycle
+        if cycle in advisor_applied:
+            observed_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in observed["evaluations"]
+            }
+            expected_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in expected["evaluations"]
+            }
+            if observed_evaluations != expected_evaluations:
+                evaluation_differences.append(cycle)
+            if not diverged:
+                observed_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(observed["pre_emotional_candidates"])
+                }
+                expected_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(expected["pre_emotional_candidates"])
+                }
+                assert observed_candidates.keys() == expected_candidates.keys()
+                assert observed_candidates.keys() == observed_evaluations.keys()
+                cycle_adjustments = {
+                    (row["input_index"], row["action"], row["source"]): row
+                    for row in adjustments[cycle]
+                }
+                for key, observed_candidate in observed_candidates.items():
+                    expected_candidate = expected_candidates[key]
+                    if key in cycle_adjustments:
+                        adjustment = cycle_adjustments[key]
+                        assert observed_candidate["strength"] == pytest.approx(
+                            adjustment["after_strength"]
+                        )
+                        assert observed_candidate["strength"] == pytest.approx(
+                            expected_candidate["strength"] * adjustment["factor"]
+                        )
+                        assert observed_candidate["strength"] >= (
+                            adjustment["before_strength"] * 0.75
+                        )
+                        assert {
+                            field: value
+                            for field, value in observed_candidate.items()
+                            if field != "strength"
+                        } == {
+                            field: value
+                            for field, value in expected_candidate.items()
+                            if field != "strength"
+                        }
+                    else:
+                        assert observed_candidate == expected_candidate, (cycle, key)
+        if not diverged and any(
+            observed[field] != expected[field]
+            for field in expected
+            if field not in {"evaluations", "diagnostics"}
+        ):
+            diverged = True
+
+    assert evaluation_differences
+    assert len(advisor_agent.hardware_interoception.history) == 200
+    assert len(advisor_agent.hardware_interoception.events) <= 50
+    assert len(advisor_agent.hardware_interoception.personal.episodes) <= 50
+    physical = advisor_agent.hardware_interoception.domain_personal.domains["physical"]
+    assert len(physical["episodes"]) <= 50
+    validate_hardware_interoception(
+        advisor_agent.hardware_interoception.to_checkpoint()
+    )

@@ -410,6 +410,10 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     # Не путаем её с нагрузкой хоста и не добавляем отдых или паузу. Советчик
     # лишь ограниченно снижает силу уже предложенных тяжёлых кандидатов после
     # пяти полных свежих own_load-наблюдений. Выбор по-прежнему делает арбитр.
+    # Исходные силы нужны 7B для общего с 4A бюджета без двух скидок.
+    advisor_input_strengths = [
+        candidate.get("strength", 0.5) for candidate in candidates
+    ]
     hardware_mode = getattr(SIM_CONFIG, "HARDWARE_BEHAVIOR_MODE", "shadow")
     result["hardware_behavior"] = {"mode": hardware_mode, "active": False}
     if hardware_mode == "advisor":
@@ -429,10 +433,48 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 "reason": "advisor_error",
             }
 
+    # === ФИЗИЧЕСКАЯ ПЕРЕГРУЗКА: 7B ===
+    # Advisor снижает только существующие тяжёлые кандидаты. Расчёт от исходной
+    # силы исключает последовательные скидки 4A и 7B ниже общего предела 25 %.
+    physical_mode = str(
+        getattr(SIM_CONFIG, "HARDWARE_PHYSICAL_BEHAVIOR_MODE", "shadow")
+    )
+    try:
+        from src.core.hardware_behavior import (
+            apply_physical_strain_advice,
+            physical_strain_behavior_report,
+        )
+
+        if physical_mode == "advisor":
+            result["hardware_physical_behavior"] = apply_physical_strain_advice(
+                candidates,
+                getattr(self, "hardware_interoception", None),
+                self._normalize_action,
+                input_strengths=advisor_input_strengths,
+            )
+        else:
+            result["hardware_physical_behavior"] = physical_strain_behavior_report(
+                getattr(self, "hardware_interoception", None), physical_mode
+            )
+    except Exception as e:
+        get_logger().log(f"[HARDWARE_PHYSICAL] Evidence error: {e}")
+        result["hardware_physical_behavior"] = {
+            "mode": physical_mode,
+            "active": False,
+            "eligible": False,
+            "reason": "physical_evidence_error",
+            "duration_cycles": 0,
+            "risk": None,
+            "experienced": None,
+            "confidence": 0.0,
+            "factor": 1.0,
+            "adjustments": [],
+        }
+
     # === ГОРМОНАЛЬНАЯ ПРОЕКЦИЯ: 4C ===
     # Shadow не меняет выбор. Advisor лишь ограниченно смещает существующие
-    # кандидаты от личного baseline; при активном 4A тяжёлые кандидаты не
-    # получают второй гормональной поправки.
+    # кандидаты от личного baseline; при активном 4A или 7B тяжёлые кандидаты
+    # не получают второй гормональной поправки.
     hormonal_mode = str(getattr(SIM_CONFIG, "HORMONAL_BEHAVIOR_MODE", "shadow"))
     if hormonal_mode == "advisor":
         try:
@@ -444,6 +486,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 self._normalize_action,
                 hardware_advisor_active=(
                     result["hardware_behavior"].get("active") is True
+                    or result["hardware_physical_behavior"].get("active") is True
                 ),
             )
         except Exception as e:
@@ -503,6 +546,9 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     self.hormonal_behavior_last = deepcopy(result["hormonal_behavior"])
     self.hardware_recovery_behavior_last = deepcopy(
         result["hardware_recovery_behavior"]
+    )
+    self.hardware_physical_behavior_last = deepcopy(
+        result["hardware_physical_behavior"]
     )
 
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===
