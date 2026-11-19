@@ -101,11 +101,18 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
     from src.cognition.inference_continuity import capture_inference
     from src.cognition.experience_observers import meta_cognition_checkpoint
     from src.cognition.integrated_experience import capture_integrated_experience
+    from src.core.hardware_interoception import HardwareInteroception
 
+    hardware = getattr(agent, "hardware_interoception", None)
     return {
         "personal_state": capture_personal_state(agent),
         "meta_cognition": meta_cognition_checkpoint(agent),
         "integrated_experience": capture_integrated_experience(agent),
+        "hardware_interoception": (
+            hardware.to_checkpoint()
+            if hardware is not None
+            else HardwareInteroception().to_checkpoint()
+        ),
         "cooperation": capture_cooperation(agent),
         "active_inference": (
             capture_inference(agent.active_inference)
@@ -615,12 +622,19 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         AgentCooperationHub,
         validate_cooperation_checkpoint,
     )
+    from src.core.hardware_interoception import HardwareInteroception
 
     integrated_state = state.get("integrated_experience") or {}
     if integrated_state:
         validate_integrated_experience(integrated_state)
     staged_integrated_experience = stage_integrated_experience(
         integrated_state, agent.name
+    )
+    hardware_state = state.get("hardware_interoception") or {}
+    staged_hardware_interoception = (
+        HardwareInteroception.from_checkpoint(hardware_state)
+        if hardware_state
+        else HardwareInteroception()
     )
     cooperation_state = state.get("cooperation") or {}
     if cooperation_state:
@@ -1226,6 +1240,7 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     from src.core.auxiliary_adapters import restore_cooperation
 
     restore_integrated_experience(agent, staged_integrated_experience)
+    agent.hardware_interoception = staged_hardware_interoception
     restore_cooperation(agent, staged_cooperation)
 
 

@@ -47,6 +47,7 @@ class Watchdog:
         # Состояние
         self._cycle_count = 0
         self._last_cycle_started: Optional[float] = None
+        self._last_cycle_duration_ms: Optional[float] = None
         self._last_heavy_tick_cycle: int = 0
         self._skip_heavy_this_cycle: bool = False
         self._alerts: List[Dict] = []
@@ -73,6 +74,7 @@ class Watchdog:
         if self._last_cycle_started is None:
             return
         elapsed = time.monotonic() - self._last_cycle_started
+        self._last_cycle_duration_ms = elapsed * 1000.0
         slow_cycle = elapsed > self.max_cycle_seconds
         self._skip_heavy_this_cycle = slow_cycle
         if slow_cycle:
@@ -167,6 +169,11 @@ class Watchdog:
                 "process_rss_mb": process_rss,
                 "process_rss_ratio": rss_ratio,
                 "slow_cycle": self._skip_heavy_this_cycle,
+                **(
+                    {"cycle_duration_ms": self._last_cycle_duration_ms}
+                    if self._last_cycle_duration_ms is not None
+                    else {}
+                ),
                 "score": float(min(1.0, max(0.0, score))),
             }
         except Exception as exc:

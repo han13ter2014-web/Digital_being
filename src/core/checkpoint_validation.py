@@ -990,6 +990,7 @@ def validate_checkpoint_state(state) -> None:
                     "process_cpu_percent",
                     "process_rss_mb",
                     "process_rss_ratio",
+                    "cycle_duration_ms",
                 ),
                 "meta_learning.last_resource_status",
             )

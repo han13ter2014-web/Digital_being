@@ -597,3 +597,160 @@ def test_dialogue_snapshot_is_honest_about_missing_or_legacy_plan():
     assert legacy["act"] is None
     assert legacy["rule_id"] is None
     assert legacy["fallback_policy"] == "none"
+
+
+def test_hardware_snapshot_is_compact_deep_copy_without_os_sampling(monkeypatch):
+    agent = _agent("HardwareSnapshot")
+    status = {
+        "mode": "shadow",
+        "observation": {"channels": {"host_cpu": {"value": 95.0}}},
+        "latest_experience": {"own_load": {"risk": 0.95, "experienced": 0.85}},
+        "personal_profile": {"baseline": {"own_load": {"sample_count": 50}}},
+        "current_episode": {"start_cycle": 1},
+        "episodes": [{"start_cycle": 1}, {"start_cycle": 20}],
+        "recent_events": [{"cycle": cycle} for cycle in range(12)],
+    }
+    agent.hardware_interoception = SimpleNamespace(status=lambda: status)
+    keys_before = set(agent.__dict__)
+
+    def unexpected_sampling(*args, **kwargs):
+        raise AssertionError("snapshot must not sample the OS")
+
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", unexpected_sampling
+    )
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status", unexpected_sampling
+    )
+
+    first = build_life_snapshot(agent)
+    second = build_life_snapshot(agent)
+
+    assert first == second
+    assert first["hardware"]["initialized"] is True
+    assert first["hardware"]["episode_count"] == 2
+    assert "episodes" not in first["hardware"]
+    assert len(first["hardware"]["recent_events"]) == 10
+    assert first["hardware"]["recent_events"][0]["cycle"] == 2
+    assert set(agent.__dict__) == keys_before
+
+    first["hardware"]["personal_profile"]["baseline"]["own_load"]["sample_count"] = 0
+    first["hardware"]["recent_events"][0]["cycle"] = -1
+    assert status["personal_profile"]["baseline"]["own_load"]["sample_count"] == 50
+    assert status["recent_events"][2]["cycle"] == 2
+
+
+def test_hardware_snapshot_is_explicit_when_observer_is_absent_or_broken():
+    agent = _agent("NoHardware")
+    agent.hardware_interoception = None
+    assert build_life_snapshot(agent)["hardware"] == {
+        "mode": "shadow",
+        "initialized": False,
+        "reason": "not_initialized",
+    }
+
+    def explode():
+        raise RuntimeError("C:/private/sensor failure")
+
+    agent.hardware_interoception = SimpleNamespace(status=explode)
+    snapshot = build_life_snapshot(agent)
+    assert snapshot["hardware"]["initialized"] is False
+    assert "C:/private" not in str(snapshot)
+
+
+def test_hardware_rows_distinguish_unavailable_stale_and_unknown():
+    from src.ui.life_view import hardware_rows
+
+    base = {
+        "initialized": True,
+        "observation": {
+            "channels": {
+                "host_cpu": {"status": "unavailable", "value": None},
+                "process_cpu": {"status": "stale", "value": 50.0},
+            }
+        },
+        "latest_experience": {"own_load": {"risk": None, "experienced": None}},
+        "personal_profile": {"baseline": {}},
+        "shadow_strain": None,
+        "shadow_recovery": None,
+    }
+    snapshot = {"hardware": base}
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "CPU среды: недоступно" in russian
+    assert "CPU процесса: устарело" in russian
+    assert "риск Нет данных" in russian
+    assert "0.0%" not in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Host CPU: unavailable" in english
+    assert "Process CPU: stale" in english
+    assert "insufficient experience" in english
+
+
+def test_hardware_rows_show_physical_values_without_hiding_missing_channels():
+    from src.ui.life_view import hardware_rows
+
+    snapshot = {
+        "hardware": {
+            "initialized": True,
+            "observation": {
+                "channels": {
+                    "gpu_utilization": {
+                        "status": "available",
+                        "value": 80.0,
+                        "unit": "percent",
+                    },
+                    "gpu_memory": {
+                        "status": "available",
+                        "value": 0.75,
+                        "unit": "ratio",
+                    },
+                    "gpu_temperature": {
+                        "status": "available",
+                        "value": 70.0,
+                        "unit": "celsius",
+                    },
+                    "gpu_power": {
+                        "status": "available",
+                        "value": 0.9,
+                        "unit": "ratio",
+                    },
+                    "cpu_temperature": {"status": "unavailable", "value": None},
+                    "external_power": {
+                        "status": "available",
+                        "value": 1.0,
+                        "unit": "ratio",
+                    },
+                    "battery_charge": {"status": "unavailable", "value": None},
+                }
+            },
+            "states": {"physical_strain": {"value": 0.8}},
+            "latest_experience": {},
+            "personal_profile": {"baseline": {}},
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Загрузка GPU: 80.0%" in russian
+    assert "Память GPU: 75.0%" in russian
+    assert "Температура GPU: 70.0 °C" in russian
+    assert "Мощность GPU: 90.0%" in russian
+    assert "Температура CPU: недоступно" in russian
+    assert "Внешнее питание: да" in russian
+    assert "Заряд батареи: недоступно" in russian
+    assert "Физическое напряжение: 80.0%" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "GPU utilization: 80.0%" in english
+    assert "CPU temperature: unavailable" in english
+    assert "External power: yes" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "GPU 温度: 70.0 °C" in chinese
+    assert "CPU 温度: 不可用" in chinese

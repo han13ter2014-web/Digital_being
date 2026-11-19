@@ -627,6 +627,17 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     ][-RECENT_INTENTIONS:]
 
     interoception = _status_of(_own(agent, "interoception", None))
+    hardware = _status_of(_own(agent, "hardware_interoception", None))
+    if hardware:
+        hardware["initialized"] = True
+        hardware["episode_count"] = len(hardware.pop("episodes", []))
+        hardware["recent_events"] = list(hardware.get("recent_events") or [])[-10:]
+    else:
+        hardware = {
+            "mode": "shadow",
+            "initialized": False,
+            "reason": "not_initialized",
+        }
     life_guard = _own(agent, "life_guard", None)
     guard_details: Dict[str, Any] = {}
     if life_guard is not None:
@@ -683,6 +694,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "motivation": _status_of(_own(agent, "motivation_system", None)),
         "emotions": _status_of(_own(agent, "emotional_state", None)),
         "body": interoception,
+        "hardware": hardware,
         "intentions": {
             "active": current,
             "waiting": waiting_entries,

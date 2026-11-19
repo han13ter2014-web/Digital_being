@@ -66,6 +66,14 @@ class HormonalSystem:
         elif event_type in {"stress", "threat", "failure", "overload"}:
             self._change("cortisol", min(0.5, intensity * 0.25))
             self._change("dopamine", -intensity * 0.05)
+        elif event_type == "hardware_strain":
+            # Только длительное давление с доказательствами от наблюдателя.
+            # Низкий CPU не является наградой, а всплеск сюда не попадает.
+            self._change("cortisol", min(0.3, intensity * 0.12))
+        elif event_type == "hardware_recovery":
+            # Восстановление подтверждено свежими продолжительными показаниями.
+            self._change("serotonin", min(0.1, intensity * 0.06))
+            self._change("cortisol", -intensity * 0.06)
         elif event_type in {"connection", "empathy", "trust", "care"}:
             self._change("oxytocin", min(0.35, intensity * 0.12))
             self._change("cortisol", -intensity * 0.04)

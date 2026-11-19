@@ -237,6 +237,129 @@ def body_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     return rows
 
 
+def _hardware_percent(value: Any, language: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return i18n.text("Нет данных", language)
+    if not math.isfinite(float(value)):
+        return i18n.text("Нет данных", language)
+    return f"{float(value) * 100.0:.1f}%"
+
+
+def _hardware_channel_text(
+    channel: Dict[str, Any], language: str, key: str = ""
+) -> str:
+    status = channel.get("status")
+    if status in {"unavailable", "stale"}:
+        return i18n.text(
+            "недоступно" if status == "unavailable" else "устарело", language
+        )
+    value = channel.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return i18n.text("Нет данных", language)
+    if not math.isfinite(float(value)):
+        return i18n.text("Нет данных", language)
+    if key == "external_power" and float(value) in {0.0, 1.0}:
+        return i18n.text("да" if float(value) == 1.0 else "нет", language)
+    unit = channel.get("unit")
+    if unit == "percent":
+        return f"{float(value):.1f}%"
+    if unit == "mb":
+        return f"{float(value):.1f} {i18n.text('МБ', language)}"
+    if unit == "celsius":
+        return f"{float(value):.1f} °C"
+    if unit in {"free_ratio", "ratio"}:
+        return _hardware_percent(value, language)
+    return f"{float(value):.2f}"
+
+
+def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Отдельная read-only диагностика, не смешанная с ресурсами тела."""
+    T = partial(i18n.text, language=language)
+    hardware = snapshot.get("hardware") or {}
+    if hardware.get("initialized") is not True:
+        return [(T("Аппаратное состояние"), T("Нет данных"))]
+
+    rows: List[Row] = [(T("Режим"), T("только наблюдение"))]
+    channels = (hardware.get("observation") or {}).get("channels") or {}
+    for key, label in (
+        ("host_cpu", "CPU среды"),
+        ("process_cpu", "CPU процесса"),
+        ("host_memory", "Память среды"),
+        ("process_rss", "RSS процесса"),
+        ("data_storage", "Свободное место data"),
+        ("gpu_utilization", "Загрузка GPU"),
+        ("gpu_memory", "Память GPU"),
+        ("gpu_temperature", "Температура GPU"),
+        ("gpu_power", "Мощность GPU"),
+        ("cpu_temperature", "Температура CPU"),
+        ("external_power", "Внешнее питание"),
+        ("battery_charge", "Заряд батареи"),
+    ):
+        rows.append(
+            (
+                T(label),
+                _hardware_channel_text(channels.get(key) or {}, language, key),
+            )
+        )
+
+    experience = hardware.get("latest_experience") or {}
+    for key, label in (
+        ("own_load", "Собственная нагрузка"),
+        ("environmental_pressure", "Давление среды"),
+        ("memory_pressure", "Давление памяти"),
+        ("storage_risk", "Риск хранилища"),
+    ):
+        item = experience.get(key) or {}
+        risk = item.get("risk")
+        text = f"{T('риск')} {_hardware_percent(risk, language)}"
+        if risk is not None:
+            text += f" · {T('переживается')} {_hardware_percent(item.get('experienced'), language)}"
+        if (
+            item.get("expectedness") == "familiar"
+            and isinstance(risk, (int, float))
+            and risk >= 0.85
+        ):
+            text += f" · {T('привычно, но риск сохраняется')}"
+        rows.append((T(label), text))
+
+    profile = hardware.get("personal_profile") or {}
+    baselines = profile.get("baseline") or {}
+    has_baseline = any(
+        isinstance(item, dict) and item.get("sample_count", 0) >= 50
+        for item in baselines.values()
+    )
+    if not has_baseline:
+        rows.append((T("Личная норма"), T("недостаточно опыта")))
+    rows.extend(
+        [
+            (
+                T("Привыкание"),
+                f"{float(profile.get('adaptation', 0.0)):.2f} · "
+                f"{T('уверенность')} {float(profile.get('confidence', 0.0)):.2f}",
+            ),
+            (
+                T("Теневое напряжение"),
+                _hardware_percent(hardware.get("shadow_strain"), language),
+            ),
+            (
+                T("Теневое восстановление"),
+                _hardware_percent(hardware.get("shadow_recovery"), language),
+            ),
+            (T("Завершённые эпизоды"), str(profile.get("completed_episode_count", 0))),
+            (
+                T("Физическое напряжение"),
+                _hardware_percent(
+                    ((hardware.get("states") or {}).get("physical_strain") or {}).get(
+                        "value"
+                    ),
+                    language,
+                ),
+            ),
+        ]
+    )
+    return rows
+
+
 def body_summary(snapshot: Dict[str, Any], language: str = "ru") -> str:
     """Одна строка о теле для подзаголовка: цикл · энергия · усталость."""
     T = partial(i18n.text, language=language)

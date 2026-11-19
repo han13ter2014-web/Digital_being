@@ -38,6 +38,8 @@
 - `EXPERIENCE_EPISTEMICS.md`, `EMPIRICAL_CLAIMS.md` — знание, гипотеза,
   свидетельство и ограничения выводов;
 - `ACCESS_AND_STORAGE_PLAN.md`, `SQLITE_CHECKPOINTS.md` — доступы и хранение;
+- [HARDWARE_INTEROCEPTION_PLAN.md](HARDWARE_INTEROCEPTION_PLAN.md) — контракт
+  аппаратной интероцепции, теневой эндокринной проекции и advisor 4A;
 - `BUILD.md`, `INSTALLER.md` — сборка и установка.
 
 ## Исторические отчёты

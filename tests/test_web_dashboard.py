@@ -71,6 +71,31 @@ def _life() -> dict:
             "fatigue_level": "normal",
             "needs_rest": False,
         },
+        "hardware": {
+            "mode": "shadow",
+            "initialized": True,
+            "observation": {
+                "channels": {
+                    "host_cpu": {
+                        "status": "available",
+                        "value": 95.0,
+                        "unit": "percent",
+                        "source": "test",
+                    }
+                }
+            },
+            "latest_experience": {
+                "own_load": {
+                    "risk": 0.95,
+                    "experienced": 0.85,
+                    "expectedness": "familiar",
+                }
+            },
+            "personal_profile": {"baseline": {}, "completed_episode_count": 2},
+            "shadow_strain": 0.85,
+            "shadow_recovery": 0.0,
+            "recent_events": [],
+        },
         "activities": {"creative": {"count": 1, "drafts": [{"title": "Тишина"}]}},
         "access": {
             "network": {"enabled": True, "label": "Интернет-поиск"},
@@ -182,7 +207,7 @@ def test_all_readonly_http_sections_match_published_dto(dashboard):
     state.update_life(life)
     state.update_graph(graph)
     assert _get_json(port, "/api/life") == life
-    for section in ("activities", "access", "emotions", "body"):
+    for section in ("activities", "access", "emotions", "body", "hardware"):
         assert _get_json(port, f"/api/{section}")[section] == life[section]
     assert _get_json(port, "/api/graph") == graph
 
@@ -246,6 +271,11 @@ def test_html_supports_three_languages_without_changing_event_codes(dashboard):
     assert payload["values"]["en"]["set_own_goal"] == "own goal"
     assert payload["texts"]["en"]["Отправить"] == "Send"
     assert payload["texts"]["zh"]["Отправить"] == "发送"
+    assert payload["texts"]["en"]["Аппаратное состояние"] == "Hardware state"
+    assert payload["texts"]["zh"]["Аппаратное состояние"] == "硬件状态"
+    assert payload["texts"]["en"]["привычно, но риск сохраняется"] == (
+        "familiar, but the risk remains"
+    )
     assert (
         payload["texts"]["en"]["Digital Being · обсерватория"]
         == "Digital Being · observatory"
@@ -280,6 +310,14 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert body.count('data-page="contacts"') == 2
     assert "function renderExternal(section)" in body
     assert "sendCommand('/api/external'" in body
+    assert 'id="hardware-rows"' in body
+    assert "function renderHardware(h)" in body
+    assert "renderHardware(life.hardware||{})" in body
+    assert "привычно, но риск сохраняется" in body
+    assert "['gpu_temperature','Температура GPU']" in body
+    assert "['cpu_temperature','Температура CPU']" in body
+    assert "['external_power','Внешнее питание']" in body
+    assert "hardwarePercent(h.states?.physical_strain?.value)" in body
     assert "set_goal" not in body
     assert "think(" not in body and "save_state(" not in body
 

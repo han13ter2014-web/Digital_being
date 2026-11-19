@@ -92,6 +92,7 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
         "arbitrator": None,
         "continuous_time": None,
         "meta_learning": None,
+        "hardware_interoception": None,
         "integrated_experience": None,
         "auxiliary_adapters": None,
     }
@@ -105,9 +106,21 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
 
     result["continuous_time"] = tick_continuous_time(self, cycle)
     result["meta_learning"] = step_meta_learning(self)
+    from src.core.hardware_interoception import observe_hardware_interoception
     from src.cognition.integrated_experience import tick_integrated_experience
     from src.core.auxiliary_adapters import tick_auxiliary_adapters
 
+    # Используем одну выборку ОС на цикл. Новый наблюдатель остаётся shadow:
+    # его единственный внешний эффект — события существующей HormonalSystem.
+    meta_learning = result["meta_learning"]
+    resource_status = (
+        meta_learning.get("resource_status")
+        if isinstance(meta_learning, dict)
+        else None
+    )
+    result["hardware_interoception"] = observe_hardware_interoception(
+        self, resource_status, cycle
+    )
     result["integrated_experience"] = tick_integrated_experience(self, cycle)
     result["auxiliary_adapters"] = tick_auxiliary_adapters(self, cycle)
 
@@ -392,6 +405,29 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 "params": {"reason": reason},
             }
         ]
+
+    # === СОБСТВЕННАЯ АППАРАТНАЯ НАГРУЗКА: СОВЕТЧИК ===
+    # Не путаем её с нагрузкой хоста и не добавляем отдых или паузу. Советчик
+    # лишь ограниченно снижает силу уже предложенных тяжёлых кандидатов после
+    # пяти полных свежих own_load-наблюдений. Выбор по-прежнему делает арбитр.
+    hardware_mode = getattr(SIM_CONFIG, "HARDWARE_BEHAVIOR_MODE", "shadow")
+    result["hardware_behavior"] = {"mode": hardware_mode, "active": False}
+    if hardware_mode == "advisor":
+        try:
+            from src.core.hardware_behavior import apply_own_load_advice
+
+            result["hardware_behavior"] = apply_own_load_advice(
+                candidates,
+                getattr(self, "hardware_interoception", None),
+                self._normalize_action,
+            )
+        except Exception as e:
+            get_logger().log(f"[HARDWARE_BEHAVIOR] Advisor error: {e}")
+            result["hardware_behavior"] = {
+                "mode": "advisor",
+                "active": False,
+                "reason": "advisor_error",
+            }
 
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===
     # Пережитое смещает тягу к занятиям: страх тянет к безопасному,

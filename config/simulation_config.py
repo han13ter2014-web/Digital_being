@@ -81,6 +81,12 @@ class SimulationConfig:
     # False = legacy путь через Active Inference напрямую
     USE_ARBITRATOR = True
 
+    # === Аппаратная интероцепция ===
+    # shadow — только наблюдение; advisor — до 25% снижения силы уже
+    # предложенных тяжёлых кандидатов при пяти свежих own_load >= 0.85.
+    # Не меняет арбитр, цели, потребности, награды, энергию и гормоны.
+    HARDWARE_BEHAVIOR_MODE = "advisor"
+
     # === Личность (НИЧЕГО не лимитируем!) ===
     # personality.values - бесконечно (душа агента)
     # personality.traits - бесконечно (характер агента)

@@ -499,6 +499,35 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
             "mitochondrial_health": 0.91,
             "needs_rest": False,
         },
+        "hardware": {
+            "initialized": True,
+            "observation": {
+                "channels": {
+                    "host_cpu": {
+                        "status": "available",
+                        "value": 95.0,
+                        "unit": "percent",
+                    },
+                    "process_cpu": {"status": "unavailable", "value": None},
+                    "data_storage": {"status": "stale", "value": 0.8},
+                }
+            },
+            "latest_experience": {
+                "own_load": {
+                    "risk": 0.95,
+                    "experienced": 0.85,
+                    "expectedness": "familiar",
+                }
+            },
+            "personal_profile": {
+                "baseline": {},
+                "adaptation": 0.4,
+                "confidence": 0.8,
+                "completed_episode_count": 3,
+            },
+            "shadow_strain": 0.85,
+            "shadow_recovery": 0.0,
+        },
     }
     win._apply_life_data(snapshot)
     root.update()
@@ -511,6 +540,14 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     assert "АТФ: 87.50" in body
     assert "Глюкоза: 121.20" in body
     assert "Митохондрии: 0.91" in body
+    hardware = win._now_hardware.cget("text")
+    assert hardware != body
+    assert "CPU среды: 95.0%" in hardware
+    assert "CPU процесса: недоступно" in hardware
+    assert "Свободное место data: устарело" in hardware
+    assert "риск 95.0% · переживается 85.0%" in hardware
+    assert "привычно, но риск сохраняется" in hardware
+    assert "Личная норма: недостаточно опыта" in hardware
 
     win._set_language("English")
     root.update()
@@ -518,11 +555,21 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     assert win._now_emotion_values["joy"].cget("text") == "0.64"
     assert "ATP: 87.50" in win._now_body.cget("text")
     assert "Glucose: 121.20" in win._now_body.cget("text")
+    hardware = win._now_hardware.cget("text")
+    assert "Host CPU: 95.0%" in hardware
+    assert "Process CPU: unavailable" in hardware
+    assert "Free data storage: stale" in hardware
+    assert "familiar, but the risk remains" in hardware
+    assert "Personal baseline: insufficient experience" in hardware
 
     win._set_language("中文")
     root.update()
     assert win._now_emotion_labels["joy"].cget("text") == "喜悦"
     assert win._now_emotion_values["joy"].cget("text") == "0.64"
+    hardware = win._now_hardware.cget("text")
+    assert "主机 CPU: 95.0%" in hardware
+    assert "进程 CPU: 不可用" in hardware
+    assert "已经习惯，但风险依然存在" in hardware
 
 
 def test_now_screen_has_honest_empty_emotion_state(root):

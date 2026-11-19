@@ -394,9 +394,11 @@ def init_impl(self, name="Lucy", life_id=None, profile_managed=False):
     # Сохранённые модели подключены только как наблюдатели реального опыта.
     # Внешние адаптеры per-instance; голос и сеть остаются выключенными.
     from src.cognition.integrated_experience import initialize_integrated_experience
+    from src.core.hardware_interoception import initialize_hardware_interoception
     from src.core.auxiliary_adapters import initialize_auxiliary_adapters
 
     initialize_integrated_experience(self)
+    initialize_hardware_interoception(self)
     initialize_auxiliary_adapters(self)
 
     # === Этап 3.5: PluginRegistry — регистрируем все подсистемы ===
