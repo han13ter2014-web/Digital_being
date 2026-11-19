@@ -431,6 +431,46 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
             ),
         ]
     )
+    recovery = hardware.get("recovery_behavior")
+    if "recovery_behavior" not in hardware:
+        recovery_mode = T("Shadow · без влияния на выбор")
+    elif not isinstance(recovery, dict):
+        recovery_mode = T("Нет данных")
+    elif recovery.get("mode") == "advisor":
+        recovery_mode = T("Advisor · ограниченное влияние на выбор")
+    else:
+        recovery_mode = T("Shadow · без влияния на выбор")
+    rows.append((f"{T('Восстановление')} · {T('Режим')}", recovery_mode))
+    if isinstance(recovery, dict):
+        rows.extend(
+            [
+                (
+                    f"{T('Восстановление')} · {T('Активность')}",
+                    T("да" if recovery.get("active") is True else "нет"),
+                ),
+                (
+                    f"{T('Восстановление')} · {T('Причина')}",
+                    str(recovery.get("reason") or T("Нет данных")),
+                ),
+                (
+                    f"{T('Восстановление')} · {T('Серия')}",
+                    f"{recovery.get('strain_cycles', 0)} + "
+                    f"{recovery.get('recovery_cycles', 0)}",
+                ),
+            ]
+        )
+        for entry in (recovery.get("adjustments") or [])[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                (
+                    f"{T('Поправка')} · {entry.get('action') or 'unknown'}",
+                    f"{_hormonal_number(entry.get('before_strength'), language)}"
+                    f" → {_hormonal_number(entry.get('after_strength'), language)}"
+                    f" · ×{_hormonal_number(entry.get('factor'), language)}"
+                    f" · {entry.get('source') or 'unknown'}",
+                )
+            )
     return rows
 
 

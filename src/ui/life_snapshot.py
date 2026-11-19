@@ -678,6 +678,62 @@ def _hormonal_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _recovery_cycle_count(value: Any) -> int:
+    return (
+        value
+        if not isinstance(value, bool) and isinstance(value, int) and value >= 0
+        else 0
+    )
+
+
+def _hardware_recovery_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
+    """Sanitized DTO последнего recovery-тика; не часть checkpoint."""
+    runtime = _own(agent, "hardware_recovery_behavior_last", None)
+    if not isinstance(runtime, dict):
+        return None
+    raw_adjustments = runtime.get("adjustments")
+    raw_adjustments = raw_adjustments if isinstance(raw_adjustments, list) else []
+    adjustments = []
+    for entry in raw_adjustments[-3:]:
+        if not isinstance(entry, dict):
+            continue
+        input_index = entry.get("input_index")
+        adjustments.append(
+            {
+                "input_index": (
+                    input_index
+                    if not isinstance(input_index, bool)
+                    and isinstance(input_index, int)
+                    and input_index >= 0
+                    else None
+                ),
+                "action": _hormonal_behavior_code(entry.get("action")),
+                "source": _hormonal_behavior_code(entry.get("source")),
+                "before_strength": _hormonal_behavior_number(
+                    entry.get("before_strength")
+                ),
+                "after_strength": _hormonal_behavior_number(
+                    entry.get("after_strength")
+                ),
+                "factor": _hormonal_behavior_number(entry.get("factor")),
+            }
+        )
+    return {
+        "mode": _hormonal_behavior_code(runtime.get("mode")),
+        "active": runtime.get("active") is True,
+        "eligible": runtime.get("eligible") is True,
+        "reason": _hormonal_behavior_code(runtime.get("reason")),
+        "strain_cycles": _recovery_cycle_count(runtime.get("strain_cycles")),
+        "recovery_cycles": _recovery_cycle_count(runtime.get("recovery_cycles")),
+        "max_recovery_risk": _hormonal_behavior_number(
+            runtime.get("max_recovery_risk")
+        ),
+        "recovery": _hormonal_behavior_number(runtime.get("recovery")),
+        "factor": _hormonal_behavior_number(runtime.get("factor")),
+        "adjustments": adjustments,
+    }
+
+
 def _hormonal_projection_section(agent: Any) -> Dict[str, Any]:
     """Компактная проекция checkpoint без истории, текста и обращения к ОС."""
     fallback = {
@@ -788,6 +844,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
             "initialized": False,
             "reason": "not_initialized",
         }
+    hardware["recovery_behavior"] = _hardware_recovery_behavior_section(agent)
     life_guard = _own(agent, "life_guard", None)
     guard_details: Dict[str, Any] = {}
     if life_guard is not None:

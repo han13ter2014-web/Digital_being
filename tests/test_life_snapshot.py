@@ -659,6 +659,7 @@ def test_hardware_snapshot_is_explicit_when_observer_is_absent_or_broken():
         "mode": "shadow",
         "initialized": False,
         "reason": "not_initialized",
+        "recovery_behavior": None,
     }
 
     def explode():
@@ -1173,3 +1174,147 @@ def test_hormonal_rows_show_actual_advisor_and_restart_absence():
     assert "Режим: Нет данных" in restarted
     assert "Сигнал ·" not in restarted
     assert "0.00 · Доказательства" not in restarted
+
+
+def test_recovery_behavior_snapshot_is_bounded_and_not_persisted():
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    agent = _agent("RecoveryBehaviorSnapshot")
+    runtime = {
+        "mode": "advisor",
+        "active": True,
+        "eligible": True,
+        "reason": "applied",
+        "strain_cycles": 5,
+        "recovery_cycles": 5,
+        "max_recovery_risk": 0.35,
+        "recovery": 0.65,
+        "factor": 1.065,
+        "adjustments": [
+            {
+                "input_index": index,
+                "action": "deep_rest",
+                "source": "embodiment",
+                "before_strength": 1.0,
+                "after_strength": 1.065,
+                "factor": 1.065,
+                "private": "C:/private/goal text",
+            }
+            for index in range(5)
+        ],
+        "raw_error": "C:/private/sensor failure",
+    }
+    agent.hardware_recovery_behavior_last = runtime
+
+    behavior = build_life_snapshot(agent)["hardware"]["recovery_behavior"]
+
+    assert set(behavior) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "strain_cycles",
+        "recovery_cycles",
+        "max_recovery_risk",
+        "recovery",
+        "factor",
+        "adjustments",
+    }
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True and behavior["eligible"] is True
+    assert behavior["reason"] == "applied"
+    assert behavior["strain_cycles"] == behavior["recovery_cycles"] == 5
+    assert behavior["max_recovery_risk"] == 0.35
+    assert behavior["recovery"] == 0.65
+    assert behavior["factor"] == 1.065
+    assert len(behavior["adjustments"]) == 3
+    assert [row["input_index"] for row in behavior["adjustments"]] == [2, 3, 4]
+    assert all(
+        set(row)
+        == {
+            "input_index",
+            "action",
+            "source",
+            "before_strength",
+            "after_strength",
+            "factor",
+        }
+        for row in behavior["adjustments"]
+    )
+    assert "C:/private" not in str(behavior)
+    behavior["adjustments"][0]["action"] = "tampered"
+    assert runtime["adjustments"][2]["action"] == "deep_rest"
+
+    state = build_state_from_agent(agent)
+    assert "hardware_recovery_behavior_last" not in state
+    restored = _agent("RecoveryBehaviorRestart")
+    apply_state_to_agent(restored, state)
+    assert not hasattr(restored, "hardware_recovery_behavior_last")
+    restarted = build_life_snapshot(restored)["hardware"]
+    assert restarted["initialized"] is True
+    assert restarted["recovery_behavior"] is None
+
+
+def test_hardware_rows_show_actual_recovery_advisor_and_restart_absence():
+    from src.ui.life_view import hardware_rows
+
+    hardware = {
+        "initialized": True,
+        "recovery_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "strain_cycles": 5,
+            "recovery_cycles": 5,
+            "max_recovery_risk": 0.35,
+            "recovery": 0.65,
+            "factor": 1.065,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "deep_rest",
+                    "source": "embodiment",
+                    "before_strength": 1.0,
+                    "after_strength": 1.065,
+                    "factor": 1.065,
+                }
+            ],
+        },
+    }
+    snapshot = {"hardware": hardware}
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Восстановление · Режим: Advisor · ограниченное влияние на выбор" in russian
+    assert "Восстановление · Активность: да" in russian
+    assert "Восстановление · Причина: applied" in russian
+    assert "Восстановление · Серия: 5 + 5" in russian
+    assert "Поправка · deep_rest: 1.00 → 1.06 · ×1.06 · embodiment" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Recovery · Mode: Advisor · bounded influence on choices" in english
+    assert "Recovery · Activity: yes" in english
+    assert "Recovery · Series: 5 + 5" in english
+    assert "Adjustment · deep_rest: 1.00 → 1.06 · ×1.06 · embodiment" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "恢复 · 模式: 顾问 · 对选择的有限影响" in chinese
+    assert "恢复 · 活动: 是" in chinese
+    assert "恢复 · 系列: 5 + 5" in chinese
+    assert "调整 · deep_rest: 1.00 → 1.06 · ×1.06 · embodiment" in chinese
+
+    hardware["recovery_behavior"] = None
+    restarted = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Восстановление · Режим: Нет данных" in restarted
+    assert "Поправка ·" not in restarted
+
+    del hardware["recovery_behavior"]
+    legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Восстановление · Режим: Shadow · без влияния на выбор" in legacy

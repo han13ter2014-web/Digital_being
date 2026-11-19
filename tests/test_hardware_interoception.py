@@ -9,7 +9,13 @@ import pytest
 
 from src.core.agent import DigitalBeing
 from src.core.checkpoint_serializer import apply_state_to_agent, build_state_from_agent
-from src.core.hardware_behavior import apply_own_load_advice, own_load_advice
+from src.core.hardware_behavior import (
+    apply_own_load_advice,
+    apply_own_recovery_advice,
+    own_load_advice,
+    own_recovery_behavior_report,
+    own_recovery_evidence,
+)
 from src.core.hardware_interoception import (
     HardwareInteroception,
     observe_hardware_interoception,
@@ -348,6 +354,388 @@ def test_own_load_advisor_application_is_atomic_on_normalization_error():
     with pytest.raises(ValueError, match="normalization failed"):
         apply_own_load_advice(candidates, observer, fail_on_second)
     assert [candidate["strength"] for candidate in candidates] == [0.8, 0.6]
+
+
+def test_own_recovery_evidence_requires_exact_five_plus_five_transition_once():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe(observer, cycle, _high_resources())
+    for cycle in range(5, 9):
+        _observe(observer, cycle, _low_resources())
+        evidence = own_recovery_evidence(observer)
+        assert evidence["eligible"] is False
+        assert evidence["reason"] == "insufficient_recovery_history"
+
+    _observe(observer, 9, _low_resources())
+    evidence = own_recovery_evidence(observer)
+    assert evidence["eligible"] is True
+    assert evidence["reason"] == "confirmed_own_recovery_transition"
+    assert evidence["strain_cycles"] == 5
+    assert evidence["recovery_cycles"] == 5
+    assert evidence["max_recovery_risk"] == pytest.approx(0.065)
+    assert evidence["factor"] == pytest.approx(1.0 + 0.10 * 0.935)
+    report = own_recovery_behavior_report(observer, "shadow")
+    assert report["active"] is False
+    assert report["eligible"] is True
+    assert report["reason"] == "shadow_only"
+    assert report["adjustments"] == []
+
+    history_size = len(observer.history)
+    _observe(observer, 9, _low_resources())
+    assert len(observer.history) == history_size
+    assert own_recovery_evidence(observer) == evidence
+
+    _observe(observer, 10, _low_resources())
+    consumed = own_recovery_evidence(observer)
+    assert consumed["eligible"] is False
+    assert consumed["reason"] == "no_new_own_recovery_transition"
+    assert consumed["factor"] == 1.0
+
+
+def test_own_recovery_evidence_rejects_sensor_loss_incomplete_channels_and_gaps():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        resources = _high_resources()
+        if cycle == 2:
+            resources.pop("process_rss_ratio")
+        _observe(observer, cycle, resources)
+    for cycle in range(5, 10):
+        _observe(observer, cycle, _low_resources())
+    evidence = own_recovery_evidence(observer)
+    assert evidence["eligible"] is False
+    assert evidence["reason"] == "invalid_own_recovery_evidence"
+
+    _observe(observer, 10, {"available": False, "reason": "sensor_disabled"})
+    unavailable = own_recovery_evidence(observer)
+    assert unavailable["eligible"] is False
+    assert unavailable["reason"] == "waiting_for_fresh_process_channels"
+
+    gapped = HardwareInteroception()
+    for cycle in range(5):
+        _observe(gapped, cycle, _high_resources())
+    for cycle in range(6, 11):
+        _observe(gapped, cycle, _low_resources())
+    gap = own_recovery_evidence(gapped)
+    assert gap["eligible"] is False
+    assert gap["reason"] == "insufficient_recovery_history"
+
+
+def test_own_recovery_evidence_ignores_generic_and_external_recovery():
+    observer = HardwareInteroception()
+    external = _resources(
+        host_cpu=98.0, process_cpu=5.0, host_memory=96.0, rss_ratio=0.1
+    )
+    for cycle in range(5):
+        _observe(observer, cycle, external, free_ratio=0.01)
+    for cycle in range(5, 10):
+        _observe(observer, cycle, _low_resources())
+
+    assert any(event["type"] == "hardware_recovery" for event in observer.events)
+    evidence = own_recovery_evidence(observer)
+    assert evidence["eligible"] is False
+    assert evidence["reason"] == "no_new_own_recovery_transition"
+
+    physical = HardwareInteroception()
+    for cycle in range(5):
+        physical.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status=_storage(free_ratio=0.01),
+            physical_status={
+                "gpu_temperature": {"available": True, "value": 100.0},
+                "gpu_power": {"available": True, "value": 1.0},
+            },
+        )
+    for cycle in range(5, 10):
+        _observe(physical, cycle, _low_resources())
+    assert own_recovery_evidence(physical)["eligible"] is False
+
+
+def test_own_recovery_evidence_restart_requires_fresh_completion():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe(observer, cycle, _high_resources())
+    for cycle in range(5, 9):
+        _observe(observer, cycle, _low_resources())
+
+    restored = HardwareInteroception.from_checkpoint(observer.to_checkpoint())
+    stale = own_recovery_evidence(restored)
+    assert stale["eligible"] is False
+    assert stale["reason"] == "waiting_for_fresh_process_channels"
+
+    _observe(restored, 9, _low_resources())
+    evidence = own_recovery_evidence(restored)
+    assert evidence["eligible"] is True
+    assert evidence["recovery_cycles"] == 5
+
+
+def test_recovery_shadow_and_unknown_mode_match_full_behavioral_baseline(monkeypatch):
+    source = DigitalBeing(name="HardwareRecoveryCounterfactualSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    shadow = DigitalBeing(name="HardwareRecoveryCounterfactualShadow")
+    unknown = DigitalBeing(name="HardwareRecoveryCounterfactualUnknown")
+    for agent in (shadow, unknown):
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+
+    sequence = [
+        *(_high_resources() for _ in range(5)),
+        *(_low_resources() for _ in range(5)),
+    ]
+    current = {"resources": sequence[0]}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage()
+    )
+
+    def run(agent, mode):
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_RECOVERY_BEHAVIOR_MODE",
+            mode,
+            raising=False,
+        )
+        random.seed(2026)
+        np.random.seed(2026)
+        trace = []
+        reports = []
+        for resources in sequence:
+            current["resources"] = resources
+            report = agent.autonomous_tick()
+            reports.append(report)
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return trace, reports
+
+    shadow_trace, shadow_reports = run(shadow, "shadow")
+    unknown_trace, unknown_reports = run(unknown, "unsupported")
+    assert unknown_trace == shadow_trace
+    assert all(
+        report["hardware_recovery_behavior"]["active"] is False
+        and not report["hardware_recovery_behavior"]["adjustments"]
+        for report in [*shadow_reports, *unknown_reports]
+    )
+    activation = shadow_reports[-1]["hardware_recovery_behavior"]
+    assert activation["mode"] == "shadow"
+    assert activation["eligible"] is True
+    assert activation["reason"] == "shadow_only"
+    assert unknown_reports[-1]["hardware_recovery_behavior"]["reason"] == (
+        "unsupported_mode"
+    )
+
+
+def _ready_recovery_observer():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe(observer, cycle, _high_resources())
+    for cycle in range(5, 10):
+        _observe(observer, cycle, _low_resources())
+    assert own_recovery_evidence(observer)["eligible"] is True
+    return observer
+
+
+def test_own_recovery_advisor_changes_only_existing_embodied_deep_rest_once():
+    observer = _ready_recovery_observer()
+    candidates = [
+        {
+            "action": "deep_rest",
+            "source": "embodiment",
+            "strength": 1.0,
+            "params": {"reason": "tired"},
+        },
+        {
+            "action": "deep_rest",
+            "source": "embodiment",
+            "strength": 0.5,
+            "params": {"reason": "low_energy"},
+        },
+        {
+            "action": "deep_rest",
+            "source": "motivation",
+            "strength": 0.5,
+            "params": {"reason": "tired"},
+        },
+        {
+            "action": "deep_rest",
+            "source": "embodiment",
+            "strength": 0.5,
+            "params": {"reason": "nothing_affordable"},
+        },
+        {
+            "action": "rest",
+            "source": "embodiment",
+            "strength": 0.5,
+            "params": {"reason": "tired"},
+        },
+        {"action": "wait", "source": "deliberate_pause", "strength": 0.3},
+        {
+            "action": "process_stimulus",
+            "source": "external_attention",
+            "strength": 0.85,
+            "params": {"user_initiated": True},
+        },
+    ]
+    original_actions = [candidate["action"] for candidate in candidates]
+
+    report = apply_own_recovery_advice(candidates, observer, lambda action: action)
+
+    assert report["active"] is True
+    assert report["reason"] == "applied"
+    assert [candidate["action"] for candidate in candidates] == original_actions
+    assert len(report["adjustments"]) == 2
+    assert candidates[0]["strength"] == pytest.approx(report["factor"])
+    assert candidates[0]["strength"] == pytest.approx(1.0935)
+    assert candidates[1]["strength"] == pytest.approx(0.5 * report["factor"])
+    assert candidates[2]["strength"] == 0.5
+    assert candidates[3]["strength"] == 0.5
+    assert candidates[4]["strength"] == 0.5
+    assert candidates[5]["strength"] == 0.3
+    assert candidates[6]["strength"] == 0.85
+    assert all(item["after_strength"] <= 1.1 for item in report["adjustments"])
+
+    strengths = [candidate["strength"] for candidate in candidates]
+    duplicate = apply_own_recovery_advice(candidates, observer, lambda action: action)
+    assert duplicate["active"] is False
+    assert duplicate["reason"] == "duplicate_cycle"
+    assert duplicate["adjustments"] == []
+    assert [candidate["strength"] for candidate in candidates] == strengths
+
+
+def test_own_recovery_advisor_does_not_create_rest_or_reward():
+    observer = _ready_recovery_observer()
+    candidates = [
+        {"action": "explore", "source": "motivation", "strength": 0.8},
+        {"action": "wait", "source": "deliberate_pause", "strength": 0.3},
+    ]
+    original = deepcopy(candidates)
+    events = deepcopy(observer.events)
+    checkpoint = observer.to_checkpoint()
+
+    report = apply_own_recovery_advice(candidates, observer, lambda action: action)
+
+    assert report["active"] is False
+    assert report["reason"] == "no_matching_candidates"
+    assert report["adjustments"] == []
+    assert candidates == original
+    assert observer.events == events
+    assert observer.to_checkpoint() == checkpoint
+
+
+def test_own_recovery_advisor_application_is_atomic_and_checkpoint_neutral():
+    observer = _ready_recovery_observer()
+    checkpoint = observer.to_checkpoint()
+    candidates = [
+        {
+            "action": "deep_rest",
+            "source": "embodiment",
+            "strength": 1.0,
+            "params": {"reason": "tired"},
+        },
+        {
+            "action": "deep_rest",
+            "source": "embodiment",
+            "strength": 0.5,
+            "params": {"reason": "low_energy"},
+        },
+    ]
+    calls = 0
+
+    def fail_on_second(action):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("normalization failed")
+        return action
+
+    with pytest.raises(ValueError, match="normalization failed"):
+        apply_own_recovery_advice(candidates, observer, fail_on_second)
+    assert [candidate["strength"] for candidate in candidates] == [1.0, 0.5]
+    assert observer.to_checkpoint() == checkpoint
+
+    report = apply_own_recovery_advice(candidates, observer, lambda action: action)
+    assert report["active"] is True
+    assert observer.to_checkpoint() == checkpoint
+    validate_hardware_interoception(observer.to_checkpoint())
+
+
+def test_recovery_advisor_activates_in_autonomous_tick_without_candidate_drift(
+    monkeypatch,
+):
+    source = DigitalBeing(name="HardwareRecoveryAdvisorSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    shadow = DigitalBeing(name="HardwareRecoveryAdvisorShadow")
+    advisor = DigitalBeing(name="HardwareRecoveryAdvisorOn")
+    for agent in (shadow, advisor):
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+
+    sequence = [
+        *(_high_resources() for _ in range(5)),
+        *(_low_resources() for _ in range(5)),
+    ]
+    current = {"resources": sequence[0]}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage()
+    )
+
+    def run(agent, mode):
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_RECOVERY_BEHAVIOR_MODE",
+            mode,
+        )
+        random.seed(2027)
+        np.random.seed(2027)
+        trace = []
+        reports = []
+        for resources in sequence:
+            current["resources"] = resources
+            # В живом контуре тело предлагает deep_rest силой 1.0. Этот тест
+            # доказывает реальную поправку 1.0 -> 1.0 * factor, а не no-op.
+            agent.interoception.state.fatigue = 0.6
+            report = agent.autonomous_tick()
+            reports.append(report)
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return trace, reports
+
+    shadow_trace, shadow_reports = run(shadow, "shadow")
+    advisor_trace, advisor_reports = run(advisor, "advisor")
+    assert advisor_trace[:9] == shadow_trace[:9]
+    assert [report["hardware_interoception"] for report in advisor_reports] == [
+        report["hardware_interoception"] for report in shadow_reports
+    ]
+
+    activation = advisor_reports[-1]["hardware_recovery_behavior"]
+    assert activation["active"] is True
+    assert activation["reason"] == "applied"
+    assert activation["adjustments"]
+    shadow_evaluations = {
+        (item["input_index"], item["action"], item["source"]): item
+        for item in shadow_reports[-1]["arbitrator"]["all_evaluations"]
+    }
+    advisor_evaluations = {
+        (item["input_index"], item["action"], item["source"]): item
+        for item in advisor_reports[-1]["arbitrator"]["all_evaluations"]
+    }
+    assert advisor_evaluations.keys() == shadow_evaluations.keys()
+    for key, advisor_evaluation in advisor_evaluations.items():
+        shadow_evaluation = shadow_evaluations[key]
+        if key[1:] == ("deep_rest", "embodiment"):
+            assert shadow_evaluation["strength"] == 1.0
+            assert advisor_evaluation["strength"] == pytest.approx(
+                shadow_evaluation["strength"] * activation["factor"]
+            )
+            assert advisor_evaluation["strength"] <= 1.1
+        else:
+            assert advisor_evaluation["strength"] == shadow_evaluation["strength"]
 
 
 def test_checkpoint_legacy_restart_and_corruption_contract():
@@ -1517,3 +1905,143 @@ def test_schema2_physical_migration_and_schema4_restart_require_fresh_samples(
     migrated_state = migrated.to_checkpoint()
     assert migrated_state["schema_version"] == 4
     validate_hardware_interoception(migrated_state)
+
+
+def test_recovery_advisor_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    source = DigitalBeing(name="RecoveryAdvisorLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    current = {"resources": _low_resources()}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+
+    def run(mode):
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_RECOVERY_BEHAVIOR_MODE",
+            mode,
+        )
+        random.seed(60023)
+        np.random.seed(60023)
+        agent = DigitalBeing(name=f"RecoveryAdvisorLong_{mode}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        trace = []
+        applied_cycles = []
+        restart_absence = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                assert "hardware_recovery_behavior_last" not in state
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                assert not hasattr(restored, "hardware_recovery_behavior_last")
+                restart_absence += 1
+                restored.web_searcher.toggle(False)
+                agent = restored
+            current["resources"] = (
+                _high_resources() if (cycle // 20) % 2 == 0 else _low_resources()
+            )
+            # Живой телесный кандидат уже выбирается: поправка не создаёт новый
+            # эпизод отдыха и позволяет отделить score-differential от дрейфа.
+            agent.interoception.state.fatigue = 0.6
+            report = agent.autonomous_tick()
+            behavior = report["hardware_recovery_behavior"]
+            assert agent.hardware_recovery_behavior_last == behavior
+            assert agent.hardware_recovery_behavior_last is not behavior
+            if behavior["active"] is True:
+                applied_cycles.append(cycle)
+            elif mode == "advisor":
+                assert behavior["adjustments"] == []
+            else:
+                assert behavior["active"] is False
+                assert behavior["adjustments"] == []
+            evaluations = report["arbitrator"].get("all_evaluations") or []
+            input_indices = {entry["input_index"] for entry in evaluations}
+            seen_indices = set()
+            for entry in behavior["adjustments"]:
+                assert entry["action"] == "deep_rest"
+                assert entry["source"] == "embodiment"
+                assert 0.0 < entry["before_strength"] <= 1.0
+                assert entry["after_strength"] == pytest.approx(
+                    min(1.1, entry["before_strength"] * entry["factor"])
+                )
+                assert entry["after_strength"] <= 1.1
+                assert entry["input_index"] in input_indices
+                assert entry["input_index"] not in seen_indices
+                seen_indices.add(entry["input_index"])
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return agent, trace, applied_cycles, restart_absence
+
+    shadow_agent, shadow_trace, shadow_applied, shadow_restarts = run("shadow")
+    advisor_agent, advisor_trace, advisor_applied, advisor_restarts = run("advisor")
+
+    assert shadow_agent.cycle_count == advisor_agent.cycle_count == 600
+    assert shadow_restarts == advisor_restarts == 2
+    assert shadow_applied == []
+    assert advisor_applied == list(range(24, 600, 40))
+    diverged = False
+    first_choice_difference = None
+    choice_differences = []
+    for cycle, (observed, expected) in enumerate(zip(advisor_trace, shadow_trace)):
+        if observed["action"] != expected["action"]:
+            if first_choice_difference is None:
+                # Первое различие обязано быть непосредственным эффектом advisor.
+                # После него трассы уже описывают разные downstream-состояния.
+                assert cycle in advisor_applied, cycle
+                first_choice_difference = cycle
+            choice_differences.append(cycle)
+        if not diverged and cycle not in advisor_applied:
+            assert observed == expected, cycle
+        if cycle in advisor_applied:
+            observed_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in observed["evaluations"]
+            }
+            expected_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in expected["evaluations"]
+            }
+            # Отдых уже предложен в обоих контурах: advisor не создаёт эпизод.
+            assert any(
+                key[1:] == ("deep_rest", "embodiment") for key in observed_evaluations
+            )
+            assert any(
+                key[1:] == ("deep_rest", "embodiment") for key in expected_evaluations
+            )
+            # Пока трассы не разошлись, сравнение является counterfactual на
+            # одинаковом входе. После расхождения остальные evaluations тоже
+            # могут отличаться downstream; сама поправка проверена выше.
+            if (
+                not diverged
+                and observed_evaluations.keys() == expected_evaluations.keys()
+            ):
+                for key, observed_evaluation in observed_evaluations.items():
+                    expected_evaluation = expected_evaluations[key]
+                    if key[1:] == ("deep_rest", "embodiment"):
+                        assert observed_evaluation["strength"] == pytest.approx(
+                            min(1.1, expected_evaluation["strength"] * 1.0935)
+                        )
+                    else:
+                        assert observed_evaluation == expected_evaluation, (cycle, key)
+        if not diverged and any(
+            observed[field] != expected[field]
+            for field in expected
+            if field not in {"evaluations", "diagnostics"}
+        ):
+            diverged = True
+
+    assert choice_differences
+    assert len(advisor_agent.hardware_interoception.history) == 200
+    assert len(advisor_agent.hardware_interoception.events) <= 50
+    assert len(advisor_agent.hardware_interoception.personal.episodes) <= 50
+    validate_hardware_interoception(
+        advisor_agent.hardware_interoception.to_checkpoint()
+    )

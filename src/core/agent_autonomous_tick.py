@@ -465,9 +465,45 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             else "unsupported_mode",
             "adjustments": [],
         }
-    # Только runtime-наблюдение для read-only UI. Checkpoint-схема его не
-    # включает: после restart до первого тика наблюдение честно отсутствует.
+    # === СОБСТВЕННОЕ АППАРАТНОЕ ВОССТАНОВЛЕНИЕ: 6B ===
+    # После подтверждённой серии 5 + 5 advisor один раз за цикл усиливает
+    # только существующий телесный deep_rest; shadow состав не меняет.
+    recovery_mode = str(
+        getattr(SIM_CONFIG, "HARDWARE_RECOVERY_BEHAVIOR_MODE", "shadow")
+    )
+    try:
+        from src.core.hardware_behavior import (
+            apply_own_recovery_advice,
+            own_recovery_behavior_report,
+        )
+
+        if recovery_mode == "advisor":
+            result["hardware_recovery_behavior"] = apply_own_recovery_advice(
+                candidates,
+                getattr(self, "hardware_interoception", None),
+                self._normalize_action,
+            )
+        else:
+            result["hardware_recovery_behavior"] = own_recovery_behavior_report(
+                getattr(self, "hardware_interoception", None), recovery_mode
+            )
+    except Exception as e:
+        get_logger().log(f"[HARDWARE_RECOVERY] Evidence error: {e}")
+        result["hardware_recovery_behavior"] = {
+            "mode": recovery_mode,
+            "active": False,
+            "eligible": False,
+            "reason": "recovery_evidence_error",
+            "factor": 1.0,
+            "adjustments": [],
+        }
+
+    # Только runtime-наблюдения для read-only UI. Checkpoint-схема их не
+    # включает: после restart до первого тика наблюдения честно отсутствуют.
     self.hormonal_behavior_last = deepcopy(result["hormonal_behavior"])
+    self.hardware_recovery_behavior_last = deepcopy(
+        result["hardware_recovery_behavior"]
+    )
 
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===
     # Пережитое смещает тягу к занятиям: страх тянет к безопасному,

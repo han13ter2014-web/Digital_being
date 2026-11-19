@@ -13,7 +13,7 @@
 - Mypy: `.venv/Scripts/python.exe -m mypy --config-file pyproject.toml --explicit-package-bases --no-site-packages --follow-imports=skip main.py main_tray.py`
 - Bandit: `.venv/Scripts/python.exe -m bandit -q -r src/ config/ main.py main_tray.py -ll --skip B101,B601`
 - Syntax: `.venv/Scripts/python.exe -m compileall -q src/ config/ tests/ main.py main_tray.py`
-- Evidence: verified locally, 2026-11-19; последний полный regression — 3916 passed, 2 skipped.
+- Evidence: verified locally, 2026-11-19; последний полный regression — 3929 passed, 2 skipped за 498,17 с (этап 6C).
 
 ## Conventions
 

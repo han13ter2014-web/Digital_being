@@ -525,3 +525,51 @@ def test_bind_error_is_visible_to_runtime_wrapper():
 def test_non_localhost_is_rejected():
     with pytest.raises(ValueError):
         WebDashboard(host="0.0.0.0", port=_free_port())
+
+
+def test_hardware_recovery_behavior_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    hardware = {
+        "initialized": True,
+        "recovery_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "strain_cycles": 5,
+            "recovery_cycles": 5,
+            "max_recovery_risk": 0.35,
+            "recovery": 0.65,
+            "factor": 1.065,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "deep_rest",
+                    "source": "embodiment",
+                    "before_strength": 1.0,
+                    "after_strength": 1.065,
+                    "factor": 1.065,
+                }
+            ],
+        },
+    }
+    life["hardware"] = hardware
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hardware") == {"hardware": hardware}
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert "h.recovery_behavior" in body
+    assert "Восстановление" in body
+    assert "entry.before_strength" in body
+    assert "entry.after_strength" in body
+    assert "set_recovery" not in body
+    assert "train_recovery" not in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["texts"]["en"]["Восстановление"] == "Recovery"
+    assert payload["texts"]["zh"]["Восстановление"] == "恢复"
+    assert payload["texts"]["en"]["Серия"] == "Series"
+    assert payload["texts"]["zh"]["Серия"] == "系列"
