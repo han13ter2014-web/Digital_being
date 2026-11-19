@@ -776,6 +776,11 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
     if hardware:
         hardware["initialized"] = True
         hardware["episode_count"] = len(hardware.pop("episodes", []))
+        domains = hardware.get("domain_experience") or {}
+        if isinstance(domains, dict):
+            for domain in domains.values():
+                if isinstance(domain, dict):
+                    domain["episode_count"] = len(domain.pop("episodes", []))
         hardware["recent_events"] = list(hardware.get("recent_events") or [])[-10:]
     else:
         hardware = {

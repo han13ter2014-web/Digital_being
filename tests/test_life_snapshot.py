@@ -608,6 +608,13 @@ def test_hardware_snapshot_is_compact_deep_copy_without_os_sampling(monkeypatch)
         "personal_profile": {"baseline": {"own_load": {"sample_count": 50}}},
         "current_episode": {"start_cycle": 1},
         "episodes": [{"start_cycle": 1}, {"start_cycle": 20}],
+        "domain_experience": {
+            "physical": {
+                "current_episode": {"start_cycle": 3},
+                "episodes": [{"start_cycle": 30}],
+            },
+            "storage": {"current_episode": None, "episodes": []},
+        },
         "recent_events": [{"cycle": cycle} for cycle in range(12)],
     }
     agent.hardware_interoception = SimpleNamespace(status=lambda: status)
@@ -630,6 +637,11 @@ def test_hardware_snapshot_is_compact_deep_copy_without_os_sampling(monkeypatch)
     assert first["hardware"]["initialized"] is True
     assert first["hardware"]["episode_count"] == 2
     assert "episodes" not in first["hardware"]
+    assert first["hardware"]["domain_experience"]["physical"]["episode_count"] == 1
+    assert "episodes" not in first["hardware"]["domain_experience"]["physical"]
+    assert first["hardware"]["domain_experience"]["physical"]["current_episode"] == {
+        "start_cycle": 3
+    }
     assert len(first["hardware"]["recent_events"]) == 10
     assert first["hardware"]["recent_events"][0]["cycle"] == 2
     assert set(agent.__dict__) == keys_before
@@ -754,6 +766,82 @@ def test_hardware_rows_show_physical_values_without_hiding_missing_channels():
     )
     assert "GPU 温度: 70.0 °C" in chinese
     assert "CPU 温度: 不可用" in chinese
+
+
+def test_stage5_hardware_domain_rows_show_experience_episode_and_freshness():
+    from src.ui.life_view import hardware_rows
+
+    snapshot = {
+        "hardware": {
+            "initialized": True,
+            "observation": {"channels": {}},
+            "states": {},
+            "latest_experience": {},
+            "personal_profile": {"baseline": {}},
+            "domain_experience": {
+                "physical": {
+                    "latest": {
+                        "risk": 1.0,
+                        "experienced": 0.9,
+                        "expectedness": "familiar",
+                        "freshness": "fresh",
+                        "reason": "observed_physical_channels",
+                    },
+                    "current_episode": {
+                        "start_cycle": 3,
+                        "strain_cycle": 7,
+                        "fresh_observations": 25,
+                    },
+                    "adaptation": 0.5,
+                    "confidence": 1.0,
+                    "baseline": {"sample_count": 60, "baseline": 0.2},
+                },
+                "storage": {
+                    "latest": {
+                        "risk": None,
+                        "experienced": None,
+                        "expectedness": "unknown",
+                        "freshness": "stale",
+                        "reason": "waiting_for_fresh_observation_after_restart",
+                    },
+                    "current_episode": None,
+                    "adaptation": 0.0,
+                    "confidence": 0.0,
+                    "baseline": {"sample_count": 0, "baseline": None},
+                },
+            },
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert (
+        "Физический опыт: риск 100.0% · переживается 90.0% · "
+        "привычно, но риск сохраняется"
+    ) in russian
+    assert (
+        "Свежесть · Физический опыт: свежие данные · " "наблюдаемые физические каналы"
+    ) in russian
+    assert (
+        "Текущий эпизод · Физический опыт: с цикла 3 · "
+        "свежих циклов 25 · подтверждён да"
+    ) in russian
+    assert "Опыт хранилища: риск Нет данных" in russian
+    assert "Свежесть · Опыт хранилища: устаревшие данные" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Physical experience: risk 100.0% · experienced 90.0%" in english
+    assert "Freshness · Physical experience: fresh data" in english
+    assert "Current episode · Physical experience: from cycle 3" in english
+    assert "Storage experience: risk No data" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "物理体验: 风险 100.0% · 主观体验 90.0%" in chinese
+    assert "新鲜度 · 物理体验: 新鲜数据" in chinese
+    assert "存储体验: 风险 暂无数据" in chinese
 
 
 def _hormonal_checkpoint():

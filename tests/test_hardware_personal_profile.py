@@ -131,12 +131,12 @@ def test_sensor_loss_does_not_grow_continuous_recovery():
     assert observer.personal.shadow_recovery == initial
 
 
-def test_checkpoint_v3_round_trip_v1_migration_and_corruption():
+def test_checkpoint_v4_round_trip_v1_migration_and_corruption():
     observer = HardwareInteroception()
     for cycle in range(30):
         _observe(observer, cycle, high=True)
     state = observer.to_checkpoint()
-    assert state["schema_version"] == 3
+    assert state["schema_version"] == 4
     validate_hardware_interoception(state)
 
     restored = HardwareInteroception.from_checkpoint(state)
@@ -164,6 +164,7 @@ def test_checkpoint_v3_round_trip_v1_migration_and_corruption():
         "shadow_strain",
         "shadow_recovery",
         "latest_experience",
+        "slow_states",
     ):
         legacy.pop(key)
     for name in (
@@ -180,7 +181,7 @@ def test_checkpoint_v3_round_trip_v1_migration_and_corruption():
     assert migrated.history == state["history"]
     assert migrated.personal.observation_count == 0
     assert migrated.personal.adaptation == 0.0
-    assert migrated.to_checkpoint()["schema_version"] == 3
+    assert migrated.to_checkpoint()["schema_version"] == 4
 
     corrupted = deepcopy(state)
     corrupted["personal_profile"]["sensitivity"] = 2.0
@@ -259,3 +260,181 @@ def test_diagnostic_dto_and_legacy_restore_exclude_raw_os_details():
     state["latest_observation"]["channels"]["host_cpu"]["status"] = "stale"
     restored = HardwareInteroception.from_checkpoint(state)
     assert "C:/private" not in str(restored.status())
+
+
+def _physical(**values):
+    result = {
+        name: {
+            "available": False,
+            "reason": "resource_source_unavailable",
+            "source": "test",
+        }
+        for name in (
+            "gpu_utilization",
+            "gpu_memory",
+            "gpu_temperature",
+            "gpu_power",
+            "cpu_temperature",
+            "external_power",
+            "battery_charge",
+        )
+    }
+    for name, value in values.items():
+        result[name] = {"available": True, "value": value, "source": "test"}
+    return result
+
+
+def _observe_domains(observer, cycle, *, hot=False, low_storage=False):
+    return observer.observe(
+        _resources(),
+        cycle=cycle,
+        storage_status=_storage(0.01 if low_storage else 0.8),
+        physical_status=_physical(
+            gpu_utilization=90.0 if hot else 5.0,
+            gpu_temperature=100.0 if hot else 45.0,
+            gpu_power=0.95 if hot else 0.2,
+        ),
+    )
+
+
+def test_stage5_physical_and_storage_adapt_independently_without_hiding_risk():
+    physical = HardwareInteroception()
+    storage = HardwareInteroception()
+    for cycle in range(200):
+        physical_report = _observe_domains(physical, cycle, hot=True)
+        storage_report = _observe_domains(storage, cycle, low_storage=True)
+
+    physical_experience = physical_report["domain_experience"]["physical"]
+    assert physical_experience["latest"]["risk"] == pytest.approx(1.0)
+    assert physical_experience["latest"]["experienced"] == pytest.approx(0.9)
+    assert physical_experience["latest"]["expectedness"] == "familiar"
+    assert physical_experience["latest"]["freshness"] == "fresh"
+    assert physical_experience["adaptation"] == pytest.approx(0.5)
+    assert physical_experience["current_episode"] is not None
+    assert physical.personal.adaptation == 0.0
+    assert physical.personal.current_episode is None
+
+    storage_experience = storage_report["domain_experience"]["storage"]
+    assert storage_experience["latest"]["risk"] == pytest.approx(0.96)
+    assert storage_experience["latest"]["experienced"] == pytest.approx(0.864)
+    assert storage_experience["latest"]["expectedness"] == "familiar"
+    assert storage_experience["adaptation"] == pytest.approx(0.5)
+    assert storage.personal.adaptation == 0.0
+    assert storage.personal.current_episode is None
+    assert storage_report["domain_experience"]["physical"]["latest"]["risk"] == 0.2
+
+
+def test_stage5_domain_episodes_complete_and_learn_separately():
+    observer = HardwareInteroception()
+    for start in (0, 10, 20):
+        for cycle in range(start, start + 5):
+            _observe_domains(observer, cycle, hot=True, low_storage=True)
+        for cycle in range(start + 5, start + 10):
+            _observe_domains(observer, cycle)
+
+    domains = observer.domain_personal.domains
+    assert observer.personal.completed_episode_count == 0
+    for name in ("physical", "storage"):
+        assert domains[name]["completed_episode_count"] == 3
+        assert len(domains[name]["episodes"]) == 3
+        assert domains[name]["current_episode"] is None
+        assert domains[name]["adaptation"] == pytest.approx(0.06)
+        assert 0.8 <= domains[name]["sensitivity"] < 1.0
+        assert 10.0 <= domains[name]["strain_half_life"] <= 20.0
+        assert 1.0 < domains[name]["recovery_rate"] <= 1.25
+    validate_hardware_interoception(observer.to_checkpoint())
+
+
+def test_stage5_domain_sensor_loss_does_not_create_experience_or_baseline():
+    observer = HardwareInteroception()
+    _observe_domains(observer, 0, hot=True, low_storage=True)
+    before = deepcopy(observer.domain_personal.to_checkpoint())
+    for cycle in range(1, 6):
+        report = observer.observe(
+            {"available": False, "reason": "sensor_disabled"},
+            cycle=cycle,
+            storage_status={"available": False, "reason": "sensor_disabled"},
+            physical_status=_physical(),
+        )
+        assert report["domain_experience"]["physical"]["latest"]["risk"] is None
+        assert report["domain_experience"]["storage"]["latest"]["risk"] is None
+    after = observer.domain_personal.to_checkpoint()
+    for name in ("physical", "storage"):
+        for field in (
+            "observation_count",
+            "baseline",
+            "adaptation",
+            "completed_episode_count",
+            "current_episode",
+            "episodes",
+        ):
+            assert after[name][field] == before[name][field]
+
+
+def test_stage5_schema4_domain_roundtrip_legacy_and_corruption():
+    observer = HardwareInteroception()
+    for cycle in range(30):
+        _observe_domains(observer, cycle, hot=True, low_storage=True)
+    state = observer.to_checkpoint()
+    assert state["schema_version"] == 4
+    validate_hardware_interoception(state)
+
+    restored = HardwareInteroception.from_checkpoint(state)
+    for name in ("physical", "storage"):
+        domain = restored.domain_personal.domains[name]
+        assert domain["episodes"] == state["domain_experience"][name]["episodes"]
+        assert (
+            domain["current_episode"]
+            == state["domain_experience"][name]["current_episode"]
+        )
+        assert domain["latest"]["risk"] is None
+        assert domain["latest"]["experienced"] is None
+        assert domain["latest"]["freshness"] == "stale"
+    validate_hardware_interoception(restored.to_checkpoint())
+
+    legacy = deepcopy(state)
+    legacy["schema_version"] = 3
+    legacy.pop("slow_states")
+    legacy.pop("domain_experience")
+    legacy["latest_experience"]["storage_risk"] = {
+        "risk": None,
+        "experienced": None,
+        "expectedness": "unknown",
+    }
+    migrated = HardwareInteroception.from_checkpoint(legacy)
+    for name in ("physical", "storage"):
+        domain = migrated.domain_personal.domains[name]
+        assert domain["observation_count"] == 0
+        assert domain["adaptation"] == 0.0
+        assert domain["baseline"]["sample_count"] == 0
+        assert domain["episodes"] == []
+        assert domain["latest"]["freshness"] == "no_observation"
+
+    corrupted = deepcopy(state)
+    corrupted["domain_experience"]["physical"]["adaptation"] = 2.0
+    with pytest.raises(ValueError, match="domain_experience.physical.adaptation"):
+        HardwareInteroception.from_checkpoint(corrupted)
+
+
+def test_stage5_domain_memory_survives_restarts_and_stays_bounded():
+    observer = HardwareInteroception()
+    for cycle in range(600):
+        if cycle in (200, 400):
+            observer = HardwareInteroception.from_checkpoint(observer.to_checkpoint())
+        strained = (cycle // 20) % 2 == 0
+        _observe_domains(
+            observer,
+            cycle,
+            hot=strained,
+            low_storage=strained,
+        )
+
+    state = observer.to_checkpoint()
+    validate_hardware_interoception(state)
+    assert len(observer.history) == 200
+    assert len(observer.events) <= 50
+    for name in ("physical", "storage"):
+        domain = observer.domain_personal.domains[name]
+        assert domain["observation_count"] == 600
+        assert domain["completed_episode_count"] > 0
+        assert len(domain["episodes"]) <= 25

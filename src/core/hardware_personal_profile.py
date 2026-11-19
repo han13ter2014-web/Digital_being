@@ -15,8 +15,18 @@ from typing import Dict, Optional
 
 
 _BASELINE_STATES = ("own_load", "environmental_pressure", "memory_pressure")
-_EXPERIENCE_STATES = _BASELINE_STATES + ("storage_risk",)
+_EXPERIENCE_STATES = _BASELINE_STATES
+_LEGACY_EXPERIENCE_STATES = _EXPERIENCE_STATES + ("storage_risk",)
+_DOMAIN_STATE_NAMES = {
+    "physical": "physical_strain",
+    "storage": "storage_risk",
+}
+_DOMAIN_EVENT_REASONS = {
+    "physical": ("sustained_physical_strain", "confirmed_physical_recovery"),
+    "storage": ("sustained_storage_risk", "confirmed_storage_recovery"),
+}
 _EPISODE_LIMIT = 50
+_DOMAIN_EPISODE_LIMIT = 25
 _MIN_BASELINE_SAMPLES = 50
 _FAMILIARITY_AFTER_CYCLES = 20
 
@@ -307,7 +317,7 @@ class HardwarePersonalProfile:
 
     @classmethod
     def from_checkpoint(cls, data: Dict) -> "HardwarePersonalProfile":
-        validate_personal_experience(data)
+        validate_personal_experience(data, legacy=data.get("schema_version", 4) < 4)
         restored = cls()
         profile = data["personal_profile"]
         restored.baseline = deepcopy(profile["baseline"])
@@ -324,6 +334,224 @@ class HardwarePersonalProfile:
         restored.shadow_recovery = data["shadow_recovery"]
         # Прежнее переживание не выдаётся за свежее после перезапуска.
         restored.latest_experience = _neutral_experience()
+        return restored
+
+
+def _neutral_domain_latest(freshness="no_observation", reason="no_observation"):
+    return {
+        "risk": None,
+        "experienced": None,
+        "expectedness": "unknown",
+        "freshness": freshness,
+        "reason": reason,
+    }
+
+
+def _neutral_domain_experience() -> Dict:
+    return {
+        "baseline": _neutral_baseline(),
+        "sensitivity": 1.0,
+        "strain_half_life": 20.0,
+        "recovery_rate": 1.0,
+        "adaptation": 0.0,
+        "confidence": 0.0,
+        "observation_count": 0,
+        "completed_episode_count": 0,
+        "current_episode": None,
+        "episodes": [],
+        "latest": _neutral_domain_latest(),
+    }
+
+
+class HardwareDomainPersonalProfile:
+    """Независимый per-life опыт physical и storage без поведенческих эффектов."""
+
+    def __init__(self):
+        self.domains = {
+            name: _neutral_domain_experience() for name in _DOMAIN_STATE_NAMES
+        }
+
+    def observe(
+        self, states: Dict, *, cycle: int, events: list, slow_states: Dict
+    ) -> Dict:
+        for name, state_name in _DOMAIN_STATE_NAMES.items():
+            domain = self.domains[name]
+            state = states[state_name]
+            risk = state["value"]
+            if risk is None:
+                domain["latest"] = _neutral_domain_latest(
+                    "unavailable", state["reason"]
+                )
+                continue
+            risk = float(risk)
+            strain_reason, recovery_reason = _DOMAIN_EVENT_REASONS[name]
+            strain = any(
+                event.get("type") == "hardware_strain"
+                and event.get("reason") == strain_reason
+                for event in events
+            )
+            recovery = any(
+                event.get("type") == "hardware_recovery"
+                and event.get("reason") == recovery_reason
+                for event in events
+            )
+            domain["observation_count"] += 1
+            domain["confidence"] = min(1.0, domain["observation_count"] / 200.0)
+            self._update_episode(
+                domain,
+                risk,
+                state,
+                cycle=cycle,
+                strain=strain,
+                recovery=recovery,
+            )
+            domain["latest"] = self._personalize(domain, risk, state)
+            if (
+                domain["current_episode"] is None
+                and not slow_states[name]["strain_active"]
+                and not strain
+                and not recovery
+                and risk < 0.85
+            ):
+                self._update_baseline(domain, risk, cycle)
+        return self.to_checkpoint()
+
+    @staticmethod
+    def _update_episode(
+        domain: Dict,
+        risk: float,
+        state: Dict,
+        *,
+        cycle: int,
+        strain: bool,
+        recovery: bool,
+    ) -> None:
+        episode = domain["current_episode"]
+        if risk >= 0.85:
+            if episode is None:
+                episode = {
+                    "start_cycle": cycle,
+                    "strain_cycle": None,
+                    "end_cycle": None,
+                    "max_pressure": risk,
+                    "origin": "unknown",
+                    "evidence": [],
+                    "slow_cycle": False,
+                    "fresh_observations": 0,
+                    "fresh_high_cycles": 0,
+                    "recovery_duration_cycles": None,
+                    "complete": False,
+                }
+                domain["current_episode"] = episode
+            episode["max_pressure"] = max(episode["max_pressure"], risk)
+            episode["origin"] = state["origin"]
+            episode["evidence"] = list(state["evidence"])[:8]
+            episode["fresh_high_cycles"] += 1
+        elif episode is not None and episode["strain_cycle"] is None:
+            # Короткий всплеск не становится опытом преодоления.
+            domain["current_episode"] = None
+            episode = None
+
+        if episode is not None:
+            episode["fresh_observations"] += 1
+        if strain and episode is not None:
+            episode["strain_cycle"] = cycle
+        if (
+            episode is not None
+            and episode["strain_cycle"] is not None
+            and risk >= 0.85
+            and episode["fresh_high_cycles"] > _FAMILIARITY_AFTER_CYCLES
+            and domain["adaptation"] < 0.5
+        ):
+            domain["adaptation"] = min(0.5, domain["adaptation"] + 0.005)
+        if not recovery or episode is None or episode["strain_cycle"] is None:
+            return
+
+        completed = deepcopy(episode)
+        completed["end_cycle"] = cycle
+        completed["recovery_duration_cycles"] = cycle - episode["strain_cycle"]
+        completed["complete"] = True
+        domain["episodes"].append(completed)
+        domain["episodes"] = domain["episodes"][-_DOMAIN_EPISODE_LIMIT:]
+        domain["current_episode"] = None
+        domain["completed_episode_count"] += 1
+        domain["adaptation"] = min(1.0, domain["adaptation"] + 0.02)
+        HardwareDomainPersonalProfile._learn(domain)
+
+    @staticmethod
+    def _learn(domain: Dict) -> None:
+        episodes = domain["episodes"]
+        if len(episodes) < 3:
+            return
+        domain["sensitivity"] = _clamp(domain["sensitivity"] - 0.005, 0.8, 1.2)
+        durations = [item["end_cycle"] - item["start_cycle"] for item in episodes]
+        recoveries = [item["recovery_duration_cycles"] for item in episodes]
+        target_half_life = _clamp(median(durations), 10.0, 80.0)
+        difference = _clamp(target_half_life - domain["strain_half_life"], -2.0, 2.0)
+        domain["strain_half_life"] = _clamp(
+            domain["strain_half_life"] + difference, 10.0, 80.0
+        )
+        target_recovery = _clamp(20.0 / max(1.0, median(recoveries)), 0.75, 1.25)
+        rate_difference = _clamp(target_recovery - domain["recovery_rate"], -0.01, 0.01)
+        domain["recovery_rate"] = _clamp(
+            domain["recovery_rate"] + rate_difference, 0.75, 1.25
+        )
+
+    @staticmethod
+    def _personalize(domain: Dict, risk: float, state: Dict) -> Dict:
+        relative = 0.0
+        baseline = domain["baseline"]
+        if baseline["sample_count"] >= _MIN_BASELINE_SAMPLES:
+            center = float(baseline["baseline"])
+            deviation = float(baseline["deviation"] or 0.0)
+            relative = _clamp(
+                (risk - center - 2.0 * deviation) / max(2.0 * deviation, 0.1)
+            )
+            relative = _clamp(relative * domain["sensitivity"])
+        weight = min(0.2, 0.2 * domain["adaptation"] * domain["confidence"])
+        experienced = risk * (1.0 - weight) + relative * weight
+        episode = domain["current_episode"]
+        familiar = bool(
+            domain["adaptation"] >= 0.3
+            and episode is not None
+            and episode["fresh_high_cycles"] >= _FAMILIARITY_AFTER_CYCLES
+        )
+        return {
+            "risk": risk,
+            "experienced": _clamp(experienced),
+            "expectedness": "familiar" if familiar and risk >= 0.85 else "unknown",
+            "freshness": "fresh",
+            "reason": state["reason"],
+        }
+
+    @staticmethod
+    def _update_baseline(domain: Dict, risk: float, cycle: int) -> None:
+        entry = domain["baseline"]
+        entry["sample_count"] += 1
+        count = entry["sample_count"]
+        alpha = min(0.02, 1.0 / count)
+        if entry["baseline"] is None:
+            entry["baseline"] = risk
+            entry["deviation"] = 0.0
+        else:
+            entry["baseline"] += alpha * (risk - entry["baseline"])
+            absolute = abs(risk - entry["baseline"])
+            entry["deviation"] += alpha * (absolute - entry["deviation"])
+        entry["last_update_cycle"] = cycle
+        entry["confidence"] = min(1.0, count / 200.0)
+
+    def to_checkpoint(self) -> Dict:
+        return deepcopy(self.domains)
+
+    @classmethod
+    def from_checkpoint(cls, data: Dict) -> "HardwareDomainPersonalProfile":
+        validate_domain_experience(data)
+        restored = cls()
+        restored.domains = deepcopy(data["domain_experience"])
+        for domain in restored.domains.values():
+            domain["latest"] = _neutral_domain_latest(
+                "stale", "waiting_for_fresh_observation_after_restart"
+            )
         return restored
 
 
@@ -387,7 +615,7 @@ def _validate_episode(episode, path: str, *, current: bool) -> None:
         raise ValueError(f"{path}.complete: inconsistent episode state")
 
 
-def validate_personal_experience(state: Dict) -> None:
+def validate_personal_experience(state: Dict, *, legacy: bool = False) -> None:
     profile = state.get("personal_profile")
     fields = {
         "baseline",
@@ -450,7 +678,8 @@ def validate_personal_experience(state: Dict) -> None:
     _finite(state.get("shadow_recovery"), "hardware_interoception.shadow_recovery")
 
     experience = state.get("latest_experience")
-    if not isinstance(experience, dict) or set(experience) != set(_EXPERIENCE_STATES):
+    expected = _LEGACY_EXPERIENCE_STATES if legacy else _EXPERIENCE_STATES
+    if not isinstance(experience, dict) or set(experience) != set(expected):
         raise ValueError("hardware_interoception.latest_experience: invalid states")
     for name, entry in experience.items():
         path = f"hardware_interoception.latest_experience.{name}"
@@ -467,4 +696,91 @@ def validate_personal_experience(state: Dict) -> None:
             raise ValueError(f"{path}.expectedness: unknown value")
 
 
-__all__ = ["HardwarePersonalProfile", "validate_personal_experience"]
+def validate_domain_experience(state: Dict) -> None:
+    domains = state.get("domain_experience")
+    if not isinstance(domains, dict) or set(domains) != set(_DOMAIN_STATE_NAMES):
+        raise ValueError("hardware_interoception.domain_experience: invalid domains")
+    fields = {
+        "baseline",
+        "sensitivity",
+        "strain_half_life",
+        "recovery_rate",
+        "adaptation",
+        "confidence",
+        "observation_count",
+        "completed_episode_count",
+        "current_episode",
+        "episodes",
+        "latest",
+    }
+    for name, domain in domains.items():
+        path = f"hardware_interoception.domain_experience.{name}"
+        if not isinstance(domain, dict) or set(domain) != fields:
+            raise ValueError(f"{path}: unknown or missing field")
+        baseline = domain["baseline"]
+        baseline_fields = {
+            "baseline",
+            "deviation",
+            "sample_count",
+            "last_update_cycle",
+            "confidence",
+        }
+        if not isinstance(baseline, dict) or set(baseline) != baseline_fields:
+            raise ValueError(f"{path}.baseline: invalid fields")
+        if baseline["baseline"] is not None:
+            _finite(baseline["baseline"], f"{path}.baseline.baseline")
+        if baseline["deviation"] is not None:
+            _finite(baseline["deviation"], f"{path}.baseline.deviation")
+        _cycle(baseline["sample_count"], f"{path}.baseline.sample_count")
+        _cycle(
+            baseline["last_update_cycle"],
+            f"{path}.baseline.last_update_cycle",
+            optional=True,
+        )
+        _finite(baseline["confidence"], f"{path}.baseline.confidence")
+        _finite(domain["sensitivity"], f"{path}.sensitivity", 0.8, 1.2)
+        _finite(domain["strain_half_life"], f"{path}.strain_half_life", 10.0, 80.0)
+        _finite(domain["recovery_rate"], f"{path}.recovery_rate", 0.75, 1.25)
+        _finite(domain["adaptation"], f"{path}.adaptation")
+        _finite(domain["confidence"], f"{path}.confidence")
+        _cycle(domain["observation_count"], f"{path}.observation_count")
+        _cycle(domain["completed_episode_count"], f"{path}.completed_episode_count")
+        current = domain["current_episode"]
+        if current is not None:
+            _validate_episode(current, f"{path}.current_episode", current=True)
+        episodes = domain["episodes"]
+        if not isinstance(episodes, list) or len(episodes) > _DOMAIN_EPISODE_LIMIT:
+            raise ValueError(f"{path}.episodes: expected a bounded list")
+        for index, episode in enumerate(episodes):
+            _validate_episode(episode, f"{path}.episodes[{index}]", current=False)
+        latest = domain["latest"]
+        if not isinstance(latest, dict) or set(latest) != {
+            "risk",
+            "experienced",
+            "expectedness",
+            "freshness",
+            "reason",
+        }:
+            raise ValueError(f"{path}.latest: invalid fields")
+        for field in ("risk", "experienced"):
+            if latest[field] is not None:
+                _finite(latest[field], f"{path}.latest.{field}")
+        if latest["expectedness"] not in {"unknown", "familiar"}:
+            raise ValueError(f"{path}.latest.expectedness: unknown value")
+        if latest["freshness"] not in {
+            "no_observation",
+            "fresh",
+            "stale",
+            "unavailable",
+        }:
+            raise ValueError(f"{path}.latest.freshness: unknown value")
+        if not isinstance(latest["reason"], str) or len(latest["reason"]) > 128:
+            raise ValueError(f"{path}.latest.reason: invalid string")
+
+
+__all__ = [
+    "HardwareDomainPersonalProfile",
+    "HardwarePersonalProfile",
+    "validate_domain_experience",
+    "validate_personal_experience",
+]

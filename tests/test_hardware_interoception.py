@@ -1192,20 +1192,26 @@ def _physical(**values):
     return result
 
 
-def test_physical_channels_are_independent_and_do_not_create_endocrine_events():
+def _observe_physical(observer, cycle, **values):
+    return observer.observe(
+        _low_resources(),
+        cycle=cycle,
+        storage_status=_storage(),
+        physical_status=_physical(**values),
+    )
+
+
+def test_physical_channels_are_independent_before_confirmed_strain():
     observer = HardwareInteroception()
-    for cycle in range(10):
-        report = observer.observe(
-            _low_resources(),
-            cycle=cycle,
-            storage_status=_storage(),
-            physical_status=_physical(
-                gpu_utilization=98.0,
-                gpu_memory=0.9,
-                gpu_temperature=100.0,
-                gpu_power=0.95,
-                external_power=1.0,
-            ),
+    for cycle in range(4):
+        report = _observe_physical(
+            observer,
+            cycle,
+            gpu_utilization=98.0,
+            gpu_memory=0.9,
+            gpu_temperature=100.0,
+            gpu_power=0.95,
+            external_power=1.0,
         )
 
     channels = report["observation"]["channels"]
@@ -1219,6 +1225,198 @@ def test_physical_channels_are_independent_and_do_not_create_endocrine_events():
     assert observer.events == []
     assert observer.personal.adaptation == 0.0
     assert observer.personal.current_episode is None
+
+
+def test_stage5_gpu_only_and_short_physical_spike_create_no_events():
+    observer = HardwareInteroception()
+    for cycle in range(10):
+        report = _observe_physical(
+            observer, cycle, gpu_utilization=100.0, gpu_memory=1.0
+        )
+        assert report["states"]["physical_strain"]["value"] == 1.0
+        assert report["endocrine_events"] == []
+
+    for cycle in range(10, 14):
+        report = _observe_physical(
+            observer,
+            cycle,
+            gpu_utilization=100.0,
+            gpu_temperature=100.0,
+            gpu_power=0.95,
+        )
+        assert report["endocrine_events"] == []
+    assert observer.events == []
+
+
+def test_stage5_sustained_physical_strain_and_recovery_have_own_provenance():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        report = _observe_physical(
+            observer,
+            cycle,
+            gpu_utilization=98.0,
+            gpu_temperature=100.0,
+            gpu_power=0.95,
+        )
+    assert len(report["endocrine_events"]) == 1
+    strain = report["endocrine_events"][0]
+    assert strain["type"] == "hardware_strain"
+    assert strain["reason"] == "sustained_physical_strain"
+    assert strain["duration_cycles"] == 5
+    assert "gpu_temperature=100.000" in strain["evidence"]
+
+    for cycle in range(5, 10):
+        report = _observe_physical(
+            observer,
+            cycle,
+            gpu_utilization=5.0,
+            gpu_temperature=45.0,
+            gpu_power=0.2,
+        )
+    assert len(report["endocrine_events"]) == 1
+    recovery = report["endocrine_events"][0]
+    assert recovery["type"] == "hardware_recovery"
+    assert recovery["reason"] == "confirmed_physical_recovery"
+    assert recovery["duration_cycles"] == 5
+
+
+def test_stage5_storage_strain_and_recovery_have_own_provenance():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        report = observer.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.01),
+            physical_status=_physical(),
+        )
+    assert len(report["endocrine_events"]) == 1
+    strain = report["endocrine_events"][0]
+    assert strain["type"] == "hardware_strain"
+    assert strain["reason"] == "sustained_storage_risk"
+    assert strain["duration_cycles"] == 5
+    assert "data_free_ratio=0.010" in strain["evidence"]
+
+    for cycle in range(5, 10):
+        report = observer.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.8),
+            physical_status=_physical(),
+        )
+    assert len(report["endocrine_events"]) == 1
+    recovery = report["endocrine_events"][0]
+    assert recovery["type"] == "hardware_recovery"
+    assert recovery["reason"] == "confirmed_storage_recovery"
+    assert recovery["duration_cycles"] == 5
+
+
+def test_stage5_projection_separates_domains_and_preserves_other_hormones(
+    monkeypatch,
+):
+    observer = HardwareInteroception()
+    hormones = HormonalSystem()
+    agent = SimpleNamespace(hardware_interoception=observer, hormonal_system=hormones)
+    baseline = dict(hormones.hormones)
+    current = {
+        "storage": _storage(0.01),
+        "physical": _physical(gpu_temperature=100.0, gpu_power=0.95),
+    }
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage",
+        lambda: current["storage"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_physical_sensors",
+        lambda: current["physical"],
+    )
+
+    for cycle in range(5):
+        report = observe_hardware_interoception(agent, _low_resources(), cycle)
+    assert report["projection"]["processed_events"] == 2
+    assert {entry["provenance"]["reason"] for entry in hormones.history[-2:]} == {
+        "sustained_physical_strain",
+        "sustained_storage_risk",
+    }
+    assert hormones.hormones["cortisol"] > baseline["cortisol"]
+    for name in ("dopamine", "oxytocin", "prolactin"):
+        assert hormones.hormones[name] == baseline[name]
+
+    current["storage"] = _storage(0.8)
+    current["physical"] = _physical(gpu_temperature=45.0, gpu_power=0.2)
+    for cycle in range(5, 10):
+        report = observe_hardware_interoception(agent, _low_resources(), cycle)
+    assert report["projection"]["processed_events"] == 2
+    assert {entry["provenance"]["reason"] for entry in hormones.history[-2:]} == {
+        "confirmed_physical_recovery",
+        "confirmed_storage_recovery",
+    }
+    assert hormones.hormones["serotonin"] > baseline["serotonin"]
+    for name in ("dopamine", "oxytocin", "prolactin"):
+        assert hormones.hormones[name] == baseline[name]
+
+
+def test_stage5_sensor_loss_duplicate_and_restart_do_not_confirm_recovery():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        observer.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.01),
+            physical_status=_physical(gpu_temperature=100.0),
+        )
+    restored = HardwareInteroception.from_checkpoint(observer.to_checkpoint())
+    restored_before = restored.to_checkpoint()
+    assert restored.latest_observation["channels"]["data_storage"]["status"] == "stale"
+    assert restored.latest_observation["channels"]["gpu_temperature"]["status"] == (
+        "stale"
+    )
+
+    for cycle in range(5, 10):
+        report = restored.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status={"available": False, "reason": "sensor_disabled"},
+            physical_status=_physical(),
+        )
+        assert report["endocrine_events"] == []
+    duplicate = restored.observe(
+        _low_resources(),
+        cycle=9,
+        storage_status=_storage(0.8),
+        physical_status=_physical(gpu_temperature=45.0),
+    )
+    assert duplicate["skipped"] == "duplicate_cycle"
+    duplicate_before = restored.to_checkpoint()
+    assert (
+        restored.observe(
+            _low_resources(),
+            cycle=9,
+            storage_status=_storage(0.8),
+            physical_status=_physical(gpu_temperature=45.0),
+        )
+        == duplicate
+    )
+    assert restored.to_checkpoint() == duplicate_before
+    assert len(restored.history) == len(restored_before["history"]) + 5
+
+    for cycle in range(10, 14):
+        report = restored.observe(
+            _low_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.8),
+            physical_status=_physical(gpu_temperature=45.0),
+        )
+        assert report["endocrine_events"] == []
+    report = restored.observe(
+        _low_resources(),
+        cycle=14,
+        storage_status=_storage(0.8),
+        physical_status=_physical(gpu_temperature=45.0),
+    )
+    assert {event["reason"] for event in report["endocrine_events"]} == {
+        "confirmed_physical_recovery",
+        "confirmed_storage_recovery",
+    }
 
 
 def test_physical_invalid_values_and_raw_os_details_are_sanitized():
@@ -1256,7 +1454,7 @@ def test_physical_invalid_values_and_raw_os_details_are_sanitized():
     assert "C:/private" not in str(report)
 
 
-def test_schema2_physical_migration_and_schema3_restart_require_fresh_samples(
+def test_schema2_physical_migration_and_schema4_restart_require_fresh_samples(
     monkeypatch,
 ):
     observer = HardwareInteroception()
@@ -1267,7 +1465,7 @@ def test_schema2_physical_migration_and_schema3_restart_require_fresh_samples(
         physical_status=_physical(gpu_temperature=75.0, external_power=1.0),
     )
     current = observer.to_checkpoint()
-    assert current["schema_version"] == 3
+    assert current["schema_version"] == 4
 
     restored = HardwareInteroception.from_checkpoint(current)
     channels = restored.latest_observation["channels"]
@@ -1277,6 +1475,13 @@ def test_schema2_physical_migration_and_schema3_restart_require_fresh_samples(
 
     legacy = deepcopy(current)
     legacy["schema_version"] = 2
+    legacy.pop("slow_states")
+    legacy.pop("domain_experience")
+    legacy["latest_experience"]["storage_risk"] = {
+        "risk": None,
+        "experienced": None,
+        "expectedness": "unknown",
+    }
     for name in (
         "gpu_utilization",
         "gpu_memory",
@@ -1308,6 +1513,7 @@ def test_schema2_physical_migration_and_schema3_restart_require_fresh_samples(
     ):
         assert migrated_channels[name]["status"] == "unavailable"
         assert migrated_channels[name]["value"] is None
+    assert migrated.slow_states == HardwareInteroception().slow_states
     migrated_state = migrated.to_checkpoint()
-    assert migrated_state["schema_version"] == 3
+    assert migrated_state["schema_version"] == 4
     validate_hardware_interoception(migrated_state)

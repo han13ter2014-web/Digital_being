@@ -322,6 +322,80 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
             text += f" · {T('привычно, но риск сохраняется')}"
         rows.append((T(label), text))
 
+    domains = hardware.get("domain_experience") or {}
+    freshness_labels = {
+        "fresh": "свежие данные",
+        "stale": "устаревшие данные",
+        "unavailable": "недоступно",
+        "no_observation": "нет наблюдения",
+    }
+    reason_labels = {
+        "observed_physical_channels": "наблюдаемые физические каналы",
+        "observed_data_storage": "наблюдаемое хранилище data",
+        "channel_unavailable": "канал недоступен",
+        "waiting_for_fresh_observation_after_restart": (
+            "ожидание свежего наблюдения после перезапуска"
+        ),
+        "no_observation": "нет наблюдения",
+    }
+    for key, label in (("physical", "Физический опыт"), ("storage", "Опыт хранилища")):
+        domain = domains.get(key) or {}
+        latest = domain.get("latest") or {}
+        risk = latest.get("risk")
+        text = f"{T('риск')} {_hardware_percent(risk, language)}"
+        if risk is not None:
+            text += f" · {T('переживается')} {_hardware_percent(latest.get('experienced'), language)}"
+        if (
+            latest.get("expectedness") == "familiar"
+            and isinstance(risk, (int, float))
+            and risk >= 0.85
+        ):
+            text += f" · {T('привычно, но риск сохраняется')}"
+        rows.append((T(label), text))
+
+        freshness = freshness_labels.get(latest.get("freshness"), "Нет данных")
+        reason = latest.get("reason")
+        reason_label = reason_labels.get(reason, reason)
+        reason_text = (
+            T(reason_label)
+            if isinstance(reason_label, str) and reason_label
+            else T("Нет данных")
+        )
+        rows.append(
+            (
+                f"{T('Свежесть')} · {T(label)}",
+                f"{T(freshness)} · {reason_text}",
+            )
+        )
+
+        episode = domain.get("current_episode")
+        if isinstance(episode, dict):
+            episode_text = (
+                f"{T('с цикла')} {episode.get('start_cycle', '—')} · "
+                f"{T('свежих циклов')} {episode.get('fresh_observations', 0)} · "
+                f"{T('подтверждён')} "
+                f"{T('да' if episode.get('strain_cycle') is not None else 'нет')}"
+            )
+        else:
+            episode_text = T("Нет данных")
+        rows.append((f"{T('Текущий эпизод')} · {T(label)}", episode_text))
+
+        baseline = domain.get("baseline") or {}
+        baseline_value = baseline.get("baseline")
+        baseline_text = (
+            _hardware_percent(baseline_value, language)
+            if baseline.get("sample_count", 0) >= 50
+            else T("недостаточно опыта")
+        )
+        rows.append(
+            (
+                f"{T('Привыкание')} · {T(label)}",
+                f"{float(domain.get('adaptation', 0.0)):.2f} · "
+                f"{T('уверенность')} {float(domain.get('confidence', 0.0)):.2f} · "
+                f"{T('Личная норма')} {baseline_text}",
+            )
+        )
+
     profile = hardware.get("personal_profile") or {}
     baselines = profile.get("baseline") or {}
     has_baseline = any(

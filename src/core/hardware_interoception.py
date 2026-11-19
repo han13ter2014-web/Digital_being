@@ -14,7 +14,9 @@ from typing import Dict, Optional
 
 from src.core.buffered_logger import get_logger
 from src.core.hardware_personal_profile import (
+    HardwareDomainPersonalProfile,
     HardwarePersonalProfile,
+    validate_domain_experience,
     validate_personal_experience,
 )
 from src.core.hardware_sensors import read_physical_sensors
@@ -260,7 +262,18 @@ class HardwareInteroception:
         self.sustained_pressure_cycles = 0
         self.low_pressure_cycles = 0
         self.strain_active = False
+        # Physical и storage имеют собственные серии доказательств. Их нельзя
+        # сбрасывать или завершать из-за соседнего resource-канала.
+        self.slow_states = {
+            name: {
+                "sustained_cycles": 0,
+                "low_cycles": 0,
+                "strain_active": False,
+            }
+            for name in ("physical", "storage")
+        }
         self.personal = HardwarePersonalProfile()
+        self.domain_personal = HardwareDomainPersonalProfile()
 
     def observe(
         self,
@@ -301,22 +314,62 @@ class HardwareInteroception:
 
         states = self._derive_states(observation)
         events = self._advance_slow_state(observation, states)
+        events.extend(self._advance_domain_slow_state("storage", observation, states))
+        events.extend(self._advance_domain_slow_state("physical", observation, states))
+        resource_events = [
+            event
+            for event in events
+            if event["reason"] in {"sustained_resource_pressure", "confirmed_recovery"}
+        ]
         personal_report = self.personal.observe(
             states,
             raw,
             cycle=cycle,
-            events=events,
+            events=resource_events,
             strain_active=self.strain_active,
+        )
+        domain_report = self.domain_personal.observe(
+            states,
+            cycle=cycle,
+            events=events,
+            slow_states=self.slow_states,
         )
         for name, experience in self.personal.latest_experience.items():
             states[name]["expectedness"] = experience["expectedness"]
-        experienced = [
-            item["experienced"]
-            for item in self.personal.latest_experience.values()
-            if item["experienced"] is not None
-        ]
+        for name, state_name in (
+            ("physical", "physical_strain"),
+            ("storage", "storage_risk"),
+        ):
+            states[state_name]["expectedness"] = domain_report[name]["latest"][
+                "expectedness"
+            ]
         for event in events:
-            if event["type"] == "hardware_strain" and experienced:
+            reason = event["reason"]
+            domain = (
+                "physical"
+                if reason
+                in {"sustained_physical_strain", "confirmed_physical_recovery"}
+                else "storage"
+                if reason in {"sustained_storage_risk", "confirmed_storage_recovery"}
+                else None
+            )
+            if domain is not None:
+                latest = domain_report[domain]["latest"]
+                event["expectedness"] = latest["expectedness"]
+                if (
+                    event["type"] == "hardware_strain"
+                    and latest["experienced"] is not None
+                ):
+                    event["intensity"] = latest["experienced"]
+                continue
+            if event["type"] != "hardware_strain":
+                continue
+            experienced = [
+                self.personal.latest_experience[name]["experienced"]
+                for name in ("own_load", "environmental_pressure")
+                if self.personal.latest_experience[name]["experienced"] is not None
+            ]
+            if experienced:
                 event["intensity"] = max(experienced)
         if events:
             states["recovery"] = (
@@ -349,6 +402,7 @@ class HardwareInteroception:
             "observation": deepcopy(observation),
             "states": deepcopy(states),
             "personal_experience": personal_report,
+            "domain_experience": domain_report,
             "endocrine_events": deepcopy(events),
         }
 
@@ -479,7 +533,10 @@ class HardwareInteroception:
                 ["available_pressure_channels"],
             )
 
-        if self.strain_active:
+        any_strain_active = self.strain_active or any(
+            item["strain_active"] for item in self.slow_states.values()
+        )
+        if any_strain_active:
             states["recovery"] = (
                 _state(0.0, 1.0, "recovery_not_confirmed", "mixed", [])
                 if core_complete
@@ -494,7 +551,7 @@ class HardwareInteroception:
     def _advance_slow_state(self, observation: Dict, states: Dict) -> list:
         pressure_states = [
             states[name]
-            for name in ("own_load", "environmental_pressure", "storage_risk")
+            for name in ("own_load", "environmental_pressure")
             if states[name]["value"] is not None
         ]
         pressure = max((item["value"] for item in pressure_states), default=0.0)
@@ -559,22 +616,115 @@ class HardwareInteroception:
             }
         ]
 
+    def _advance_domain_slow_state(
+        self, domain: str, observation: Dict, states: Dict
+    ) -> list:
+        """Продвинуть независимую physical/storage-серию свежих доказательств."""
+        slow = self.slow_states[domain]
+        evidence = []
+        if domain == "storage":
+            state = states["storage_risk"]
+            risk = state["value"]
+            evidence = list(state["evidence"])
+        else:
+            # Загрузка и память GPU остаются диагностикой. Для эндокринного
+            # события нужен нагрев или приближение к ограничению мощности.
+            physical_parts = []
+            for name in ("gpu_temperature", "gpu_power", "cpu_temperature"):
+                value = _available(observation, name)
+                if value is None:
+                    continue
+                risk_value = (
+                    _clamp((value - 60.0) / 40.0)
+                    if name in {"gpu_temperature", "cpu_temperature"}
+                    else _clamp(value)
+                )
+                physical_parts.append(risk_value)
+                evidence.append(f"{name}={value:.3f}")
+            risk = max(physical_parts) if physical_parts else None
+
+        if risk is None:
+            slow["sustained_cycles"] = 0
+            slow["low_cycles"] = 0
+            return []
+
+        if risk >= _STRAIN_THRESHOLD:
+            slow["sustained_cycles"] += 1
+            slow["low_cycles"] = 0
+            if (
+                slow["sustained_cycles"] >= _STRAIN_AFTER_CYCLES
+                and not slow["strain_active"]
+            ):
+                slow["strain_active"] = True
+                return [
+                    {
+                        "type": "hardware_strain",
+                        "intensity": risk,
+                        "quality": "negative",
+                        "reason": f"sustained_{domain}_"
+                        + ("strain" if domain == "physical" else "risk"),
+                        "origin": "unknown",
+                        "expectedness": "unknown",
+                        "evidence": evidence[:8],
+                        "duration_cycles": slow["sustained_cycles"],
+                    }
+                ]
+            return []
+
+        slow["sustained_cycles"] = 0
+        if risk > _RECOVERY_THRESHOLD:
+            slow["low_cycles"] = 0
+            return []
+        if not slow["strain_active"]:
+            slow["low_cycles"] = 0
+            return []
+
+        slow["low_cycles"] += 1
+        if slow["low_cycles"] < _RECOVERY_AFTER_CYCLES:
+            return []
+        duration = slow["low_cycles"]
+        slow["strain_active"] = False
+        slow["low_cycles"] = 0
+        return [
+            {
+                "type": "hardware_recovery",
+                "intensity": 1.0 - risk,
+                "quality": "positive",
+                "reason": f"confirmed_{domain}_recovery",
+                "origin": "unknown",
+                "expectedness": "unknown",
+                "evidence": [f"sustained_fresh_low_{domain}_risk"],
+                "duration_cycles": duration,
+            }
+        ]
+
     def status(self) -> Dict:
-        return {
+        domain_experience = self.domain_personal.to_checkpoint()
+        result = {
             "mode": "shadow",
             "observation": deepcopy(self.latest_observation),
             "states": deepcopy(self.states),
             "strain_active": self.strain_active,
             "sustained_pressure_cycles": self.sustained_pressure_cycles,
             "low_pressure_cycles": self.low_pressure_cycles,
+            "slow_states": deepcopy(self.slow_states),
             "history_count": len(self.history),
             "recent_events": deepcopy(self.events[-10:]),
             **self.personal.status(),
+            "domain_experience": domain_experience,
         }
+        # Совместимый сводный DTO для существующих карточек; checkpoint хранит
+        # resource и domain-профили раздельно.
+        result["latest_experience"] = {
+            **deepcopy(self.personal.latest_experience),
+            "physical_strain": deepcopy(domain_experience["physical"]["latest"]),
+            "storage_risk": deepcopy(domain_experience["storage"]["latest"]),
+        }
+        return result
 
     def to_checkpoint(self) -> Dict:
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "latest_observation": deepcopy(self.latest_observation),
             "states": deepcopy(self.states),
             "history": deepcopy(self.history),
@@ -583,7 +733,9 @@ class HardwareInteroception:
             "sustained_pressure_cycles": self.sustained_pressure_cycles,
             "low_pressure_cycles": self.low_pressure_cycles,
             "strain_active": self.strain_active,
+            "slow_states": deepcopy(self.slow_states),
             **self.personal.to_checkpoint(),
+            "domain_experience": self.domain_personal.to_checkpoint(),
         }
 
     @classmethod
@@ -621,7 +773,12 @@ class HardwareInteroception:
         restored.sustained_pressure_cycles = data.get("sustained_pressure_cycles", 0)
         restored.low_pressure_cycles = data.get("low_pressure_cycles", 0)
         restored.strain_active = bool(data.get("strain_active", False))
-        if data["schema_version"] in {2, 3}:
+        if data["schema_version"] >= 4:
+            restored.slow_states = deepcopy(data["slow_states"])
+            restored.domain_personal = HardwareDomainPersonalProfile.from_checkpoint(
+                data
+            )
+        if data["schema_version"] >= 2:
             restored.personal = HardwarePersonalProfile.from_checkpoint(data)
         return restored
 
@@ -727,16 +884,39 @@ def _validation_events(events, path: str, limit: int) -> None:
 
 
 def validate_hardware_interoception(state: Dict) -> None:
-    if not isinstance(state, dict) or state.get("schema_version") not in {1, 2, 3}:
+    if not isinstance(state, dict) or state.get("schema_version") not in {1, 2, 3, 4}:
         raise ValueError("hardware_interoception.schema_version: unsupported")
-    if state["schema_version"] in {2, 3}:
-        validate_personal_experience(state)
+    if state["schema_version"] >= 2:
+        validate_personal_experience(state, legacy=state["schema_version"] < 4)
+    if state["schema_version"] >= 4:
+        validate_domain_experience(state)
     _validation_observation(
         state.get("latest_observation"),
         "hardware_interoception.latest_observation",
         state["schema_version"],
     )
     _validation_states(state.get("states"), "hardware_interoception.states")
+    if state["schema_version"] >= 4:
+        slow_states = state.get("slow_states")
+        if not isinstance(slow_states, dict) or set(slow_states) != {
+            "physical",
+            "storage",
+        }:
+            raise ValueError("hardware_interoception.slow_states: invalid domains")
+        for domain, entry in slow_states.items():
+            path = f"hardware_interoception.slow_states.{domain}"
+            if not isinstance(entry, dict) or set(entry) != {
+                "sustained_cycles",
+                "low_cycles",
+                "strain_active",
+            }:
+                raise ValueError(f"{path}: unknown or missing field")
+            for field in ("sustained_cycles", "low_cycles"):
+                value = entry[field]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError(f"{path}.{field}: expected nonnegative integer")
+            if not isinstance(entry["strain_active"], bool):
+                raise ValueError(f"{path}.strain_active: expected boolean")
     history = state.get("history")
     if not isinstance(history, list) or len(history) > _HISTORY_LIMIT:
         raise ValueError("hardware_interoception.history: expected a bounded list")
@@ -748,7 +928,7 @@ def validate_hardware_interoception(state: Dict) -> None:
         if isinstance(cycle, bool) or not isinstance(cycle, int) or cycle < 0:
             raise ValueError(f"{path}.cycle: expected a nonnegative integer")
         _validation_states(entry.get("states"), f"{path}.states")
-        _validation_events(entry.get("events"), f"{path}.events", 2)
+        _validation_events(entry.get("events"), f"{path}.events", 3)
     _validation_events(
         state.get("events"), "hardware_interoception.events", _EVENT_LIMIT
     )

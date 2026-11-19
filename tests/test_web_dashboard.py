@@ -318,6 +318,11 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert "['cpu_temperature','Температура CPU']" in body
     assert "['external_power','Внешнее питание']" in body
     assert "hardwarePercent(h.states?.physical_strain?.value)" in body
+    assert "h.domain_experience||{}" in body
+    assert "['physical','Физический опыт']" in body
+    assert "['storage','Опыт хранилища']" in body
+    assert "Текущий эпизод" in body
+    assert "свежие данные" in body
     assert "set_goal" not in body
     assert "think(" not in body and "save_state(" not in body
 
