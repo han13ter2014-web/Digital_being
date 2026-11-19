@@ -572,6 +572,84 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     assert "已经习惯，但风险依然存在" in hardware
 
 
+def test_now_screen_renders_separate_hormonal_projection_in_three_languages(root):
+    win = _window(root)
+    names = ("dopamine", "serotonin", "oxytocin", "cortisol", "prolactin")
+    profile = {
+        name: {
+            "baseline": 0.4,
+            "sensitivity": 1.0,
+            "half_life_scale": 1.0,
+            "confidence": 0.0,
+            "sample_count": 0,
+            "source_sample_counts": {},
+        }
+        for name in names
+    }
+    profile["dopamine"].update(
+        {
+            "baseline": 0.43,
+            "sensitivity": 0.98,
+            "half_life_scale": 1.02,
+            "confidence": 0.125,
+            "sample_count": 25,
+            "source_sample_counts": {"action_outcome": 25},
+        }
+    )
+    snapshot = {
+        "life": {"state": "alive", "cycle": 12, "energy": 148.0},
+        "emotions": {"levels": {"joy": 0.64}, "dominant": {"emotion": "joy"}},
+        "hormonal_projection": {
+            "initialized": True,
+            "time_model": "tick_only",
+            "legacy_mixed_time": False,
+            "levels": {
+                "dopamine": 0.55,
+                "serotonin": 0.52,
+                "oxytocin": 0.3,
+                "cortisol": 0.15,
+                "prolactin": 0.2,
+            },
+            "profile": profile,
+            "recent_reasons": [
+                {
+                    "event": "success",
+                    "source": "action_outcome",
+                    "cycle": 12,
+                    "reason": "knowledge_changed",
+                    "action": "explore",
+                    "origin": "own",
+                }
+            ],
+        },
+    }
+
+    win._apply_life_data(snapshot)
+    root.update()
+
+    hormonal = win._now_hormonal.cget("text")
+    assert hormonal != win._now_body.cget("text")
+    assert hormonal != win._now_hardware.cget("text")
+    assert hormonal != win._now_emotion_values["joy"].cget("text")
+    assert "Дофамин: 0.55" in hormonal
+    assert "Базовый уровень 0.43" in hormonal
+    assert "Подтверждённые эпизоды 25" in hormonal
+
+    win._set_language("English")
+    root.update()
+    hormonal = win._now_hormonal.cget("text")
+    assert "Dopamine: 0.55" in hormonal
+    assert "Baseline 0.43" in hormonal
+    assert "Confirmed episodes 25" in hormonal
+
+    win._set_language("中文")
+    root.update()
+    hormonal = win._now_hormonal.cget("text")
+    assert "多巴胺: 0.55" in hormonal
+    assert "基础水平 0.43" in hormonal
+    assert "已确认事件 25" in hormonal
+
+
 def test_now_screen_has_honest_empty_emotion_state(root):
     win = _window(root)
     win._apply_life_data({})

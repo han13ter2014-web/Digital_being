@@ -125,6 +125,7 @@ class MainWindow(ChatWindow):
         self._now_influence = None
         self._now_body = None
         self._now_hardware = None
+        self._now_hormonal = None
         self._now_dominant = None
         self._now_emotion_inner = None
         self._now_emotion_canvas = None
@@ -251,6 +252,7 @@ class MainWindow(ChatWindow):
             self._now_influence,
             self._now_body,
             self._now_hardware,
+            self._now_hormonal,
             self._now_dominant,
             self._now_emotion_empty,
             *self._now_emotion_labels.values(),
@@ -755,6 +757,10 @@ class MainWindow(ChatWindow):
                 self._now_hardware.configure(
                     text=self._rows_text(life_view.hardware_rows(snap, self._language))
                 )
+            if self._now_hormonal is not None:
+                self._now_hormonal.configure(
+                    text=self._rows_text(life_view.hormonal_rows(snap, self._language))
+                )
             self._apply_now_emotions(snap)
             self._apply_diary_data(snap)
             self._apply_activity_data(snap)
@@ -1224,7 +1230,7 @@ class MainWindow(ChatWindow):
         for label in (self._now_activity, self._now_choice, self._now_body):
             if label is not None:
                 label.configure(wraplength=column - 34)
-        for label in (self._now_influence, self._now_hardware):
+        for label in (self._now_influence, self._now_hardware, self._now_hormonal):
             if label is not None:
                 label.configure(wraplength=width - 64)
         for label in (self._now_headline, self._now_sub):
@@ -1356,15 +1362,24 @@ class MainWindow(ChatWindow):
             hardware_card, self._now_body_font, 760
         )
 
+        hormonal_card, _header = self._now_card(
+            cards, "ГОРМОНАЛЬНАЯ ПРОЕКЦИЯ", theme.VIOLET
+        )
+        hormonal_card.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=4)
+        self._now_hormonal = self._now_card_text(
+            hormonal_card, self._now_body_font, 760
+        )
+
         influence_card, _header = self._now_card(
             cards, "ЧТО ВЛИЯЕТ НА ВЫБОР", theme.VIOLET
         )
-        influence_card.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
+        influence_card.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
         self._now_influence = self._now_card_text(
             influence_card, self._now_body_font, 760
         )
         cards.rowconfigure(2, weight=3)
-        cards.rowconfigure(3, weight=2)
+        cards.rowconfigure(3, weight=3)
+        cards.rowconfigure(4, weight=2)
         page.bind("<Configure>", self._resize_now_page)
         return page
 

@@ -198,3 +198,54 @@ def test_export_creative_draft_is_explicit_idempotent_effector_request():
     assert request.metadata["activity"] == "creative"
     assert agent._creative_draft["revision"] == draft["revision"]
     effector.submit.assert_called_once_with(request)
+
+
+def test_hormone_events_do_not_advance_time_or_decay():
+    system = DigitalBeing(name="HormonalTickOnlyTime").hormonal_system
+    system.hormones["cortisol"] = 0.45
+    system.tick(10.0)
+    before = dict(system.hormones)
+    cycle_time = system.cycle_time
+
+    for _ in range(5):
+        system.process_event("observation", 0.0)
+
+    assert system.cycle_time == cycle_time
+    assert system.hormones == before
+    assert [entry["time"] for entry in system.history] == [cycle_time] * 5
+
+
+def test_hormone_provenance_preserves_only_observed_action_and_social_facts():
+    agent = DigitalBeing(name="HormonalProvenance")
+    observe_user_message(agent, "текст не должен попасть в историю", None, 3)
+    observe_integrated_action(
+        agent,
+        {"action": "explore", "target": "секретная тема", "params": {}},
+        SimpleNamespace(had_effect=True, reason="knowledge_changed"),
+    )
+
+    social, action = agent.hormonal_system.history
+    assert social["provenance"] == {
+        "source": "social_message",
+        "cycle": 3,
+        "reason": "user_message_observed",
+    }
+    assert action["provenance"] == {
+        "source": "action_outcome",
+        "cycle": 0,
+        "action": "explore",
+        "reason": "knowledge_changed",
+    }
+    assert "текст не должен" not in repr(agent.hormonal_system.history)
+    assert "секретная тема" not in repr(agent.hormonal_system.history)
+
+
+def test_hormone_tick_rejects_invalid_elapsed_time_without_mutation():
+    system = DigitalBeing(name="HormonalTickValidation").hormonal_system
+    system.tick(5.0)
+    before = system.to_checkpoint()
+
+    for invalid in (-1.0, float("nan"), float("inf"), True, "1"):
+        with pytest.raises(ValueError):
+            system.tick(invalid)
+        assert system.to_checkpoint() == before

@@ -754,3 +754,202 @@ def test_hardware_rows_show_physical_values_without_hiding_missing_channels():
     )
     assert "GPU 温度: 70.0 °C" in chinese
     assert "CPU 温度: 不可用" in chinese
+
+
+def _hormonal_checkpoint():
+    names = ("dopamine", "serotonin", "oxytocin", "cortisol", "prolactin")
+    levels = {
+        "dopamine": 0.55,
+        "serotonin": 0.52,
+        "oxytocin": 0.3,
+        "cortisol": 0.15,
+        "prolactin": 0.2,
+    }
+    profile = {
+        name: {
+            "baseline": levels[name],
+            "sensitivity": 1.0,
+            "half_life_scale": 1.0,
+            "confidence": 0.0,
+            "sample_count": 0,
+            "source_sample_counts": {},
+        }
+        for name in names
+    }
+    profile["dopamine"].update(
+        {
+            "baseline": 0.43,
+            "sensitivity": 0.98,
+            "half_life_scale": 1.02,
+            "confidence": 0.125,
+            "sample_count": 25,
+            "source_sample_counts": {"action_outcome": 25},
+        }
+    )
+    return {
+        "schema_version": 2,
+        "time_model": "tick_only",
+        "legacy_mixed_time": False,
+        "hormones": levels,
+        "profile": profile,
+        "episodes": [
+            {
+                "time": float(cycle),
+                "event": "success",
+                "source": "action_outcome",
+                "cycle": cycle,
+                "reason": "knowledge_changed",
+                "action": "explore",
+                "origin": "own",
+                "intensity": 1.0,
+                "changes": {"dopamine": 0.15},
+                "private": "C:/private/message",
+            }
+            for cycle in range(5)
+        ],
+        "history": [{"event": "success", "message": "C:/private/history"}],
+        "cycle_time": 300.0,
+    }
+
+
+def test_hormonal_snapshot_is_compact_deep_copy_with_bounded_reasons():
+    agent = _agent("HormonalSnapshot")
+    checkpoint = _hormonal_checkpoint()
+    agent.hormonal_system = SimpleNamespace(to_checkpoint=lambda: checkpoint)
+    keys_before = set(agent.__dict__)
+
+    first = build_life_snapshot(agent)
+    second = build_life_snapshot(agent)
+
+    assert first == second
+    assert set(agent.__dict__) == keys_before
+    projection = first["hormonal_projection"]
+    assert projection["initialized"] is True
+    assert projection["mode"] == "shadow_interoception"
+    assert projection["time_model"] == "tick_only"
+    assert projection["legacy_mixed_time"] is False
+    assert projection["levels"] == checkpoint["hormones"]
+    assert projection["profile"] == checkpoint["profile"]
+    assert "history" not in projection
+    assert "episodes" not in projection
+    assert "cycle_time" not in projection
+    assert len(projection["recent_reasons"]) == 3
+    assert [item["cycle"] for item in projection["recent_reasons"]] == [2, 3, 4]
+    assert all(
+        set(item) == {"event", "source", "cycle", "reason", "action", "origin"}
+        for item in projection["recent_reasons"]
+    )
+    assert "C:/private" not in str(projection)
+
+    projection["levels"]["dopamine"] = 0.0
+    projection["profile"]["dopamine"]["baseline"] = 0.0
+    projection["recent_reasons"][0]["action"] = "tampered"
+    assert checkpoint["hormones"]["dopamine"] == 0.55
+    assert checkpoint["profile"]["dopamine"]["baseline"] == 0.43
+    assert checkpoint["episodes"][2]["action"] == "explore"
+
+
+def test_hormonal_snapshot_is_explicit_when_system_is_absent_or_broken():
+    agent = _agent("NoHormones")
+    agent.hormonal_system = None
+    assert build_life_snapshot(agent)["hormonal_projection"] == {
+        "initialized": False,
+        "mode": "shadow_interoception",
+        "reason": "not_initialized",
+    }
+
+    def explode():
+        raise RuntimeError("C:/private/endocrine failure")
+
+    agent.hormonal_system = SimpleNamespace(to_checkpoint=explode)
+    snapshot = build_life_snapshot(agent)
+    assert snapshot["hormonal_projection"]["initialized"] is False
+    assert "C:/private" not in str(snapshot)
+
+
+def test_hormonal_rows_keep_no_evidence_distinct_from_personal_profile():
+    from src.ui.life_view import hormonal_rows
+
+    checkpoint = _hormonal_checkpoint()
+    for profile in checkpoint["profile"].values():
+        profile.update(
+            {
+                "confidence": 0.0,
+                "sample_count": 0,
+                "source_sample_counts": {},
+            }
+        )
+    snapshot = {
+        "hormonal_projection": {
+            "initialized": True,
+            "time_model": "tick_only",
+            "legacy_mixed_time": False,
+            "levels": checkpoint["hormones"],
+            "profile": checkpoint["profile"],
+            "recent_reasons": [],
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hormonal_rows(snapshot))
+    assert "Дофамин: 0.55" in russian
+    assert "Личный профиль: Нет данных" in russian
+    assert "Модель времени: только тик" in russian
+    assert "Прежнее смешанное время: нет" in russian
+    assert "уверенность 0.00" not in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "en")
+    )
+    assert "Dopamine: 0.55" in english
+    assert "Personal profile: No data" in english
+    assert "Time model: tick only" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "zh")
+    )
+    assert "多巴胺: 0.55" in chinese
+    assert "个人档案: 暂无数据" in chinese
+    assert "时间模型: 仅按周期" in chinese
+
+
+def test_hormonal_rows_show_real_profile_and_reason_codes_in_three_languages():
+    from src.ui.life_view import hormonal_rows
+
+    checkpoint = _hormonal_checkpoint()
+    snapshot = {
+        "hormonal_projection": {
+            "initialized": True,
+            "time_model": "tick_only",
+            "legacy_mixed_time": False,
+            "levels": checkpoint["hormones"],
+            "profile": checkpoint["profile"],
+            "recent_reasons": [checkpoint["episodes"][-1]],
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hormonal_rows(snapshot))
+    assert (
+        "Дофамин: 0.55 · Базовый уровень 0.43 · Чувствительность 0.98 · "
+        "Масштаб half-life 1.02 · уверенность 0.12 · Подтверждённые эпизоды 25"
+    ) in russian
+    assert "Последние причины · цикл 4: success · action_outcome" in russian
+    assert "explore · knowledge_changed" in russian
+    assert "C:/private" not in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "en")
+    )
+    assert (
+        "Dopamine: 0.55 · Baseline 0.43 · Sensitivity 0.98 · "
+        "Half-life scale 1.02 · confidence 0.12 · Confirmed episodes 25"
+    ) in english
+    assert "Recent reasons · cycle 4" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "zh")
+    )
+    assert (
+        "多巴胺: 0.55 · 基础水平 0.43 · 敏感性 0.98 · "
+        "半衰期缩放 1.02 · 置信度 0.12 · 已确认事件 25"
+    ) in chinese
+    assert "最近原因 · 周期 4" in chinese

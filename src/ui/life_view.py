@@ -360,6 +360,88 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     return rows
 
 
+def _hormonal_number(value: Any, language: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return i18n.text("Нет данных", language)
+    if not math.isfinite(float(value)):
+        return i18n.text("Нет данных", language)
+    return f"{float(value):.2f}"
+
+
+def hormonal_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Теневые уровни и подтверждённый профиль, отдельно от эмоций и тела."""
+    T = partial(i18n.text, language=language)
+    projection = snapshot.get("hormonal_projection") or {}
+    if projection.get("initialized") is not True:
+        return [(T("Гормональная проекция"), T("Нет данных"))]
+
+    time_model = projection.get("time_model")
+    time_text = (
+        T("только тик")
+        if time_model == "tick_only"
+        else str(time_model)
+        if time_model
+        else T("Нет данных")
+    )
+    legacy = projection.get("legacy_mixed_time")
+    legacy_text = (
+        T("да" if legacy else "нет") if isinstance(legacy, bool) else T("Нет данных")
+    )
+    rows: List[Row] = [
+        (T("Режим"), T("Shadow · без влияния на выбор")),
+        (T("Модель времени"), time_text),
+        (T("Прежнее смешанное время"), legacy_text),
+    ]
+    levels = projection.get("levels") or {}
+    profile = projection.get("profile") or {}
+    has_personal_profile = False
+    for name, label in (
+        ("dopamine", "Дофамин"),
+        ("serotonin", "Серотонин"),
+        ("oxytocin", "Окситоцин"),
+        ("cortisol", "Кортизол"),
+        ("prolactin", "Пролактин"),
+    ):
+        text = _hormonal_number(levels.get(name), language)
+        values = profile.get(name) or {}
+        sample_count = values.get("sample_count")
+        if (
+            not isinstance(sample_count, bool)
+            and isinstance(sample_count, int)
+            and sample_count > 0
+        ):
+            has_personal_profile = True
+            text += (
+                f" · {T('Базовый уровень')} "
+                f"{_hormonal_number(values.get('baseline'), language)}"
+                f" · {T('Чувствительность')} "
+                f"{_hormonal_number(values.get('sensitivity'), language)}"
+                f" · {T('Масштаб half-life')} "
+                f"{_hormonal_number(values.get('half_life_scale'), language)}"
+                f" · {T('уверенность')} "
+                f"{_hormonal_number(values.get('confidence'), language)}"
+                f" · {T('Подтверждённые эпизоды')} {sample_count}"
+            )
+        rows.append((T(label), text))
+    if not has_personal_profile:
+        rows.append((T("Личный профиль"), T("Нет данных")))
+
+    for entry in (projection.get("recent_reasons") or [])[-3:]:
+        if not isinstance(entry, dict):
+            continue
+        reason = " · ".join(
+            str(entry[field])
+            for field in ("event", "source", "action", "reason", "origin")
+            if entry.get(field) is not None
+        )
+        cycle = entry.get("cycle")
+        label = T("Последние причины")
+        if cycle is not None:
+            label += f" · {T('цикл')} {cycle}"
+        rows.append((label, reason or T("Нет данных")))
+    return rows
+
+
 def body_summary(snapshot: Dict[str, Any], language: str = "ru") -> str:
     """Одна строка о теле для подзаголовка: цикл · энергия · усталость."""
     T = partial(i18n.text, language=language)

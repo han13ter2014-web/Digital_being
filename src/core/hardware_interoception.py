@@ -795,7 +795,19 @@ def observe_hardware_interoception(
         if hormones is None:
             break
         try:
-            hormones.process_event(event["type"], event["intensity"], event["quality"])
+            hormones.process_event(
+                event["type"],
+                event["intensity"],
+                event["quality"],
+                provenance={
+                    "source": "hardware",
+                    "cycle": int(cycle),
+                    "reason": event["reason"],
+                    "origin": event["origin"],
+                    "duration_cycles": event["duration_cycles"],
+                    "evidence": list(event["evidence"]),
+                },
+            )
             processed += 1
         except Exception as exc:
             get_logger().log(f"[HARDWARE_INTEROCEPTION] projection error: {exc}")

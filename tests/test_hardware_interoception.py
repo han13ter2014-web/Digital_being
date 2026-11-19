@@ -196,6 +196,15 @@ def test_hardware_projection_preserves_reward_and_social_hormones():
     assert hormones.hormones["oxytocin"] == baseline["oxytocin"]
     assert hormones.hormones["prolactin"] == baseline["prolactin"]
     assert hormones.history[-1]["event"] == "hardware_strain"
+    event = report["endocrine_events"][0]
+    assert hormones.history[-1]["provenance"] == {
+        "source": "hardware",
+        "cycle": 4,
+        "reason": event["reason"],
+        "origin": event["origin"],
+        "duration_cycles": 5,
+        "evidence": event["evidence"],
+    }
 
 
 def test_low_resource_idle_creates_no_endocrine_reward():
@@ -733,6 +742,104 @@ def test_full_six_hundred_cycles_with_two_restarts_match_baseline(monkeypatch):
         enabled_agent.hardware_interoception.to_checkpoint()
     )
     for cycle, (observed, expected) in enumerate(zip(enabled_trace, baseline_trace)):
+        for field in expected:
+            assert observed[field] == expected[field], (cycle, field)
+
+
+def test_hormonal_profiles_match_behavior_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    source = DigitalBeing(name="HormonalLongSource")
+    source.web_searcher.toggle(False)
+    neutral_initial = build_state_from_agent(source)
+
+    trained = HormonalSystem()
+    for cycle in range(25):
+        trained.process_event(
+            "success",
+            1.0,
+            provenance={
+                "source": "action_outcome",
+                "cycle": cycle,
+                "action": "explore",
+                "reason": "knowledge_changed",
+                "origin": "own",
+            },
+        )
+        trained.tick(300.0)
+    trained_checkpoint = trained.to_checkpoint()
+    assert trained_checkpoint["profile"]["dopamine"]["baseline"] > 0.4
+    assert trained_checkpoint["profile"]["dopamine"]["sensitivity"] < 1.0
+
+    experienced_initial = deepcopy(neutral_initial)
+    experienced_initial["integrated_experience"]["hormones"] = deepcopy(
+        trained_checkpoint
+    )
+    current = {"resources": _low_resources()}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage",
+        lambda: _storage(0.8),
+    )
+
+    def run(initial):
+        random.seed(60018)
+        np.random.seed(60018)
+        agent = DigitalBeing(name="HormonalLongLife")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        trace = []
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                restored.web_searcher.toggle(False)
+                agent = restored
+            if cycle % 200 in {150, 151, 152}:
+                current["resources"] = {
+                    "available": False,
+                    "reason": "sensor_disabled",
+                }
+            else:
+                current["resources"] = (
+                    _high_resources() if (cycle // 20) % 2 == 0 else _low_resources()
+                )
+            report = agent.autonomous_tick()
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return agent, trace
+
+    neutral_agent, neutral_trace = run(neutral_initial)
+    experienced_agent, experienced_trace = run(experienced_initial)
+
+    assert neutral_agent.cycle_count == experienced_agent.cycle_count == 600
+    neutral_checkpoint = neutral_agent.hormonal_system.to_checkpoint()
+    experienced_checkpoint = experienced_agent.hormonal_system.to_checkpoint()
+    assert experienced_checkpoint != neutral_checkpoint
+    assert (
+        experienced_checkpoint["profile"]["dopamine"]["sample_count"]
+        > neutral_checkpoint["profile"]["dopamine"]["sample_count"]
+    )
+    for checkpoint in (neutral_checkpoint, experienced_checkpoint):
+        HormonalSystem.validate_checkpoint(checkpoint)
+        assert len(checkpoint["history"]) <= 200
+        assert len(checkpoint["episodes"]) <= 50
+        for name, level in checkpoint["hormones"].items():
+            assert 0.0 <= level <= 1.0
+            profile = checkpoint["profile"][name]
+            spec = HormonalSystem.HORMONES[name]
+            assert (
+                spec.base_level - 0.05 <= profile["baseline"] <= spec.base_level + 0.05
+            )
+            assert 0.75 <= profile["sensitivity"] <= 1.25
+            assert 0.75 <= profile["half_life_scale"] <= 1.5
+            assert 0.0 <= profile["confidence"] <= 1.0
+
+    for cycle, (observed, expected) in enumerate(zip(experienced_trace, neutral_trace)):
         for field in expected:
             assert observed[field] == expected[field], (cycle, field)
 

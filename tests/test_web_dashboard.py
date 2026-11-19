@@ -322,6 +322,45 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert "think(" not in body and "save_state(" not in body
 
 
+def test_hormonal_projection_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    projection = {
+        "initialized": True,
+        "mode": "shadow_interoception",
+        "time_model": "tick_only",
+        "legacy_mixed_time": False,
+        "levels": {
+            "dopamine": 0.55,
+            "serotonin": 0.52,
+            "oxytocin": 0.3,
+            "cortisol": 0.15,
+            "prolactin": 0.2,
+        },
+        "profile": {},
+        "recent_reasons": [],
+    }
+    life["hormonal_projection"] = projection
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hormonal_projection") == {
+        "hormonal_projection": projection
+    }
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert 'id="hormonal-rows"' in body
+    assert "function renderHormones(h)" in body
+    assert "renderHormones(life.hormonal_projection||{})" in body
+    assert "set_hormone" not in body
+    assert "train_hormonal" not in body
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["texts"]["en"]["Гормональная проекция"] == "Hormonal projection"
+    assert payload["texts"]["zh"]["Гормональная проекция"] == "激素投影"
+    assert payload["texts"]["en"]["Дофамин"] == "Dopamine"
+    assert payload["texts"]["zh"]["Дофамин"] == "多巴胺"
+
+
 @pytest.mark.asyncio
 async def test_sse_reconnect_replays_without_duplicates(dashboard):
     _, port, state = dashboard

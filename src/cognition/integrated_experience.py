@@ -96,8 +96,21 @@ class IntegratedExperience:
         pattern = PATTERN_BY_ACTION.get(normalized)
         if pattern:
             self.thinking_patterns.use_pattern(pattern, had_effect, target or action)
+        hormone_provenance = {
+            "source": "action_outcome",
+            "cycle": cycle,
+            "action": normalized,
+            "reason": (
+                "action_error"
+                if error is not None
+                else reason
+                or ("effect_confirmed" if had_effect else "outcome_observed")
+            ),
+        }
         if error is not None:
-            self.hormones.process_event("failure", 1.0, "negative")
+            self.hormones.process_event(
+                "failure", 1.0, "negative", provenance=hormone_provenance
+            )
         elif had_effect:
             event = (
                 "learning"
@@ -114,9 +127,13 @@ class IntegratedExperience:
                 }
                 else "success"
             )
-            self.hormones.process_event(event, 1.0, "positive")
+            self.hormones.process_event(
+                event, 1.0, "positive", provenance=hormone_provenance
+            )
         elif reason.startswith("denied:"):
-            self.hormones.process_event("stress", 0.5, "negative")
+            self.hormones.process_event(
+                "stress", 0.5, "negative", provenance=hormone_provenance
+            )
         components = self._canonical_components(agent)
         state = self.emergence.record_state(
             components,
@@ -135,7 +152,16 @@ class IntegratedExperience:
 
     def observe_user_message(self, agent, text: str, cycle: int) -> None:
         self.personality.observe_user_message(text, cycle=cycle)
-        self.hormones.process_event("connection", 1.0, "positive")
+        self.hormones.process_event(
+            "connection",
+            1.0,
+            "positive",
+            provenance={
+                "source": "social_message",
+                "cycle": int(cycle),
+                "reason": "user_message_observed",
+            },
+        )
         self.personality.project_canonical_state(agent)
 
     def tick(self, agent, cycle: int) -> Dict:
@@ -408,21 +434,7 @@ def validate_integrated_experience(state: Dict) -> None:
     )
 
     hormones = _dict(state.get("hormones"), "integrated_experience.hormones")
-    if hormones.get("schema_version") != 1:
-        raise ValueError("integrated_experience.hormones.schema_version: unsupported")
-    levels = _dict(hormones.get("hormones"), "integrated_experience.hormones.levels")
-    if set(levels) != set(HormonalSystem.HORMONES):
-        raise ValueError(
-            "integrated_experience.hormones.levels: unknown or missing hormone"
-        )
-    for name, value in levels.items():
-        _number(
-            value, f"integrated_experience.hormones.levels.{name}", low=0.0, high=1.0
-        )
-    _list(hormones.get("history"), "integrated_experience.hormones.history", 200)
-    _number(
-        hormones.get("cycle_time"), "integrated_experience.hormones.cycle_time", low=0.0
-    )
+    HormonalSystem.validate_checkpoint(hormones, "integrated_experience.hormones")
     last = state.get("last_tick_cycle")
     if last is not None:
         _integer(last, "integrated_experience.last_tick_cycle")

@@ -595,6 +595,79 @@ def _social_channels_section(agent: Any) -> Dict[str, Any]:
     return section
 
 
+_HORMONE_NAMES = ("dopamine", "serotonin", "oxytocin", "cortisol", "prolactin")
+_HORMONE_PROFILE_FIELDS = (
+    "baseline",
+    "sensitivity",
+    "half_life_scale",
+    "confidence",
+    "sample_count",
+    "source_sample_counts",
+)
+_HORMONE_REASON_FIELDS = ("event", "source", "cycle", "reason", "action", "origin")
+
+
+def _hormonal_projection_section(agent: Any) -> Dict[str, Any]:
+    """Компактная проекция checkpoint без истории, текста и обращения к ОС."""
+    fallback = {
+        "initialized": False,
+        "mode": "shadow_interoception",
+        "reason": "not_initialized",
+    }
+    system = _own(agent, "hormonal_system", None)
+    callback = getattr(system, "to_checkpoint", None)
+    if not callable(callback):
+        return fallback
+    try:
+        checkpoint = callback()
+    except Exception:  # pragma: no cover - защита UI
+        return fallback
+    if not isinstance(checkpoint, dict):
+        return fallback
+    raw_levels = checkpoint.get("hormones")
+    raw_profile = checkpoint.get("profile")
+    if not isinstance(raw_levels, dict) or not isinstance(raw_profile, dict):
+        return fallback
+
+    levels = {
+        name: deepcopy(raw_levels[name])
+        for name in _HORMONE_NAMES
+        if name in raw_levels
+    }
+    profile: Dict[str, Any] = {}
+    for name in _HORMONE_NAMES:
+        values = raw_profile.get(name)
+        if isinstance(values, dict):
+            profile[name] = {
+                field: deepcopy(values[field])
+                for field in _HORMONE_PROFILE_FIELDS
+                if field in values
+            }
+
+    recent_reasons = []
+    episodes = checkpoint.get("episodes")
+    if isinstance(episodes, list):
+        for entry in episodes[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            reason = {
+                field: deepcopy(entry[field])
+                for field in _HORMONE_REASON_FIELDS
+                if field in entry
+            }
+            if reason:
+                recent_reasons.append(reason)
+    return {
+        "initialized": True,
+        "mode": "shadow_interoception",
+        "time_model": deepcopy(checkpoint.get("time_model")),
+        "legacy_mixed_time": deepcopy(checkpoint.get("legacy_mixed_time")),
+        "levels": levels,
+        "profile": profile,
+        "recent_reasons": recent_reasons,
+    }
+
+
 def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, Any]:
     """Собрать снимок жизни существа для интерфейса.
 
@@ -695,6 +768,7 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
         "emotions": _status_of(_own(agent, "emotional_state", None)),
         "body": interoception,
         "hardware": hardware,
+        "hormonal_projection": _hormonal_projection_section(agent),
         "intentions": {
             "active": current,
             "waiting": waiting_entries,
