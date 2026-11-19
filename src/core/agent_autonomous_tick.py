@@ -429,6 +429,46 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 "reason": "advisor_error",
             }
 
+    # === ГОРМОНАЛЬНАЯ ПРОЕКЦИЯ: 4C ===
+    # Shadow не меняет выбор. Advisor лишь ограниченно смещает существующие
+    # кандидаты от личного baseline; при активном 4A тяжёлые кандидаты не
+    # получают второй гормональной поправки.
+    hormonal_mode = str(getattr(SIM_CONFIG, "HORMONAL_BEHAVIOR_MODE", "shadow"))
+    if hormonal_mode == "advisor":
+        try:
+            from src.core.hormonal_behavior import apply_hormonal_advice
+
+            result["hormonal_behavior"] = apply_hormonal_advice(
+                candidates,
+                getattr(self, "hormonal_system", None),
+                self._normalize_action,
+                hardware_advisor_active=(
+                    result["hardware_behavior"].get("active") is True
+                ),
+            )
+        except Exception as e:
+            get_logger().log(f"[HORMONAL_BEHAVIOR] Advisor error: {e}")
+            result["hormonal_behavior"] = {
+                "mode": "advisor",
+                "active": False,
+                "reason": "advisor_error",
+                "signals": {"dopamine": 0.0, "oxytocin": 0.0, "cortisol": 0.0},
+                "evidence": {"dopamine": 0.0, "oxytocin": 0.0, "cortisol": 0.0},
+                "adjustments": [],
+            }
+    else:
+        result["hormonal_behavior"] = {
+            "mode": hormonal_mode,
+            "active": False,
+            "reason": "shadow_only"
+            if hormonal_mode == "shadow"
+            else "unsupported_mode",
+            "adjustments": [],
+        }
+    # Только runtime-наблюдение для read-only UI. Checkpoint-схема его не
+    # включает: после restart до первого тика наблюдение честно отсутствует.
+    self.hormonal_behavior_last = deepcopy(result["hormonal_behavior"])
+
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===
     # Пережитое смещает тягу к занятиям: страх тянет к безопасному,
     # счастье — к творческому, грусть — к тихому. Это вес, не

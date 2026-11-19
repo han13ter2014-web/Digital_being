@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
@@ -605,6 +606,76 @@ _HORMONE_PROFILE_FIELDS = (
     "source_sample_counts",
 )
 _HORMONE_REASON_FIELDS = ("event", "source", "cycle", "reason", "action", "origin")
+_HORMONAL_BEHAVIOR_CHANNELS = ("dopamine", "oxytocin", "cortisol")
+_HORMONAL_BEHAVIOR_NUMBER_FIELDS = (
+    "before_strength",
+    "after_strength",
+    "contribution",
+)
+
+
+def _hormonal_behavior_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(float(value)) else None
+
+
+def _hormonal_behavior_code(value: Any) -> str:
+    """Пропустить только короткий машинный код, не текст, путь или ошибку."""
+    if not isinstance(value, str) or not 0 < len(value) <= 64:
+        return "unknown"
+    if not all(character.isalnum() or character in "_-." for character in value):
+        return "unknown"
+    return value
+
+
+def _hormonal_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
+    """Ограниченный DTO последнего тика; не является частью checkpoint."""
+    runtime = _own(agent, "hormonal_behavior_last", None)
+    if not isinstance(runtime, dict):
+        return None
+    raw_signals = runtime.get("signals")
+    raw_evidence = runtime.get("evidence")
+    raw_signals = raw_signals if isinstance(raw_signals, dict) else {}
+    raw_evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+    raw_adjustments = runtime.get("adjustments")
+    raw_adjustments = raw_adjustments if isinstance(raw_adjustments, list) else []
+    adjustments = []
+    for entry in raw_adjustments[-3:]:
+        if not isinstance(entry, dict):
+            continue
+        input_index = entry.get("input_index")
+        adjustments.append(
+            {
+                "input_index": (
+                    input_index
+                    if not isinstance(input_index, bool)
+                    and isinstance(input_index, int)
+                    and input_index >= 0
+                    else None
+                ),
+                "action": _hormonal_behavior_code(entry.get("action")),
+                "source": _hormonal_behavior_code(entry.get("source")),
+                **{
+                    field: _hormonal_behavior_number(entry.get(field))
+                    for field in _HORMONAL_BEHAVIOR_NUMBER_FIELDS
+                },
+            }
+        )
+    return {
+        "mode": _hormonal_behavior_code(runtime.get("mode")),
+        "active": runtime.get("active") is True,
+        "reason": _hormonal_behavior_code(runtime.get("reason")),
+        "signals": {
+            name: _hormonal_behavior_number(raw_signals.get(name))
+            for name in _HORMONAL_BEHAVIOR_CHANNELS
+        },
+        "evidence": {
+            name: _hormonal_behavior_number(raw_evidence.get(name))
+            for name in _HORMONAL_BEHAVIOR_CHANNELS
+        },
+        "adjustments": adjustments,
+    }
 
 
 def _hormonal_projection_section(agent: Any) -> Dict[str, Any]:
@@ -665,6 +736,7 @@ def _hormonal_projection_section(agent: Any) -> Dict[str, Any]:
         "levels": levels,
         "profile": profile,
         "recent_reasons": recent_reasons,
+        "behavior": _hormonal_behavior_section(agent),
     }
 
 

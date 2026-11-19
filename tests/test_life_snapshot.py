@@ -953,3 +953,135 @@ def test_hormonal_rows_show_real_profile_and_reason_codes_in_three_languages():
         "半衰期缩放 1.02 · 置信度 0.12 · 已确认事件 25"
     ) in chinese
     assert "最近原因 · 周期 4" in chinese
+
+
+def test_hormonal_behavior_snapshot_is_bounded_and_not_persisted():
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    agent = _agent("HormonalBehaviorSnapshot")
+    agent.hormonal_system = SimpleNamespace(
+        to_checkpoint=lambda: _hormonal_checkpoint()
+    )
+    runtime = {
+        "mode": "advisor",
+        "active": True,
+        "reason": "applied",
+        "signals": {"dopamine": 0.5, "oxytocin": 0.25, "cortisol": -0.5},
+        "evidence": {"dopamine": 1.0, "oxytocin": 0.5, "cortisol": 1.0},
+        "adjustments": [
+            {
+                "input_index": index,
+                "action": "explore",
+                "source": "motivation",
+                "before_strength": 0.5,
+                "after_strength": 0.55,
+                "contribution": 0.1,
+                "private": "C:/private/message",
+            }
+            for index in range(5)
+        ],
+        "raw_error": "C:/private/sensor failure",
+    }
+    agent.hormonal_behavior_last = runtime
+
+    projection = build_life_snapshot(agent)["hormonal_projection"]
+    behavior = projection["behavior"]
+
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True
+    assert behavior["reason"] == "applied"
+    assert behavior["signals"] == runtime["signals"]
+    assert behavior["evidence"] == runtime["evidence"]
+    assert len(behavior["adjustments"]) == 3
+    assert [row["input_index"] for row in behavior["adjustments"]] == [2, 3, 4]
+    assert all(
+        set(row)
+        == {
+            "input_index",
+            "action",
+            "source",
+            "before_strength",
+            "after_strength",
+            "contribution",
+        }
+        for row in behavior["adjustments"]
+    )
+    assert "C:/private" not in str(projection)
+    behavior["signals"]["dopamine"] = 0.0
+    behavior["adjustments"][0]["action"] = "tampered"
+    assert runtime["signals"]["dopamine"] == 0.5
+    assert runtime["adjustments"][2]["action"] == "explore"
+
+    state = build_state_from_agent(agent)
+    assert "hormonal_behavior_last" not in state
+    restored = _agent("HormonalBehaviorRestart")
+    apply_state_to_agent(restored, state)
+    assert not hasattr(restored, "hormonal_behavior_last")
+    restarted = build_life_snapshot(restored)["hormonal_projection"]
+    assert restarted["initialized"] is True
+    assert restarted["behavior"] is None
+    assert "0.0" not in str(restarted["behavior"])
+
+
+def test_hormonal_rows_show_actual_advisor_and_restart_absence():
+    from src.ui.life_view import hormonal_rows
+
+    checkpoint = _hormonal_checkpoint()
+    projection = {
+        "initialized": True,
+        "time_model": "tick_only",
+        "legacy_mixed_time": False,
+        "levels": checkpoint["hormones"],
+        "profile": checkpoint["profile"],
+        "recent_reasons": [],
+        "behavior": {
+            "mode": "advisor",
+            "active": True,
+            "reason": "applied",
+            "signals": {"dopamine": 0.5, "oxytocin": 0.25, "cortisol": -0.5},
+            "evidence": {"dopamine": 1.0, "oxytocin": 0.5, "cortisol": 1.0},
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "explore",
+                    "source": "motivation",
+                    "before_strength": 0.5,
+                    "after_strength": 0.55,
+                    "contribution": 0.1,
+                }
+            ],
+        },
+    }
+    snapshot = {"hormonal_projection": projection}
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hormonal_rows(snapshot))
+    assert "Режим: Advisor · ограниченное влияние на выбор" in russian
+    assert "Активность: да" in russian
+    assert "Причина: applied" in russian
+    assert "Сигнал · Дофамин: 0.50 · Доказательства 1.00" in russian
+    assert "Поправка · explore: 0.50 → 0.55 · +10.0% · motivation" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "en")
+    )
+    assert "Mode: Advisor · bounded influence on choices" in english
+    assert "Activity: yes" in english
+    assert "Signal · Dopamine: 0.50 · Evidence 1.00" in english
+    assert "Adjustment · explore: 0.50 → 0.55 · +10.0% · motivation" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hormonal_rows(snapshot, "zh")
+    )
+    assert "模式: 顾问 · 对选择的有限影响" in chinese
+    assert "活动: 是" in chinese
+    assert "信号 · 多巴胺: 0.50 · 证据 1.00" in chinese
+    assert "调整 · explore: 0.50 → 0.55 · +10.0% · motivation" in chinese
+
+    projection["behavior"] = None
+    restarted = "\n".join(f"{key}: {value}" for key, value in hormonal_rows(snapshot))
+    assert "Режим: Нет данных" in restarted
+    assert "Сигнал ·" not in restarted
+    assert "0.00 · Доказательства" not in restarted

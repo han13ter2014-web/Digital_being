@@ -922,6 +922,254 @@ def test_advisor_long_life_does_not_collapse_into_idle(monkeypatch):
     )
 
 
+def test_hormonal_behavior_mode_defaults_to_shadow():
+    from config.simulation_config import SIM_CONFIG
+
+    assert SIM_CONFIG.HORMONAL_BEHAVIOR_MODE == "shadow"
+
+
+def test_hormonal_advisor_is_connected_in_autonomous_tick(monkeypatch):
+    monkeypatch.setattr(
+        "config.simulation_config.SIM_CONFIG.HORMONAL_BEHAVIOR_MODE", "advisor"
+    )
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: _low_resources(),
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+    agent = DigitalBeing(name="HormonalAdvisorConnected")
+    agent.web_searcher.toggle(False)
+    for name in ("dopamine", "oxytocin", "cortisol"):
+        agent.hormonal_system.hormones[name] = 1.0
+        agent.hormonal_system.profile.values[name]["sample_count"] = 20
+
+    behavior = {}
+    for _ in range(80):
+        report = agent.autonomous_tick()
+        behavior = report["hormonal_behavior"]
+        if behavior["adjustments"]:
+            break
+        agent.cycle_count += 1
+
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True, behavior
+    assert behavior["reason"] == "applied"
+    assert behavior["signals"]["dopamine"] > 0.0
+    assert behavior["adjustments"]
+    assert all(
+        -0.1 <= entry["contribution"] <= 0.1
+        and entry["before_strength"] != entry["after_strength"]
+        for entry in behavior["adjustments"]
+    )
+
+
+def test_hormonal_shadow_extreme_rich_profile_matches_full_trace(monkeypatch):
+    source = DigitalBeing(name="HormonalShadowCounterfactual")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    baseline = DigitalBeing(name="HormonalShadowCounterfactual")
+    extreme = DigitalBeing(name="HormonalShadowCounterfactual")
+    for agent in (baseline, extreme):
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+
+    extreme.hormonal_system.hormones.update(
+        {
+            "dopamine": 1.0,
+            "serotonin": 0.0,
+            "oxytocin": 1.0,
+            "cortisol": 1.0,
+            "prolactin": 1.0,
+        }
+    )
+    for name, values in extreme.hormonal_system.profile.values.items():
+        if name == "prolactin":
+            continue
+        source_name = {
+            "oxytocin": "social_message",
+            "cortisol": "hardware",
+        }.get(name, "action_outcome")
+        values["sample_count"] = 200
+        values["confidence"] = 1.0
+        values["source_sample_counts"] = {source_name: 200}
+
+    monkeypatch.setattr(
+        "config.simulation_config.SIM_CONFIG.HORMONAL_BEHAVIOR_MODE", "shadow"
+    )
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: _low_resources(),
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+
+    def run(agent):
+        random.seed(4040)
+        np.random.seed(4040)
+        trace = []
+        reports = []
+        for cycle in range(12):
+            if cycle == 6:
+                state = build_state_from_agent(agent)
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                restored.web_searcher.toggle(False)
+                agent = restored
+            report = agent.autonomous_tick()
+            reports.append(report)
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return agent, trace, reports
+
+    baseline_agent, baseline_trace, baseline_reports = run(baseline)
+    extreme_agent, extreme_trace, extreme_reports = run(extreme)
+
+    assert extreme_trace == baseline_trace
+    assert (
+        extreme_agent.hormonal_system.to_checkpoint()
+        != baseline_agent.hormonal_system.to_checkpoint()
+    )
+    for report in (*baseline_reports, *extreme_reports):
+        assert report["hormonal_behavior"] == {
+            "mode": "shadow",
+            "active": False,
+            "reason": "shadow_only",
+            "adjustments": [],
+        }
+
+
+def test_hormonal_advisor_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    import math
+
+    from src.core.agent_body import HEAVY_ACTIONS
+
+    source = DigitalBeing(name="HormonalAdvisorLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    rich = HormonalSystem()
+    rich.hormones.update(
+        {
+            "dopamine": 1.0,
+            "serotonin": 0.5,
+            "oxytocin": 1.0,
+            "cortisol": 0.0,
+            "prolactin": 0.2,
+        }
+    )
+    for name, values in rich.profile.values.items():
+        source_name = {
+            "oxytocin": "social_message",
+            "cortisol": "hardware",
+        }.get(name, "action_outcome")
+        values["sample_count"] = 200
+        values["confidence"] = 1.0
+        values["source_sample_counts"] = {source_name: 200}
+    initial["integrated_experience"]["hormones"] = rich.to_checkpoint()
+
+    current = {"resources": _low_resources()}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+    monkeypatch.setattr(
+        "config.simulation_config.SIM_CONFIG.HARDWARE_BEHAVIOR_MODE", "advisor"
+    )
+
+    def run(mode):
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HORMONAL_BEHAVIOR_MODE", mode
+        )
+        random.seed(60019)
+        np.random.seed(60019)
+        agent = DigitalBeing(name=f"HormonalAdvisorLong_{mode}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        actions = []
+        adjustment_count = 0
+        restart_absence = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                assert "hormonal_behavior_last" not in state
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                assert not hasattr(restored, "hormonal_behavior_last")
+                restart_absence += 1
+                restored.web_searcher.toggle(False)
+                agent = restored
+            current["resources"] = (
+                _high_resources() if (cycle // 20) % 2 == 0 else _low_resources()
+            )
+            report = agent.autonomous_tick()
+            behavior = report["hormonal_behavior"]
+            assert agent.hormonal_behavior_last == behavior
+            assert agent.hormonal_behavior_last is not behavior
+            evaluations = report["arbitrator"].get("all_evaluations") or []
+            input_indices = {entry["input_index"] for entry in evaluations}
+            seen_indices = set()
+            for entry in behavior.get("adjustments") or []:
+                contribution = entry["contribution"]
+                before = entry["before_strength"]
+                after = entry["after_strength"]
+                action = agent._normalize_action(entry["action"])
+                assert math.isfinite(contribution)
+                assert math.isfinite(before) and before > 0.0
+                assert math.isfinite(after)
+                assert -0.1 <= contribution <= 0.1
+                assert after == pytest.approx(before * (1.0 + contribution))
+                assert entry["input_index"] in input_indices
+                assert entry["input_index"] not in seen_indices
+                seen_indices.add(entry["input_index"])
+                if action in {"wait", "rest", "deep_rest"}:
+                    assert contribution <= 0.0
+                if report["hardware_behavior"].get("active") is True:
+                    assert action not in HEAVY_ACTIONS
+            adjustment_count += len(behavior.get("adjustments") or [])
+            actions.append(report["arbitrator"].get("action"))
+            for need in agent.motivation_system.needs.values():
+                assert math.isfinite(need.current_level)
+                assert 0.0 <= need.current_level <= 1.0
+            agent.cycle_count += 1
+        return agent, actions, adjustment_count, restart_absence
+
+    shadow_agent, shadow_actions, shadow_adjustments, shadow_restarts = run("shadow")
+    advisor_agent, advisor_actions, advisor_adjustments, advisor_restarts = run(
+        "advisor"
+    )
+    shadow_idle = sum(action in {"wait", "deep_rest"} for action in shadow_actions)
+    advisor_idle = sum(action in {"wait", "deep_rest"} for action in advisor_actions)
+    advisor_heavy = sum(
+        advisor_agent._normalize_action(action) in HEAVY_ACTIONS
+        for action in advisor_actions
+    )
+
+    assert shadow_agent.cycle_count == advisor_agent.cycle_count == 600
+    assert shadow_restarts == advisor_restarts == 2
+    assert shadow_adjustments == 0
+    assert advisor_adjustments > 0
+    assert advisor_heavy > 0
+    assert advisor_idle <= shadow_idle
+    assert advisor_agent.motivation_system.goal_summary["generated"] > 0
+    assert len(advisor_agent.hardware_interoception.history) == 200
+    assert len(advisor_agent.hardware_interoception.events) <= 50
+    assert len(advisor_agent.hardware_interoception.personal.episodes) <= 50
+    validate_hardware_interoception(
+        advisor_agent.hardware_interoception.to_checkpoint()
+    )
+    hormonal_checkpoint = advisor_agent.hormonal_system.to_checkpoint()
+    HormonalSystem.validate_checkpoint(hormonal_checkpoint)
+    assert len(hormonal_checkpoint["history"]) <= 200
+    assert len(hormonal_checkpoint["episodes"]) <= 50
+
+
 def _physical(**values):
     result = {
         name: {

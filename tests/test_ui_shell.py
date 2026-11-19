@@ -650,6 +650,47 @@ def test_now_screen_renders_separate_hormonal_projection_in_three_languages(root
     assert "已确认事件 25" in hormonal
 
 
+def test_now_screen_renders_actual_hormonal_advisor_in_three_languages(root):
+    win = _window(root)
+    snapshot = {
+        "life": {"state": "alive", "cycle": 12, "energy": 148.0},
+        "hormonal_projection": {
+            "initialized": True,
+            "time_model": "tick_only",
+            "legacy_mixed_time": False,
+            "levels": {},
+            "profile": {},
+            "recent_reasons": [],
+            "behavior": {
+                "mode": "advisor",
+                "active": True,
+                "reason": "applied",
+                "signals": {"dopamine": 0.5, "oxytocin": 0.0, "cortisol": 0.0},
+                "evidence": {"dopamine": 1.0, "oxytocin": 0.0, "cortisol": 0.0},
+                "adjustments": [],
+            },
+        },
+    }
+
+    win._apply_life_data(snapshot)
+    root.update()
+    hormonal = win._now_hormonal.cget("text")
+    assert "Advisor · ограниченное влияние на выбор" in hormonal
+    assert "Сигнал · Дофамин: 0.50 · Доказательства 1.00" in hormonal
+
+    win._set_language("English")
+    root.update()
+    hormonal = win._now_hormonal.cget("text")
+    assert "Advisor · bounded influence on choices" in hormonal
+    assert "Signal · Dopamine: 0.50 · Evidence 1.00" in hormonal
+
+    win._set_language("中文")
+    root.update()
+    hormonal = win._now_hormonal.cget("text")
+    assert "顾问 · 对选择的有限影响" in hormonal
+    assert "信号 · 多巴胺: 0.50 · 证据 1.00" in hormonal
+
+
 def test_now_screen_has_honest_empty_emotion_state(root):
     win = _window(root)
     win._apply_life_data({})

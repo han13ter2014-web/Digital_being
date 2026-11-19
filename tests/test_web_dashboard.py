@@ -339,6 +339,14 @@ def test_hormonal_projection_is_read_only_and_localized(dashboard):
         },
         "profile": {},
         "recent_reasons": [],
+        "behavior": {
+            "mode": "advisor",
+            "active": True,
+            "reason": "applied",
+            "signals": {"dopamine": 0.5, "oxytocin": 0.0, "cortisol": 0.0},
+            "evidence": {"dopamine": 1.0, "oxytocin": 0.0, "cortisol": 0.0},
+            "adjustments": [],
+        },
     }
     life["hormonal_projection"] = projection
     state.update_life(life)
@@ -349,8 +357,11 @@ def test_hormonal_projection_is_read_only_and_localized(dashboard):
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
         body = response.read().decode("utf-8")
     assert 'id="hormonal-rows"' in body
+    assert 'id="hormonal-mode"' in body
     assert "function renderHormones(h)" in body
     assert "renderHormones(life.hormonal_projection||{})" in body
+    assert "$('hormonal-mode').textContent" in body
+    assert "h.behavior" in body
     assert "set_hormone" not in body
     assert "train_hormonal" not in body
     raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
@@ -359,6 +370,12 @@ def test_hormonal_projection_is_read_only_and_localized(dashboard):
     assert payload["texts"]["zh"]["Гормональная проекция"] == "激素投影"
     assert payload["texts"]["en"]["Дофамин"] == "Dopamine"
     assert payload["texts"]["zh"]["Дофамин"] == "多巴胺"
+    assert (
+        payload["texts"]["en"]["Advisor · ограниченное влияние на выбор"]
+        == "Advisor · bounded influence on choices"
+    )
+    assert payload["texts"]["en"]["Доказательства"] == "Evidence"
+    assert payload["texts"]["zh"]["Сигнал"] == "信号"
 
 
 @pytest.mark.asyncio

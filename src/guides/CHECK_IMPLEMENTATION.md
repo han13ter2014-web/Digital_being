@@ -22,6 +22,7 @@
 - `SensoryInterface` наблюдает текст, не подменяя stimulus.
 - `MetaCognitiveSystem` наблюдает намерения и исходы, но не управляет арбитражем.
 - `IntegratedExperience` передаёт фактический опыт в `Personality`, `EmergenceEngine`, `ThinkingPatternLibrary` и `HormonalSystem`.
+- По умолчанию `HormonalSystem` остаётся shadow-наблюдателем. Опциональный advisor 4C лишь ограниченно меняет strength существующих кандидатов по личному baseline, не управляя арбитром и не создавая целей.
 
 ## Локальные адаптеры
 

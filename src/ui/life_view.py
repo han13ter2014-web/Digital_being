@@ -369,7 +369,7 @@ def _hormonal_number(value: Any, language: str) -> str:
 
 
 def hormonal_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
-    """Теневые уровни и подтверждённый профиль, отдельно от эмоций и тела."""
+    """Уровни, личный профиль и ограниченная runtime-диагностика advisor."""
     T = partial(i18n.text, language=language)
     projection = snapshot.get("hormonal_projection") or {}
     if projection.get("initialized") is not True:
@@ -387,11 +387,64 @@ def hormonal_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     legacy_text = (
         T("да" if legacy else "нет") if isinstance(legacy, bool) else T("Нет данных")
     )
+    # Старые снимки без ключа описывали только shadow-наблюдение. Новый None
+    # означает restart до первого тика и не должен выдумывать режим или нули.
+    behavior = projection.get("behavior")
+    if "behavior" not in projection:
+        mode_text = T("Shadow · без влияния на выбор")
+    elif not isinstance(behavior, dict):
+        mode_text = T("Нет данных")
+    elif behavior.get("mode") == "advisor":
+        mode_text = T("Advisor · ограниченное влияние на выбор")
+    else:
+        mode_text = T("Shadow · без влияния на выбор")
     rows: List[Row] = [
-        (T("Режим"), T("Shadow · без влияния на выбор")),
+        (T("Режим"), mode_text),
         (T("Модель времени"), time_text),
         (T("Прежнее смешанное время"), legacy_text),
     ]
+    if isinstance(behavior, dict):
+        rows.extend(
+            [
+                (T("Активность"), T("да" if behavior.get("active") is True else "нет")),
+                (T("Причина"), str(behavior.get("reason") or T("Нет данных"))),
+            ]
+        )
+        signals = behavior.get("signals") or {}
+        evidence = behavior.get("evidence") or {}
+        for name, label in (
+            ("dopamine", "Дофамин"),
+            ("oxytocin", "Окситоцин"),
+            ("cortisol", "Кортизол"),
+        ):
+            rows.append(
+                (
+                    f"{T('Сигнал')} · {T(label)}",
+                    f"{_hormonal_number(signals.get(name), language)}"
+                    f" · {T('Доказательства')} "
+                    f"{_hormonal_number(evidence.get(name), language)}",
+                )
+            )
+        for entry in (behavior.get("adjustments") or [])[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            contribution = entry.get("contribution")
+            contribution_text = (
+                f"{float(contribution) * 100.0:+.1f}%"
+                if not isinstance(contribution, bool)
+                and isinstance(contribution, (int, float))
+                and math.isfinite(float(contribution))
+                else T("Нет данных")
+            )
+            rows.append(
+                (
+                    f"{T('Поправка')} · {entry.get('action') or 'unknown'}",
+                    f"{_hormonal_number(entry.get('before_strength'), language)}"
+                    f" → {_hormonal_number(entry.get('after_strength'), language)}"
+                    f" · {contribution_text} · {entry.get('source') or 'unknown'}",
+                )
+            )
+
     levels = projection.get("levels") or {}
     profile = projection.get("profile") or {}
     has_personal_profile = False
