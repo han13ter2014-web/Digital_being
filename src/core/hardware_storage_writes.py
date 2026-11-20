@@ -39,11 +39,16 @@ def storage_write_error_category(error: BaseException) -> str:
     if isinstance(error, sqlite3.Error):
         code = getattr(error, "sqlite_errorcode", None)
         primary = code & 0xFF if isinstance(code, int) else None
-        if primary == sqlite3.SQLITE_FULL:
+        # Python 3.10 передаёт sqlite_errorcode, но не экспортирует сами константы.
+        # Числа — стабильные primary result codes из публичного ABI SQLite.
+        if primary == getattr(sqlite3, "SQLITE_FULL", 13):
             return "no_space"
-        if primary in {sqlite3.SQLITE_PERM, sqlite3.SQLITE_AUTH}:
+        if primary in {
+            getattr(sqlite3, "SQLITE_PERM", 3),
+            getattr(sqlite3, "SQLITE_AUTH", 23),
+        }:
             return "permission_denied"
-        if primary == sqlite3.SQLITE_IOERR:
+        if primary == getattr(sqlite3, "SQLITE_IOERR", 10):
             return "io_error"
         return "unknown"
     if isinstance(error, PermissionError):

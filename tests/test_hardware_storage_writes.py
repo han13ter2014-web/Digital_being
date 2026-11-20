@@ -93,10 +93,10 @@ def _sqlite_error(code=None):
         (ValueError("bad input"), "invalid_input"),
         (OSError(errno.ENOSPC, "private path"), "no_space"),
         (OSError(errno.EIO, "private path"), "io_error"),
-        (_sqlite_error(sqlite3.SQLITE_FULL | (5 << 8)), "no_space"),
-        (_sqlite_error(sqlite3.SQLITE_PERM), "permission_denied"),
-        (_sqlite_error(sqlite3.SQLITE_AUTH), "permission_denied"),
-        (_sqlite_error(sqlite3.SQLITE_IOERR), "io_error"),
+        (_sqlite_error(13 | (5 << 8)), "no_space"),  # extended SQLITE_FULL
+        (_sqlite_error(3), "permission_denied"),  # SQLITE_PERM
+        (_sqlite_error(23), "permission_denied"),  # SQLITE_AUTH
+        (_sqlite_error(10), "io_error"),  # SQLITE_IOERR
         (_sqlite_error(), "unknown"),
         (RuntimeError("external detail"), "unknown"),
     ],
@@ -116,6 +116,24 @@ def test_storage_write_errors_have_distinct_bounded_categories(error, expected):
     assert latest["origin"] == "unknown"
     assert str(error) not in str(latest)
     assert observer.to_checkpoint() == checkpoint
+
+
+@pytest.mark.parametrize(
+    ("constant_name", "code", "expected"),
+    [
+        ("SQLITE_FULL", 13, "no_space"),
+        ("SQLITE_PERM", 3, "permission_denied"),
+        ("SQLITE_AUTH", 23, "permission_denied"),
+        ("SQLITE_IOERR", 10, "io_error"),
+    ],
+)
+def test_sqlite_categories_do_not_require_python_311_constants(
+    monkeypatch, constant_name, code, expected
+):
+    """Python 3.10 имеет sqlite_errorcode, но не экспортирует эти константы."""
+    monkeypatch.delattr(sqlite3, constant_name, raising=False)
+
+    assert storage_write_error_category(_sqlite_error(code)) == expected
 
 
 def test_external_service_refusal_is_not_no_space():
@@ -248,7 +266,7 @@ def test_checkpoint_and_managed_memory_have_separate_outcomes(monkeypatch, tmp_p
     assert latest["operation"] == "checkpoint"
     assert latest["outcome"] == "succeeded"
 
-    save_error = _sqlite_error(sqlite3.SQLITE_FULL)
+    save_error = _sqlite_error(13)  # SQLITE_FULL
     with pytest.raises(sqlite3.Error):
         save_state_impl(agent, force=True)
     latest = agent.hardware_interoception.status()["storage_writes"]["latest"]
@@ -256,7 +274,7 @@ def test_checkpoint_and_managed_memory_have_separate_outcomes(monkeypatch, tmp_p
 
     save_error = None
     agent._profile_managed = True
-    memory.error = _sqlite_error(sqlite3.SQLITE_PERM)
+    memory.error = _sqlite_error(3)  # SQLITE_PERM
     with pytest.raises(sqlite3.Error):
         save_state_impl(agent, force=True)
     history = agent.hardware_interoception.storage_writes.history
