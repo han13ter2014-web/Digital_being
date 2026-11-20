@@ -98,6 +98,22 @@ class SimulationConfig:
     # advisor — общая с 4A скидка до 25 % для существующих тяжёлых кандидатов.
     HARDWARE_PHYSICAL_BEHAVIOR_MODE = "shadow"
 
+    # === Риск хранилища data/: этапы 8A/8B ===
+    # shadow — только sanitized отчёт подтверждённого storage_risk;
+    # advisor — до 25 % скидки силы существующих create_draft/draw/compose_music.
+    HARDWARE_STORAGE_BEHAVIOR_MODE = "shadow"
+
+    # === Условная запись web_search/explore: этапы 11B/11C ===
+    # shadow — только sanitized-отчёт; advisor — до 25 % снижения первого
+    # доказанного standalone web_search/explore в общем с 4A/7B бюджете.
+    HARDWARE_CONDITIONAL_WRITE_MODE = "shadow"
+
+    # === Relevant roots: этап 12A ===
+    # Существующий data/ сохраняет логический ID "data". Дополнительные корни
+    # задаёт только владелец: {"логический_id": "путь"}. Пусто = ничего нового
+    # не наблюдать; порядок перечисления ОС идентичностью не является.
+    HARDWARE_RELEVANT_ROOTS = {}
+
     # === Гормональная проекция ===
     # shadow — только наблюдение; advisor — одна поправка до ±10% силы уже
     # предложенных кандидатов от личного baseline с ограниченной evidence-шкалой.

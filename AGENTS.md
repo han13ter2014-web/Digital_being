@@ -13,7 +13,7 @@
 - Mypy: `.venv/Scripts/python.exe -m mypy --config-file pyproject.toml --explicit-package-bases --no-site-packages --follow-imports=skip main.py main_tray.py`
 - Bandit: `.venv/Scripts/python.exe -m bandit -q -r src/ config/ main.py main_tray.py -ll --skip B101,B601`
 - Syntax: `.venv/Scripts/python.exe -m compileall -q src/ config/ tests/ main.py main_tray.py`
-- Evidence: verified locally, 2026-11-20; последний полный regression с branch coverage — 3940 passed, 2 skipped за 686,59 с, coverage 80,64 % (исправление коллизии ID SQLite-памяти).
+- Evidence: verified locally, 2026-11-20; последний полный regression с branch coverage — 3943 passed, 2 skipped за 699,79 с, coverage 80,64 % (этап 8A storage shadow-доказательства).
 
 ## Conventions
 

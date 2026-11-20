@@ -319,6 +319,10 @@ def test_html_exposes_only_narrow_event_based_controls(dashboard):
     assert "['external_power','Внешнее питание']" in body
     assert "hardwarePercent(h.states?.physical_strain?.value)" in body
     assert "h.domain_experience||{}" in body
+    assert "h.relevant_root_observations||{}" in body
+    assert "Object.entries(rootObservations)" in body
+    assert "observed_relevant_root_storage" in body
+    assert "Разделы хранения" in body
     assert "['physical','Физический опыт']" in body
     assert "['storage','Опыт хранилища']" in body
     assert "Текущий эпизод" in body
@@ -622,3 +626,159 @@ def test_hardware_physical_behavior_is_read_only_and_localized(dashboard):
     assert payload["texts"]["zh"]["Физическая защита"] == "物理保护"
     assert payload["texts"]["en"]["Серия"] == "Series"
     assert payload["texts"]["zh"]["Серия"] == "系列"
+
+
+def test_hardware_storage_behavior_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    hardware = {
+        "initialized": True,
+        "storage_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "duration_cycles": 5,
+            "risk": 0.96,
+            "experienced": 0.8,
+            "confidence": 1.0,
+            "factor": 0.8,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "draw",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.64,
+                    "factor": 0.8,
+                }
+            ],
+        },
+    }
+    life["hardware"] = hardware
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hardware") == {"hardware": hardware}
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert "h.storage_behavior" in body
+    assert "Защита хранилища" in body
+    assert "storage.duration_cycles" in body
+    assert "entry.before_strength" in body
+    assert "entry.after_strength" in body
+    assert "set_storage" not in body
+    assert "train_storage" not in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["texts"]["en"]["Защита хранилища"] == "Storage protection"
+    assert payload["texts"]["zh"]["Защита хранилища"] == "存储保护"
+    assert payload["texts"]["en"]["Серия"] == "Series"
+    assert payload["texts"]["zh"]["Серия"] == "系列"
+
+
+def test_hardware_conditional_write_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    hardware = {
+        "initialized": True,
+        "conditional_write_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "profile_class": "web_search_standalone_conditional",
+            "write_evidence": {
+                "sample_count": 5,
+                "write_count": 3,
+                "failed_count": 0,
+                "write_ratio": 0.6,
+            },
+            "risk": 0.96,
+            "experienced": 0.8,
+            "confidence": 1.0,
+            "factor": 0.856,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "web_search",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.6848,
+                    "factor": 0.856,
+                }
+            ],
+        },
+    }
+    life["hardware"] = hardware
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hardware") == {"hardware": hardware}
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert "h.conditional_write_behavior" in body
+    assert "conditional.write_evidence" in body
+    assert "conditional.profile_class" in body
+    assert "entry.before_strength" in body
+    assert "entry.after_strength" in body
+    assert "Условная запись" in body
+    assert "set_conditional" not in body
+    assert "train_conditional" not in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert payload["texts"]["en"]["Условная запись"] == "Conditional write"
+    assert payload["texts"]["zh"]["Условная запись"] == "条件写入"
+    assert payload["texts"]["en"]["Профиль"] == "Profile"
+    assert payload["texts"]["zh"]["Профиль"] == "配置文件"
+    assert payload["texts"]["en"]["Записи"] == "Writes"
+    assert payload["texts"]["zh"]["Записи"] == "写入"
+
+
+def test_hardware_action_experience_is_read_only_and_localized(dashboard):
+    _, port, state = dashboard
+    life = _life()
+    hardware = {
+        "initialized": True,
+        "action_experience": {
+            "latest": {
+                "action": "explore",
+                "sample_count": 200,
+                "expectedness": "familiar",
+                "freshness": "fresh",
+                "reason": "observed_after_completed_action",
+                "risk": 0.95,
+            }
+        },
+    }
+    life["hardware"] = hardware
+    state.update_life(life)
+
+    assert _get_json(port, "/api/hardware") == {"hardware": hardware}
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert "h.action_experience?.latest" in body
+    assert "actionExperience.sample_count" in body
+    assert "actionExperience.expectedness" in body
+    assert "actionExperience.risk" in body
+    assert "Опыт после предыдущего действия" in body
+    assert "set_action_experience" not in body
+    assert "train_action_experience" not in body
+
+    raw_payload = body.split("const I18N=", 1)[1].split(";\nlet language=", 1)[0]
+    payload = json.loads(raw_payload)
+    assert (
+        payload["texts"]["en"]["Опыт после предыдущего действия"]
+        == "Experience after previous action"
+    )
+    assert (
+        payload["texts"]["zh"]["Опыт после предыдущего действия"] == "上一行动后的体验"
+    )
+    assert (
+        payload["texts"]["en"]["наблюдение после завершённого действия"]
+        == "observation after completed action"
+    )
+    assert (
+        payload["texts"]["zh"]["наблюдение после завершённого действия"]
+        == "完成行动后的观察"
+    )

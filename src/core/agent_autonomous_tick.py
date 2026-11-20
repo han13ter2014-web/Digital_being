@@ -471,10 +471,100 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
             "adjustments": [],
         }
 
+    # === РИСК ХРАНИЛИЩА DATA/: 8A/8B ===
+    # Shadow только наблюдает. Advisor ослабляет силу уже существующих
+    # create_draft (new/continue), draw и compose_music не более чем на 25 %;
+    # состав, доступность, параметры, essential-действия и выбор не меняются здесь.
+    storage_mode = str(getattr(SIM_CONFIG, "HARDWARE_STORAGE_BEHAVIOR_MODE", "shadow"))
+    try:
+        from src.core.hardware_behavior import (
+            apply_storage_risk_advice,
+            storage_risk_behavior_report,
+        )
+
+        if storage_mode == "advisor":
+            result["hardware_storage_behavior"] = apply_storage_risk_advice(
+                candidates,
+                getattr(self, "hardware_interoception", None),
+                self._normalize_action,
+                input_strengths=advisor_input_strengths,
+            )
+        else:
+            result["hardware_storage_behavior"] = storage_risk_behavior_report(
+                getattr(self, "hardware_interoception", None), storage_mode
+            )
+    except Exception as e:
+        get_logger().log(f"[HARDWARE_STORAGE] Evidence error: {e}")
+        result["hardware_storage_behavior"] = {
+            "mode": storage_mode,
+            "active": False,
+            "eligible": False,
+            "reason": "storage_evidence_error",
+            "duration_cycles": 0,
+            "risk": None,
+            "experienced": None,
+            "confidence": 0.0,
+            "factor": 1.0,
+            "adjustments": [],
+        }
+
+    # === УСЛОВНАЯ ЗАПИСЬ WEB_SEARCH/EXPLORE: 11B/11C ===
+    # Shadow только наблюдает. Advisor снижает первый доказанный кандидат от
+    # исходной силы в общем с 4A/7B бюджете, без умножения последовательных скидок.
+    conditional_write_mode = str(
+        getattr(SIM_CONFIG, "HARDWARE_CONDITIONAL_WRITE_MODE", "shadow")
+    )
+    try:
+        from src.core.hardware_conditional_behavior import (
+            apply_conditional_write_advice,
+            conditional_write_behavior_report,
+        )
+
+        if conditional_write_mode == "advisor":
+            result["hardware_conditional_write_behavior"] = (
+                apply_conditional_write_advice(
+                    candidates,
+                    getattr(self, "hardware_interoception", None),
+                    self._normalize_action,
+                    profile_managed=getattr(self, "_profile_managed", False) is True,
+                    input_strengths=advisor_input_strengths,
+                )
+            )
+        else:
+            result["hardware_conditional_write_behavior"] = (
+                conditional_write_behavior_report(
+                    candidates,
+                    getattr(self, "hardware_interoception", None),
+                    conditional_write_mode,
+                    profile_managed=getattr(self, "_profile_managed", False) is True,
+                    normalize_action=self._normalize_action,
+                )
+            )
+    except Exception as e:
+        get_logger().log(f"[HARDWARE_CONDITIONAL_WRITE] Evidence error: {e}")
+        result["hardware_conditional_write_behavior"] = {
+            "mode": conditional_write_mode,
+            "active": False,
+            "eligible": False,
+            "reason": "conditional_write_evidence_error",
+            "profile_class": None,
+            "write_evidence": {
+                "sample_count": 0,
+                "write_count": 0,
+                "failed_count": 0,
+                "write_ratio": 0.0,
+            },
+            "risk": None,
+            "experienced": None,
+            "confidence": 0.0,
+            "factor": 1.0,
+            "adjustments": [],
+        }
+
     # === ГОРМОНАЛЬНАЯ ПРОЕКЦИЯ: 4C ===
     # Shadow не меняет выбор. Advisor лишь ограниченно смещает существующие
-    # кандидаты от личного baseline; при активном 4A или 7B тяжёлые кандидаты
-    # не получают второй гормональной поправки.
+    # кандидаты от личного baseline; при активном 4A, 7B или 11C тяжёлые
+    # кандидаты не получают второй гормональной поправки.
     hormonal_mode = str(getattr(SIM_CONFIG, "HORMONAL_BEHAVIOR_MODE", "shadow"))
     if hormonal_mode == "advisor":
         try:
@@ -487,6 +577,8 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
                 hardware_advisor_active=(
                     result["hardware_behavior"].get("active") is True
                     or result["hardware_physical_behavior"].get("active") is True
+                    or result["hardware_conditional_write_behavior"].get("active")
+                    is True
                 ),
             )
         except Exception as e:
@@ -549,6 +641,10 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
     )
     self.hardware_physical_behavior_last = deepcopy(
         result["hardware_physical_behavior"]
+    )
+    self.hardware_storage_behavior_last = deepcopy(result["hardware_storage_behavior"])
+    self.hardware_conditional_write_behavior_last = deepcopy(
+        result["hardware_conditional_write_behavior"]
     )
 
     # === ЭМОЦИОНАЛЬНЫЙ ОТТЕНОК ВЫБОРА (Эмоции-2) ===

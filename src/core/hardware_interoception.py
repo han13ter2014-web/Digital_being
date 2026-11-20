@@ -13,13 +13,25 @@ import shutil
 from typing import Dict, Optional
 
 from src.core.buffered_logger import get_logger
+from src.core.hardware_action_experience import (
+    HardwareActionExperience,
+    validate_action_experience,
+)
 from src.core.hardware_personal_profile import (
     HardwareDomainPersonalProfile,
     HardwarePersonalProfile,
     validate_domain_experience,
     validate_personal_experience,
 )
+from src.core.hardware_conditional_writes import HardwareConditionalWrites
+from src.core.hardware_relevant_root_experience import (
+    HardwareRelevantRootExperience,
+    validate_relevant_root_experience_map,
+)
+from src.core.hardware_relevant_roots import RelevantRootRegistry
 from src.core.hardware_sensors import read_physical_sensors
+from src.core.hardware_storage_trend import HardwareStorageTrend
+from src.core.hardware_storage_writes import HardwareStorageWrites
 from src.core.paths import data_dir
 
 
@@ -139,10 +151,9 @@ def _resource_channel(raw: Dict, key: str, field: str, low, high, unit: str) -> 
     }
 
 
-def read_data_storage() -> Dict:
-    """Прочитать только агрегаты раздела с изменяемыми данными проекта."""
+def _read_storage_usage(path) -> Dict:
     try:
-        usage = shutil.disk_usage(data_dir())
+        usage = shutil.disk_usage(path)
         return {
             "available": True,
             "total_bytes": int(usage.total),
@@ -156,6 +167,16 @@ def read_data_storage() -> Dict:
             "reason": "source_error",
             "source": "shutil.disk_usage",
         }
+
+
+def read_data_storage() -> Dict:
+    """Прочитать только агрегаты раздела с изменяемыми данными проекта."""
+    return _read_storage_usage(data_dir())
+
+
+def read_relevant_root_storage(path) -> Dict:
+    """Прочитать агрегаты только явно разрешённого root, ничего не создавая."""
+    return _read_storage_usage(path)
 
 
 def _storage_channel(raw: Dict) -> Dict:
@@ -274,6 +295,44 @@ class HardwareInteroception:
         }
         self.personal = HardwarePersonalProfile()
         self.domain_personal = HardwareDomainPersonalProfile()
+        self.action_experience = HardwareActionExperience()
+        self.storage_writes = HardwareStorageWrites()
+        self.storage_trend = HardwareStorageTrend()
+        self.conditional_writes = HardwareConditionalWrites()
+        # Только текущий owner allowlist. Не сериализуется и не перечисляет ОС.
+        self.relevant_roots = RelevantRootRegistry.from_config()
+        self.latest_relevant_root_observations: Dict = {}
+        self.relevant_root_trends = {
+            root_id: HardwareStorageTrend()
+            for root_id in self.relevant_roots.root_ids
+            if root_id != "data"
+        }
+        self.relevant_root_experiences = {
+            root_id: HardwareRelevantRootExperience()
+            for root_id in self.relevant_roots.root_ids
+            if root_id != "data"
+        }
+
+    def record_storage_write(
+        self, operation: str, *, outcome: str, category: str, cycle: Optional[int]
+    ) -> Dict:
+        """Принять фактический исход явного boundary, не интерпретируя его как риск."""
+        return self.storage_writes.record(
+            operation, outcome=outcome, category=category, cycle=cycle
+        )
+
+    def begin_conditional_write(
+        self, action: str, *, managed: bool, cycle: int
+    ) -> Optional[object]:
+        return self.conditional_writes.begin(action, managed=managed, cycle=cycle)
+
+    def record_conditional_save(
+        self, disposition: str, error: Optional[BaseException] = None
+    ) -> Dict:
+        return self.conditional_writes.record_save(disposition, error)
+
+    def end_conditional_write(self, token: object) -> Dict:
+        return self.conditional_writes.end(token)
 
     def observe(
         self,
@@ -282,6 +341,7 @@ class HardwareInteroception:
         cycle: int,
         storage_status: Optional[Dict] = None,
         physical_status: Optional[Dict] = None,
+        action_context: Optional[Dict] = None,
     ) -> Dict:
         cycle = int(cycle)
         if self.last_cycle == cycle:
@@ -328,6 +388,14 @@ class HardwareInteroception:
             events=resource_events,
             strain_active=self.strain_active,
         )
+        action_report = self.action_experience.observe(
+            action_context,
+            states,
+            raw,
+            cycle=cycle,
+            events=resource_events,
+            strain_active=self.strain_active,
+        )
         domain_report = self.domain_personal.observe(
             states,
             cycle=cycle,
@@ -343,6 +411,12 @@ class HardwareInteroception:
             states[state_name]["expectedness"] = domain_report[name]["latest"][
                 "expectedness"
             ]
+        relevant_root_observations = self._observe_relevant_roots(
+            cycle,
+            channels["data_storage"],
+            states["storage_risk"],
+            domain_report["storage"],
+        )
         for event in events:
             reason = event["reason"]
             domain = (
@@ -385,6 +459,7 @@ class HardwareInteroception:
             )
 
         self.latest_observation = observation
+        self.latest_relevant_root_observations = relevant_root_observations
         self.states = states
         self.last_cycle = cycle
         self.events.extend(deepcopy(events))
@@ -400,11 +475,64 @@ class HardwareInteroception:
         return {
             "mode": "shadow",
             "observation": deepcopy(observation),
+            "relevant_root_observations": deepcopy(relevant_root_observations),
             "states": deepcopy(states),
             "personal_experience": personal_report,
             "domain_experience": domain_report,
+            "action_experience": action_report,
+            "storage_trend": self.storage_trend.status(),
             "endocrine_events": deepcopy(events),
         }
+
+    def _observe_relevant_roots(
+        self,
+        cycle: int,
+        data_channel: Dict,
+        data_risk: Dict,
+        data_experience: Dict,
+    ) -> Dict:
+        """Наблюдать roots раздельно, не создавая aggregate или события наружу."""
+        observations = {}
+        for root_id, path in self.relevant_roots.items():
+            if root_id == "data":
+                channel = data_channel
+                trend = self.storage_trend.status()
+                writes = self.storage_writes.status()
+                risk = deepcopy(data_risk)
+                experience = deepcopy(data_experience)
+            else:
+                raw_channel = _storage_channel(read_relevant_root_storage(path))
+                channel = {
+                    key: deepcopy(value)
+                    for key, value in raw_channel.items()
+                    if key not in {"free_bytes", "total_bytes"}
+                }
+                free_ratio = (
+                    channel.get("value")
+                    if channel.get("status") == "available"
+                    else None
+                )
+                trend = self.relevant_root_trends[root_id].observe(cycle, free_ratio)
+                root_status = self.relevant_root_experiences[root_id].observe(
+                    channel, trend, cycle
+                )
+                # Пока write path не доказан, дополнительный root не наследует
+                # фактические исходы записи существующего data root.
+                writes = HardwareStorageWrites().status()
+                risk = root_status["risk"]
+                experience = root_status["experience"]
+            observations[root_id] = {
+                "channel": {
+                    key: deepcopy(value)
+                    for key, value in channel.items()
+                    if key not in {"free_bytes", "total_bytes"}
+                },
+                "trend": trend,
+                "writes": writes,
+                "risk": risk,
+                "experience": experience,
+            }
+        return observations
 
     def _derive_states(self, observation: Dict) -> Dict:
         states = {name: _unknown_state("channel_unavailable") for name in _STATE_NAMES}
@@ -471,16 +599,15 @@ class HardwareInteroception:
             )
 
         free_ratio = _available(observation, "data_storage")
+        trend = self.storage_trend.observe(observation["cycle"], free_ratio)
         if free_ratio is not None:
-            previous = _available(self.latest_observation, "data_storage")
             risk = _clamp((0.25 - free_ratio) / 0.25)
             evidence = [f"data_free_ratio={free_ratio:.3f}"]
-            confidence = 0.8
-            if previous is not None:
-                drop = max(0.0, previous - free_ratio)
+            confidence = 1.0 if trend["window_size"] >= 2 else 0.8
+            drop = trend["drop"]
+            if drop is not None:
                 risk = max(risk, _clamp(drop * 2.0))
-                evidence.append(f"data_free_ratio_drop={drop:.3f}")
-                confidence = 1.0
+                evidence.append(f"data_free_ratio_sustained_drop_v1={drop:.3f}")
             states["storage_risk"] = _state(
                 risk, confidence, "observed_data_storage", "unknown", evidence
             )
@@ -643,6 +770,17 @@ class HardwareInteroception:
                 evidence.append(f"{name}={value:.3f}")
             risk = max(physical_parts) if physical_parts else None
 
+        if domain == "storage":
+            previous_cycle = self.latest_observation.get("cycle")
+            if (
+                isinstance(previous_cycle, int)
+                and not isinstance(previous_cycle, bool)
+                and observation["cycle"] != previous_cycle + 1
+            ):
+                # Разрыв не продлевает старую серию и не имитирует recovery.
+                slow["sustained_cycles"] = 0
+                slow["low_cycles"] = 0
+
         if risk is None:
             slow["sustained_cycles"] = 0
             slow["low_cycles"] = 0
@@ -703,6 +841,9 @@ class HardwareInteroception:
         result = {
             "mode": "shadow",
             "observation": deepcopy(self.latest_observation),
+            "relevant_root_observations": deepcopy(
+                self.latest_relevant_root_observations
+            ),
             "states": deepcopy(self.states),
             "strain_active": self.strain_active,
             "sustained_pressure_cycles": self.sustained_pressure_cycles,
@@ -712,6 +853,9 @@ class HardwareInteroception:
             "recent_events": deepcopy(self.events[-10:]),
             **self.personal.status(),
             "domain_experience": domain_experience,
+            "action_experience": self.action_experience.status(),
+            "storage_writes": self.storage_writes.status(),
+            "storage_trend": self.storage_trend.status(),
         }
         # Совместимый сводный DTO для существующих карточек; checkpoint хранит
         # resource и domain-профили раздельно.
@@ -724,7 +868,7 @@ class HardwareInteroception:
 
     def to_checkpoint(self) -> Dict:
         return {
-            "schema_version": 4,
+            "schema_version": 6,
             "latest_observation": deepcopy(self.latest_observation),
             "states": deepcopy(self.states),
             "history": deepcopy(self.history),
@@ -736,6 +880,11 @@ class HardwareInteroception:
             "slow_states": deepcopy(self.slow_states),
             **self.personal.to_checkpoint(),
             "domain_experience": self.domain_personal.to_checkpoint(),
+            "action_experience": self.action_experience.to_checkpoint(),
+            "relevant_root_experience": {
+                root_id: experience.to_checkpoint()
+                for root_id, experience in self.relevant_root_experiences.items()
+            },
         }
 
     @classmethod
@@ -778,8 +927,47 @@ class HardwareInteroception:
             restored.domain_personal = HardwareDomainPersonalProfile.from_checkpoint(
                 data
             )
+        if data["schema_version"] >= 5:
+            restored.action_experience = HardwareActionExperience.from_checkpoint(
+                data["action_experience"]
+            )
         if data["schema_version"] >= 2:
             restored.personal = HardwarePersonalProfile.from_checkpoint(data)
+
+        persisted_roots = (
+            data["relevant_root_experience"] if data["schema_version"] >= 6 else {}
+        )
+        for root_id, experience in restored.relevant_root_experiences.items():
+            if root_id in persisted_roots:
+                restored.relevant_root_experiences[root_id] = (
+                    HardwareRelevantRootExperience.from_checkpoint(
+                        persisted_roots[root_id]
+                    )
+                )
+
+        observations = {}
+        if "data_storage" in channels:
+            observations["data"] = {
+                "channel": {
+                    key: deepcopy(value)
+                    for key, value in channels["data_storage"].items()
+                    if key not in {"free_bytes", "total_bytes"}
+                },
+                "trend": restored.storage_trend.status(),
+                "writes": restored.storage_writes.status(),
+                "risk": deepcopy(restored.states["storage_risk"]),
+                "experience": restored.domain_personal.to_checkpoint()["storage"],
+            }
+        for root_id, experience in restored.relevant_root_experiences.items():
+            if not experience.has_observation:
+                continue
+            root_status = experience.status()
+            observations[root_id] = {
+                **root_status,
+                "trend": restored.relevant_root_trends[root_id].status(),
+                "writes": HardwareStorageWrites().status(),
+            }
+        restored.latest_relevant_root_observations = observations
         return restored
 
 
@@ -884,12 +1072,23 @@ def _validation_events(events, path: str, limit: int) -> None:
 
 
 def validate_hardware_interoception(state: Dict) -> None:
-    if not isinstance(state, dict) or state.get("schema_version") not in {1, 2, 3, 4}:
+    if not isinstance(state, dict) or state.get("schema_version") not in {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+    }:
         raise ValueError("hardware_interoception.schema_version: unsupported")
     if state["schema_version"] >= 2:
         validate_personal_experience(state, legacy=state["schema_version"] < 4)
     if state["schema_version"] >= 4:
         validate_domain_experience(state)
+    if state["schema_version"] >= 5:
+        validate_action_experience(state.get("action_experience"))
+    if state["schema_version"] >= 6:
+        validate_relevant_root_experience_map(state.get("relevant_root_experience"))
     _validation_observation(
         state.get("latest_observation"),
         "hardware_interoception.latest_observation",
@@ -957,6 +1156,30 @@ def initialize_hardware_interoception(agent) -> HardwareInteroception:
     return observer
 
 
+def _previous_completed_action(agent, cycle: int) -> Optional[Dict]:
+    history = getattr(agent, "_intention_history", None)
+    if not isinstance(history, list):
+        return None
+    for entry in reversed(history):
+        if not isinstance(entry, dict) or entry.get("cycle") != cycle - 1:
+            continue
+        if entry.get("status") != "performed":
+            return None
+        action = entry.get("action")
+        normalize = getattr(agent, "_normalize_action", None)
+        if callable(normalize):
+            try:
+                action = normalize(action)
+            except Exception:
+                return None
+        return {
+            "action": action,
+            "cycle": cycle - 1,
+            "status": "completed",
+        }
+    return None
+
+
 def observe_hardware_interoception(
     agent, resource_status: Optional[Dict], cycle: int
 ) -> Optional[Dict]:
@@ -964,7 +1187,12 @@ def observe_hardware_interoception(
     if observer is None:
         return None
     try:
-        report = observer.observe(resource_status, cycle=int(cycle))
+        cycle = int(cycle)
+        report = observer.observe(
+            resource_status,
+            cycle=cycle,
+            action_context=_previous_completed_action(agent, cycle),
+        )
     except Exception as exc:
         get_logger().log(f"[HARDWARE_INTEROCEPTION] observation error: {exc}")
         return {"mode": "shadow", "error": str(exc)}
@@ -1000,5 +1228,6 @@ __all__ = [
     "initialize_hardware_interoception",
     "observe_hardware_interoception",
     "read_data_storage",
+    "read_relevant_root_storage",
     "validate_hardware_interoception",
 ]

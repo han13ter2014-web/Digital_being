@@ -12,7 +12,39 @@ from typing import Dict
 
 from config.simulation_config import LR_CONFIG, SIM_CONFIG
 from src.core.buffered_logger import get_logger
+from src.core.hardware_storage_writes import storage_write_error_category
 from src.memory.knowledge_quality import REASON_TITLES, clean_knowledge_base
+
+
+def _record_storage_write(agent, operation, error=None) -> None:
+    """Наблюдение не должно менять результат или исключения persistence."""
+    try:
+        observer = getattr(agent, "hardware_interoception", None)
+        record = getattr(observer, "record_storage_write", None)
+        if not callable(record):
+            return
+        record(
+            operation,
+            outcome="failed" if error is not None else "succeeded",
+            category=(
+                storage_write_error_category(error) if error is not None else "written"
+            ),
+            cycle=getattr(agent, "cycle_count", None),
+        )
+    except Exception:
+        # Диагностика fail-closed: исходная запись уже имеет собственный контракт.
+        pass
+
+
+def _record_conditional_save(agent, disposition, error=None) -> None:
+    """Связать факт сохранения только с активным web_search/explore handler."""
+    try:
+        observer = getattr(agent, "hardware_interoception", None)
+        record = getattr(observer, "record_conditional_save", None)
+        if callable(record):
+            record(disposition, error)
+    except Exception:
+        pass
 
 
 def save_state_impl(self, *, force=False):
@@ -73,13 +105,23 @@ def save_state_impl(self, *, force=False):
         sqlite_mirror_path=mirror_path,
         sqlite_mirror_life_id=mirror_life_id,
     )
-    filename = ser.save(state, storage_key, self.cycle_count)
+    try:
+        filename = ser.save(state, storage_key, self.cycle_count)
+    except Exception as error:
+        _record_storage_write(self, "checkpoint", error)
+        raise
+    _record_storage_write(self, "checkpoint")
     if getattr(self, "_profile_managed", False):
         memory = getattr(self, "long_term_memory", None)
         if memory is not None:
             # Снимок Core не сериализует LongTermMemory: сохраняем её таблицы
             # при каждом успешном checkpoint, включая штатное завершение.
-            memory.save()
+            try:
+                memory.save()
+            except Exception as error:
+                _record_storage_write(self, "long_term_memory", error)
+                raise
+            _record_storage_write(self, "long_term_memory")
 
     self._last_saved_intelligence = self.intelligence
     return filename
@@ -291,6 +333,7 @@ def _save_knowledge_base_impl(self):
 
     self._prune_knowledge_base()
     if getattr(self, "_profile_managed", False):
+        _record_conditional_save(self, "managed_only")
         return
 
     now = _time.time()
@@ -301,6 +344,7 @@ def _save_knowledge_base_impl(self):
 
     if (now - last) < debounce_sec and size_delta < min_delta:
         # Пропускаем запись — debounce
+        _record_conditional_save(self, "deferred")
         return
 
     temporary = self.knowledge_file + ".tmp"
@@ -310,7 +354,11 @@ def _save_knowledge_base_impl(self):
         os.replace(temporary, self.knowledge_file)
         self._last_kb_save_ts = now
         self._last_kb_save_size = len(self.knowledge_base)
+        _record_storage_write(self, "knowledge_base")
+        _record_conditional_save(self, "immediate")
     except Exception as e:
+        _record_storage_write(self, "knowledge_base", e)
+        _record_conditional_save(self, "immediate", e)
         try:
             os.remove(temporary)
         except OSError:
@@ -355,6 +403,7 @@ def save_mental_models_impl(self, filename=None, *, data_path):
     """Сохраняет ментальные модели в файл."""
     filename = filename or data_path("mind", "mental_models.json")
     temporary = filename + ".tmp"
+    written = False
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
@@ -363,8 +412,12 @@ def save_mental_models_impl(self, filename=None, *, data_path):
                 self.mental_models.to_storage_dict(), f, indent=2, ensure_ascii=False
             )
         os.replace(temporary, filename)
+        written = True
+        _record_storage_write(self, "mental_models")
         get_logger().log(f"[{self.name}] Ментальные модели сохранены: {filename}")
     except Exception as e:
+        if not written:
+            _record_storage_write(self, "mental_models", e)
         try:
             os.remove(temporary)
         except OSError:

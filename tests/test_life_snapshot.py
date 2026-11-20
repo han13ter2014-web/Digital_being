@@ -615,6 +615,18 @@ def test_hardware_snapshot_is_compact_deep_copy_without_os_sampling(monkeypatch)
             },
             "storage": {"current_episode": None, "episodes": []},
         },
+        "action_experience": {
+            "latest": {
+                "action": "explore",
+                "sample_count": 200,
+                "expectedness": "familiar",
+                "freshness": "fresh",
+                "reason": "observed_after_completed_action",
+                "risk": 0.95,
+                "private": "C:/private/action.txt",
+            },
+            "profiles": {"private": "must not reach DTO"},
+        },
         "recent_events": [{"cycle": cycle} for cycle in range(12)],
     }
     agent.hardware_interoception = SimpleNamespace(status=lambda: status)
@@ -642,14 +654,176 @@ def test_hardware_snapshot_is_compact_deep_copy_without_os_sampling(monkeypatch)
     assert first["hardware"]["domain_experience"]["physical"]["current_episode"] == {
         "start_cycle": 3
     }
+    assert first["hardware"]["action_experience"] == {
+        "latest": {
+            "action": "explore",
+            "sample_count": 200,
+            "expectedness": "familiar",
+            "freshness": "fresh",
+            "reason": "observed_after_completed_action",
+            "risk": 0.95,
+        }
+    }
+    assert "C:/private" not in str(first["hardware"]["action_experience"])
     assert len(first["hardware"]["recent_events"]) == 10
     assert first["hardware"]["recent_events"][0]["cycle"] == 2
     assert set(agent.__dict__) == keys_before
 
     first["hardware"]["personal_profile"]["baseline"]["own_load"]["sample_count"] = 0
+    first["hardware"]["action_experience"]["latest"]["sample_count"] = 0
     first["hardware"]["recent_events"][0]["cycle"] = -1
     assert status["personal_profile"]["baseline"]["own_load"]["sample_count"] == 50
+    assert status["action_experience"]["latest"]["sample_count"] == 200
     assert status["recent_events"][2]["cycle"] == 2
+
+
+def test_relevant_root_snapshot_is_sanitized_bounded_and_deep_copied(monkeypatch):
+    agent = _agent("RelevantRootSnapshot")
+    status = {
+        "mode": "shadow",
+        "relevant_root_observations": {
+            "archive": {
+                "channel": {
+                    "status": "available",
+                    "value": 0.1,
+                    "unit": "free_ratio",
+                    "reason": "",
+                    "source": "test",
+                    "path": "C:/private/archive",
+                },
+                "trend": {"window_size": 3, "drop": None},
+                "writes": {"sample_count": 0},
+                "risk": {"value": 0.96, "reason": "observed_relevant_root_storage"},
+                "experience": {
+                    "latest": {
+                        "risk": 0.96,
+                        "experienced": 0.9,
+                        "expectedness": "familiar",
+                        "freshness": "fresh",
+                        "reason": "observed_relevant_root_storage",
+                    },
+                    "current_episode": {"start_cycle": 3, "fresh_observations": 25},
+                    "episodes": [{"start_cycle": 1}, {"start_cycle": 20}],
+                    "adaptation": 0.4,
+                    "confidence": 0.5,
+                    "baseline": {"sample_count": 0, "baseline": None},
+                },
+                "private": "C:/private/archive",
+            }
+        },
+    }
+    agent.hardware_interoception = SimpleNamespace(status=lambda: status)
+
+    def unexpected_sampling(*args, **kwargs):
+        raise AssertionError("snapshot must not sample roots")
+
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_relevant_root_storage",
+        unexpected_sampling,
+    )
+    first = build_life_snapshot(agent)
+    root = first["hardware"]["relevant_root_observations"]["archive"]
+
+    assert set(root) == {"channel", "trend", "writes", "risk", "experience"}
+    assert root["experience"]["episode_count"] == 2
+    assert "episodes" not in root["experience"]
+    assert "path" not in root["channel"]
+    assert "private" not in root
+    assert "C:/private" not in str(first)
+
+    root["channel"]["value"] = 999
+    root["experience"]["latest"]["risk"] = 999
+    assert status["relevant_root_observations"]["archive"]["channel"]["value"] == 0.1
+    latest = status["relevant_root_observations"]["archive"]["experience"]["latest"]
+    assert latest["risk"] == 0.96
+
+
+def test_relevant_root_rows_show_summary_experience_freshness_and_episode():
+    from src.ui.life_view import hardware_rows
+
+    snapshot = {
+        "hardware": {
+            "initialized": True,
+            "observation": {"channels": {}},
+            "latest_experience": {},
+            "personal_profile": {"baseline": {}},
+            "relevant_root_observations": {
+                "archive": {
+                    "channel": {
+                        "status": "available",
+                        "value": 0.1,
+                        "unit": "free_ratio",
+                    },
+                    "risk": {"value": 0.96},
+                    "experience": {
+                        "latest": {
+                            "risk": 0.96,
+                            "experienced": 0.9,
+                            "expectedness": "familiar",
+                            "freshness": "fresh",
+                            "reason": "observed_relevant_root_storage",
+                        },
+                        "current_episode": {
+                            "start_cycle": 3,
+                            "fresh_observations": 25,
+                            "strain_cycle": 8,
+                        },
+                        "adaptation": 0.4,
+                        "confidence": 0.5,
+                    },
+                },
+                "data": {
+                    "channel": {"status": "stale", "value": 0.8, "unit": "free_ratio"},
+                    "risk": {"value": None},
+                    "experience": {
+                        "latest": {
+                            "risk": None,
+                            "experienced": None,
+                            "expectedness": "unknown",
+                            "freshness": "stale",
+                            "reason": "waiting_for_fresh_observation_after_restart",
+                        },
+                        "current_episode": None,
+                        "adaptation": 0.0,
+                        "confidence": 0.0,
+                    },
+                },
+            },
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Разделы хранения: 2 · высокий риск 1" in russian
+    assert (
+        "Хранилище · archive: свободно 10.0% · риск 96.0% · переживается 90.0% · "
+        "привычно, но риск сохраняется"
+    ) in russian
+    assert (
+        "Свежесть · Хранилище · archive: свежие данные · наблюдаемый раздел хранения"
+    ) in russian
+    assert (
+        "Текущий эпизод · Хранилище · archive: с цикла 3 · свежих циклов 25 · "
+        "подтверждён да"
+    ) in russian
+    assert "Хранилище · data: устарело · риск Нет данных" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Storage roots: 2 · high risk 1" in english
+    assert "Storage · archive: free 10.0% · risk 96.0% · experienced 90.0%" in english
+    assert (
+        "Freshness · Storage · archive: fresh data · observed storage root" in english
+    )
+    assert "Storage · data: stale · risk No data" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "存储分区: 2 · 高风险 1" in chinese
+    assert "存储 · archive: 可用 10.0% · 风险 96.0% · 主观体验 90.0%" in chinese
+    assert "新鲜度 · 存储 · archive: 新鲜数据 · 已观察的存储分区" in chinese
+    assert "存储 · data: 已过期 · 风险 暂无数据" in chinese
 
 
 def test_hardware_snapshot_is_explicit_when_observer_is_absent_or_broken():
@@ -659,8 +833,11 @@ def test_hardware_snapshot_is_explicit_when_observer_is_absent_or_broken():
         "mode": "shadow",
         "initialized": False,
         "reason": "not_initialized",
+        "action_experience": None,
         "recovery_behavior": None,
         "physical_behavior": None,
+        "storage_behavior": None,
+        "conditional_write_behavior": None,
     }
 
     def explode():
@@ -1468,3 +1645,394 @@ def test_hardware_rows_show_actual_physical_advisor_and_restart_absence():
     del hardware["physical_behavior"]
     legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
     assert "Физическая защита · Режим: Shadow · без влияния на выбор" in legacy
+
+
+def test_storage_behavior_snapshot_is_bounded_and_not_persisted():
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    agent = _agent("StorageBehaviorSnapshot")
+    runtime = {
+        "mode": "advisor",
+        "active": True,
+        "eligible": True,
+        "reason": "applied",
+        "duration_cycles": 5,
+        "risk": 0.96,
+        "experienced": 0.8,
+        "confidence": 1.0,
+        "factor": 0.8,
+        "adjustments": [
+            {
+                "input_index": True if index == 3 else index,
+                "action": "draw",
+                "source": "motivation",
+                "before_strength": float("nan") if index == 3 else 0.8,
+                "after_strength": 0.64,
+                "factor": 0.8,
+                "private": "C:/private/draft topic",
+            }
+            for index in range(5)
+        ],
+        "raw_error": "C:/private/storage failure",
+    }
+    agent.hardware_storage_behavior_last = runtime
+
+    behavior = build_life_snapshot(agent)["hardware"]["storage_behavior"]
+
+    assert set(behavior) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "duration_cycles",
+        "risk",
+        "experienced",
+        "confidence",
+        "factor",
+        "adjustments",
+    }
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True and behavior["eligible"] is True
+    assert behavior["reason"] == "applied"
+    assert behavior["duration_cycles"] == 5
+    assert behavior["risk"] == 0.96
+    assert behavior["experienced"] == 0.8
+    assert behavior["confidence"] == 1.0
+    assert behavior["factor"] == 0.8
+    assert len(behavior["adjustments"]) == 3
+    assert [row["input_index"] for row in behavior["adjustments"]] == [2, None, 4]
+    assert behavior["adjustments"][1]["before_strength"] is None
+    assert all(
+        set(row)
+        == {
+            "input_index",
+            "action",
+            "source",
+            "before_strength",
+            "after_strength",
+            "factor",
+        }
+        for row in behavior["adjustments"]
+    )
+    assert "C:/private" not in str(behavior)
+    behavior["adjustments"][0]["action"] = "tampered"
+    assert runtime["adjustments"][2]["action"] == "draw"
+
+    state = build_state_from_agent(agent)
+    assert "hardware_storage_behavior_last" not in state
+    restored = _agent("StorageBehaviorRestart")
+    apply_state_to_agent(restored, state)
+    assert not hasattr(restored, "hardware_storage_behavior_last")
+    restarted = build_life_snapshot(restored)["hardware"]
+    assert restarted["initialized"] is True
+    assert restarted["storage_behavior"] is None
+
+
+def test_hardware_rows_show_actual_storage_advisor_and_restart_absence():
+    from src.ui.life_view import hardware_rows
+
+    hardware = {
+        "initialized": True,
+        "storage_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "duration_cycles": 5,
+            "risk": 0.96,
+            "experienced": 0.8,
+            "confidence": 1.0,
+            "factor": 0.8,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "draw",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.64,
+                    "factor": 0.8,
+                }
+            ],
+        },
+    }
+    snapshot = {"hardware": hardware}
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert (
+        "Защита хранилища · Режим: Advisor · ограниченное влияние на выбор" in russian
+    )
+    assert "Защита хранилища · Активность: да" in russian
+    assert "Защита хранилища · Причина: applied" in russian
+    assert "Защита хранилища · Серия: 5" in russian
+    assert "Поправка · draw: 0.80 → 0.64 · ×0.80 · motivation" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert (
+        "Storage protection · Mode: Advisor · bounded influence on choices" in english
+    )
+    assert "Storage protection · Activity: yes" in english
+    assert "Storage protection · Series: 5" in english
+    assert "Adjustment · draw: 0.80 → 0.64 · ×0.80 · motivation" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "存储保护 · 模式: 顾问 · 对选择的有限影响" in chinese
+    assert "存储保护 · 活动: 是" in chinese
+    assert "存储保护 · 系列: 5" in chinese
+    assert "调整 · draw: 0.80 → 0.64 · ×0.80 · motivation" in chinese
+
+    hardware["storage_behavior"] = None
+    restarted = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Защита хранилища · Режим: Нет данных" in restarted
+    assert "Поправка · draw" not in restarted
+
+    del hardware["storage_behavior"]
+    legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Защита хранилища · Режим: Shadow · без влияния на выбор" in legacy
+
+
+def test_conditional_write_snapshot_is_bounded_sanitized_and_not_persisted():
+    from src.core.checkpoint_serializer import (
+        apply_state_to_agent,
+        build_state_from_agent,
+    )
+
+    agent = _agent("ConditionalWriteSnapshot")
+    runtime = {
+        "mode": "advisor",
+        "active": True,
+        "eligible": True,
+        "reason": "applied",
+        "profile_class": "web_search_standalone_conditional",
+        "write_evidence": {
+            "sample_count": 5,
+            "write_count": 3,
+            "failed_count": 0,
+            "write_ratio": 0.6,
+            "private": "C:/private/query",
+        },
+        "risk": 0.96,
+        "experienced": 0.8,
+        "confidence": 1.0,
+        "factor": 0.856,
+        "adjustments": [
+            {
+                "input_index": True if index == 3 else index,
+                "action": "web_search",
+                "source": "motivation",
+                "before_strength": float("nan") if index == 3 else 0.8,
+                "after_strength": 0.6848,
+                "factor": 0.856,
+                "private": "C:/private/topic",
+            }
+            for index in range(5)
+        ],
+        "raw_error": "C:/private/conditional failure",
+    }
+    agent.hardware_conditional_write_behavior_last = runtime
+
+    behavior = build_life_snapshot(agent)["hardware"]["conditional_write_behavior"]
+
+    assert set(behavior) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "profile_class",
+        "write_evidence",
+        "risk",
+        "experienced",
+        "confidence",
+        "factor",
+        "adjustments",
+    }
+    assert behavior["mode"] == "advisor"
+    assert behavior["active"] is True and behavior["eligible"] is True
+    assert behavior["reason"] == "applied"
+    assert behavior["profile_class"] == "web_search_standalone_conditional"
+    assert behavior["write_evidence"] == {
+        "sample_count": 5,
+        "write_count": 3,
+        "failed_count": 0,
+        "write_ratio": 0.6,
+    }
+    assert behavior["factor"] == 0.856
+    assert len(behavior["adjustments"]) == 3
+    assert [row["input_index"] for row in behavior["adjustments"]] == [2, None, 4]
+    assert behavior["adjustments"][1]["before_strength"] is None
+    assert all(
+        set(row)
+        == {
+            "input_index",
+            "action",
+            "source",
+            "before_strength",
+            "after_strength",
+            "factor",
+        }
+        for row in behavior["adjustments"]
+    )
+    assert "C:/private" not in str(behavior)
+    behavior["write_evidence"]["write_count"] = 0
+    behavior["adjustments"][0]["action"] = "tampered"
+    assert runtime["write_evidence"]["write_count"] == 3
+    assert runtime["adjustments"][2]["action"] == "web_search"
+
+    state = build_state_from_agent(agent)
+    assert "hardware_conditional_write_behavior_last" not in state
+    restored = _agent("ConditionalWriteRestart")
+    apply_state_to_agent(restored, state)
+    assert not hasattr(restored, "hardware_conditional_write_behavior_last")
+    restarted = build_life_snapshot(restored)["hardware"]
+    assert restarted["initialized"] is True
+    assert restarted["conditional_write_behavior"] is None
+
+
+def test_hardware_rows_show_conditional_advisor_and_restart_absence():
+    from src.ui.life_view import hardware_rows
+
+    hardware = {
+        "initialized": True,
+        "conditional_write_behavior": {
+            "mode": "advisor",
+            "active": True,
+            "eligible": True,
+            "reason": "applied",
+            "profile_class": "web_search_standalone_conditional",
+            "write_evidence": {
+                "sample_count": 5,
+                "write_count": 3,
+                "failed_count": 0,
+                "write_ratio": 0.6,
+            },
+            "risk": 0.96,
+            "experienced": 0.8,
+            "confidence": 1.0,
+            "factor": 0.856,
+            "adjustments": [
+                {
+                    "input_index": 2,
+                    "action": "web_search",
+                    "source": "motivation",
+                    "before_strength": 0.8,
+                    "after_strength": 0.6848,
+                    "factor": 0.856,
+                }
+            ],
+        },
+    }
+    snapshot = {"hardware": hardware}
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Условная запись · Режим: Advisor · ограниченное влияние на выбор" in russian
+    assert "Условная запись · Активность: да" in russian
+    assert "Условная запись · Причина: applied" in russian
+    assert "Условная запись · Профиль: web_search_standalone_conditional" in russian
+    assert "Условная запись · Записи: 3/5 · 60.0%" in russian
+    assert "Поправка · web_search: 0.80 → 0.68 · ×0.86 · motivation" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Conditional write · Mode: Advisor · bounded influence on choices" in english
+    assert "Conditional write · Activity: yes" in english
+    assert "Conditional write · Profile: web_search_standalone_conditional" in english
+    assert "Conditional write · Writes: 3/5 · 60.0%" in english
+    assert "Adjustment · web_search: 0.80 → 0.68 · ×0.86 · motivation" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "条件写入 · 模式: 顾问 · 对选择的有限影响" in chinese
+    assert "条件写入 · 活动: 是" in chinese
+    assert "条件写入 · 配置文件: web_search_standalone_conditional" in chinese
+    assert "条件写入 · 写入: 3/5 · 60.0%" in chinese
+    assert "调整 · web_search: 0.80 → 0.68 · ×0.86 · motivation" in chinese
+
+    hardware["conditional_write_behavior"] = None
+    restarted = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Условная запись · Режим: Нет данных" in restarted
+    assert "Поправка · web_search" not in restarted
+
+    del hardware["conditional_write_behavior"]
+    legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Условная запись · Режим: Shadow · без влияния на выбор" in legacy
+
+    hardware["conditional_write_behavior"] = {"mode": "unsupported"}
+    unknown = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Условная запись · Режим: unsupported" in unknown
+
+
+def test_stage9_action_experience_rows_are_read_only_and_localized():
+    from src.ui.life_view import hardware_rows
+
+    snapshot = {
+        "hardware": {
+            "initialized": True,
+            "observation": {"channels": {}},
+            "states": {},
+            "latest_experience": {},
+            "personal_profile": {"baseline": {}},
+            "action_experience": {
+                "latest": {
+                    "action": "explore",
+                    "sample_count": 200,
+                    "expectedness": "familiar",
+                    "freshness": "fresh",
+                    "reason": "observed_after_completed_action",
+                    "risk": 0.95,
+                }
+            },
+        }
+    }
+
+    russian = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Опыт после предыдущего действия: привычно" in russian
+    assert "Действие: Исследую тему" in russian
+    assert "Наблюдений после действия: 200" in russian
+    assert "Риск после действия: 95.0%" in russian
+    assert "свежие данные · наблюдение после завершённого действия" in russian
+
+    english = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "en")
+    )
+    assert "Experience after previous action: familiar" in english
+    assert "Action: Exploring a topic" in english
+    assert "Observations after action: 200" in english
+    assert "Risk after action: 95.0%" in english
+    assert "fresh data · observation after completed action" in english
+
+    chinese = "\n".join(
+        f"{key}: {value}" for key, value in hardware_rows(snapshot, "zh")
+    )
+    assert "上一行动后的体验: 习以为常" in chinese
+    assert "动作: 探索主题" in chinese
+    assert "行动后观察数: 200" in chinese
+    assert "行动后风险: 95.0%" in chinese
+    assert "新鲜数据 · 完成行动后的观察" in chinese
+
+    latest = snapshot["hardware"]["action_experience"]["latest"]
+    latest.update(
+        action=None,
+        sample_count=29,
+        expectedness="unknown",
+        freshness="stale",
+        reason="waiting_for_fresh_observation_after_restart",
+        risk=None,
+    )
+    stale = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Опыт после предыдущего действия: неизвестно" in stale
+    assert "Действие: Нет данных" in stale
+    assert "Наблюдений после действия: 29" in stale
+    assert "Риск после действия: Нет данных" in stale
+    assert "ожидание свежего наблюдения после перезапуска" in stale
+
+    snapshot["hardware"].pop("action_experience")
+    legacy = "\n".join(f"{key}: {value}" for key, value in hardware_rows(snapshot))
+    assert "Опыт после предыдущего действия: Нет данных" in legacy

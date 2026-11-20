@@ -136,7 +136,7 @@ def test_checkpoint_v4_round_trip_v1_migration_and_corruption():
     for cycle in range(30):
         _observe(observer, cycle, high=True)
     state = observer.to_checkpoint()
-    assert state["schema_version"] == 4
+    assert state["schema_version"] == 6
     validate_hardware_interoception(state)
 
     restored = HardwareInteroception.from_checkpoint(state)
@@ -181,7 +181,7 @@ def test_checkpoint_v4_round_trip_v1_migration_and_corruption():
     assert migrated.history == state["history"]
     assert migrated.personal.observation_count == 0
     assert migrated.personal.adaptation == 0.0
-    assert migrated.to_checkpoint()["schema_version"] == 4
+    assert migrated.to_checkpoint()["schema_version"] == 6
 
     corrupted = deepcopy(state)
     corrupted["personal_profile"]["sensitivity"] = 2.0
@@ -376,7 +376,7 @@ def test_stage5_schema4_domain_roundtrip_legacy_and_corruption():
     for cycle in range(30):
         _observe_domains(observer, cycle, hot=True, low_storage=True)
     state = observer.to_checkpoint()
-    assert state["schema_version"] == 4
+    assert state["schema_version"] == 6
     validate_hardware_interoception(state)
 
     restored = HardwareInteroception.from_checkpoint(state)

@@ -332,11 +332,16 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     reason_labels = {
         "observed_physical_channels": "наблюдаемые физические каналы",
         "observed_data_storage": "наблюдаемое хранилище data",
+        "observed_relevant_root_storage": "наблюдаемый раздел хранения",
         "channel_unavailable": "канал недоступен",
         "waiting_for_fresh_observation_after_restart": (
             "ожидание свежего наблюдения после перезапуска"
         ),
         "no_observation": "нет наблюдения",
+        "no_previous_completed_action": "нет предыдущего завершённого действия",
+        "invalid_action_context": "некорректный контекст действия",
+        "own_load_unavailable": "собственная нагрузка недоступна",
+        "observed_after_completed_action": "наблюдение после завершённого действия",
     }
     for key, label in (("physical", "Физический опыт"), ("storage", "Опыт хранилища")):
         domain = domains.get(key) or {}
@@ -393,6 +398,125 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
                 f"{float(domain.get('adaptation', 0.0)):.2f} · "
                 f"{T('уверенность')} {float(domain.get('confidence', 0.0)):.2f} · "
                 f"{T('Личная норма')} {baseline_text}",
+            )
+        )
+
+    root_observations = hardware.get("relevant_root_observations") or {}
+    if isinstance(root_observations, dict) and root_observations:
+        high_risk_count = sum(
+            1
+            for root in root_observations.values()
+            if isinstance(root, dict)
+            and isinstance((root.get("risk") or {}).get("value"), (int, float))
+            and (root.get("risk") or {})["value"] >= 0.85
+        )
+        rows.append(
+            (
+                T("Разделы хранения"),
+                f"{len(root_observations)} · {T('высокий риск')} {high_risk_count}",
+            )
+        )
+        for root_id, root in sorted(root_observations.items()):
+            if not isinstance(root, dict):
+                continue
+            root_label = f"{T('Хранилище')} · {root_id}"
+            channel = root.get("channel") or {}
+            channel_text = _hardware_channel_text(channel, language)
+            if channel.get("status") == "available":
+                channel_text = f"{T('свободно')} {channel_text}"
+            latest = (root.get("experience") or {}).get("latest") or {}
+            risk = latest.get("risk")
+            text = f"{channel_text} · {T('риск')} {_hardware_percent(risk, language)}"
+            if risk is not None:
+                text += f" · {T('переживается')} {_hardware_percent(latest.get('experienced'), language)}"
+            if (
+                latest.get("expectedness") == "familiar"
+                and isinstance(risk, (int, float))
+                and risk >= 0.85
+            ):
+                text += f" · {T('привычно, но риск сохраняется')}"
+            rows.append((root_label, text))
+
+            freshness = freshness_labels.get(latest.get("freshness"), "Нет данных")
+            reason = latest.get("reason")
+            reason_label = reason_labels.get(reason, reason)
+            reason_text = (
+                T(reason_label)
+                if isinstance(reason_label, str) and reason_label
+                else T("Нет данных")
+            )
+            rows.append(
+                (
+                    f"{T('Свежесть')} · {root_label}",
+                    f"{T(freshness)} · {reason_text}",
+                )
+            )
+            episode = (root.get("experience") or {}).get("current_episode")
+            if isinstance(episode, dict):
+                episode_text = (
+                    f"{T('с цикла')} {episode.get('start_cycle', '—')} · "
+                    f"{T('свежих циклов')} {episode.get('fresh_observations', 0)} · "
+                    f"{T('подтверждён')} "
+                    f"{T('да' if episode.get('strain_cycle') is not None else 'нет')}"
+                )
+            else:
+                episode_text = T("Нет данных")
+            rows.append((f"{T('Текущий эпизод')} · {root_label}", episode_text))
+            experience = root.get("experience") or {}
+            rows.append(
+                (
+                    f"{T('Привыкание')} · {root_label}",
+                    f"{float(experience.get('adaptation', 0.0)):.2f} · "
+                    f"{T('уверенность')} {float(experience.get('confidence', 0.0)):.2f}",
+                )
+            )
+
+    action_label = "Опыт после предыдущего действия"
+    action_container = hardware.get("action_experience")
+    action_latest = (
+        action_container.get("latest") if isinstance(action_container, dict) else None
+    )
+    if not isinstance(action_latest, dict):
+        rows.append((T(action_label), T("Нет данных")))
+    else:
+        expectedness = action_latest.get("expectedness")
+        expectedness_text = (
+            T("привычно")
+            if expectedness == "familiar"
+            else i18n.value_label(expectedness or "unknown", language)
+        )
+        action = action_latest.get("action")
+        action_text = (
+            i18n.action_phrase(action, language)
+            if isinstance(action, str) and action
+            else T("Нет данных")
+        )
+        rows.extend(
+            [
+                (T(action_label), expectedness_text),
+                (T("Действие"), action_text),
+                (
+                    T("Наблюдений после действия"),
+                    str(action_latest.get("sample_count", 0)),
+                ),
+                (
+                    T("Риск после действия"),
+                    _hardware_percent(action_latest.get("risk"), language),
+                ),
+            ]
+        )
+        freshness = freshness_labels.get(action_latest.get("freshness"), "Нет данных")
+        reason = action_latest.get("reason")
+        reason_label = reason_labels.get(reason, reason)
+        reason_text = (
+            T(reason_label)
+            if isinstance(reason_label, str) and reason_label
+            else T("Нет данных")
+        )
+        rows.append(
+            (
+                f"{T('Свежесть')} · {T(action_label)}",
+                f"{T(freshness)} · {reason_text}",
             )
         )
 
@@ -499,6 +623,92 @@ def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
             ]
         )
         for entry in (physical.get("adjustments") or [])[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                (
+                    f"{T('Поправка')} · {entry.get('action') or 'unknown'}",
+                    f"{_hormonal_number(entry.get('before_strength'), language)}"
+                    f" → {_hormonal_number(entry.get('after_strength'), language)}"
+                    f" · ×{_hormonal_number(entry.get('factor'), language)}"
+                    f" · {entry.get('source') or 'unknown'}",
+                )
+            )
+    storage = hardware.get("storage_behavior")
+    if "storage_behavior" not in hardware:
+        storage_mode = T("Shadow · без влияния на выбор")
+    elif not isinstance(storage, dict):
+        storage_mode = T("Нет данных")
+    elif storage.get("mode") == "advisor":
+        storage_mode = T("Advisor · ограниченное влияние на выбор")
+    else:
+        storage_mode = T("Shadow · без влияния на выбор")
+    rows.append((f"{T('Защита хранилища')} · {T('Режим')}", storage_mode))
+    if isinstance(storage, dict):
+        rows.extend(
+            [
+                (
+                    f"{T('Защита хранилища')} · {T('Активность')}",
+                    T("да" if storage.get("active") is True else "нет"),
+                ),
+                (
+                    f"{T('Защита хранилища')} · {T('Причина')}",
+                    str(storage.get("reason") or T("Нет данных")),
+                ),
+                (
+                    f"{T('Защита хранилища')} · {T('Серия')}",
+                    str(storage.get("duration_cycles", 0)),
+                ),
+            ]
+        )
+        for entry in (storage.get("adjustments") or [])[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                (
+                    f"{T('Поправка')} · {entry.get('action') or 'unknown'}",
+                    f"{_hormonal_number(entry.get('before_strength'), language)}"
+                    f" → {_hormonal_number(entry.get('after_strength'), language)}"
+                    f" · ×{_hormonal_number(entry.get('factor'), language)}"
+                    f" · {entry.get('source') or 'unknown'}",
+                )
+            )
+    conditional = hardware.get("conditional_write_behavior")
+    if "conditional_write_behavior" not in hardware:
+        conditional_mode = T("Shadow · без влияния на выбор")
+    elif not isinstance(conditional, dict):
+        conditional_mode = T("Нет данных")
+    elif conditional.get("mode") == "advisor":
+        conditional_mode = T("Advisor · ограниченное влияние на выбор")
+    elif conditional.get("mode") == "shadow":
+        conditional_mode = T("Shadow · без влияния на выбор")
+    else:
+        conditional_mode = str(conditional.get("mode") or T("Нет данных"))
+    rows.append((f"{T('Условная запись')} · {T('Режим')}", conditional_mode))
+    if isinstance(conditional, dict):
+        evidence = conditional.get("write_evidence") or {}
+        rows.extend(
+            [
+                (
+                    f"{T('Условная запись')} · {T('Активность')}",
+                    T("да" if conditional.get("active") is True else "нет"),
+                ),
+                (
+                    f"{T('Условная запись')} · {T('Причина')}",
+                    str(conditional.get("reason") or T("Нет данных")),
+                ),
+                (
+                    f"{T('Условная запись')} · {T('Профиль')}",
+                    str(conditional.get("profile_class") or T("Нет данных")),
+                ),
+                (
+                    f"{T('Условная запись')} · {T('Записи')}",
+                    f"{evidence.get('write_count', 0)}/{evidence.get('sample_count', 0)}"
+                    f" · {_hardware_percent(evidence.get('write_ratio'), language)}",
+                ),
+            ]
+        )
+        for entry in (conditional.get("adjustments") or [])[-3:]:
             if not isinstance(entry, dict):
                 continue
             rows.append(

@@ -10,9 +10,11 @@ from typing import Dict, Optional
 
 from config.simulation_config import LR_CONFIG
 from src.core.buffered_logger import get_logger
+from src.core.hardware_conditional_writes import conditional_write_action
 from src.memory.knowledge_quality import STOP_WORDS, normalize_concept_name
 
 
+@conditional_write_action("explore")
 def _act_explore_impl(self, target=None) -> Dict:
     """Исследование как работа, а не как счётчик.
 
@@ -416,6 +418,7 @@ def _remember_shared_topic_impl(self, topic: str) -> None:
             shared.pop(old_topic, None)
 
 
+@conditional_write_action("web_search")
 def _act_web_search_impl(self, target: Optional[str] = None) -> Dict:
     """Найти в сети тему намерения, а при его отсутствии — новую тему.
 

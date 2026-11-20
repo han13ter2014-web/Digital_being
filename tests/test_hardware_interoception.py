@@ -1853,7 +1853,7 @@ def test_schema2_physical_migration_and_schema4_restart_require_fresh_samples(
         physical_status=_physical(gpu_temperature=75.0, external_power=1.0),
     )
     current = observer.to_checkpoint()
-    assert current["schema_version"] == 4
+    assert current["schema_version"] == 6
 
     restored = HardwareInteroception.from_checkpoint(current)
     channels = restored.latest_observation["channels"]
@@ -1903,7 +1903,7 @@ def test_schema2_physical_migration_and_schema4_restart_require_fresh_samples(
         assert migrated_channels[name]["value"] is None
     assert migrated.slow_states == HardwareInteroception().slow_states
     migrated_state = migrated.to_checkpoint()
-    assert migrated_state["schema_version"] == 4
+    assert migrated_state["schema_version"] == 6
     validate_hardware_interoception(migrated_state)
 
 
@@ -2601,4 +2601,884 @@ def test_physical_advisor_differential_for_six_hundred_cycles_and_restarts(
     assert len(physical["episodes"]) <= 50
     validate_hardware_interoception(
         advisor_agent.hardware_interoception.to_checkpoint()
+    )
+
+
+def test_storage_behavior_shadow_requires_five_sustained_fresh_cycles():
+    from src.core.hardware_behavior import storage_risk_behavior_report
+
+    observer = HardwareInteroception()
+    for cycle in range(4):
+        _observe(observer, cycle, _low_resources(), free_ratio=0.01)
+        early = storage_risk_behavior_report(observer)
+        assert early["active"] is False
+        assert early["eligible"] is False
+        assert early["reason"] == "insufficient_sustained_storage_risk"
+        assert early["factor"] == 1.0
+        assert early["adjustments"] == []
+
+    _observe(observer, 4, _low_resources(), free_ratio=0.01)
+    before = observer.to_checkpoint()
+    report = storage_risk_behavior_report(observer)
+
+    assert set(report) == {
+        "mode",
+        "active",
+        "eligible",
+        "reason",
+        "duration_cycles",
+        "risk",
+        "experienced",
+        "confidence",
+        "factor",
+        "adjustments",
+    }
+    assert report["mode"] == "shadow"
+    assert report["active"] is False
+    assert report["eligible"] is True
+    assert report["reason"] == "shadow_only"
+    assert report["duration_cycles"] == 5
+    assert report["risk"] == pytest.approx(0.96)
+    assert report["experienced"] == pytest.approx(0.96)
+    assert report["confidence"] == pytest.approx(1.0)
+    assert report["factor"] == pytest.approx(0.76)
+    assert report["adjustments"] == []
+    assert observer.states["storage_risk"]["origin"] == "unknown"
+    assert observer.to_checkpoint() == before
+
+    advisor = storage_risk_behavior_report(observer, "advisor")
+    assert advisor["active"] is False
+    assert advisor["eligible"] is True
+    assert advisor["reason"] == "advisor_requires_candidates"
+    assert advisor["factor"] == pytest.approx(0.76)
+    assert advisor["adjustments"] == []
+    assert observer.to_checkpoint() == before
+
+    duplicate = _observe(observer, 4, _low_resources(), free_ratio=0.01)
+    assert duplicate["skipped"] == "duplicate_cycle"
+    assert storage_risk_behavior_report(observer) == report
+    assert observer.to_checkpoint() == before
+
+
+def test_storage_behavior_rejects_gaps_sensor_loss_restart_and_other_domains():
+    from src.core.hardware_behavior import storage_risk_behavior_report
+
+    observer = HardwareInteroception()
+    for cycle in (0, 1, 2, 3, 100):
+        _observe(observer, cycle, _low_resources(), free_ratio=0.01)
+    gap = storage_risk_behavior_report(observer)
+    assert gap["active"] is False
+    assert gap["eligible"] is False
+    assert gap["reason"] == "noncontiguous_storage_evidence"
+
+    for cycle in range(101, 105):
+        _observe(observer, cycle, _low_resources(), free_ratio=0.01)
+    assert storage_risk_behavior_report(observer)["eligible"] is True
+
+    restored = HardwareInteroception.from_checkpoint(observer.to_checkpoint())
+    restored_before = restored.to_checkpoint()
+    waiting = storage_risk_behavior_report(restored)
+    assert waiting["active"] is False
+    assert waiting["eligible"] is False
+    assert waiting["reason"] == "waiting_for_fresh_storage_channel"
+    assert restored.to_checkpoint() == restored_before
+
+    observer.observe(
+        _low_resources(),
+        cycle=105,
+        storage_status={"available": False, "reason": "sensor_disabled"},
+        physical_status={},
+    )
+    loss = storage_risk_behavior_report(observer)
+    assert loss["active"] is False
+    assert loss["eligible"] is False
+    assert loss["reason"] == "waiting_for_fresh_storage_channel"
+
+    non_storage = HardwareInteroception()
+    for cycle in range(5):
+        non_storage.observe(
+            _high_resources(),
+            cycle=cycle,
+            storage_status=_storage(0.8),
+            physical_status=_physical(gpu_temperature=100.0, gpu_power=0.95),
+        )
+    assert storage_risk_behavior_report(non_storage)["eligible"] is False
+    assert non_storage.states["storage_risk"]["origin"] == "unknown"
+
+
+def _confirmed_storage_observer():
+    observer = HardwareInteroception()
+    for cycle in range(5):
+        _observe(observer, cycle, _low_resources(), free_ratio=0.01)
+    return observer
+
+
+def _storage_test_action(action):
+    return {"creative_act": "create_draft"}.get(action, action)
+
+
+def test_storage_advisor_changes_only_allowed_existing_candidates_once():
+    from src.core.hardware_behavior import apply_storage_risk_advice
+
+    observer = _confirmed_storage_observer()
+    candidates = [
+        {
+            "action": "creative_act",
+            "source": "motivation",
+            "strength": 0.8,
+            "params": {"draft_mode": "new", "topic": "private-test-topic"},
+        },
+        {
+            "action": "create_draft",
+            "source": "creative_choices",
+            "strength": 0.6,
+            "params": {"draft_mode": "continue"},
+        },
+        {
+            "action": "create_draft",
+            "source": "creative_choices",
+            "strength": 0.5,
+            "params": {},
+        },
+        {"action": "draw", "source": "motivation", "strength": 0.4},
+        {"action": "compose_music", "source": "motivation", "strength": 0.9},
+        {
+            "action": "create_draft",
+            "source": "creative_choices",
+            "strength": 0.7,
+            "params": {"draft_mode": "leave"},
+        },
+        {"action": "web_search", "source": "motivation", "strength": 0.8},
+        {"action": "explore", "source": "motivation", "strength": 0.8},
+        {"action": "checkpoint_now", "source": "maintenance", "strength": 1.0},
+        {"action": "repair", "source": "maintenance", "strength": 1.0},
+        {"action": "rest", "source": "embodiment", "strength": 0.9},
+        {"action": "deep_rest", "source": "embodiment", "strength": 0.9},
+        {"action": "wait", "source": "deliberate_pause", "strength": 0.3},
+        {"action": "draw", "source": "invalid_bool", "strength": True},
+        {"action": "draw", "source": "invalid_nan", "strength": float("nan")},
+        {"action": "draw", "source": "invalid_zero", "strength": 0.0},
+        {"action": "draw", "source": "invalid_negative", "strength": -0.2},
+    ]
+    original = deepcopy(candidates)
+    checkpoint = observer.to_checkpoint()
+
+    report = apply_storage_risk_advice(candidates, observer, _storage_test_action)
+
+    assert report["active"] is True
+    assert report["eligible"] is True
+    assert report["reason"] == "applied"
+    assert report["factor"] == pytest.approx(0.76)
+    assert [item["input_index"] for item in report["adjustments"]] == [0, 1, 2, 3, 4]
+    for index, adjustment in zip(range(5), report["adjustments"]):
+        assert candidates[index]["strength"] == pytest.approx(
+            original[index]["strength"] * 0.76
+        )
+        assert adjustment["before_strength"] == original[index]["strength"]
+        assert adjustment["after_strength"] == candidates[index]["strength"]
+        assert adjustment["factor"] == report["factor"]
+        assert adjustment["action"] == original[index]["action"]
+        assert adjustment["source"] == original[index]["source"]
+    for index, (candidate, before) in enumerate(zip(candidates, original)):
+        assert candidate["action"] == before["action"]
+        assert candidate["source"] == before["source"]
+        assert candidate.get("params") == before.get("params")
+        if before["source"] == "invalid_nan":
+            assert candidate["strength"] != candidate["strength"]
+        elif index >= 5:
+            assert candidate["strength"] == before["strength"]
+    assert observer.to_checkpoint() == checkpoint
+
+    strengths = [candidate["strength"] for candidate in candidates]
+    duplicate = apply_storage_risk_advice(candidates, observer, _storage_test_action)
+    assert duplicate["active"] is False
+    assert duplicate["eligible"] is True
+    assert duplicate["reason"] == "duplicate_cycle"
+    assert duplicate["adjustments"] == []
+    assert [candidate["strength"] for candidate in candidates] == strengths
+    assert observer.to_checkpoint() == checkpoint
+
+
+def test_storage_advisor_is_atomic_and_ignores_absent_candidates():
+    from src.core.hardware_behavior import apply_storage_risk_advice
+
+    observer = _confirmed_storage_observer()
+    candidates = [
+        {
+            "action": "create_draft",
+            "strength": 0.8,
+            "params": {"draft_mode": "new"},
+        },
+        {"action": "draw", "strength": 0.6},
+    ]
+    original = deepcopy(candidates)
+    checkpoint = observer.to_checkpoint()
+
+    def fail_on_second(action):
+        if action == "draw":
+            raise ValueError("normalization failed")
+        return action
+
+    with pytest.raises(ValueError, match="normalization failed"):
+        apply_storage_risk_advice(candidates, observer, fail_on_second)
+    assert candidates == original
+    assert observer.to_checkpoint() == checkpoint
+    assert not hasattr(observer, "_storage_advisor_applied_cycle")
+
+    no_match = apply_storage_risk_advice(
+        [
+            {
+                "action": "create_draft",
+                "strength": 0.8,
+                "params": {"draft_mode": "leave"},
+            },
+            {"action": "web_search", "strength": 0.8},
+        ],
+        observer,
+        _storage_test_action,
+    )
+    assert no_match["active"] is False
+    assert no_match["eligible"] is True
+    assert no_match["reason"] == "no_matching_candidates"
+    assert no_match["adjustments"] == []
+    assert observer.to_checkpoint() == checkpoint
+
+
+def _inject_storage_candidate(monkeypatch):
+    from src.cognition import method_feedback
+
+    original = method_feedback.prepare_candidates
+
+    def prepare(agent, candidates):
+        prepared, feedback = original(agent, candidates)
+        prepared.append(
+            {
+                "action": "draw",
+                "source": "storage_advisor_probe",
+                "strength": 0.08,
+                "params": {"probe": True},
+            }
+        )
+        return prepared, feedback
+
+    monkeypatch.setattr(method_feedback, "prepare_candidates", prepare)
+
+
+def test_storage_behavior_modes_and_advisor_candidate_drift(monkeypatch):
+    source = DigitalBeing(name="StorageBehaviorSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    agents = {
+        mode: DigitalBeing(name=f"StorageBehavior_{mode}")
+        for mode in ("shadow", "advisor", "unsupported")
+    }
+    for agent in agents.values():
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: _low_resources(),
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.01)
+    )
+    _inject_storage_candidate(monkeypatch)
+    pre_emotional = {}
+    current_mode = {"value": None}
+    original_emotional_bias = DigitalBeing._apply_emotional_bias
+
+    def capture_candidates(self, candidates):
+        snapshot = deepcopy(candidates)
+        for candidate in snapshot:
+            params = candidate.get("params") or {}
+            if params.get("continuation_of") is not None:
+                params["continuation_of"] = "present"
+        pre_emotional.setdefault(current_mode["value"], []).append(snapshot)
+        return original_emotional_bias(self, candidates)
+
+    monkeypatch.setattr(DigitalBeing, "_apply_emotional_bias", capture_candidates)
+
+    def run(mode):
+        current_mode["value"] = mode
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_STORAGE_BEHAVIOR_MODE",
+            mode,
+            raising=False,
+        )
+        random.seed(8008)
+        np.random.seed(8008)
+        reports = []
+        traces = []
+        for _ in range(6):
+            report = agents[mode].autonomous_tick()
+            reports.append(report)
+            traces.append(_canonical_trace(agents[mode], report))
+            agents[mode].cycle_count += 1
+        return traces, reports
+
+    shadow_trace, shadow_reports = run("shadow")
+    advisor_trace, advisor_reports = run("advisor")
+    unknown_trace, unknown_reports = run("unsupported")
+
+    assert unknown_trace == shadow_trace
+    assert advisor_trace[:4] == shadow_trace[:4]
+    assert [report["hardware_interoception"] for report in advisor_reports] == [
+        report["hardware_interoception"] for report in shadow_reports
+    ]
+    assert all(
+        report["hardware_storage_behavior"]["active"] is False
+        and report["hardware_storage_behavior"]["adjustments"] == []
+        for report in [*shadow_reports, *unknown_reports]
+    )
+    assert shadow_reports[4]["hardware_storage_behavior"]["eligible"] is True
+    assert shadow_reports[4]["hardware_storage_behavior"]["reason"] == "shadow_only"
+    assert unknown_reports[-1]["hardware_storage_behavior"]["reason"] == (
+        "unsupported_mode"
+    )
+    for cycle in (4, 5):
+        behavior = advisor_reports[cycle]["hardware_storage_behavior"]
+        assert behavior["active"] is True
+        assert behavior["reason"] == "applied"
+        adjustments = {item["input_index"]: item for item in behavior["adjustments"]}
+        assert any(
+            item["action"] == "draw" and item["source"] == "storage_advisor_probe"
+            for item in adjustments.values()
+        )
+        observed = pre_emotional["advisor"][cycle]
+        expected = pre_emotional["shadow"][cycle]
+        assert len(observed) == len(expected)
+        for index, (candidate, baseline) in enumerate(zip(observed, expected)):
+            if index in adjustments:
+                adjustment = adjustments[index]
+                assert _storage_test_action(adjustment["action"]) in {
+                    "create_draft",
+                    "draw",
+                    "compose_music",
+                }
+                assert candidate["strength"] == pytest.approx(
+                    baseline["strength"] * behavior["factor"]
+                )
+                assert candidate["strength"] >= baseline["strength"] * 0.75
+                assert {
+                    key: value for key, value in candidate.items() if key != "strength"
+                } == {
+                    key: value for key, value in baseline.items() if key != "strength"
+                }
+            else:
+                assert candidate == baseline
+    for mode, agent in agents.items():
+        behavior = {"shadow": shadow_reports, "advisor": advisor_reports}.get(
+            mode, unknown_reports
+        )[-1]["hardware_storage_behavior"]
+        assert agent.hardware_storage_behavior_last == behavior
+        assert agent.hardware_storage_behavior_last is not behavior
+        assert "hardware_storage_behavior_last" not in build_state_from_agent(agent)
+
+
+def test_storage_advisor_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    source = DigitalBeing(name="StorageAdvisorLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    current = {"free_ratio": 0.8}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: _low_resources(),
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage",
+        lambda: _storage(current["free_ratio"]),
+    )
+    _inject_storage_candidate(monkeypatch)
+
+    pre_emotional_traces = {}
+    current_trace_key = {"mode": None}
+    original_emotional_bias = DigitalBeing._apply_emotional_bias
+
+    def capture_pre_emotional(self, candidates):
+        mode = current_trace_key["mode"]
+        snapshot = deepcopy(candidates)
+        for candidate in snapshot:
+            params = candidate.get("params") or {}
+            if params.get("continuation_of") is not None:
+                params["continuation_of"] = "present"
+        pre_emotional_traces.setdefault(mode, []).append(snapshot)
+        return original_emotional_bias(self, candidates)
+
+    monkeypatch.setattr(DigitalBeing, "_apply_emotional_bias", capture_pre_emotional)
+
+    def run(mode):
+        current_trace_key["mode"] = mode
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_STORAGE_BEHAVIOR_MODE",
+            mode,
+        )
+        random.seed(80029)
+        np.random.seed(80029)
+        agent = DigitalBeing(name=f"StorageAdvisorLong_{mode}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        trace = []
+        eligible_cycles = []
+        applied_cycles = []
+        adjustment_history = {}
+        restart_absence = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                assert "hardware_storage_behavior_last" not in state
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                assert not hasattr(restored, "hardware_storage_behavior_last")
+                assert not hasattr(
+                    restored.hardware_interoception, "_storage_advisor_applied_cycle"
+                )
+                restart_absence += 1
+                restored.web_searcher.toggle(False)
+                agent = restored
+            current["free_ratio"] = 0.01 if (cycle // 20) % 2 == 0 else 0.8
+            report = agent.autonomous_tick()
+            behavior = report["hardware_storage_behavior"]
+            assert agent.hardware_storage_behavior_last == behavior
+            assert agent.hardware_storage_behavior_last is not behavior
+            expected_eligible = (cycle // 20) % 2 == 0 and cycle % 20 >= 4
+            assert behavior["eligible"] is expected_eligible
+            if expected_eligible:
+                eligible_cycles.append(cycle)
+            if behavior["active"] is True:
+                applied_cycles.append(cycle)
+                adjustment_history[cycle] = deepcopy(behavior["adjustments"])
+            else:
+                assert behavior["adjustments"] == []
+            evaluations = report["arbitrator"].get("all_evaluations") or []
+            input_indices = {entry["input_index"] for entry in evaluations}
+            seen_indices = set()
+            for entry in behavior["adjustments"]:
+                assert agent._normalize_action(entry["action"]) in {
+                    "create_draft",
+                    "draw",
+                    "compose_music",
+                }
+                assert entry["before_strength"] > 0.0
+                assert entry["after_strength"] == pytest.approx(
+                    entry["before_strength"] * entry["factor"]
+                )
+                assert entry["after_strength"] >= entry["before_strength"] * 0.75
+                assert entry["input_index"] in input_indices
+                assert entry["input_index"] not in seen_indices
+                seen_indices.add(entry["input_index"])
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        pre_emotional = pre_emotional_traces[mode]
+        assert len(pre_emotional) == len(trace) == 600
+        for entry, candidates in zip(trace, pre_emotional):
+            entry["pre_emotional_candidates"] = candidates
+        return (
+            agent,
+            trace,
+            eligible_cycles,
+            applied_cycles,
+            restart_absence,
+            adjustment_history,
+        )
+
+    shadow_agent, shadow_trace, _, shadow_applied, shadow_restarts, _ = run("shadow")
+    (
+        advisor_agent,
+        advisor_trace,
+        expected_eligible,
+        advisor_applied,
+        advisor_restarts,
+        adjustments,
+    ) = run("advisor")
+
+    assert shadow_agent.cycle_count == advisor_agent.cycle_count == 600
+    assert shadow_restarts == advisor_restarts == 2
+    assert shadow_applied == []
+    assert advisor_applied
+    assert set(advisor_applied) <= set(expected_eligible)
+    diverged = False
+    evaluation_differences = []
+    for cycle, (observed, expected) in enumerate(zip(advisor_trace, shadow_trace)):
+        if observed["action"] != expected["action"] and not diverged:
+            assert cycle in advisor_applied, cycle
+        if not diverged and cycle not in advisor_applied:
+            assert observed == expected, cycle
+        if cycle in advisor_applied:
+            observed_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in observed["evaluations"]
+            }
+            expected_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in expected["evaluations"]
+            }
+            if observed_evaluations != expected_evaluations:
+                evaluation_differences.append(cycle)
+            if not diverged:
+                observed_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(observed["pre_emotional_candidates"])
+                }
+                expected_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(expected["pre_emotional_candidates"])
+                }
+                assert observed_candidates.keys() == expected_candidates.keys()
+                assert observed_candidates.keys() == observed_evaluations.keys()
+                cycle_adjustments = {
+                    (row["input_index"], row["action"], row["source"]): row
+                    for row in adjustments[cycle]
+                }
+                for key, observed_candidate in observed_candidates.items():
+                    expected_candidate = expected_candidates[key]
+                    if key in cycle_adjustments:
+                        adjustment = cycle_adjustments[key]
+                        assert observed_candidate["strength"] == pytest.approx(
+                            adjustment["after_strength"]
+                        )
+                        assert observed_candidate["strength"] == pytest.approx(
+                            expected_candidate["strength"] * adjustment["factor"]
+                        )
+                        assert {
+                            field: value
+                            for field, value in observed_candidate.items()
+                            if field != "strength"
+                        } == {
+                            field: value
+                            for field, value in expected_candidate.items()
+                            if field != "strength"
+                        }
+                    else:
+                        assert observed_candidate == expected_candidate, (cycle, key)
+        if not diverged and any(
+            observed[field] != expected[field]
+            for field in expected
+            if field not in {"evaluations", "diagnostics"}
+        ):
+            diverged = True
+
+    assert evaluation_differences
+    assert len(advisor_agent.hardware_interoception.history) == 200
+    assert len(advisor_agent.hardware_interoception.events) <= 50
+    assert len(advisor_agent.hardware_interoception.personal.episodes) <= 50
+    storage = advisor_agent.hardware_interoception.domain_personal.domains["storage"]
+    assert len(storage["episodes"]) <= 50
+    checkpoint = advisor_agent.hardware_interoception.to_checkpoint()
+    assert "_storage_advisor_applied_cycle" not in checkpoint
+    validate_hardware_interoception(checkpoint)
+
+
+def test_conditional_write_advisor_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    from src.cognition import method_feedback
+
+    source = DigitalBeing(name="ConditionalWriteAdvisorLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: _low_resources(),
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage",
+        lambda: _storage(0.01),
+    )
+    monkeypatch.setattr(
+        "config.simulation_config.SIM_CONFIG.HORMONAL_BEHAVIOR_MODE", "shadow"
+    )
+
+    original_prepare = method_feedback.prepare_candidates
+
+    def prepare(agent, candidates):
+        prepared, feedback = original_prepare(agent, candidates)
+        prepared.insert(
+            0,
+            {
+                "action": "web_search",
+                "source": "conditional_advisor_probe",
+                "strength": 0.08,
+                "params": {"probe": True},
+            },
+        )
+        return prepared, feedback
+
+    monkeypatch.setattr(method_feedback, "prepare_candidates", prepare)
+    pre_emotional_traces = {}
+    current_trace_key = {"mode": None}
+    original_emotional_bias = DigitalBeing._apply_emotional_bias
+
+    def capture_pre_emotional(self, candidates):
+        snapshot = deepcopy(candidates)
+        for candidate in snapshot:
+            params = candidate.get("params") or {}
+            if params.get("continuation_of") is not None:
+                params["continuation_of"] = "present"
+        pre_emotional_traces.setdefault(current_trace_key["mode"], []).append(snapshot)
+        return original_emotional_bias(self, candidates)
+
+    monkeypatch.setattr(DigitalBeing, "_apply_emotional_bias", capture_pre_emotional)
+
+    def seed_standalone_writes(agent):
+        observer = agent.hardware_interoception
+        for cycle in range(5):
+            token = observer.begin_conditional_write(
+                "web_search", managed=False, cycle=cycle
+            )
+            assert token is not None
+            observer.record_conditional_save("immediate")
+            observer.end_conditional_write(token)
+        evidence = observer.conditional_writes.evidence("web_search", managed=False)
+        assert evidence["sample_count"] == 5
+        assert evidence["write_count"] == 5
+
+    def run(mode):
+        current_trace_key["mode"] = mode
+        monkeypatch.setattr(
+            "config.simulation_config.SIM_CONFIG.HARDWARE_CONDITIONAL_WRITE_MODE",
+            mode,
+        )
+        random.seed(110029)
+        np.random.seed(110029)
+        agent = DigitalBeing(name=f"ConditionalWriteAdvisorLong_{mode}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        seed_standalone_writes(agent)
+        trace = []
+        eligible_cycles = []
+        applied_cycles = []
+        adjustment_history = {}
+        restart_absence = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                assert "conditional_writes" not in (
+                    agent.hardware_interoception.to_checkpoint()
+                )
+                state = build_state_from_agent(agent)
+                assert "hardware_conditional_write_behavior_last" not in state
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                assert not hasattr(restored, "hardware_conditional_write_behavior_last")
+                assert not hasattr(
+                    restored.hardware_interoception,
+                    "_conditional_write_advisor_applied_cycle",
+                )
+                assert (
+                    restored.hardware_interoception.conditional_writes.sample_count == 0
+                )
+                restart_absence += 1
+                restored.web_searcher.toggle(False)
+                agent = restored
+                seed_standalone_writes(agent)
+            report = agent.autonomous_tick()
+            behavior = report["hardware_conditional_write_behavior"]
+            assert agent.hardware_conditional_write_behavior_last == behavior
+            assert agent.hardware_conditional_write_behavior_last is not behavior
+            # Checkpoint сохраняет подтверждённый storage risk: после restart
+            # eligibility возвращается с первым свежим наблюдением, а опыт записей
+            # при этом заново накоплен только в runtime.
+            expected_eligible = cycle >= 4
+            assert behavior["eligible"] is expected_eligible, (
+                cycle,
+                behavior["reason"],
+            )
+            if expected_eligible:
+                eligible_cycles.append(cycle)
+            if behavior["active"] is True:
+                applied_cycles.append(cycle)
+                adjustment_history[cycle] = deepcopy(behavior["adjustments"])
+            else:
+                assert behavior["adjustments"] == []
+            evaluations = report["arbitrator"].get("all_evaluations") or []
+            input_indices = {entry["input_index"] for entry in evaluations}
+            seen_indices = set()
+            for entry in behavior["adjustments"]:
+                assert agent._normalize_action(entry["action"]) == "web_search"
+                assert entry["before_strength"] > 0.0
+                assert entry["after_strength"] == pytest.approx(
+                    entry["before_strength"] * entry["factor"]
+                )
+                assert entry["after_strength"] >= entry["before_strength"] * 0.75
+                assert entry["input_index"] in input_indices
+                assert entry["input_index"] not in seen_indices
+                seen_indices.add(entry["input_index"])
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        pre_emotional = pre_emotional_traces[mode]
+        assert len(pre_emotional) == len(trace) == 600
+        for entry, candidates in zip(trace, pre_emotional):
+            entry["pre_emotional_candidates"] = candidates
+        return (
+            agent,
+            trace,
+            eligible_cycles,
+            applied_cycles,
+            restart_absence,
+            adjustment_history,
+        )
+
+    shadow_agent, shadow_trace, _, shadow_applied, shadow_restarts, _ = run("shadow")
+    (
+        advisor_agent,
+        advisor_trace,
+        expected_eligible,
+        advisor_applied,
+        advisor_restarts,
+        adjustments,
+    ) = run("advisor")
+
+    assert shadow_agent.cycle_count == advisor_agent.cycle_count == 600
+    assert shadow_restarts == advisor_restarts == 2
+    assert shadow_applied == []
+    assert advisor_applied == expected_eligible
+    diverged = False
+    evaluation_differences = []
+    for cycle, (observed, expected) in enumerate(zip(advisor_trace, shadow_trace)):
+        if observed["action"] != expected["action"] and not diverged:
+            assert cycle in advisor_applied, cycle
+        if not diverged and cycle not in advisor_applied:
+            assert observed == expected, cycle
+        if cycle in advisor_applied:
+            observed_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in observed["evaluations"]
+            }
+            expected_evaluations = {
+                (row["input_index"], row["action"], row["source"]): row
+                for row in expected["evaluations"]
+            }
+            if observed_evaluations != expected_evaluations:
+                evaluation_differences.append(cycle)
+            if not diverged:
+                observed_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(observed["pre_emotional_candidates"])
+                }
+                expected_candidates = {
+                    (index, row["action"], row["source"]): row
+                    for index, row in enumerate(expected["pre_emotional_candidates"])
+                }
+                assert observed_candidates.keys() == expected_candidates.keys()
+                assert observed_candidates.keys() == observed_evaluations.keys()
+                cycle_adjustments = {
+                    (row["input_index"], row["action"], row["source"]): row
+                    for row in adjustments[cycle]
+                }
+                for key, observed_candidate in observed_candidates.items():
+                    expected_candidate = expected_candidates[key]
+                    if key in cycle_adjustments:
+                        adjustment = cycle_adjustments[key]
+                        assert observed_candidate["strength"] == pytest.approx(
+                            adjustment["after_strength"]
+                        )
+                        assert observed_candidate["strength"] == pytest.approx(
+                            expected_candidate["strength"] * adjustment["factor"]
+                        )
+                        assert {
+                            field: value
+                            for field, value in observed_candidate.items()
+                            if field != "strength"
+                        } == {
+                            field: value
+                            for field, value in expected_candidate.items()
+                            if field != "strength"
+                        }
+                    else:
+                        assert observed_candidate == expected_candidate, (cycle, key)
+        if not diverged and any(
+            observed[field] != expected[field]
+            for field in expected
+            if field not in {"evaluations", "diagnostics"}
+        ):
+            diverged = True
+
+    assert evaluation_differences
+    assert len(advisor_agent.hardware_interoception.history) == 200
+    assert len(advisor_agent.hardware_interoception.conditional_writes.history) <= 50
+    assert len(advisor_agent.hardware_interoception.conditional_writes.profiles) <= 7
+    checkpoint = advisor_agent.hardware_interoception.to_checkpoint()
+    assert "conditional_writes" not in checkpoint
+    assert "_conditional_write_advisor_applied_cycle" not in checkpoint
+    validate_hardware_interoception(checkpoint)
+
+
+def test_action_experience_differential_for_six_hundred_cycles_and_restarts(
+    monkeypatch,
+):
+    from src.core.hardware_action_experience import HardwareActionExperience
+
+    source = DigitalBeing(name="ActionExperienceLongSource")
+    source.web_searcher.toggle(False)
+    initial = build_state_from_agent(source)
+    current = {"resources": _low_resources()}
+    monkeypatch.setattr(
+        "src.core.watchdog.Watchdog.get_resource_status",
+        lambda self: current["resources"],
+    )
+    monkeypatch.setattr(
+        "src.core.hardware_interoception.read_data_storage", lambda: _storage(0.8)
+    )
+
+    def run(learning_enabled):
+        if not learning_enabled:
+            with monkeypatch.context() as disabled:
+                disabled.setattr(
+                    HardwareActionExperience,
+                    "observe",
+                    lambda self, *args, **kwargs: deepcopy(self.latest),
+                )
+                return _run(False)
+        return _run(True)
+
+    def _run(learning_enabled):
+        random.seed(90029)
+        np.random.seed(90029)
+        agent = DigitalBeing(name=f"ActionExperienceLong_{learning_enabled}")
+        apply_state_to_agent(agent, deepcopy(initial))
+        agent.web_searcher.toggle(False)
+        trace = []
+        fresh_samples = 0
+        for cycle in range(600):
+            if cycle in {200, 400}:
+                state = build_state_from_agent(agent)
+                restored = DigitalBeing(name=agent.name)
+                apply_state_to_agent(restored, state)
+                if learning_enabled:
+                    latest = restored.hardware_interoception.status()[
+                        "action_experience"
+                    ]["latest"]
+                    assert latest["freshness"] == "stale"
+                    assert latest["risk"] is None
+                restored.web_searcher.toggle(False)
+                agent = restored
+            current["resources"] = (
+                _high_resources() if (cycle // 20) % 2 == 0 else _low_resources()
+            )
+            report = agent.autonomous_tick()
+            experience = report["hardware_interoception"]["action_experience"]
+            if experience["freshness"] == "fresh":
+                fresh_samples += 1
+            trace.append(_canonical_trace(agent, report))
+            agent.cycle_count += 1
+        return agent, trace, fresh_samples
+
+    baseline_agent, baseline_trace, baseline_samples = run(False)
+    observed_agent, observed_trace, observed_samples = run(True)
+
+    assert observed_trace == baseline_trace
+    assert baseline_samples == 0
+    assert observed_samples > 0
+    assert baseline_agent.hardware_interoception.action_experience.profiles == {}
+    assert observed_agent.hardware_interoception.action_experience.profiles
+    assert len(observed_agent.hardware_interoception.history) == 200
+    assert len(observed_agent.hardware_interoception.events) <= 50
+    for (
+        profile
+    ) in observed_agent.hardware_interoception.action_experience.profiles.values():
+        assert len(profile.episodes) <= 50
+    validate_hardware_interoception(
+        observed_agent.hardware_interoception.to_checkpoint()
     )

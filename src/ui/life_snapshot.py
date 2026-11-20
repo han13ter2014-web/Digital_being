@@ -734,9 +734,149 @@ def _hardware_recovery_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _hardware_physical_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
-    """Sanitized DTO последнего physical-тика; не часть checkpoint."""
-    runtime = _own(agent, "hardware_physical_behavior_last", None)
+def _hardware_relevant_root_section(hardware: Dict[str, Any]) -> Dict[str, Any]:
+    """Whitelisted per-root DTO без путей, устройств и полной истории эпизодов."""
+    raw_roots = hardware.get("relevant_root_observations")
+    if not isinstance(raw_roots, dict):
+        return {}
+    roots = {}
+    for raw_id, raw in list(raw_roots.items())[:8]:
+        root_id = _hormonal_behavior_code(raw_id)
+        if root_id != raw_id or not isinstance(raw, dict):
+            continue
+        channel = raw.get("channel")
+        channel = channel if isinstance(channel, dict) else {}
+        trend = raw.get("trend")
+        trend = trend if isinstance(trend, dict) else {}
+        writes = raw.get("writes")
+        writes = writes if isinstance(writes, dict) else {}
+        latest_write = writes.get("latest")
+        latest_write = latest_write if isinstance(latest_write, dict) else {}
+        risk = raw.get("risk")
+        risk = risk if isinstance(risk, dict) else {}
+        experience = raw.get("experience")
+        experience = experience if isinstance(experience, dict) else {}
+        latest = experience.get("latest")
+        latest = latest if isinstance(latest, dict) else {}
+        episode = experience.get("current_episode")
+        episode = episode if isinstance(episode, dict) else None
+        baseline = experience.get("baseline")
+        baseline = baseline if isinstance(baseline, dict) else {}
+        episodes = experience.get("episodes")
+        episode_count = len(episodes) if isinstance(episodes, list) else 0
+        roots[root_id] = {
+            "channel": {
+                key: deepcopy(channel.get(key))
+                for key in ("status", "value", "unit", "reason", "source")
+                if key in channel
+            },
+            "trend": {
+                key: deepcopy(trend.get(key))
+                for key in (
+                    "version",
+                    "window_size",
+                    "decline_cycles",
+                    "drop",
+                    "reason",
+                )
+                if key in trend
+            },
+            "writes": {
+                "latest": {
+                    key: deepcopy(latest_write.get(key))
+                    for key in ("operation", "outcome", "category", "origin", "cycle")
+                    if key in latest_write
+                },
+                "sample_count": _recovery_cycle_count(writes.get("sample_count")),
+            },
+            "risk": {
+                key: deepcopy(risk.get(key))
+                for key in (
+                    "value",
+                    "confidence",
+                    "reason",
+                    "origin",
+                    "expectedness",
+                    "evidence",
+                )
+                if key in risk
+            },
+            "experience": {
+                "latest": {
+                    key: deepcopy(latest.get(key))
+                    for key in (
+                        "risk",
+                        "experienced",
+                        "expectedness",
+                        "freshness",
+                        "reason",
+                    )
+                    if key in latest
+                },
+                "current_episode": (
+                    {
+                        key: deepcopy(episode.get(key))
+                        for key in (
+                            "start_cycle",
+                            "strain_cycle",
+                            "end_cycle",
+                            "max_pressure",
+                            "origin",
+                            "evidence",
+                            "slow_cycle",
+                            "fresh_observations",
+                            "fresh_high_cycles",
+                            "recovery_duration_cycles",
+                            "complete",
+                        )
+                        if key in episode
+                    }
+                    if episode is not None
+                    else None
+                ),
+                "baseline": {
+                    key: deepcopy(baseline.get(key))
+                    for key in (
+                        "baseline",
+                        "deviation",
+                        "sample_count",
+                        "last_update_cycle",
+                        "confidence",
+                    )
+                    if key in baseline
+                },
+                "adaptation": _hormonal_behavior_number(experience.get("adaptation")),
+                "confidence": _hormonal_behavior_number(experience.get("confidence")),
+                "episode_count": episode_count,
+            },
+        }
+    return roots
+
+
+def _hardware_action_experience_section(hardware: Dict[str, Any]) -> Optional[Dict]:
+    """Только sanitized latest; profiles остаются в checkpoint, а не в UI."""
+    raw = hardware.get("action_experience")
+    if not isinstance(raw, dict) or not isinstance(raw.get("latest"), dict):
+        return None
+    latest = raw["latest"]
+    action = latest.get("action")
+    return {
+        "latest": {
+            "action": (_hormonal_behavior_code(action) if action is not None else None),
+            "sample_count": _recovery_cycle_count(latest.get("sample_count")),
+            "expectedness": _hormonal_behavior_code(latest.get("expectedness")),
+            "freshness": _hormonal_behavior_code(latest.get("freshness")),
+            "reason": _hormonal_behavior_code(latest.get("reason")),
+            "risk": _hormonal_behavior_number(latest.get("risk")),
+        }
+    }
+
+
+def _hardware_behavior_section(
+    agent: Any, runtime_attribute: str
+) -> Optional[Dict[str, Any]]:
+    """Sanitized DTO последнего hardware-тика; не часть checkpoint."""
+    runtime = _own(agent, runtime_attribute, None)
     if not isinstance(runtime, dict):
         return None
     raw_adjustments = runtime.get("adjustments")
@@ -772,6 +912,60 @@ def _hardware_physical_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
         "eligible": runtime.get("eligible") is True,
         "reason": _hormonal_behavior_code(runtime.get("reason")),
         "duration_cycles": _recovery_cycle_count(runtime.get("duration_cycles")),
+        "risk": _hormonal_behavior_number(runtime.get("risk")),
+        "experienced": _hormonal_behavior_number(runtime.get("experienced")),
+        "confidence": _hormonal_behavior_number(runtime.get("confidence")),
+        "factor": _hormonal_behavior_number(runtime.get("factor")),
+        "adjustments": adjustments,
+    }
+
+
+def _conditional_write_behavior_section(agent: Any) -> Optional[Dict[str, Any]]:
+    """Sanitized runtime DTO conditional-write advisor; не часть checkpoint."""
+    runtime = _own(agent, "hardware_conditional_write_behavior_last", None)
+    if not isinstance(runtime, dict):
+        return None
+    raw_evidence = runtime.get("write_evidence")
+    raw_evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
+    raw_adjustments = runtime.get("adjustments")
+    raw_adjustments = raw_adjustments if isinstance(raw_adjustments, list) else []
+    adjustments = []
+    for entry in raw_adjustments[-3:]:
+        if not isinstance(entry, dict):
+            continue
+        input_index = entry.get("input_index")
+        adjustments.append(
+            {
+                "input_index": (
+                    input_index
+                    if not isinstance(input_index, bool)
+                    and isinstance(input_index, int)
+                    and input_index >= 0
+                    else None
+                ),
+                "action": _hormonal_behavior_code(entry.get("action")),
+                "source": _hormonal_behavior_code(entry.get("source")),
+                "before_strength": _hormonal_behavior_number(
+                    entry.get("before_strength")
+                ),
+                "after_strength": _hormonal_behavior_number(
+                    entry.get("after_strength")
+                ),
+                "factor": _hormonal_behavior_number(entry.get("factor")),
+            }
+        )
+    return {
+        "mode": _hormonal_behavior_code(runtime.get("mode")),
+        "active": runtime.get("active") is True,
+        "eligible": runtime.get("eligible") is True,
+        "reason": _hormonal_behavior_code(runtime.get("reason")),
+        "profile_class": _hormonal_behavior_code(runtime.get("profile_class")),
+        "write_evidence": {
+            "sample_count": _recovery_cycle_count(raw_evidence.get("sample_count")),
+            "write_count": _recovery_cycle_count(raw_evidence.get("write_count")),
+            "failed_count": _recovery_cycle_count(raw_evidence.get("failed_count")),
+            "write_ratio": _hormonal_behavior_number(raw_evidence.get("write_ratio")),
+        },
         "risk": _hormonal_behavior_number(runtime.get("risk")),
         "experienced": _hormonal_behavior_number(runtime.get("experienced")),
         "confidence": _hormonal_behavior_number(runtime.get("confidence")),
@@ -884,14 +1078,25 @@ def build_life_snapshot(agent: Any, runner: Optional[Any] = None) -> Dict[str, A
                 if isinstance(domain, dict):
                     domain["episode_count"] = len(domain.pop("episodes", []))
         hardware["recent_events"] = list(hardware.get("recent_events") or [])[-10:]
+        if "relevant_root_observations" in hardware:
+            hardware["relevant_root_observations"] = _hardware_relevant_root_section(
+                hardware
+            )
     else:
         hardware = {
             "mode": "shadow",
             "initialized": False,
             "reason": "not_initialized",
         }
+    hardware["action_experience"] = _hardware_action_experience_section(hardware)
     hardware["recovery_behavior"] = _hardware_recovery_behavior_section(agent)
-    hardware["physical_behavior"] = _hardware_physical_behavior_section(agent)
+    hardware["physical_behavior"] = _hardware_behavior_section(
+        agent, "hardware_physical_behavior_last"
+    )
+    hardware["storage_behavior"] = _hardware_behavior_section(
+        agent, "hardware_storage_behavior_last"
+    )
+    hardware["conditional_write_behavior"] = _conditional_write_behavior_section(agent)
     life_guard = _own(agent, "life_guard", None)
     guard_details: Dict[str, Any] = {}
     if life_guard is not None:

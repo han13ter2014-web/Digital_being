@@ -1,10 +1,11 @@
 """Ограниченные поведенческие советчики собственной аппаратной нагрузки.
 
 Советчики читают уже накопленный per-life опыт, но не создают действия, цели,
-награды или эндокринные события. Разрешены три раздельных эффекта: 4A ослабляет
+награды или эндокринные события. Разрешены четыре раздельных эффекта: 4A ослабляет
 уже предложенные тяжёлые кандидаты после устойчивой свежей own_load, 7B делает
-это после подтверждённой physical-перегрузки в общем с 4A бюджете, а 6B
-ограниченно усиливает существующий телесный deep_rest после серии 5 + 5.
+это после подтверждённой physical-перегрузки в общем с 4A бюджете, 8B ослабляет
+только разрешённые творческие кандидаты после storage-риска, а 6B ограниченно
+усиливает существующий телесный deep_rest после серии 5 + 5.
 """
 
 from __future__ import annotations
@@ -584,13 +585,316 @@ def apply_physical_strain_advice(
     return report
 
 
+def _neutral_storage_evidence(reason: str) -> Dict:
+    return {
+        "eligible": False,
+        "reason": reason,
+        "duration_cycles": 0,
+        "risk": None,
+        "experienced": None,
+        "confidence": 0.0,
+        "factor": 1.0,
+    }
+
+
+def _storage_history_state(entry: Dict) -> Dict | None:
+    states = entry.get("states")
+    if not isinstance(states, dict):
+        return None
+    state = states.get("storage_risk")
+    if (
+        not isinstance(state, dict)
+        or state.get("origin") != "unknown"
+        or state.get("reason") != "observed_data_storage"
+        or not _finite_unit(state.get("value"))
+        or float(state["value"]) < _OWN_LOAD_THRESHOLD
+        or not _finite_unit(state.get("confidence"))
+        or float(state["confidence"]) <= 0.0
+    ):
+        return None
+    return state
+
+
+def _relevant_root_storage_evidence(observer, root_id) -> Dict:
+    """Доказательства дополнительного root без заимствования опыта data."""
+    observations = getattr(observer, "latest_relevant_root_observations", None)
+    root = observations.get(root_id) if isinstance(observations, dict) else None
+    if not isinstance(root, dict):
+        return _neutral_storage_evidence("root_not_observed")
+    channel = root.get("channel")
+    if (
+        not isinstance(channel, dict)
+        or channel.get("status") != "available"
+        or not _finite_unit(channel.get("value"))
+    ):
+        return _neutral_storage_evidence("waiting_for_fresh_storage_channel")
+
+    current = root.get("risk")
+    if (
+        not isinstance(current, dict)
+        or current.get("origin") != "unknown"
+        or current.get("reason") != "observed_relevant_root_storage"
+        or not _finite_unit(current.get("value"))
+        or float(current["value"]) < _OWN_LOAD_THRESHOLD
+        or not _finite_unit(current.get("confidence"))
+        or float(current["confidence"]) <= 0.0
+    ):
+        return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+
+    experiences = getattr(observer, "relevant_root_experiences", None)
+    root_experience = (
+        experiences.get(root_id) if isinstance(experiences, dict) else None
+    )
+    slow = getattr(root_experience, "slow_state", None)
+    duration = slow.get("sustained_cycles") if isinstance(slow, dict) else None
+    if (
+        not isinstance(slow, dict)
+        or slow.get("strain_active") is not True
+        or isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or duration < _REQUIRED_CYCLES
+    ):
+        return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+
+    domain = root.get("experience")
+    episode = domain.get("current_episode") if isinstance(domain, dict) else None
+    experience = domain.get("latest") if isinstance(domain, dict) else None
+    if (
+        not isinstance(episode, dict)
+        or not isinstance(episode.get("strain_cycle"), int)
+        or isinstance(episode.get("strain_cycle"), bool)
+        or episode.get("fresh_high_cycles", 0) < _REQUIRED_CYCLES
+        or not isinstance(experience, dict)
+        or experience.get("freshness") != "fresh"
+        or experience.get("reason") != "observed_relevant_root_storage"
+        or not _finite_unit(experience.get("risk"))
+        or not _finite_unit(experience.get("experienced"))
+        or float(experience["risk"]) < _OWN_LOAD_THRESHOLD
+    ):
+        return _neutral_storage_evidence("storage_experience_unavailable")
+
+    experienced = float(experience["experienced"])
+    confidence = float(current["confidence"])
+    return {
+        "eligible": True,
+        "reason": "confirmed_storage_risk",
+        "duration_cycles": duration,
+        "risk": float(experience["risk"]),
+        "experienced": experienced,
+        "confidence": confidence,
+        "factor": 1.0 - _MAX_STRENGTH_REDUCTION * experienced * confidence,
+    }
+
+
+def storage_risk_evidence(observer, root_id: str = "data") -> Dict:
+    """Подтверждённый опыт одного root без доступа к кандидатам."""
+    if root_id != "data":
+        return _relevant_root_storage_evidence(observer, root_id)
+    if observer is None:
+        return _neutral_storage_evidence("no_observer")
+    observation = getattr(observer, "latest_observation", None)
+    history = getattr(observer, "history", None)
+    if not isinstance(observation, dict) or not isinstance(history, list):
+        return _neutral_storage_evidence("insufficient_storage_evidence")
+    channels = observation.get("channels")
+    storage = channels.get("data_storage") if isinstance(channels, dict) else None
+    if (
+        not isinstance(storage, dict)
+        or storage.get("status") != "available"
+        or not _finite_unit(storage.get("value"))
+    ):
+        return _neutral_storage_evidence("waiting_for_fresh_storage_channel")
+
+    current = _storage_history_state({"states": getattr(observer, "states", None)})
+    if current is None:
+        return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+    expected_cycle = _cycle(observation)
+    if expected_cycle is None:
+        return _neutral_storage_evidence("insufficient_storage_evidence")
+
+    # Непрерывность истории проверяется до локальных счётчиков: после разрыва
+    # они уже сброшены, но sanitized-причина должна сохранить сам разрыв.
+    confirmed = 0
+    for entry in reversed(history):
+        if not isinstance(entry, dict) or _cycle(entry) != expected_cycle:
+            return _neutral_storage_evidence("noncontiguous_storage_evidence")
+        if _storage_history_state(entry) is None:
+            return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+        confirmed += 1
+        if confirmed == _REQUIRED_CYCLES:
+            break
+        expected_cycle -= 1
+    if confirmed < _REQUIRED_CYCLES:
+        return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+
+    slow_states = getattr(observer, "slow_states", None)
+    slow = slow_states.get("storage") if isinstance(slow_states, dict) else None
+    duration = slow.get("sustained_cycles") if isinstance(slow, dict) else None
+    if (
+        not isinstance(slow, dict)
+        or slow.get("strain_active") is not True
+        or isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or duration < _REQUIRED_CYCLES
+    ):
+        return _neutral_storage_evidence("insufficient_sustained_storage_risk")
+
+    domain_personal = getattr(observer, "domain_personal", None)
+    domains = getattr(domain_personal, "domains", None)
+    domain = domains.get("storage") if isinstance(domains, dict) else None
+    episode = domain.get("current_episode") if isinstance(domain, dict) else None
+    experience = domain.get("latest") if isinstance(domain, dict) else None
+    if (
+        not isinstance(episode, dict)
+        or not isinstance(episode.get("strain_cycle"), int)
+        or isinstance(episode.get("strain_cycle"), bool)
+        or episode.get("fresh_high_cycles", 0) < _REQUIRED_CYCLES
+        or not isinstance(experience, dict)
+        or experience.get("freshness") != "fresh"
+        or experience.get("reason") != "observed_data_storage"
+        or not _finite_unit(experience.get("risk"))
+        or not _finite_unit(experience.get("experienced"))
+        or float(experience["risk"]) < _OWN_LOAD_THRESHOLD
+    ):
+        return _neutral_storage_evidence("storage_experience_unavailable")
+
+    experienced = float(experience["experienced"])
+    confidence = float(current["confidence"])
+    return {
+        "eligible": True,
+        "reason": "confirmed_storage_risk",
+        "duration_cycles": duration,
+        "risk": float(experience["risk"]),
+        "experienced": experienced,
+        "confidence": confidence,
+        "factor": 1.0 - _MAX_STRENGTH_REDUCTION * experienced * confidence,
+    }
+
+
+def storage_risk_behavior_report(observer, mode: str = "shadow") -> Dict:
+    """Sanitized shadow-отчёт; advisor без кандидатов ничего не изменяет."""
+    mode = str(mode)
+    evidence = storage_risk_evidence(observer)
+    if mode == "shadow":
+        reason = "shadow_only" if evidence["eligible"] else evidence["reason"]
+    elif mode == "advisor":
+        reason = "advisor_requires_candidates"
+    else:
+        reason = "unsupported_mode"
+    return {
+        "mode": mode,
+        "active": False,
+        **evidence,
+        "reason": reason,
+        "adjustments": [],
+    }
+
+
+def apply_storage_risk_advice(
+    candidates: List[Dict],
+    observer,
+    normalize_action: Callable,
+    *,
+    input_strengths: List | None = None,
+) -> Dict:
+    """Ослабить кандидаты только с доказанным записывающим путём в data."""
+    # Инвентарь 8B/11A доказывает data только для перечисленных ниже кандидатов.
+    # Наблюдаемый additional root не становится их write path автоматически.
+    evidence = storage_risk_evidence(observer, root_id="data")
+    report = {
+        "mode": "advisor",
+        "active": False,
+        **evidence,
+        "adjustments": [],
+    }
+    if not evidence["eligible"]:
+        return report
+
+    cycle = _cycle(getattr(observer, "latest_observation", None))
+    if (
+        cycle is not None
+        and getattr(observer, "_storage_advisor_applied_cycle", None) == cycle
+    ):
+        report["reason"] = "duplicate_cycle"
+        return report
+
+    if input_strengths is None:
+        originals = [candidate.get("strength", 0.5) for candidate in candidates]
+    else:
+        if len(input_strengths) != len(candidates):
+            raise ValueError("storage advisor input strength count mismatch")
+        originals = list(input_strengths)
+
+    pending = []
+    budget_limited = False
+    for input_index, (candidate, original) in enumerate(zip(candidates, originals)):
+        action = normalize_action(candidate.get("action"))
+        if action == "create_draft":
+            params = candidate.get("params") or {}
+            if not isinstance(params, dict) or params.get(
+                "draft_mode", "continue"
+            ) not in {"new", "continue"}:
+                continue
+        elif action not in {"draw", "compose_music"}:
+            continue
+        before = candidate.get("strength", 0.5)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+            for value in (original, before)
+        ):
+            continue
+        original = float(original)
+        before = float(before)
+        # Прежняя поправка и новая выбирают одну более сильную скидку от
+        # исходной силы; коэффициенты не перемножаются ниже общих 75 %.
+        target = max(original * 0.75, original * evidence["factor"])
+        after = max(original * 0.75, min(before, target))
+        if after >= before:
+            budget_limited = True
+            continue
+        pending.append((candidate, after))
+        report["adjustments"].append(
+            {
+                "input_index": input_index,
+                "action": str(candidate.get("action") or "unknown"),
+                "source": str(candidate.get("source") or "unknown"),
+                "before_strength": original,
+                "after_strength": after,
+                "factor": evidence["factor"],
+            }
+        )
+    if not pending:
+        report["reason"] = (
+            "shared_budget_already_applied"
+            if budget_limited
+            else "no_matching_candidates"
+        )
+        return report
+
+    # Полный расчёт предшествует runtime-отметке и всем мутациям. Отметка
+    # дедупликации остаётся только в процессе и не входит в checkpoint.
+    if cycle is not None:
+        setattr(observer, "_storage_advisor_applied_cycle", cycle)
+    for candidate, after in pending:
+        candidate["strength"] = after
+    report["active"] = True
+    report["reason"] = "applied"
+    return report
+
+
 __all__ = [
     "apply_own_load_advice",
     "apply_own_recovery_advice",
     "apply_physical_strain_advice",
+    "apply_storage_risk_advice",
     "own_load_advice",
     "own_recovery_behavior_report",
     "own_recovery_evidence",
     "physical_strain_behavior_report",
     "physical_strain_evidence",
+    "storage_risk_behavior_report",
+    "storage_risk_evidence",
 ]
