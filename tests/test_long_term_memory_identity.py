@@ -137,6 +137,45 @@ def test_sqlite_memory_roundtrip_preserves_traces_links_and_order(
     assert tuple(row) == ("episodic", 1, 1)
 
 
+def test_sqlite_memory_ids_survive_clock_and_short_hash_collision(
+    tmp_path, monkeypatch
+):
+    from datetime import datetime as RealDateTime
+    from src.core.life_identity import new_life_id
+    import src.memory.long_term_memory as module
+
+    class FixedDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 1)
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(module, "datetime", FixedDateTime)
+    colliding_contents = None
+    buckets = {}
+    for index in range(10001):
+        content = f"trace-{index}"
+        bucket = hash(content) % 10000
+        if bucket in buckets:
+            colliding_contents = (buckets[bucket], content)
+            break
+        buckets[bucket] = content
+    assert colliding_contents is not None
+
+    life_id = new_life_id()
+    memory = LongTermMemory("Alpha", life_id=life_id)
+    consolidated_id = memory.store(colliding_contents[0], importance=0.9)
+    working_id = memory.store(
+        colliding_contents[1], importance=0.4, memory_type="semantic"
+    )
+
+    assert consolidated_id != working_id
+    memory.save()
+    restored = LongTermMemory("Renamed", life_id=life_id)
+    assert set(restored._long_term) == {consolidated_id}
+    assert set(restored._short_term) == {working_id}
+
+
 def test_sqlite_memory_save_rolls_back_on_failure(tmp_path, monkeypatch):
     from contextlib import closing
     import pytest

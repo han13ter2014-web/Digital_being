@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Set
+from uuid import uuid4
 import os
 
 from src.core.paths import data_path
@@ -503,10 +504,12 @@ class LongTermMemory:
             self._consolidation_count += 1
 
     def _generate_id(self, content: str) -> str:
-        """Генерирует ID для воспоминания."""
+        """Генерирует ID, устойчивый к совпадению часов и короткого хеша."""
         timestamp = int(datetime.now().timestamp() * 1000)
         content_hash = hash(content) % 10000
-        return f"mem_{timestamp}_{content_hash}"
+        # Старые ID остаются читаемыми; UUID не даёт новым следам перезаписать
+        # друг друга при совпадении миллисекунды и hash(content) % 10000.
+        return f"mem_{timestamp}_{content_hash}_{uuid4().hex}"
 
     def _save_to_sqlite(self):
         """Атомарно заменить представление памяти в базе этой жизни."""
