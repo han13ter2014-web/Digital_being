@@ -157,9 +157,11 @@ def _is_action_available_impl(self, action: Optional[str]) -> bool:
         return True
     if normalized == "create_draft":
         from src.cognition.creative_draft import draft_available
+        from src.core.activity_workspace import workspace_for
 
         return self._is_action_affordable(normalized) and draft_available(
-            getattr(self, "_creative_draft", None)
+            getattr(self, "_creative_draft", None),
+            workspace=workspace_for(self),
         )
     if normalized == "draw":
         from src.cognition.local_art import art_available
@@ -230,6 +232,7 @@ def _is_candidate_available_impl(self, candidate) -> bool:
         if self._normalize_action(candidate.get("action")) == "create_draft":
             from src.cognition.creative_catalog import creative_request, catalog_for
             from src.cognition.creative_draft import MAX_DRAFTS, draft_available
+            from src.core.activity_workspace import workspace_for
 
             mode, identifier, _ = creative_request(candidate)
             catalog = catalog_for(self)
@@ -249,7 +252,7 @@ def _is_candidate_available_impl(self, candidate) -> bool:
             if mode == "new":
                 return (
                     len(catalog) < MAX_DRAFTS
-                    and draft_available(None)
+                    and draft_available(None, workspace=workspace_for(self))
                     and self._is_action_affordable("create_draft")
                 )
             if identifier is not None and mode == "continue":

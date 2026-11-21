@@ -57,6 +57,10 @@ from src.core.dialogue_acts import (
         ("Кто ты такая?", ACT_ASK_ABOUT_SELF),
         ("Что ты знаешь обо мне?", ACT_ASK_ABOUT_SELF),
         ("Чем занимаешься?", ACT_ASK_ABOUT_SELF),
+        ("Что делаешь?", ACT_ASK_ABOUT_SELF),
+        ("Что ты делаешь?", ACT_ASK_ABOUT_SELF),
+        ("Чем занят?", ACT_ASK_ABOUT_SELF),
+        ("Чем ты занят?", ACT_ASK_ABOUT_SELF),
         ("Чем ты занята?", ACT_ASK_ABOUT_SELF),
         ("Чем занята?", ACT_ASK_ABOUT_SELF),
         # живой прогон 2026-11-01: без маркера вопрос уходил в концепт

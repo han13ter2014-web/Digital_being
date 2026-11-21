@@ -94,6 +94,12 @@ def controlled_dashboard():
             Events.USER_MESSAGE,
             {"text": "Привет, Нова"},
         ),
+        (
+            "/api/dialogue",
+            {"text": "  /ask Что делаешь?  "},
+            Events.USER_COMMAND,
+            {"command": "ask Что делаешь?"},
+        ),
         ("/api/control/pause", {}, Events.PAUSE_REQUESTED, {}),
         ("/api/control/resume", {}, Events.RESUME_REQUESTED, {}),
         (

@@ -395,3 +395,50 @@ def test_acknowledged_messages_leave_queue_and_live_history_is_bounded(monkeypat
     # Удаление из очереди и обрезка history не должны приводить к повторному ID.
     assert ui.send_message("Новое", cycle=7) not in ids
     assert len(ui.to_checkpoint_dict()["outgoing_messages"]) <= ui.OUTGOING_TRACE_MAX
+
+
+class _MessageBus:
+    def __init__(self):
+        self.published = []
+
+    def publish_sync(self, name, data=None, source="system", priority=1):
+        self.published.append((name, dict(data or {})))
+
+
+def test_long_reply_is_split_without_loss_everywhere(monkeypatch):
+    """150 строк × 80 символов не создают oversized-записей ни в одном канале."""
+    from src.core.event_bus import Events
+    from src.perception.user_interaction import UserInteraction
+
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: None)
+    bus = _MessageBus()
+    ui = UserInteraction("ChunkedDialogue", bus=bus)
+    text = "\n".join(f"{index:03d} {'x' * 76}" for index in range(150))
+
+    first_id = ui.send_reply(text, context="long_reply", cycle=9)
+
+    published = [data for name, data in bus.published if name == Events.AGENT_MESSAGE]
+    assert len(published) > 1
+    assert published[0]["id"] == first_id
+    for records in (ui.message_queue, ui.message_history, published):
+        assert "".join(entry["content"] for entry in records) == text
+        assert all(0 < len(entry["content"]) < 1900 for entry in records)
+        assert len({entry["id"] for entry in records}) == len(records)
+    assert ui.message_queue[0] is not ui.message_queue[1]
+    checkpoint = ui.to_checkpoint_dict()["outgoing_messages"]
+    assert "".join(entry["content"] for entry in checkpoint) == text
+    assert all(len(entry["content"]) < 1900 for entry in checkpoint)
+
+
+def test_short_reply_remains_one_message(monkeypatch):
+    from src.perception.user_interaction import UserInteraction
+
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: None)
+    ui = UserInteraction("ShortDialogue")
+
+    msg_id = ui.send_reply("Короткий ответ", cycle=3)
+
+    assert len(ui.message_queue) == 1
+    assert len(ui.message_history) == 1
+    assert ui.message_queue[0]["id"] == msg_id
+    assert ui.message_queue[0]["content"] == "Короткий ответ"

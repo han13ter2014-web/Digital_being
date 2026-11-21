@@ -619,3 +619,44 @@ async def test_noise_input_gets_honest_reply_not_learning_material():
     texts = _reply_texts(bus)
     reply = next(t for t in texts if "нет букв" in t)
     assert "Напиши текстом" in reply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Что делаешь?", "Меня зовут"),
+        ("Чем занят?", "Меня зовут"),
+        ("Как дела?", "Со мной всё ровно"),
+    ],
+)
+async def test_ask_about_self_or_social_never_becomes_open_research(
+    monkeypatch, text, expected
+):
+    """Бытовой /ask отвечает из self-model, а не ищет реплику в вебе."""
+    agent, runner, _bus = _make_runner()
+    concepts_before = dict(agent.mental_models.concepts)
+
+    def unexpected_open_question(*args, **kwargs):
+        raise AssertionError("социальная реплика не должна становиться open question")
+
+    monkeypatch.setattr(agent, "ask_user", unexpected_open_question)
+    response = await runner.handle_command(f"/ask {text}")
+
+    assert expected in response
+    assert agent._open_questions == []
+    assert agent.mental_models.concepts == concepts_before
+    assert agent.user_interaction.get_last_user_message_cycle() == agent.cycle_count
+    assert agent.user_interaction.message_history[-1]["content"] == text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ask_content_question_still_uses_open_questions():
+    """Обычный содержательный /ask сохраняет прежний путь исследования."""
+    agent, runner, _bus = _make_runner()
+
+    response = await runner.handle_command("/ask что такое оптика?")
+
+    assert "поставлен в очередь" in response
+    assert len(agent._open_questions) == 1
+    assert agent._open_questions[0]["text"] == "что такое оптика?"

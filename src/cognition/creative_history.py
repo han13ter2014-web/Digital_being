@@ -43,7 +43,15 @@ def with_creative_history(agent, candidates):
     entries = _creative_entries(agent)
     latest = {}
     for entry, intention in entries:
-        latest[intention["form"]] = entry
+        # Только подтверждённая работа обновляет recency формы. Ошибка,
+        # отказ или прерванное намерение не должны отодвигать форму в
+        # ротации, будто творческий акт действительно состоялся.
+        if entry.get("status") != "performed":
+            continue
+        episode = entry.get("decision_episode") or {}
+        result = episode.get("creative_result")
+        if isinstance(result, dict) and result.get("form") == intention["form"]:
+            latest[intention["form"]] = entry
 
     decorated = []
     for candidate in candidates:

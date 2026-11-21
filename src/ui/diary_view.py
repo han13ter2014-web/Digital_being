@@ -180,6 +180,61 @@ def draft_detail(draft: Dict[str, Any], language: str = "ru") -> List[Row]:
     return rows
 
 
+def art_detail(work: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Реальные поля рисунка без пути и служебного хеша."""
+    T = partial(i18n.text, language=language)
+    rows: List[Row] = [
+        (
+            T("Что это"),
+            T("Рисунок на тему «{theme}»").format(
+                theme=work.get("theme") or T("без названия")
+            ),
+        ),
+        (T("Состояние"), i18n.value_label(work.get("status", "active"), language)),
+        (T("Редакция"), str(work.get("revision", 1))),
+        (T("Палитра"), i18n.value_label(work.get("palette", ""), language)),
+    ]
+    if work.get("sha256"):
+        rows.append((T("Файл"), T("сохранён; отпечаток файла записан")))
+    return rows
+
+
+def music_detail(work: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Реальные поля мелодии без пути и служебного хеша."""
+    T = partial(i18n.text, language=language)
+    rows: List[Row] = [
+        (
+            T("Что это"),
+            T("Мелодия на тему «{theme}»").format(
+                theme=work.get("theme") or T("без названия")
+            ),
+        ),
+        (T("Состояние"), i18n.value_label(work.get("status", "active"), language)),
+        (T("Редакция"), str(work.get("revision", 1))),
+        (T("Настроение"), i18n.value_label(work.get("mood", ""), language)),
+    ]
+    if work.get("sha256"):
+        rows.append((T("Файл"), T("сохранён; отпечаток файла записан")))
+    return rows
+
+
+def guess_detail(game: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Состояние угадывания; загаданное число в UI не раскрывается."""
+    T = partial(i18n.text, language=language)
+    result = game.get("result")
+    rows: List[Row] = [
+        (T("Что это"), T("Угадывание числа методом сужения диапазона")),
+        (T("Раунд"), str(game.get("round", 1))),
+        (T("Попыток"), str(game.get("attempts", 0))),
+        (T("Диапазон"), f"{game.get('low', 1)}–{game.get('high', 100)}"),
+        (T("Результат"), T("угадано") if result == "win" else T("идёт")),
+    ]
+    history = game.get("history")
+    if isinstance(history, list) and history:
+        rows.append((T("Завершено раундов"), str(len(history))))
+    return rows
+
+
 def game_detail(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     T = partial(i18n.text, language=language)
     game = (snapshot.get("activities") or {}).get("game")

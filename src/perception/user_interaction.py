@@ -555,7 +555,50 @@ class UserInteraction:
         context: str = None,
         cycle: int = 0,
     ) -> str:
-        """Отправляет сообщение пользователю.
+        """Опубликовать сообщение частями строго короче 1900 символов.
+
+        Разбиение находится здесь, а не в Tk: одинаковые ограничения получают
+        EventBus, очередь, история и checkpoint. Разделители сохраняются в
+        частях, поэтому ``"".join(chunks)`` восстанавливает исходный текст
+        без потерь. Возвращается ID первой части — он остаётся логическим
+        response_id для обратной связи, как прежний ID одиночного сообщения.
+        """
+        chunks = []
+        remaining = content
+        while len(remaining) >= 1900:
+            # Ищем удобную границу только внутри первых 1899 символов.
+            # Перенос/пробел остаётся в конце части и не исчезает из текста.
+            cut = max(remaining.rfind("\n", 0, 1899), remaining.rfind(" ", 0, 1899))
+            cut = cut + 1 if cut > 0 else 1899
+            chunks.append(remaining[:cut])
+            remaining = remaining[cut:]
+        chunks.append(remaining)
+
+        first_id = None
+        for chunk in chunks:
+            msg_id = self._send_message_chunk(
+                chunk,
+                msg_type=msg_type,
+                tone=tone,
+                urgency=urgency,
+                context=context,
+                cycle=cycle,
+            )
+            if first_id is None:
+                first_id = msg_id
+        assert first_id is not None  # даже пустой вход даёт одну короткую запись
+        return first_id
+
+    def _send_message_chunk(
+        self,
+        content: str,
+        msg_type: str = "statement",
+        tone: str = "casual",
+        urgency: float = 0.5,
+        context: str = None,
+        cycle: int = 0,
+    ) -> str:
+        """Отправляет одну уже ограниченную по размеру часть сообщения.
 
         В отличие от ask_user, НЕ ожидает немедленного ответа.
         Это полноценный диалог: сообщение — это не вопрос.
