@@ -61,7 +61,33 @@ def draft_available(state=None, workspace=None):
 
 
 def _single_line(value, limit=500):
-    return " ".join(str(value).split())[:limit].strip()
+    text = " ".join(str(value).split()).strip()
+    if len(text) <= limit:
+        return text
+    shortened = text[:limit].rstrip()
+    if " " in shortened:
+        shortened = shortened.rsplit(" ", 1)[0]
+    return shortened.rstrip(" ,;:.—-") + "…"
+
+
+def _creative_material_text(value):
+    """Отделить личный материал от служебных журналов и сырых источников."""
+    text = " ".join(str(value).split()).strip()
+    lowered = text.casefold()
+    diagnostic_markers = (
+        "[ментальная модель]",
+        "уверенность:",
+        "связано с:",
+        "нашёл в интернете",
+        "wikipedia",
+        "http://",
+        "https://",
+    )
+    if any(marker in lowered for marker in diagnostic_markers):
+        return ""
+    if text.startswith("Знаю ответ:"):
+        text = text[len("Знаю ответ:") :].strip()
+    return _single_line(text, 240).rstrip(".")
 
 
 def _choice_digest(context, revision):
@@ -120,15 +146,23 @@ def compose_line(context, revision=1):
     }
     templates = forms[_emotional_form(context)]
     template = templates[int.from_bytes(digest[:8], "big") % len(templates)]
-    material_items = [("память", item["content"]) for item in context["memories"]] + [
-        ("мысль", item["text"]) for item in context["thoughts"]
+    material_items = [
+        text
+        for text in (
+            _creative_material_text(item["content"]) for item in context["memories"]
+        )
+        if text
+    ] + [
+        text
+        for text in (
+            _creative_material_text(item["text"]) for item in context["thoughts"]
+        )
+        if text
     ]
     material = ""
     if material_items:
-        kind, text = material_items[
-            int.from_bytes(digest[8:16], "big") % len(material_items)
-        ]
-        material = f"; {kind}: «{_single_line(text, 400)}»"
+        text = material_items[int.from_bytes(digest[8:16], "big") % len(material_items)]
+        material = f" — {text}"
     return template.format(theme=theme.capitalize(), material=material)
 
 
@@ -142,6 +176,9 @@ def _bounded_content(previous, line, theme, limit):
     header = f"Черновик: {theme}\n\n"
     body = previous[len(header) :] if previous.startswith(header) else previous
     lines = [item for item in body.splitlines() if item.strip()]
+    # Повторный выбор того же материала — новая редакция строки, а не
+    # ещё одна идентичная строка в теле стихотворения.
+    lines = [item for item in lines if item != line]
     lines.append(line)
     content = header + "\n".join(lines)
     while len(content.encode("utf-8")) > limit and len(lines) > 1:

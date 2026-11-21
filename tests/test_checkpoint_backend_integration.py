@@ -127,3 +127,45 @@ def test_profile_sqlite_primary_uses_lives_and_restores_without_json(
     assert report["source"] == "checkpoint"
     assert second.life_id == first.life_id
     assert second.cycle_count == 19
+
+
+def test_hunt_misses_survive_real_file_restart(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from src.core.agent import DigitalBeing
+    from src.core.checkpoint_serializer import apply_state_to_agent
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(SIM_CONFIG, "CHECKPOINT_BACKEND", "json")
+    first = DigitalBeing(name="HuntRestartSource")
+    first.checkpoint_dir = str(tmp_path / "checkpoints")
+    first.cycle_count = 209
+    first._hunt_misses = {"энтелехия": 10}
+
+    saved = first.save_state(force=True)
+    snapshot = CheckpointSerializer().load(saved)
+    restored = DigitalBeing(name="HuntRestartTarget")
+    restored._hunt_misses = {"stale": 1}
+    apply_state_to_agent(restored, snapshot)
+
+    assert restored._hunt_misses == {"энтелехия": 10}
+    restored.web_searcher._enabled = True
+    with patch.object(
+        restored.web_searcher,
+        "search",
+        return_value={"found": False, "error": "no_pages"},
+    ) as search:
+        blocked = restored._act_web_search(target="энтелехия")
+        assert "след ещё свеж" in blocked["text"]
+        search.assert_not_called()
+
+        restored.cycle_count = 210
+        allowed = restored._act_web_search(target="энтелехия")
+        assert "ничего" in allowed["text"]
+        search.assert_called_once_with("энтелехия")
+        assert restored._hunt_misses == {"энтелехия": 210}
+
+    second_life = DigitalBeing(name="HuntSecondLife")
+    assert second_life._hunt_misses == {}
+    assert second_life.cycle_count == 0
+    assert second_life._open_questions == []

@@ -272,6 +272,47 @@ def _hardware_channel_text(
     return f"{float(value):.2f}"
 
 
+def hardware_summary_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
+    """Короткое состояние для «Сейчас»: только понятные свежие наблюдения.
+
+    Полная диагностика остаётся в ``hardware_rows`` и веб-обсерватории. На
+    главном экране недоступные каналы, эпизоды и коэффициенты привыкания не
+    должны вытеснять занятие, эмоции и причину выбора.
+    """
+    T = partial(i18n.text, language=language)
+    hardware = snapshot.get("hardware") or {}
+    if hardware.get("initialized") is not True:
+        return [(T("Аппаратное состояние"), T("Нет данных"))]
+
+    rows: List[Row] = [(T("Режим"), T("только наблюдение"))]
+    channels = (hardware.get("observation") or {}).get("channels") or {}
+    for key, label in (
+        ("host_cpu", "CPU среды"),
+        ("host_memory", "Память среды"),
+        ("data_storage", "Свободное место data"),
+        ("gpu_utilization", "Загрузка GPU"),
+        ("gpu_temperature", "Температура GPU"),
+    ):
+        channel = channels.get(key) or {}
+        if channel.get("status") != "available":
+            continue
+        value = channel.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if not math.isfinite(float(value)):
+            continue
+        rows.append((T(label), _hardware_channel_text(channel, language, key)))
+
+    strain = ((hardware.get("states") or {}).get("physical_strain") or {}).get("value")
+    if (
+        not isinstance(strain, bool)
+        and isinstance(strain, (int, float))
+        and math.isfinite(float(strain))
+    ):
+        rows.append((T("Физическое напряжение"), _hardware_percent(strain, language)))
+    return rows
+
+
 def hardware_rows(snapshot: Dict[str, Any], language: str = "ru") -> List[Row]:
     """Отдельная read-only диагностика, не смешанная с ресурсами тела."""
     T = partial(i18n.text, language=language)

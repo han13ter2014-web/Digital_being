@@ -342,6 +342,14 @@ def validate_checkpoint_state(state) -> None:
     for field in ("cycle_count", "intelligence", "completed_goals", "success_streak"):
         if field in state:
             _integer(state[field], field, nonnegative=True)
+    if "hunt_misses" in state:
+        for topic, miss_cycle in _dict(state["hunt_misses"], "hunt_misses").items():
+            path = f"hunt_misses.{topic}"
+            if not isinstance(topic, str) or not topic:
+                _fail("hunt_misses", "expected nonempty string topics")
+            _integer(miss_cycle, path, nonnegative=True)
+            if "cycle_count" in state and miss_cycle > state["cycle_count"]:
+                _fail(path, "miss cycle exceeds cycle_count")
     for field in ("knowledge_base", "_known_definitions"):
         if field in state:
             _dict(state[field], field)

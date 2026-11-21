@@ -96,11 +96,57 @@ class FakeAgent:
         )
         self._open_questions = open_questions if open_questions is not None else []
         self.naming_dialogue = naming_dialogue or FakeNamingDialogue()
+        self._hunt_misses = {}
+        self._news_reads = {}
+        self._web_browses = {}
+        self._shared_topics = {}
 
 
 def make_fake_agent(**kwargs) -> FakeAgent:
     """Удобная фабрика (имя сохранено для читаемости тестов)."""
     return FakeAgent(**kwargs)
+
+
+def test_build_state_copies_hunt_misses():
+    agent = make_fake_agent(cycle_count=20)
+    agent._hunt_misses = {"topic": 10}
+
+    state = build_state_from_agent(agent)
+
+    assert state["hunt_misses"] == {"topic": 10}
+    assert state["hunt_misses"] is not agent._hunt_misses
+    agent._hunt_misses["topic"] = 19
+    assert state["hunt_misses"] == {"topic": 10}
+
+
+@pytest.mark.parametrize("misses", [{}, {"new": 0, "current": 20}])
+def test_hunt_misses_round_trip_preserves_neighbor_trails(misses):
+    original = make_fake_agent(cycle_count=20)
+    original._hunt_misses = dict(misses)
+    original._shared_topics = {"shared": 7}
+    state = build_state_from_agent(original)
+
+    restored = make_fake_agent(cycle_count=0)
+    restored._hunt_misses = {"stale": 1}
+    restored._news_reads = {"news": 4}
+    restored._web_browses = {"web": 5}
+    restored._shared_topics = {"stale": 1}
+    apply_state_to_agent(restored, state)
+
+    assert restored._hunt_misses == misses
+    assert restored._hunt_misses is not state["hunt_misses"]
+    assert restored._news_reads == {"news": 4}
+    assert restored._web_browses == {"web": 5}
+    assert restored._shared_topics == {"shared": 7}
+
+
+def test_legacy_checkpoint_clears_existing_hunt_misses():
+    agent = make_fake_agent()
+    agent._hunt_misses = {"stale": 1}
+
+    apply_state_to_agent(agent, {"cycle_count": 2})
+
+    assert agent._hunt_misses == {}
 
 
 # ============================================================

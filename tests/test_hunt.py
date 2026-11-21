@@ -52,8 +52,11 @@ def _make_searcher(result):
 
 def _make_agent(searcher, target="энтелехия", cycle=10):
     agent = _FakeAgent(
+        name="HuntFake",
         web_searcher=searcher,
         cycle_count=cycle,
+        goals=[],
+        active_goal=None,
         knowledge_base={},
         _known_definitions={},
         _hunt_misses={},
@@ -152,6 +155,62 @@ class HuntTrailTests(unittest.TestCase):
         result = agent._act_web_search()
         self.assertNotIn("по следам", result["text"])
         self.assertEqual(agent.mental_models.encounters, [])
+
+
+class HuntRestartTests(unittest.TestCase):
+    """Восстановленный след действует на прежней границе cooldown."""
+
+    def test_restored_cooldown_and_exact_boundary(self):
+        from src.core.checkpoint_serializer import apply_state_to_agent
+
+        searcher = _make_searcher({"found": False, "error": "no_pages"})
+        agent = _make_agent(searcher, cycle=209)
+        apply_state_to_agent(
+            agent, {"cycle_count": 209, "hunt_misses": {"энтелехия": 10}}
+        )
+
+        blocked = agent._act_web_search()
+        self.assertIn("след ещё свеж", blocked["text"])
+        self.assertEqual(searcher.calls, [])
+
+        agent.cycle_count = 210
+        allowed = agent._act_web_search()
+        self.assertIn("ничего", allowed["text"])
+        self.assertEqual(searcher.calls, ["энтелехия"])
+        self.assertEqual(agent._hunt_misses, {"энтелехия": 210})
+
+    def test_restored_success_clears_only_selected_topic(self):
+        from src.core.checkpoint_serializer import apply_state_to_agent
+
+        searcher = _make_searcher(dict(_FOUND_SOUL, title="Энтелехия"))
+        agent = _make_agent(searcher, cycle=210)
+        apply_state_to_agent(
+            agent,
+            {
+                "cycle_count": 210,
+                "hunt_misses": {"энтелехия": 10, "другая тема": 10},
+            },
+        )
+
+        result = agent._act_web_search()
+
+        self.assertIn("нашла в сети", result["text"])
+        self.assertEqual(agent._hunt_misses, {"другая тема": 10})
+        self.assertIn("энтелехия", agent.knowledge_base)
+
+    def test_restored_cooldown_does_not_block_other_topic(self):
+        from src.core.checkpoint_serializer import apply_state_to_agent
+
+        searcher = _make_searcher({"found": False, "error": "no_pages"})
+        agent = _make_agent(searcher, target="новая тема", cycle=209)
+        apply_state_to_agent(
+            agent, {"cycle_count": 209, "hunt_misses": {"энтелехия": 10}}
+        )
+
+        agent._act_web_search()
+
+        self.assertEqual(searcher.calls, ["новая тема"])
+        self.assertEqual(agent._hunt_misses, {"энтелехия": 10, "новая тема": 209})
 
 
 if __name__ == "__main__":

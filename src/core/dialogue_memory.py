@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from src.core.dialogue_capabilities import capabilities_reply
+
 
 _TOPIC_PATTERNS = (
     re.compile(
@@ -216,12 +218,7 @@ def build_known_topic_reply(agent, text) -> Optional[str]:
 
 
 def _capabilities_reply() -> str:
-    return (
-        "Из просьб я умею: рассказать о себе; процитировать сохранённое знание "
-        "о теме; запомнить твоё объяснение в форме «X — это Y»; принять ответ "
-        "на свой вопрос и уточнить непонятную реплику. Если просьба мне "
-        "недоступна, я честно скажу об этом, а не стану выдумывать результат."
-    )
+    return capabilities_reply()
 
 
 def _name_fact_reply(agent, normalized: str) -> Optional[str]:

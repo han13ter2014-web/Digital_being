@@ -235,7 +235,8 @@ def test_ring_restore_skips_malformed_descriptors_and_normalizes_entities():
 
 def test_dispatch_order_covers_complete_canonical_chain():
     """Изменение любого звена порядка дверей должно сломать этот тест."""
-    source = inspect.getsource(AgentRunner._on_user_message)
+    # Тонкий journal wrapper не является частью canonical dispatch chain.
+    source = inspect.getsource(AgentRunner._on_user_message_impl)
     anchors = [
         "act = classify_user_text(",
         "observe_user_message(",

@@ -36,6 +36,7 @@ import math
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from src.core.event_bus import Events
 from src.ui import diary_view, graph_view, i18n, life_view, theme
@@ -105,6 +106,7 @@ class MainWindow(ChatWindow):
         self._life_prompt: Optional[Dict[str, Any]] = None
         self._life_deadline: Optional[float] = None
         self._life_tick_job = None
+        self._state_export_requests: set[str] = set()
 
         self._last_paused: Optional[bool] = None
         self._last_speed_mode: Optional[str] = None
@@ -362,6 +364,7 @@ class MainWindow(ChatWindow):
         try:
             self.bus.subscribe(Events.LIFE_PROMPT, self._on_life_prompt)
             self.bus.subscribe(Events.LIFE_RESULT, self._on_life_result)
+            self.bus.subscribe(Events.STATE_EXPORT_RESULT, self._on_state_export_result)
         except Exception as exc:
             logger.debug("[MainWindow] life subscriptions: %s", exc)
 
@@ -377,6 +380,9 @@ class MainWindow(ChatWindow):
     async def _on_life_result(self, event) -> None:
         data = dict(event.data or {})
         self._incoming_queue.put(("__life_result__", data))
+
+    async def _on_state_export_result(self, event) -> None:
+        self._incoming_queue.put(("__state_export_result__", dict(event.data or {})))
 
     async def _on_agent_web_result(self, event) -> None:
         """Результат web-поиска: карточка источника, а не сырые строки."""
@@ -413,6 +419,8 @@ class MainWindow(ChatWindow):
             self._apply_life_prompt(data)
         elif kind == "__life_result__":
             self._apply_life_result(data)
+        elif kind == "__state_export_result__":
+            self._apply_state_export_result(data)
         elif kind == "__web_card__":
             self._render_web_card(data)
         else:
@@ -801,7 +809,9 @@ class MainWindow(ChatWindow):
                 )
             if self._now_hardware is not None:
                 self._now_hardware.configure(
-                    text=self._rows_text(life_view.hardware_rows(snap, self._language))
+                    text=self._rows_text(
+                        life_view.hardware_summary_rows(snap, self._language)
+                    )
                 )
             if self._now_hormonal is not None:
                 self._now_hormonal.configure(
@@ -3574,12 +3584,32 @@ class MainWindow(ChatWindow):
             wraplength=850,
         ).pack(fill=tk.X, padx=theme.SPACING["md"], pady=(0, 8))
 
-        body = tk.Frame(page, bg=theme.BG_DEEP)
-        body.pack(fill=tk.BOTH, expand=True, padx=theme.SPACING["md"])
-        body.columnconfigure(0, weight=0, minsize=280)
-        body.columnconfigure(1, weight=1)
-        left = tk.Frame(body, bg=theme.BG_DEEP)
-        right = tk.Frame(body, bg=theme.BG_DEEP)
+        body = tk.Canvas(page, bg=theme.BG_DEEP, highlightthickness=0, bd=0)
+        self._contacts_canvas = body
+        body_scroll = tk.Scrollbar(page, orient=tk.VERTICAL, command=body.yview)
+        body.configure(yscrollcommand=body_scroll.set)
+        body.pack(
+            side=tk.LEFT,
+            fill=tk.BOTH,
+            expand=True,
+            padx=(theme.SPACING["md"], 0),
+        )
+        body_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, theme.SPACING["md"]))
+        content = tk.Frame(body, bg=theme.BG_DEEP)
+        self._contacts_inner = content
+        content_window = body.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _event: body.configure(scrollregion=body.bbox("all")),
+        )
+        body.bind(
+            "<Configure>",
+            lambda event: body.itemconfigure(content_window, width=event.width),
+        )
+        content.columnconfigure(0, weight=0, minsize=280)
+        content.columnconfigure(1, weight=1)
+        left = tk.Frame(content, bg=theme.BG_DEEP)
+        right = tk.Frame(content, bg=theme.BG_DEEP)
         left.grid(row=0, column=0, sticky="new", padx=(0, 5))
         right.grid(row=0, column=1, sticky="new", padx=(5, 0))
 
@@ -3808,6 +3838,24 @@ class MainWindow(ChatWindow):
         add_action(auto_actions, "pause", "Пауза")
         add_action(auto_actions_secondary, "resume", "Продолжить")
         add_action(auto_actions_secondary, "manual", "Ручное вмешательство")
+
+        def scroll_contacts(event):
+            delta = -1 if getattr(event, "num", None) == 4 else 1
+            if hasattr(event, "delta"):
+                delta = -1 if event.delta > 0 else 1
+            body.yview_scroll(delta, "units")
+            return "break"
+
+        def bind_contacts_wheel(widget):
+            # Журнал и список сессий сохраняют собственную прокрутку.
+            if isinstance(widget, (tk.Listbox, tk.Text)):
+                return
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequence, scroll_contacts)
+            for child in widget.winfo_children():
+                bind_contacts_wheel(child)
+
+        bind_contacts_wheel(body)
         return page
 
     def _build_page_access(self, parent):
@@ -4433,6 +4481,7 @@ class MainWindow(ChatWindow):
 
         button(left, "⏭ Шаг", self._action_step)
         button(left, "Сохранить", self._action_save, padx=8)
+        button(left, "Экспорт состояния", self._action_export_state, padx=8)
 
         button(right, "Выход", self._action_quit, fg=theme.MUTED, padx=8)
         separator(right)
@@ -4495,6 +4544,45 @@ class MainWindow(ChatWindow):
     def _action_save(self) -> None:
         self._publish(Events.SAVE_REQUESTED, {})
         self._append_system(self._t("Прошу сохранить состояние."))
+
+    def _action_export_state(self) -> None:
+        from tkinter import filedialog
+
+        destination = filedialog.asksaveasfilename(
+            title=self._t("Экспорт состояния"),
+            defaultextension=".zip",
+            filetypes=[(self._t("ZIP-архив"), "*.zip")],
+            initialfile="digital-being-state.zip",
+        )
+        if not destination:
+            return
+        request_id = uuid4().hex
+        self._state_export_requests.add(request_id)
+        self._publish(
+            Events.STATE_EXPORT_REQUESTED,
+            {"request_id": request_id, "destination": destination},
+        )
+        self._append_system(self._t("Прошу подготовить sanitized ZIP журнала."))
+
+    def _apply_state_export_result(self, data: Dict[str, Any]) -> None:
+        from tkinter import messagebox
+
+        request_id = str(data.get("request_id") or "")
+        if request_id not in self._state_export_requests:
+            return
+        self._state_export_requests.discard(request_id)
+        if data.get("ok") is True:
+            messagebox.showinfo(
+                self._t("Экспорт состояния"),
+                self._t("ZIP сохранён:\n{path}").format(path=data.get("path") or ""),
+            )
+        else:
+            messagebox.showerror(
+                self._t("Экспорт состояния"),
+                self._t("Не удалось экспортировать журнал: {error}").format(
+                    error=data.get("message") or self._t("неизвестная ошибка")
+                ),
+            )
 
     def _action_wake(self) -> None:
         self._publish(Events.LIFE_WAKE, {})

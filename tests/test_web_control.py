@@ -502,6 +502,7 @@ def test_standalone_is_honest_and_never_accepts_mutations():
         for path, body in (
             ("/api/dialogue", {"text": "не доставится"}),
             ("/api/control/save", {}),
+            ("/api/state-export", {}),
             ("/api/control/life/wake", {}),
             ("/api/access", {"key": "network", "state": "off"}),
             ("/api/tutor", {"action": "exercise"}),
@@ -818,3 +819,139 @@ def test_tutor_language_selects_en_command_and_rejects_unknown_language(
     status, response = _post(port, "/api/tutor", {"action": "solve", "language": "fr"})
     assert status == 400 and response["status"] == "rejected"
     assert bus.published == before
+
+
+def test_state_export_request_result_and_registered_download(
+    controlled_dashboard, tmp_path
+):
+    _, port, state, bus = controlled_dashboard
+
+    status, accepted = _post(port, "/api/state-export", {})
+    assert status == 202
+    request_id = accepted["request_id"]
+    assert bus.published == [
+        (Events.STATE_EXPORT_REQUESTED, {"request_id": request_id}, "web")
+    ]
+    pending = _get(port, f"/api/state-export?request_id={request_id}")
+    assert pending == {"status": "pending", "request_id": request_id}
+
+    archive = tmp_path / "registered.zip"
+    archive.write_bytes(b"zip-evidence")
+    state.push_event(
+        "state_export_result",
+        {
+            "request_id": request_id,
+            "ok": True,
+            "artifact_id": "art_registered",
+            "path": str(archive),
+            "counts": {"observations": 1},
+        },
+    )
+    completed = _get(port, f"/api/state-export?request_id={request_id}")
+    assert completed["status"] == "completed"
+    assert completed["ok"] is True
+    assert completed["counts"] == {"observations": 1}
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/state-export/art_registered/download",
+        timeout=3,
+    ) as response:
+        assert response.status == 200
+        assert response.read() == b"zip-evidence"
+        assert "attachment" in response.headers["Content-Disposition"]
+
+    with pytest.raises(urllib.error.HTTPError) as missing:
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/state-export/arbitrary/download", timeout=3
+        )
+    assert missing.value.code == 404
+
+
+def test_state_export_control_is_present_without_optimistic_success(
+    controlled_dashboard,
+):
+    _, port, _, _ = controlled_dashboard
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+        body = response.read().decode("utf-8")
+    assert 'id="state-export-button"' in body
+    assert "postJSON('/api/state-export'" in body
+    assert "result.ok!==true" in body
+    assert "Экспорт выполнен успешно" not in body
+
+
+@pytest.mark.asyncio
+async def test_http_state_export_reaches_runner_and_downloads_real_zip(
+    tmp_path, monkeypatch
+):
+    """HTTP → EventBus → Runner/SQLite → Runtime → результат и ZIP."""
+    from types import SimpleNamespace
+    from uuid import uuid4
+    import zipfile
+
+    from main import Runtime
+    from src.core.agent_runner import AgentRunner
+    from src.core.emotional_state import EmotionalState
+    from src.memory.life_database import LifeDatabase
+
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path / "sandbox"))
+    life_id = str(uuid4())
+    database = LifeDatabase(tmp_path / "lives" / life_id / "life.sqlite3", life_id)
+    agent = SimpleNamespace(
+        name="WebStateExport",
+        cycle_count=7,
+        energy=100.0,
+        emotional_state=EmotionalState(),
+        life_guard=SimpleNamespace(database=database),
+    )
+    bus = EventBus()
+    runner = AgentRunner(agent, bus, watchdog=SimpleNamespace(get_status=lambda: {}))
+    monkeypatch.setattr(
+        "src.ui.life_snapshot.build_life_snapshot",
+        lambda current, current_runner: {
+            "life": {
+                "cycle": current.cycle_count,
+                "energy": current.energy,
+                "speed_mode": "live",
+            }
+        },
+    )
+    port = _free_port()
+    dashboard = WebDashboard(host="127.0.0.1", port=port, bus=bus)
+    runtime = Runtime(agent, bus, runner, dashboard=dashboard)
+    runtime._subscribe_dashboard()
+    dashboard.start(in_thread=True)
+    try:
+        assert _wait_for_url(f"http://127.0.0.1:{port}/health")
+        status, accepted = _post(port, "/api/state-export", {})
+        assert status == 202
+        request_id = accepted["request_id"]
+        await bus.start()
+        bus.attach_loop(asyncio.get_running_loop())
+        bus.drain_pre_start()
+        for _ in range(100):
+            await bus.dispatch_once()
+            if dashboard.state.state_export_result(request_id) is not None:
+                break
+            await asyncio.sleep(0.02)
+        await bus.dispatch_once()
+
+        completed = _get(port, f"/api/state-export?request_id={request_id}")
+        assert completed["status"] == "completed"
+        assert completed["ok"] is True
+        assert completed["counts"]["observations"] == 1
+        artifact_id = completed["artifact_id"]
+        assert database.get_artifact(artifact_id)["kind"] == "state_observation_export"
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/state-export/{artifact_id}/download",
+            timeout=3,
+        ) as response:
+            payload = response.read()
+        downloaded = tmp_path / "downloaded.zip"
+        downloaded.write_bytes(payload)
+        with zipfile.ZipFile(downloaded) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["life_id"] == life_id
+            assert manifest["fresh_snapshot"] is True
+            assert manifest["counts"]["observations"] == 1
+            assert archive.read("observations.jsonl")
+    finally:
+        dashboard.stop()

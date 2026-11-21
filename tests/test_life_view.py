@@ -250,6 +250,48 @@ def test_pending_note_only_when_something_is_unfinished():
     assert "Не завершено" in view.pending_effector_note(snap)
 
 
+def test_now_hardware_summary_hides_diagnostic_noise_but_keeps_full_rows():
+    snap = _snapshot(
+        hardware={
+            "initialized": True,
+            "observation": {
+                "channels": {
+                    "host_cpu": {
+                        "status": "available",
+                        "value": 11.0,
+                        "unit": "percent",
+                    },
+                    "process_cpu": {"status": "unavailable", "value": None},
+                    "data_storage": {
+                        "status": "available",
+                        "value": 0.068,
+                        "unit": "free_ratio",
+                    },
+                }
+            },
+            "domain_experience": {
+                "physical": {
+                    "latest": {"risk": 0.22, "experienced": 0.22},
+                    "adaptation": 0.0,
+                    "confidence": 1.0,
+                }
+            },
+        }
+    )
+
+    summary = dict(view.hardware_summary_rows(snap))
+
+    assert summary["CPU среды"] == "11.0%"
+    assert summary["Свободное место data"] == "6.8%"
+    assert "CPU процесса" not in summary
+    assert "Привыкание · Физический опыт" not in summary
+    assert len(summary) <= 7
+
+    detailed = dict(view.hardware_rows(snap))
+    assert detailed["CPU процесса"] == "недоступно"
+    assert "Привыкание · Физический опыт" in detailed
+
+
 def test_formatters_localize_labels_but_keep_user_content():
     snap = _snapshot(now={"activity": {"action": "explore", "target": "память"}})
 

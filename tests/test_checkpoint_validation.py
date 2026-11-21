@@ -365,6 +365,62 @@ def test_unknown_activity_criterion_still_rejected():
         validate_checkpoint_state(state)
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"hunt_misses": None},
+        {"hunt_misses": []},
+        {"hunt_misses": {1: 1}},
+        {"hunt_misses": {"": 1}},
+        {"hunt_misses": {"topic": True}},
+        {"hunt_misses": {"topic": 1.0}},
+        {"hunt_misses": {"topic": "1"}},
+        {"hunt_misses": {"topic": -1}},
+        {"cycle_count": 5, "hunt_misses": {"topic": 6}},
+    ],
+)
+def test_invalid_hunt_misses_are_rejected_before_restore(state):
+    incoming = deepcopy(state)
+    with pytest.raises(ValueError, match="hunt_misses"):
+        validate_checkpoint_state(state)
+    assert state == incoming
+
+
+def test_hunt_misses_validation_accepts_legacy_empty_and_zero_cycles():
+    state = {"cycle_count": 5, "hunt_misses": {"new": 0, "current": 5}}
+    before = deepcopy(state)
+    assert validate_checkpoint_state(state) is None
+    assert validate_checkpoint_state({}) is None
+    assert state == before
+
+
+def test_invalid_hunt_misses_leave_agent_and_nested_objects_unchanged():
+    agent = _agent()
+    agent._hunt_misses = {"old": 1}
+    original_misses = agent._hunt_misses
+    original_kb = agent.knowledge_base
+    before = deepcopy(build_state_from_agent(agent))
+    before.pop("saved_at")
+    state = {
+        "energy": 10,
+        "cycle_count": 5,
+        "knowledge_base": {"replacement": "new"},
+        "hunt_misses": {"new": 6},
+    }
+    incoming = deepcopy(state)
+
+    with pytest.raises(ValueError, match="hunt_misses"):
+        apply_state_to_agent(agent, state)
+
+    after = build_state_from_agent(agent)
+    after.pop("saved_at")
+    assert after == before
+    assert agent._hunt_misses is original_misses
+    assert agent._hunt_misses == {"old": 1}
+    assert agent.knowledge_base is original_kb
+    assert state == incoming
+
+
 def _agent():
     node = ConceptNode("original")
     model = SimpleNamespace(

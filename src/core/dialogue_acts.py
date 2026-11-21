@@ -23,6 +23,11 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from src.core.dialogue_capabilities import (
+    DRAW_REQUEST_MARKERS,
+    MUSIC_REQUEST_MARKERS,
+    SING_REQUEST_MARKERS,
+)
 from src.core.human_affect import (
     extract_learned_human_affect,
     extract_static_human_affect,
@@ -224,25 +229,36 @@ _IDENTITY_CHECK_RE = re.compile(
 )
 
 
-# Просьбы совершить действие («нарисуй кота», «спой», «Опиши свой
-# день») сущность выполнить не может: нет тела, голоса и холста.
-# Живой прогон 2026-11-01: «Опиши свой день.» уходил в изучение
-# концепта («Не нашел файл для 'Опиши свой день.'») — выдумка вместо
-# честного отказа. Проверяются после вопросов о себе: «опиши, что ты
-# изучаешь» — вопрос о себе, а не просьба. Слова-действия, которые
-# сущность УМЕЕТ (писать код и файлы, предлагать имена, цели, планы),
-# в таблицу не входят, а guard отсекает просьбы к реальным умениям:
-# честный «не умею» там был бы ложью. Границы слов обязательны:
-# «спой» не должен ловить «спойлер». Фразы сравниваются после
+# Просьба о действии получает ответ о реальной способности, но не обходит
+# арбитр и не запускает действие из диалога. Проверка идёт после вопросов
+# о себе: «опиши, что ты изучаешь» — вопрос о себе, а не отдельная просьба.
+# Guard сохраняет прежний маршрут для имён, целей и планов. Границы слов
+# обязательны: «спой» не должен ловить «спойлер». Фразы сравниваются после
 # замены «ё»→«е», чтобы ловить оба написания.
 _REQUEST_GUARD_RE = re.compile(
     r"\b(имя|имени|ник|название|цель|цели|план[аы]?)\b",
     re.IGNORECASE,
 )
 
-_REQUEST_UNACHIEVABLE_RE = re.compile(
-    r"\b(нарисуй|спойте|спой|спляши|станцуй|потанцуй|танцуй|"
-    r"изобрази|сфотографируй|сфоткай|придумай)\b",
+_REQUEST_ACTION_MARKERS = tuple(
+    sorted(
+        (
+            *DRAW_REQUEST_MARKERS,
+            *MUSIC_REQUEST_MARKERS,
+            *SING_REQUEST_MARKERS,
+            "спляши",
+            "станцуй",
+            "потанцуй",
+            "танцуй",
+            "сфотографируй",
+            "сфоткай",
+            "придумай",
+        ),
+        key=lambda marker: (-len(marker), marker),
+    )
+)
+_REQUEST_ACTION_RE = re.compile(
+    r"\b(" + "|".join(re.escape(marker) for marker in _REQUEST_ACTION_MARKERS) + r")\b",
     re.IGNORECASE,
 )
 
@@ -418,7 +434,7 @@ def classify_user_text(
     if not _REQUEST_GUARD_RE.search(normalized):
         folded = normalized.replace("ё", "е")
         speakable = " ".join(folded.replace(",", " ").split())
-        match = _REQUEST_UNACHIEVABLE_RE.search(speakable) or _REQUEST_PHRASE_RE.search(
+        match = _REQUEST_ACTION_RE.search(speakable) or _REQUEST_PHRASE_RE.search(
             speakable
         )
         if match is not None:
@@ -500,9 +516,22 @@ _QUESTION_START_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Вопрос «да/нет» может обходиться без вопросительного слова:
+# «Тебе нравится музыка?», «Можешь ответить?». Список ограничен явными
+# обращениями и формами второго лица, чтобы «Думаю, что да?» и «не знаю?»
+# по-прежнему не глушили содержательный ответ на вопрос сущности.
+_YES_NO_QUESTION_START_RE = re.compile(
+    r"^(?:а|и|ну)?\s*"
+    r"(?:ты|тебе|тебя|тобой|вы|вам|вас|вами|"
+    r"можешь|можете|хочешь|хотите|умеешь|умеете|"
+    r"знаешь|знаете|помнишь|помните|чувствуешь|чувствуете|"
+    r"[а-яё]+(?:ешь|ёшь|ете|ёте)|нравится|есть\s+ли)\b",
+    re.IGNORECASE,
+)
+
 
 def is_question_text(text) -> bool:
-    """True, если реплика целиком — вопрос (вопросительное слово + «?»).
+    """True, если реплика целиком — вопрос (вопросительная форма + «?»).
 
     Вопрос человека не должен
     закрывать висящий вопрос сущности как «ответ» — иначе «Что тебе
@@ -513,7 +542,10 @@ def is_question_text(text) -> bool:
     normalized = " ".join(str(text or "").strip().split())
     if not normalized.endswith("?"):
         return False
-    return _QUESTION_START_RE.search(normalized) is not None
+    return (
+        _QUESTION_START_RE.search(normalized) is not None
+        or _YES_NO_QUESTION_START_RE.search(normalized) is not None
+    )
 
 
 # «Собеседник-5»: формула «X — это Y» — способ человека объяснить тему

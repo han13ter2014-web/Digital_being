@@ -203,6 +203,37 @@ async def test_question_with_pending_does_not_close_question():
 
 
 @pytest.mark.asyncio
+async def test_yes_no_question_does_not_close_open_question():
+    """Живая регрессия: вопрос о музыке не ответ на вопрос о ностальгии."""
+    agent, runner, bus = _make_runner()
+    result = agent.ask_user("что думаешь о ностальгии?", source="chat")
+    assert result["status"] == "queued"
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Тебе нравится музыка?"})
+    )
+
+    assert agent.has_open_questions()
+    texts = _reply_texts(bus)
+    assert not any("Ответ записан к вопросу" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_second_person_action_question_does_not_close_open_question():
+    """Живая регрессия: просьба-вопрос не ответ на вопрос о черепахах."""
+    agent, runner, bus = _make_runner()
+    result = agent.ask_user("что думаешь о черепахах?", source="chat")
+    assert result["status"] == "queued"
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Нарисуешь картину?"}))
+
+    assert agent.has_open_questions()
+    texts = _reply_texts(bus)
+    assert not any("Ответ записан к вопросу" in t for t in texts)
+    assert any("умею рисовать" in t for t in texts)
+
+
+@pytest.mark.asyncio
 async def test_about_self_question_with_pending_gets_honest_reply():
     """Вопрос о сущности при висящем вопросе — честный
     ответ о себе; висящий вопрос не перебивает разговор."""
@@ -409,13 +440,13 @@ async def test_social_greeting_gets_greeting_reply():
 
 @pytest.mark.asyncio
 async def test_social_state_question_gets_state_reply():
-    """Социальный отклик: «Как дела?» — каркас состояния без выдуманных деталей."""
+    """Социальный отклик описывает фактическое состояние тела."""
     agent, runner, bus = _make_runner()
 
     await runner._on_user_message(SimpleNamespace(data={"text": "Как дела?"}))
 
     texts = _reply_texts(bus)
-    assert any("всё ровно" in t for t in texts)
+    assert any("Моя энергия сейчас" in t for t in texts)
     assert not any("Спасибо, что ты рядом" in t for t in texts)
 
 
@@ -569,8 +600,96 @@ async def test_social_door_respects_naming_phase_priority(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_draw_request_describes_real_capability_without_forcing_action():
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Нарисуешь картину?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "умею рисовать" in reply
+    assert "собственном цикле" in reply
+    assert "холста" not in reply
+    assert agent._last_action_outcome is None
+    queue = getattr(runner, "_pending_user_messages", None)
+    assert queue is None or queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_sing_request_distinguishes_missing_voice_from_music_composition():
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Споешь песню?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "Петь человеческим голосом я не умею" in reply
+    assert "сочинять мелодии" in reply
+    assert agent._last_action_outcome is None
+
+
+@pytest.mark.asyncio
+async def test_music_request_describes_real_capability_without_forcing_action():
+    agent, runner, bus = _make_runner()
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Сочинишь мелодию?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "умею сочинять мелодии" in reply
+    assert "собственном цикле" in reply
+    assert agent._last_action_outcome is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "context",
+    [
+        "dialogue_learning: повторяемая фраза",
+        "affect_learning: радость",
+        "dialogue_strategy_preference:set:unknown_listen",
+    ],
+)
+async def test_new_question_bypasses_pending_learning_protocols(context):
+    """Новый вопрос не становится ответом на старое учебное уточнение."""
+    agent, runner, bus = _make_runner()
+    ui = agent.user_interaction
+    ui.ask_user("Подтверди прежний протокол.", context=context, cycle=1)
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "Что ты умеешь из просьб?"})
+    )
+
+    assert ui.get_pending_question() is not None
+    replies = _replies(bus)
+    assert replies[-1]["context"] == "persistent_fact"
+    assert "Из просьб я умею:" in replies[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_social_state_reply_uses_current_body_and_last_real_action():
+    agent, runner, bus = _make_runner()
+    agent.energy = 73.25
+    agent._last_action_outcome = SimpleNamespace(action="draw")
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Как дела?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "энергия сейчас 73.25" in reply
+    assert "Последнее завершённое действие: рисование" in reply
+    assert "Со мной всё ровно" not in reply
+
+
+def test_about_self_does_not_present_exploration_history_as_current_activity():
+    agent, runner, _bus = _make_runner()
+    agent._exploration_history = ["уже завершённая тема"]
+
+    reply = runner._format_about_self_reply()
+
+    assert "последняя исследованная тема" in reply
+    assert "сейчас разбираюсь" not in reply
+
+
+@pytest.mark.asyncio
 async def test_request_gets_honest_refusal_not_learning_material():
-    """Границы просьб: «Нарисуй кота» — честное «не умею», не концепт и не выдумка."""
+    """Просьба о рисовании описывает реальное умение, не создаёт концепт."""
     agent, runner, bus = _make_runner()
     ui = agent.user_interaction
 
@@ -582,8 +701,8 @@ async def test_request_gets_honest_refusal_not_learning_material():
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
     texts = _reply_texts(bus)
-    reply = next(t for t in texts if "не умею" in t)
-    assert "тела" in reply
+    reply = next(t for t in texts if "умею рисовать" in t)
+    assert "собственном цикле" in reply
     assert "Не нашел файл" not in reply
 
 
@@ -627,7 +746,7 @@ async def test_noise_input_gets_honest_reply_not_learning_material():
     [
         ("Что делаешь?", "Меня зовут"),
         ("Чем занят?", "Меня зовут"),
-        ("Как дела?", "Со мной всё ровно"),
+        ("Как дела?", "Моя энергия сейчас"),
     ],
 )
 async def test_ask_about_self_or_social_never_becomes_open_research(

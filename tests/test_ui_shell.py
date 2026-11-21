@@ -245,6 +245,33 @@ def _external_snapshot(
     }
 
 
+def test_contacts_page_scrolls_to_bottom_controls_on_short_window(root):
+    win = _window(root)
+    root.deiconify()
+    root.geometry("1000x650+0+0")
+    win._show_page("contacts")
+    root.update()
+
+    canvas = win._contacts_canvas
+    region = canvas.cget("scrollregion").split()
+    assert len(region) == 4
+    assert float(region[3]) > canvas.winfo_height()
+    assert canvas.bind("<MouseWheel>")
+    assert not win._external_journal.bind("<MouseWheel>")
+    assert not win._external_session_list.bind("<MouseWheel>")
+
+    canvas.yview_moveto(1.0)
+    root.update()
+    bottom_button = _find_button(win._pages["contacts"], "Ручное вмешательство")
+    assert bottom_button.winfo_ismapped()
+    assert bottom_button.winfo_rooty() >= canvas.winfo_rooty()
+    assert (
+        bottom_button.winfo_rooty() + bottom_button.winfo_height()
+        <= canvas.winfo_rooty() + canvas.winfo_height()
+    )
+    root.withdraw()
+
+
 def test_external_buttons_publish_commands_and_only_live_session_ids(root):
     from src.core.event_bus import Events
 
@@ -543,11 +570,10 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     hardware = win._now_hardware.cget("text")
     assert hardware != body
     assert "CPU среды: 95.0%" in hardware
-    assert "CPU процесса: недоступно" in hardware
-    assert "Свободное место data: устарело" in hardware
-    assert "риск 95.0% · переживается 85.0%" in hardware
-    assert "привычно, но риск сохраняется" in hardware
-    assert "Личная норма: недостаточно опыта" in hardware
+    assert "CPU процесса" not in hardware
+    assert "Свободное место data" not in hardware  # устаревшее значение скрыто
+    assert "риск" not in hardware
+    assert "Личная норма" not in hardware
 
     win._set_language("English")
     root.update()
@@ -557,10 +583,10 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     assert "Glucose: 121.20" in win._now_body.cget("text")
     hardware = win._now_hardware.cget("text")
     assert "Host CPU: 95.0%" in hardware
-    assert "Process CPU: unavailable" in hardware
-    assert "Free data storage: stale" in hardware
-    assert "familiar, but the risk remains" in hardware
-    assert "Personal baseline: insufficient experience" in hardware
+    assert "Process CPU" not in hardware
+    assert "Free data storage" not in hardware
+    assert "risk" not in hardware
+    assert "Personal baseline" not in hardware
 
     win._set_language("中文")
     root.update()
@@ -568,8 +594,8 @@ def test_now_screen_renders_full_emotion_palette_and_body(root):
     assert win._now_emotion_values["joy"].cget("text") == "0.64"
     hardware = win._now_hardware.cget("text")
     assert "主机 CPU: 95.0%" in hardware
-    assert "进程 CPU: 不可用" in hardware
-    assert "已经习惯，但风险依然存在" in hardware
+    assert "进程 CPU" not in hardware
+    assert "风险" not in hardware
 
 
 def test_now_screen_renders_separate_hormonal_projection_in_three_languages(root):
@@ -1613,3 +1639,50 @@ def test_graph_drag_pans_without_selecting(root):
     assert win._graph_offset != (0.0, 0.0)
     # Панорама — не выбор: карточка узла не открылась.
     assert win._graph_detail.cget("text") == detail_before
+
+
+def test_state_export_uses_selected_destination_and_shows_actual_result(monkeypatch):
+    from tkinter import filedialog, messagebox
+
+    from src.core.event_bus import Events
+
+    monkeypatch.setattr(
+        filedialog, "asksaveasfilename", lambda **_kwargs: "C:/chosen/state.zip"
+    )
+    messages = []
+    monkeypatch.setattr(
+        messagebox, "showinfo", lambda title, text: messages.append((title, text))
+    )
+    monkeypatch.setattr(
+        messagebox, "showerror", lambda title, text: messages.append((title, text))
+    )
+    win = MainWindow.__new__(MainWindow)
+    win._language = "ru"
+    win._state_export_requests = set()
+    published = []
+    win._publish = lambda name, data: published.append((name, data))
+    win._append_system = lambda _text: None
+
+    win._action_export_state()
+    assert len(published) == 1
+    name, payload = published[0]
+    assert name == Events.STATE_EXPORT_REQUESTED
+    assert payload["destination"] == "C:/chosen/state.zip"
+    assert payload["request_id"] in win._state_export_requests
+
+    win._handle_incoming(
+        "__state_export_result__",
+        {"request_id": "foreign-request", "ok": True, "path": "ignored.zip"},
+    )
+    assert messages == []
+    win._handle_incoming(
+        "__state_export_result__",
+        {
+            "request_id": payload["request_id"],
+            "ok": True,
+            "path": "C:/chosen/state.zip",
+        },
+    )
+    assert len(messages) == 1
+    assert "C:/chosen/state.zip" in messages[0][1]
+    assert win._state_export_requests == set()

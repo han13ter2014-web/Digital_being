@@ -113,9 +113,11 @@
         "fallback_policy": "none",
         "reply_context": "social_reply",
         "required_text": [
+          "моя энергия сейчас"
+        ],
+        "forbidden_text": [
           "всё ровно"
         ],
-        "forbidden_text": [],
         "pending_after": false,
         "explicit_switch": "none",
         "profile_isolation": "single_profile",

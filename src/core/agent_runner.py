@@ -79,6 +79,7 @@ from src.core.dialogue_acts import (
     is_question_text,
     social_reply_kind,
 )
+from src.core.dialogue_capabilities import request_reply
 from src.core.dialogue_learning import DialogueLearning
 from src.core.dialogue_strategies import (
     build_preference_proposal,
@@ -90,6 +91,21 @@ from src.core.dialogue_strategies import (
     preference_from_context,
 )
 from src.core.response_experience import parse_generic_feedback
+from src.core.response_experience_journal import (
+    disabled_journal_status,
+    open_response_experience_journal,
+)
+from src.core.state_observation import (
+    GAP_NAME,
+    OBSERVATION_INTERVAL_CYCLES,
+    OBSERVATION_NAME,
+    EPISODE_NAME,
+    emotion_episode_records,
+    export_state_observations,
+    metric_record,
+    observation_from_snapshot,
+    utc_now,
+)
 from src.core.chinese_dialogue import (
     build_chinese_realization,
     chinese_feedback_realization,
@@ -357,6 +373,27 @@ class AgentRunner:
         self._dialogue_journal_backend: Optional[str] = None
         self._dialogue_journal_error: Optional[str] = None
         self._dialogue_journal_lock = threading.RLock()
+        self._state_observation_backend = (
+            "sqlite"
+            if getattr(getattr(agent, "life_guard", None), "database", None) is not None
+            else "unavailable"
+        )
+        self._state_observation_last_cycle: Optional[int] = None
+        self._state_observation_last_error: Optional[str] = None
+        self._state_observation_last_error_type: Optional[str] = None
+        self._state_observation_observations = 0
+        self._state_observation_episodes = 0
+        self._state_observation_dropped_events = 0
+        self._state_observation_gap_pending = False
+        self._response_experience_journal = open_response_experience_journal(agent)
+        self._response_journal_turn_id: Optional[str] = None
+        experience = getattr(agent, "response_experience", None)
+        if experience is not None:
+            experience.set_transition_observer(
+                self._observe_response_transition
+                if self._response_experience_journal is not None
+                else None
+            )
         self._stimulus_mode = "quiet"
         self._last_user_message_at = 0  # время последнего сообщения пользователя
         # Живые контроллеры не сериализуются: restart никогда не возобновляет API.
@@ -421,11 +458,27 @@ class AgentRunner:
         self.bus.subscribe(Events.RESUME_REQUESTED, self._on_resume)
         self.bus.subscribe(Events.SHUTDOWN_REQUESTED, self._on_shutdown)
         self.bus.subscribe(Events.SAVE_REQUESTED, self._on_save)
+        self.bus.subscribe(Events.STATE_EXPORT_REQUESTED, self._on_state_export)
         # Скорость жизни: окно публикует событие, раннер меняет темп.
         self.bus.subscribe(Events.SPEED_CHANGED, self._on_speed_changed)
         self.bus.subscribe(Events.STEP_REQUESTED, self._on_step)
 
     async def _on_user_message(self, event) -> None:
+        """Назначить turn локальному входу, не меняя его обработку."""
+        # Некоторые narrow unit-tests собирают Runner через __new__ без __init__.
+        journal = getattr(self, "_response_experience_journal", None)
+        text = (event.data or {}).get("text", "")
+        if journal is None or not text:
+            await self._on_user_message_impl(event)
+            return
+        previous_turn = self._response_journal_turn_id
+        self._response_journal_turn_id = journal.begin_turn()
+        try:
+            await self._on_user_message_impl(event)
+        finally:
+            self._response_journal_turn_id = previous_turn
+
+    async def _on_user_message_impl(self, event) -> None:
         """Пользователь отправил сообщение. Обрабатываем его в следующем тике.
 
         Очередь сообщений создаётся лениво при первом вызове, чтобы
@@ -576,11 +629,14 @@ class AgentRunner:
 
         # === «Собеседник-7»: обучающий ответ — до всех дверей ===
         # Ответ на вопрос-уточнение («1», «вопрос», «не учи») не должен
-        # проглатываться дверями шума/социальной речи: «2» — без букв,
-        # «приветствие» — содержит социальный маркер «привет».
+        # проглатываться дверями шума/социальной речи. Но новый вопрос
+        # человека — не решение старого протокола: он идёт по обычному
+        # маршруту, а ожидающее уточнение остаётся открытым.
+        answer_to_pending = not is_question_text(text)
         if (
             learning is not None
             and pending is not None
+            and answer_to_pending
             and DialogueLearning.is_proposal_context(pending.get("context"))
         ):
             feedback = None
@@ -602,6 +658,7 @@ class AgentRunner:
         if (
             learning is not None
             and pending is not None
+            and answer_to_pending
             and DialogueLearning.is_affect_proposal_context(pending.get("context"))
         ):
             if strategy_memory is not None:
@@ -611,6 +668,7 @@ class AgentRunner:
         if (
             learning is not None
             and pending is not None
+            and answer_to_pending
             and is_preference_context(pending.get("context"))
         ):
             if strategy_memory is not None:
@@ -927,15 +985,15 @@ class AgentRunner:
                 )
             return
 
-        # Просьбы о невозможном («нарисуй», «спой», «Опиши свой день») —
-        # честный отказ вместо выдумки или изучения концепта.
+        # Просьба получает честное описание способности. Творческое действие
+        # не запускается здесь: выбор остаётся за арбитром собственного цикла.
         if act.kind == ACT_REQUEST:
             if interaction is not None:
                 interaction.receive_user_message(text, cycle=self.agent.cycle_count)
             user_model = getattr(self.agent, "user_model", None)
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
-            response = self._format_request_refusal()
+            response = self._format_request_refusal(act.matched_marker)
             if response:
                 await self._reply_to_user(
                     response, context="request_refusal", source="dialogue_acts"
@@ -1597,6 +1655,34 @@ class AgentRunner:
             chinese_realization=realization,
         )
 
+    def _record_response_delivery(self, record: dict) -> None:
+        journal = getattr(self, "_response_experience_journal", None)
+        if journal is None:
+            return
+        journal.record_delivery(
+            self.agent.response_experience,
+            record,
+            cycle=self.agent.cycle_count,
+            turn_id=getattr(self, "_response_journal_turn_id", None),
+        )
+
+    def _observe_response_transition(
+        self, transition_kind: str, record: dict | None, *, cycle: int
+    ) -> None:
+        journal = getattr(self, "_response_experience_journal", None)
+        if journal is None:
+            return
+        if transition_kind == "core_restored":
+            journal.note_core_restore(cycle=cycle)
+            return
+        if record is not None:
+            journal.record_transition(
+                transition_kind,
+                record,
+                cycle=cycle,
+                turn_id=getattr(self, "_response_journal_turn_id", None),
+            )
+
     async def _reply_to_user(
         self,
         text: str,
@@ -1675,7 +1761,10 @@ class AgentRunner:
                 dialogue_affect,
             )
             if plan is not None and isinstance(message_id, str) and message_id:
-                experience.register_delivery(message_id, plan, self.agent.cycle_count)
+                record = experience.register_delivery(
+                    message_id, plan, self.agent.cycle_count
+                )
+                self._record_response_delivery(record)
             return message_id
         if interaction is not None and hasattr(interaction, "send_message"):
             message_id = interaction.send_message(
@@ -1698,7 +1787,10 @@ class AgentRunner:
                 dialogue_affect,
             )
             if plan is not None and isinstance(message_id, str) and message_id:
-                experience.register_delivery(message_id, plan, self.agent.cycle_count)
+                record = experience.register_delivery(
+                    message_id, plan, self.agent.cycle_count
+                )
+                self._record_response_delivery(record)
             return message_id
         await self.bus.publish(
             Events.AGENT_THOUGHT,
@@ -1987,16 +2079,8 @@ class AgentRunner:
             )
         return reply, context
 
-    @staticmethod
-    def _format_social_reply(text, pending) -> str:
-        """Каркас отклика на социальный акт — по типу входа.
-
-        Прежде отклик был один на всё: приветствие, вопрос о состоянии
-        и тепло получали одну и ту же реплику. Теперь каркасов три:
-        приветствие, вопрос о состоянии, прочее социальное. Тон
-        прежний, выдумки нет; при открытом вопросе сущности — прежняя
-        честная заметка о висящем вопросе.
-        """
+    def _format_social_reply(self, text, pending) -> str:
+        """Отклик по типу входа; состояние берётся только из живого Core."""
         topic = AgentRunner._topic_from_pending(pending)
         if topic:
             return (
@@ -2008,8 +2092,35 @@ class AgentRunner:
         if kind == SOCIAL_KIND_GREETING:
             return "Привет. Рада тебя слышать."
         if kind == SOCIAL_KIND_STATE:
-            return "Со мной всё ровно, спасибо. Учусь потихоньку."
+            return self._format_social_state_reply()
         return "Я слышу тебя. Спасибо, что ты рядом."
+
+    def _format_social_state_reply(self) -> str:
+        """Описать наблюдаемое тело и последний исход без оценки «всё ровно»."""
+        parts = []
+        energy = getattr(self.agent, "energy", None)
+        if isinstance(energy, (int, float)) and not isinstance(energy, bool):
+            parts.append(f"Моя энергия сейчас {energy:.2f}.")
+        outcome = getattr(self.agent, "_last_action_outcome", None)
+        action = getattr(outcome, "action", "") if outcome is not None else ""
+        action_names = {
+            "draw": "рисование",
+            "compose_music": "сочинение мелодии",
+            "listen_music": "прослушивание музыки",
+            "create_draft": "работа над черновиком",
+            "explore": "исследование",
+            "reflect": "размышление",
+            "web_search": "поиск в интернете",
+            "read_news": "чтение новостей",
+            "set_own_goal": "постановка собственной цели",
+        }
+        if action in action_names:
+            parts.append(f"Последнее завершённое действие: {action_names[action]}.")
+        if not parts:
+            parts.append(
+                "Я продолжаю свои циклы; завершённых действий пока не записано."
+            )
+        return "Спасибо за вопрос. " + " ".join(parts)
 
     def _handle_repeat_protest(self, pending, interaction) -> str:
         """«Уже отвечал» — вопрос снимается, тема замолкает.
@@ -2034,27 +2145,14 @@ class AgentRunner:
             )
         return "Ты прав — вопрос снимаю и сама к нему больше не вернусь."
 
-    def _format_request_refusal(self) -> str:
-        """Честный отказ на просьбу о невозможном — без выдуманных умений.
-
-        «Собеседник» (верификация 2026-11-01): «Опиши свой день.» и
-        «нарисуй» раньше уходили в изучение концептов («Не нашел файл
-        для…»). Сущность не рисует, не поёт и не танцует — и говорит
-        об этом прямо, предлагая то, что действительно умеет.
-        """
-        return (
-            "Честно: этого я не умею. У меня нет тела, голоса и холста — "
-            "только циклы, память и наши тексты. Могу ответить о себе, "
-            "выучить то, что ты расскажешь, и задать вопрос в ответ."
-        )
+    def _format_request_refusal(self, matched_marker="") -> str:
+        """Сохранённое имя метода; ответ теперь различает реальные способности."""
+        return request_reply(matched_marker)
 
     def _format_about_self_reply(self) -> str:
         """Честный рассказ о себе из read-only Core — без выдумки.
 
-        «Собеседник-5»: на «чем занимаешься?» сущность отвечает только
-        тем, что действительно есть в её состоянии: имя, возраст в
-        циклах, последняя тема исследования, объём опыта, что она помнит
-        о человеке. Ничего из этого не придумывается и не улучшается.
+        История исследования называется историей, а не текущим занятием.
         """
         agent = self.agent
         concepts = getattr(getattr(agent, "mental_models", None), "concepts", None)
@@ -2070,7 +2168,7 @@ class AgentRunner:
         if occupation:
             parts = [
                 f"Меня зовут {agent.name}. Я живу уже {agent.cycle_count} "
-                f"циклов, сейчас разбираюсь с темой «{occupation}»."
+                f"циклов; последняя исследованная тема — «{occupation}»."
             ]
         else:
             parts = [
@@ -2244,6 +2342,36 @@ class AgentRunner:
     async def _on_save(self, event) -> None:
         logger.info(f"[{self.name}] SAVE_REQUESTED")
         self._save_state_safe()
+
+    async def _on_state_export(self, event) -> None:
+        """Выполнить sanitized-экспорт в agent loop и вернуть фактический итог."""
+        data = dict(event.data or {})
+        request_id = str(data.get("request_id") or "")
+        destination = data.get("destination")
+        try:
+            result = self.export_state_observation(
+                destination=destination if isinstance(destination, str) else None,
+                start_cycle=data.get("start_cycle"),
+                end_cycle=data.get("end_cycle"),
+            )
+        except Exception as exc:
+            logger.warning(f"[{self.name}] state observation export failed: {exc}")
+            payload = {
+                "request_id": request_id,
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            }
+        else:
+            payload = {
+                "request_id": request_id,
+                "ok": True,
+                "path": result["path"],
+                "artifact_id": result["artifact_id"],
+                "fresh_snapshot": result["fresh_snapshot"],
+                "counts": result["manifest"]["counts"],
+            }
+        await self.bus.publish(Events.STATE_EXPORT_RESULT, payload, source="core")
 
     async def _on_speed_changed(self, event) -> None:
         """Окно попросило сменить темп жизни."""
@@ -2463,6 +2591,21 @@ class AgentRunner:
         )
 
     async def stop(self) -> None:
+        """Остановить жизнь и гарантированно закрыть optional journal."""
+        try:
+            await self._stop_impl()
+        finally:
+            experience = getattr(self.agent, "response_experience", None)
+            if (
+                experience is not None
+                and experience.transition_observer == self._observe_response_transition
+            ):
+                experience.set_transition_observer(None)
+            journal = self._response_experience_journal
+            if journal is not None:
+                journal.close()
+
+    async def _stop_impl(self) -> None:
         """Обработать принятые сообщения, остановить адаптеры и сохраниться."""
         controllers = [
             *self._external_dialogues.values(),
@@ -2700,6 +2843,7 @@ class AgentRunner:
             # диалог фиксируется после каждого цикла, даже если цикл
             # завершился ошибкой или отменой. Журнал отделён от checkpoint.
             self._save_dialogue_cycle_snapshot()
+            self._save_state_observation()
             # === Watchdog: конец цикла — в любой развилке ===
             self.watchdog.on_cycle_end()
 
@@ -2713,6 +2857,137 @@ class AgentRunner:
         ) >= LR_CONFIG.TRAY_AUTO_SAVE_INTERVAL_SEC:
             self._save_state_safe()
             self._last_auto_save_ts = time.time()
+
+    def _state_observation_status(self) -> dict:
+        """Диагностика writer; getattr нужен узким тестам через ``__new__``."""
+        return {
+            "backend": getattr(self, "_state_observation_backend", "unavailable"),
+            "last_observation_cycle": getattr(
+                self, "_state_observation_last_cycle", None
+            ),
+            "last_error": getattr(self, "_state_observation_last_error", None),
+            "last_error_type": getattr(
+                self, "_state_observation_last_error_type", None
+            ),
+            "observations": getattr(self, "_state_observation_observations", 0),
+            "episodes": getattr(self, "_state_observation_episodes", 0),
+            "dropped_events": getattr(self, "_state_observation_dropped_events", 0),
+        }
+
+    def _save_state_observation(self, *, force: bool = False) -> bool:
+        """Fail-open сохранить sanitized-снимок и retained emotional episodes."""
+        database = getattr(getattr(self.agent, "life_guard", None), "database", None)
+        if database is None:
+            self._state_observation_backend = "unavailable"
+            return False
+        self._state_observation_backend = "sqlite"
+        records = []
+        observation_attempted = False
+        episode_count = 0
+        try:
+            cycle = int(getattr(self.agent, "cycle_count", 0))
+            last_cycle = getattr(self, "_state_observation_last_cycle", None)
+            observation_attempted = bool(
+                force or last_cycle is None or cycle % OBSERVATION_INTERVAL_CYCLES == 0
+            )
+            if observation_attempted:
+                # Локальный import сохраняет существующую границу Core → read-only DTO.
+                from src.ui.life_snapshot import build_life_snapshot
+
+                snapshot = build_life_snapshot(self.agent, self)
+                observation = observation_from_snapshot(snapshot)
+                records.append(
+                    metric_record(
+                        observation,
+                        name=OBSERVATION_NAME,
+                        record_id=f"observation:{cycle}",
+                    )
+                )
+            episodes = emotion_episode_records(
+                getattr(self.agent, "emotional_state", None)
+            )
+            episode_count = len(episodes)
+            records.extend(
+                metric_record(item, name=EPISODE_NAME, record_id=item["record_id"])
+                for item in episodes
+            )
+            if getattr(self, "_state_observation_gap_pending", False):
+                gap_id = f"gap:{cycle}:{time.time_ns()}"
+                records.append(
+                    metric_record(
+                        {
+                            "schema_version": 1,
+                            "observed_at": utc_now(),
+                            "cycle": cycle,
+                            "reason": "writer_recovered",
+                        },
+                        name=GAP_NAME,
+                        record_id=gap_id,
+                    )
+                )
+            if not records:
+                return True
+            database.append_metric_samples(records)
+        except Exception as exc:
+            self._state_observation_dropped_events = getattr(
+                self, "_state_observation_dropped_events", 0
+            ) + max(1, len(records))
+            self._state_observation_gap_pending = True
+            self._state_observation_last_error_type = type(exc).__name__
+            self._state_observation_last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning(f"[{self.name}] state observation writer failed: {exc}")
+            return False
+        if observation_attempted:
+            self._state_observation_last_cycle = cycle
+            self._state_observation_observations = (
+                getattr(self, "_state_observation_observations", 0) + 1
+            )
+        self._state_observation_episodes = (
+            getattr(self, "_state_observation_episodes", 0) + episode_count
+        )
+        self._state_observation_gap_pending = False
+        self._state_observation_last_error = None
+        self._state_observation_last_error_type = None
+        return True
+
+    def export_state_observation(
+        self, destination=None, *, start_cycle=None, end_cycle=None
+    ) -> dict:
+        """Сохранить свежий снимок и экспортировать согласованный SQLite-срез."""
+        database = getattr(getattr(self.agent, "life_guard", None), "database", None)
+        if database is None:
+            raise RuntimeError("Журнал состояния недоступен без managed LifeDatabase")
+        fresh_snapshot = self._save_state_observation(force=True)
+        register = destination is None
+        if register:
+            destination = (
+                database.artifacts_dir
+                / "state_observation"
+                / f"state-observation-{time.time_ns()}.zip"
+            )
+        manifest = export_state_observations(
+            database,
+            destination,
+            start_cycle=start_cycle,
+            end_cycle=end_cycle,
+            fresh_snapshot=fresh_snapshot,
+            writer_status=self._state_observation_status(),
+        )
+        artifact_id = None
+        if register:
+            artifact = database.register_artifact(
+                destination,
+                kind="state_observation_export",
+                metadata={"export_id": manifest["export_id"]},
+                update=False,
+            )
+            artifact_id = artifact["id"]
+        return {
+            "path": str(destination),
+            "artifact_id": artifact_id,
+            "manifest": manifest,
+            "fresh_snapshot": fresh_snapshot,
+        }
 
     def _save_dialogue_cycle_snapshot(self) -> None:
         """Сохранить полный след цикла в managed SQLite или standalone JSONL.
@@ -4955,6 +5230,12 @@ class AgentRunner:
                 "backend": self._dialogue_journal_backend,
                 "last_error": self._dialogue_journal_error,
             },
+            "state_observation_journal": self._state_observation_status(),
+            "response_experience_journal": (
+                self._response_experience_journal.get_status()
+                if self._response_experience_journal is not None
+                else disabled_journal_status()
+            ),
             "social_sessions": {
                 "workers": sum(
                     controller.get_status()["state"]

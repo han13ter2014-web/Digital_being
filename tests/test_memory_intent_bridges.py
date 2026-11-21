@@ -122,6 +122,9 @@ async def test_capabilities_request_gets_enumerated_answer():
     assert reply["context"] == "persistent_fact"
     assert "Из просьб я умею:" in reply["content"]
     assert "запомнить" in reply["content"]
+    assert "рисовать" in reply["content"]
+    assert "сочинять мелодии" in reply["content"]
+    assert "в собственном цикле" in reply["content"]
     assert reply["context"] != "unknown_reply"
 
 
