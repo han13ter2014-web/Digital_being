@@ -1057,6 +1057,170 @@ def test_activity_invalid_board_and_empty_state_do_not_fabricate_cells(root):
     assert win._activity_detail.cget("text") == "Выберите запись слева."
 
 
+def test_activity_list_shows_art_music_guess_and_stable_details(root):
+    """Все каталоги из общего DTO видны в Tk, а не только drafts и tic-tac-toe."""
+    win = _window(root)
+    snapshot = {
+        "activities": {
+            "creative": {
+                "drafts": [
+                    {
+                        "id": "d" * 32,
+                        "theme": "тишина",
+                        "revision": 2,
+                        "status": "active",
+                    }
+                ]
+            },
+            "art": {
+                "works": [
+                    {
+                        "id": "a" * 32,
+                        "theme": "свет",
+                        "revision": 3,
+                        "status": "active",
+                        "palette": "joy",
+                        "sha256": "art-hash",
+                    }
+                ]
+            },
+            "music": {
+                "works": [
+                    {
+                        "id": "b" * 32,
+                        "theme": "дорога",
+                        "revision": 4,
+                        "status": "active",
+                        "mood": "calm",
+                        "sha256": "music-hash",
+                    }
+                ]
+            },
+            "game": {"board": ["."] * 9, "turns": 0, "round": 1, "result": None},
+            "guess_game": {
+                "secret": 73,
+                "low": 51,
+                "high": 100,
+                "attempts": 2,
+                "round": 3,
+                "result": None,
+                "history": [5, 4],
+            },
+        }
+    }
+
+    win._apply_life_data(snapshot)
+    root.update()
+
+    items = list(win._activity_list.get(0, tk.END))
+    assert len(items) == 5
+    assert any("Рисунок" in item and "свет" in item for item in items)
+    assert any("Мелодия" in item and "дорога" in item for item in items)
+    assert any("Угадывание" in item for item in items)
+
+    win._activity_list.selection_set(1)
+    win._on_activity_select()
+    assert "Рисунок" in win._activity_detail.cget("text")
+    assert "Редакция: 3" in win._activity_detail.cget("text")
+    assert win._activity_board.winfo_manager() == ""
+
+    win._apply_life_data(snapshot)
+    root.update()
+    assert win._activity_list.curselection() == (1,)
+
+    win._activity_list.selection_clear(0, tk.END)
+    win._activity_list.selection_set(2)
+    win._on_activity_select()
+    assert "Мелодия" in win._activity_detail.cget("text")
+    assert "Редакция: 4" in win._activity_detail.cget("text")
+
+    win._activity_list.selection_clear(0, tk.END)
+    win._activity_list.selection_set(4)
+    win._on_activity_select()
+    assert "Угадывание" in win._activity_detail.cget("text")
+    assert "Попыток: 2" in win._activity_detail.cget("text")
+    assert "73" not in win._activity_detail.cget("text")
+
+
+def test_empty_proposals_leave_dialog_layout(root):
+    """После решения предложения его контейнер не оставляет мёртвую высоту."""
+    win = _window(root)
+    win._show_page("dialog")
+    root.geometry("900x640")
+    root.deiconify()
+    root.update()
+    empty_text_height = win._text.winfo_height()
+    proposal = {
+        "id": "proposal-1",
+        "status": "pending",
+        "title": "Изменить параметр",
+        "description": "Длинное описание предложения. " * 20,
+        "verification": {"passed": True},
+    }
+
+    win._apply_proposals({"proposals": {"pending": [proposal]}})
+    root.update()
+    assert win._proposal_frame.winfo_manager() == "pack"
+    assert win._proposal_frame.winfo_height() <= 190
+    assert win._text.winfo_height() < empty_text_height
+    assert (
+        win._text.winfo_rooty() + win._text.winfo_height()
+        <= win._proposal_frame.winfo_rooty() + 1
+    )
+
+    win._apply_proposals({"proposals": {"pending": []}})
+    root.update()
+
+    assert win._proposal_frame.winfo_manager() == ""
+    assert not win._proposal_inner.winfo_children()
+    assert win._text.winfo_height() == empty_text_height
+
+
+def test_dialog_composer_separates_voice_row(root):
+    """Узкое окно не заставляет Entry, Send и голосовые кнопки делить одну строку."""
+    win = _window(root)
+    win._show_page("dialog")
+    root.geometry("900x640")
+    root.deiconify()
+    root.update()
+
+    assert win._input_entry.master is win._dialog_send_button.master
+    assert win._voice_record_button.master is not win._dialog_send_button.master
+    composer_right = win._dialog_send_button.master.master.winfo_rootx() + (
+        win._dialog_send_button.master.master.winfo_width()
+    )
+    for widget in (
+        win._input_entry,
+        win._dialog_send_button,
+        win._voice_record_button,
+        win._voice_replay_button,
+        win._voice_auto_check,
+    ):
+        assert widget.winfo_rootx() + widget.winfo_width() <= composer_right + 1
+
+
+@pytest.mark.parametrize(
+    "action,expected",
+    [
+        ("see", "Смотрю"),
+        ("listening_music", "Слушаю музыку"),
+        ("listen_music", "Слушаю музыку"),
+        ("draw", "Рисую"),
+        ("compose_music", "Сочиняю музыку"),
+        ("create_draft", "Продолжаю творческий черновик"),
+        ("exploration", "Исследую тему"),
+        ("communication", "Общаюсь"),
+        ("intentional_forgetting", "Освобождаю память"),
+    ],
+)
+def test_now_headline_uses_real_activity_name(action, expected):
+    from src.ui import life_view
+
+    snapshot = {"life": {"state": "alive"}, "now": {"activity": {"action": action}}}
+
+    assert life_view.now_headline(snapshot) == expected
+
+
 class _FakeEvent:
     def __init__(self, x=0, y=0, delta=0):
         self.x = x

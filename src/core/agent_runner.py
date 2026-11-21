@@ -3221,6 +3221,30 @@ class AgentRunner:
             # AgentRunner будет думать над ним в ближайших циклах.
             question = cmd[4:].strip()
             if question:
+                # /ask — только ускоренный вход в открытое исследование, а не
+                # способ отправить бытовую реплику в веб-поиск. Для вопросов
+                # о сущности и smalltalk используем те же честные self-model
+                # ответы, что и обычная дверь USER_MESSAGE.
+                act = classify_user_text(question)
+                if act.kind in {ACT_ASK_ABOUT_SELF, ACT_SOCIAL}:
+                    interaction = getattr(agent, "user_interaction", None)
+                    pending = None
+                    if interaction is not None:
+                        interaction.receive_user_message(
+                            question, cycle=agent.cycle_count
+                        )
+                        pending = interaction.get_pending_question()
+                    user_model = getattr(agent, "user_model", None)
+                    if user_model is not None:
+                        user_model.observe(question, cycle=agent.cycle_count)
+                    if act.kind == ACT_ASK_ABOUT_SELF:
+                        proposed = extract_identity_check(question)
+                        return (
+                            self._format_identity_reply(proposed)
+                            if proposed is not None
+                            else self._format_about_self_reply()
+                        )
+                    return self._format_social_reply(question, pending)
                 result = agent.ask_user(question, source="chat")
                 if result.get("status") == "queued":
                     return (

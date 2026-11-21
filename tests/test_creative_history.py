@@ -204,6 +204,35 @@ def test_same_form_and_equal_history_keep_input_order():
     assert equal_result["choice_diagnostics"]["winner_input_index"] == 0
 
 
+def test_failed_attempt_does_not_refresh_successful_creative_recency():
+    agent = DigitalBeing(name="CreativeHistoryFailedAttempt")
+    successful, _work = perform_new_work(agent, "create_draft", "_creative_draft")
+    successful["cycle"] = 2
+    failed = deepcopy(successful)
+    failed["id"] = "f" * 32
+    failed["cycle"] = 9
+    failed["status"] = "error"
+    failed["decision_episode"]["creative_result"] = None
+    art = deepcopy(successful)
+    art["id"] = "a" * 32
+    art["cycle"] = 5
+    art["decision_episode"]["creative_intention"]["form"] = "art"
+    art["decision_episode"]["creative_result"]["form"] = "art"
+    music = deepcopy(successful)
+    music["id"] = "b" * 32
+    music["cycle"] = 7
+    music["decision_episode"]["creative_intention"]["form"] = "music"
+    music["decision_episode"]["creative_result"]["form"] = "music"
+    agent._intention_history = [successful, failed, art, music]
+
+    decorated = with_creative_history(
+        agent,
+        [{"action": "create_draft", "source": "test", "strength": 0.5, "params": {}}],
+    )
+
+    assert decorated[0]["params"]["creative_last_cycle"] == 2
+
+
 def test_higher_score_and_noncreative_first_tie_keep_existing_policy():
     arbiter = DecisionArbitrator()
     higher_score = [

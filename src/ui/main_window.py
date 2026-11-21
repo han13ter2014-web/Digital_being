@@ -146,9 +146,14 @@ class MainWindow(ChatWindow):
         self._access_status_labels: Dict[str, Any] = {}
         self._mono_font = None
         self._proposal_frame = None
+        self._proposal_inner = None
+        self._proposal_canvas = None
+        self._proposal_window = None
+        self._proposal_labels: List[Any] = []
         self._proposal_signature: Optional[tuple] = None
         self._proposal_buttons: List[Any] = []
         self._proposal_decision_pending = False
+        self._composer_frame = None
 
         # Языковой наставник: те же USER_COMMAND, решения только по живым ID.
         self._tutor_url_var = None
@@ -202,6 +207,7 @@ class MainWindow(ChatWindow):
         self._graph_zoom_label = None
         self._activity_entries: List[Dict[str, Any]] = []
         self._activity_game = None
+        self._activity_records: List[Dict[str, Any]] = []
         self._graph_data: Dict[str, Any] = {}
         self._graph_tag_nodes: Dict[str, Dict[str, Any]] = {}
         self._graph_positions: Dict[str, Any] = {}
@@ -571,30 +577,48 @@ class MainWindow(ChatWindow):
     def _apply_proposals(self, snapshot: Dict[str, Any]) -> None:
         """Показать ожидающие предложения, не пересоздавая карточки каждый тик."""
         frame = self._proposal_frame
-        if frame is None:
+        inner = self._proposal_inner
+        if frame is None or inner is None:
             return
-        pending = (snapshot.get("proposals") or {}).get("pending") or []
+        pending = [
+            item
+            for item in (snapshot.get("proposals") or {}).get("pending") or []
+            if isinstance(item, dict) and item.get("id")
+        ]
         signature = (
             self._language,
             tuple(
                 (str(item.get("id")), str(item.get("status", "pending")))
                 for item in pending
-                if isinstance(item, dict) and item.get("id")
             ),
         )
         was_waiting = self._proposal_decision_pending
         self._proposal_decision_pending = False
+        if not pending:
+            self._proposal_signature = signature
+            self._proposal_buttons = []
+            self._proposal_labels = []
+            for child in inner.winfo_children():
+                child.destroy()
+            frame.pack_forget()
+            return
         if not was_waiting and signature == self._proposal_signature:
             return
         self._proposal_signature = signature
         self._proposal_buttons = []
-        for child in frame.winfo_children():
+        self._proposal_labels = []
+        for child in inner.winfo_children():
             child.destroy()
+        frame.pack(
+            before=self._composer_frame,
+            side=tk.BOTTOM,
+            fill=tk.X,
+            padx=theme.SPACING["md"],
+            pady=(theme.SPACING["xs"], 0),
+        )
         for item in pending:
-            if not isinstance(item, dict) or not item.get("id"):
-                continue
             card = tk.Frame(
-                frame,
+                inner,
                 bg=theme.BG_CENTER,
                 highlightbackground=theme.AMBER,
                 highlightthickness=1,
@@ -608,7 +632,7 @@ class MainWindow(ChatWindow):
                 fg=theme.AMBER,
                 anchor="w",
                 justify=tk.LEFT,
-                wraplength=480,
+                wraplength=160,
             ).pack(fill=tk.X, padx=10, pady=(8, 2))
             if item.get("description"):
                 tk.Label(
@@ -619,7 +643,7 @@ class MainWindow(ChatWindow):
                     fg=theme.TEXT,
                     anchor="w",
                     justify=tk.LEFT,
-                    wraplength=480,
+                    wraplength=160,
                 ).pack(fill=tk.X, padx=10, pady=2)
             if item.get("attr"):
                 tk.Label(
@@ -650,7 +674,7 @@ class MainWindow(ChatWindow):
                     fg=theme.MUTED,
                     anchor="w",
                     justify=tk.LEFT,
-                    wraplength=480,
+                    wraplength=160,
                 ).pack(fill=tk.X, padx=10, pady=2)
             actions = tk.Frame(card, bg=theme.BG_CENTER)
             actions.pack(fill=tk.X, padx=10, pady=(4, 8))
@@ -678,6 +702,28 @@ class MainWindow(ChatWindow):
                 )
                 button.pack(side=tk.LEFT, padx=(0, theme.SPACING["xs"]))
                 self._proposal_buttons.append(button)
+            self._proposal_labels.extend(
+                child for child in card.winfo_children() if isinstance(child, tk.Label)
+            )
+        self._sync_proposal_layout()
+
+    def _sync_proposal_layout(self, _event=None) -> None:
+        """Ограничить высоту предложений и переносить текст по реальной ширине."""
+        canvas = self._proposal_canvas
+        inner = self._proposal_inner
+        if canvas is None or inner is None:
+            return
+        width = canvas.winfo_width()
+        if width > 1 and self._proposal_window is not None:
+            canvas.itemconfigure(self._proposal_window, width=width)
+        wraplength = max(120, width - 24)
+        for label in self._proposal_labels:
+            if label.winfo_exists():
+                label.configure(wraplength=wraplength)
+        canvas.configure(
+            scrollregion=canvas.bbox("all"),
+            height=max(1, min(180, inner.winfo_reqheight())),
+        )
 
     def _decide_proposal(self, proposal_id: str, approved: bool) -> bool:
         """Отправить решение ядру; ID остаётся внутри действия кнопки."""
@@ -2648,37 +2694,85 @@ class MainWindow(ChatWindow):
     def _apply_activity_data(self, snapshot):
         if self._activity_list is None:
             return
+        activities = snapshot.get("activities") or {}
+        art = activities.get("art") or {}
+        music = activities.get("music") or {}
         drafts = diary_view.draft_rows(snapshot)
-        game = (snapshot.get("activities") or {}).get("game")
+        art_works = [work for work in art.get("works") or [] if isinstance(work, dict)]
+        music_works = [
+            work for work in music.get("works") or [] if isinstance(work, dict)
+        ]
+        game = activities.get("game")
         game = game if isinstance(game, dict) else None
+        guess = activities.get("guess_game")
+        guess = guess if isinstance(guess, dict) else None
+
+        records = []
+        for kind, works in (
+            ("draft", drafts),
+            ("art", art_works),
+            ("music", music_works),
+        ):
+            for position, work in enumerate(works):
+                identity = work.get("id") or f"position-{position}"
+                records.append(
+                    {"kind": kind, "data": work, "key": f"{kind}:{identity}"}
+                )
+        if game is not None:
+            records.append(
+                {"kind": "game", "data": game, "key": f"game:{game.get('round', 1)}"}
+            )
+        if guess is not None:
+            records.append(
+                {
+                    "kind": "guess",
+                    "data": guess,
+                    "key": f"guess:{guess.get('round', 1)}",
+                }
+            )
         if (
-            drafts == self._activity_entries
-            and game == self._activity_game
+            records == self._activity_records
             and self._activity_rendered_language == self._language
         ):
             return
+
         selection = self._activity_list.curselection()
+        selected_index = selection[0] if selection else None
+        selected_key = None
+        if selected_index is not None and selected_index < len(self._activity_records):
+            selected_key = self._activity_records[selected_index]["key"]
         self._activity_rendered_language = self._language
         self._activity_entries = drafts
-        self._activity_list.delete(0, tk.END)
-        for draft in self._activity_entries:
-            index = self._activity_list.size()
-            self._activity_list.insert(
-                tk.END,
-                self._t("Черновик · {theme}").format(
-                    theme=draft.get("theme") or self._t("без темы")
-                ),
-            )
-            self._activity_list.itemconfigure(
-                index,
-                fg=theme.CYAN if draft.get("status") == "active" else theme.MUTED,
-            )
         self._activity_game = game
-        if self._activity_game is not None:
+        self._activity_records = records
+        self._activity_list.delete(0, tk.END)
+
+        for record in records:
+            kind = record["kind"]
+            data = record["data"]
+            if kind in {"draft", "art", "music"}:
+                title_key = {
+                    "draft": "Черновик · {theme}",
+                    "art": "Рисунок · {theme}",
+                    "music": "Мелодия · {theme}",
+                }[kind]
+                title = self._t(title_key).format(
+                    theme=data.get("theme") or self._t("без темы")
+                )
+                color = theme.CYAN if data.get("status") == "active" else theme.MUTED
+            elif kind == "game":
+                title = self._t("Партия · крестики-нолики")
+                color = theme.VIOLET
+            else:
+                title = self._t("Угадывание · раунд {round}").format(
+                    round=data.get("round", 1)
+                )
+                color = theme.AMBER
             index = self._activity_list.size()
-            self._activity_list.insert(tk.END, self._t("Партия · крестики-нолики"))
-            self._activity_list.itemconfigure(index, fg=theme.VIOLET)
-        if not self._activity_entries and self._activity_game is None:
+            self._activity_list.insert(tk.END, title)
+            self._activity_list.itemconfigure(index, fg=color)
+
+        if not records:
             self._activity_list.insert(tk.END, self._t("Занятий пока нет"))
             self._activity_list.configure(
                 state=tk.DISABLED,
@@ -2689,34 +2783,48 @@ class MainWindow(ChatWindow):
                 self._activity_board.pack_forget()
             if self._activity_detail is not None:
                 self._activity_detail.configure(text=self._t("Выберите запись слева."))
-        else:
-            self._activity_list.configure(state=tk.NORMAL, justify=tk.LEFT)
-            if selection:
-                index = min(selection[0], self._activity_list.size() - 1)
-                self._activity_list.selection_set(index)
-                self._on_activity_select()
+            return
+
+        self._activity_list.configure(state=tk.NORMAL, justify=tk.LEFT)
+        target_index = next(
+            (
+                index
+                for index, record in enumerate(records)
+                if record["key"] == selected_key
+            ),
+            None,
+        )
+        if target_index is None and selected_index is not None:
+            target_index = min(selected_index, len(records) - 1)
+        if target_index is not None:
+            self._activity_list.selection_set(target_index)
+            self._on_activity_select()
 
     def _on_activity_select(self, _event=None):
         if self._activity_detail is None:
             return
         selection = self._activity_list.curselection()
-        if not selection:
+        if not selection or selection[0] >= len(self._activity_records):
             return
         self._activity_list.configure(highlightbackground=theme.AMBER)
         if self._activity_board is not None:
             self._activity_board.pack_forget()
-        index = selection[0]
-        if index < len(self._activity_entries):
-            rows = diary_view.draft_detail(
-                self._activity_entries[index], self._language
-            )
-        elif self._activity_game is not None and index == len(self._activity_entries):
+        record = self._activity_records[selection[0]]
+        kind = record["kind"]
+        data = record["data"]
+        if kind == "draft":
+            rows = diary_view.draft_detail(data, self._language)
+        elif kind == "art":
+            rows = diary_view.art_detail(data, self._language)
+        elif kind == "music":
+            rows = diary_view.music_detail(data, self._language)
+        elif kind == "guess":
+            rows = diary_view.guess_detail(data, self._language)
+        else:
             rows = diary_view.game_detail(self._life_snapshot, self._language)
-            if self._render_activity_board(self._activity_game):
+            if self._render_activity_board(data):
                 # Клетки уже показаны графически, текстовая строка не дублируется.
                 rows = [row for row in rows if row[0] != self._t("Поле")]
-        else:
-            return
         self._activity_detail.configure(text=diary_view.rows_text(rows))
 
     def _render_activity_board(self, game) -> bool:
@@ -3921,6 +4029,7 @@ class MainWindow(ChatWindow):
             highlightcolor=theme.CYAN,
             highlightthickness=1,
         )
+        self._composer_frame = input_frame
         composer_hint = tk.Label(
             conversation,
             text="Enter — отправить · ↑ ↓ — история ввода",
@@ -3944,11 +4053,33 @@ class MainWindow(ChatWindow):
             pady=(theme.SPACING["xs"], 0),
         )
         self._proposal_frame = tk.Frame(conversation, bg=theme.SURFACE)
-        self._proposal_frame.pack(
-            side=tk.BOTTOM,
-            fill=tk.X,
-            padx=theme.SPACING["md"],
-            pady=(theme.SPACING["xs"], 0),
+        self._proposal_canvas = tk.Canvas(
+            self._proposal_frame,
+            bg=theme.SURFACE,
+            highlightthickness=0,
+            bd=0,
+            height=1,
+        )
+        proposal_scroll = tk.Scrollbar(
+            self._proposal_frame,
+            orient=tk.VERTICAL,
+            command=self._proposal_canvas.yview,
+            width=10,
+        )
+        self._proposal_canvas.configure(yscrollcommand=proposal_scroll.set)
+        proposal_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._proposal_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._proposal_inner = tk.Frame(self._proposal_canvas, bg=theme.SURFACE)
+        self._proposal_window = self._proposal_canvas.create_window(
+            (0, 0), window=self._proposal_inner, anchor="nw"
+        )
+        self._proposal_inner.bind("<Configure>", self._sync_proposal_layout)
+        self._proposal_canvas.bind("<Configure>", self._sync_proposal_layout)
+        self._proposal_canvas.bind(
+            "<MouseWheel>",
+            lambda event: self._proposal_canvas.yview_scroll(
+                -event.delta // 120, "units"
+            ),
         )
 
         self._text = scrolledtext.ScrolledText(
@@ -4051,9 +4182,15 @@ class MainWindow(ChatWindow):
             spacing3=4,
         )
 
+        voice_row = tk.Frame(input_frame, bg=theme.BG_CENTER)
+        voice_row.pack(side=tk.BOTTOM, fill=tk.X)
+        self._build_voice_controls(voice_row)
+        entry_row = tk.Frame(input_frame, bg=theme.BG_CENTER)
+        entry_row.pack(side=tk.BOTTOM, fill=tk.X)
+
         self._input_var = tk.StringVar()
         self._dialog_send_button = tk.Button(
-            input_frame,
+            entry_row,
             text="Сказать",
             command=self._on_send,
             font=self._mono_font,
@@ -4069,9 +4206,8 @@ class MainWindow(ChatWindow):
             cursor="hand2",
         )
         self._dialog_send_button.pack(side=tk.RIGHT, fill=tk.Y)
-        self._build_voice_controls(input_frame)
         self._input_entry = tk.Entry(
-            input_frame,
+            entry_row,
             textvariable=self._input_var,
             font=self._ui_font,
             bg=theme.BG_CENTER,

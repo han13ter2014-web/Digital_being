@@ -8,8 +8,10 @@ from uuid import uuid4
 import pytest
 
 from src.core.activity_workspace import ActivityWorkspace, workspace_for
+from src.core.agent import DigitalBeing
 from src.core.paths import data_path
 from src.cognition import creative_draft, local_art, local_music
+from src.cognition.creative_choices import creative_choices
 from src.memory.life_database import LifeDatabase
 from src.memory.profile_backup import create_backup, restore_backup
 
@@ -122,6 +124,35 @@ def test_workspace_for_agent_selects_root_by_mode(tmp_path, monkeypatch):
         == Path(data_path("delamain", "workspace", "creative")).resolve()
     )
     assert workspace_for(object()).database is None
+
+
+def test_managed_text_availability_ignores_full_legacy_workspace(tmp_path, monkeypatch):
+    """Чужая заполненная legacy-папка не запрещает стихи текущей жизни."""
+    monkeypatch.setenv("DIGITAL_BEING_DATA_DIR", str(tmp_path))
+    legacy_root = Path(data_path("delamain", "workspace", "creative"))
+    legacy_root.mkdir(parents=True)
+    for index in range(creative_draft.MAX_DRAFTS):
+        (legacy_root / f"legacy-{index}.txt").write_text("чужой", encoding="utf-8")
+    agent = DigitalBeing(name="ManagedDraftAvailability")
+    agent._profile_managed = True
+    agent.life_id = str(uuid4())
+    candidate = {
+        "action": "create_draft",
+        "source": "test",
+        "strength": 0.5,
+        "params": {},
+    }
+
+    choices = creative_choices(agent, candidate)
+    new_choices = [
+        choice for choice in choices if choice["params"].get("draft_mode") == "new"
+    ]
+
+    assert workspace_for(agent).list() == []
+    assert len(new_choices) == 1
+    assert agent._is_action_available("create_draft") is True
+    assert agent._is_candidate_available(new_choices[0]) is True
+    assert len(list(legacy_root.glob("*.txt"))) == creative_draft.MAX_DRAFTS
 
 
 def test_adopt_legacy_root_copies_and_keeps_originals(tmp_path, monkeypatch):

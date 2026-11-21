@@ -592,6 +592,12 @@ VALUE_LABELS: Dict[str, Dict[str, str]] = {
 ACTION_PHRASES: Dict[str, Dict[str, str]] = {
     "ru": {
         "play": "Играю партию",
+        "see": "Смотрю",
+        "listening_music": "Слушаю музыку",
+        "listen_music": "Слушаю музыку",
+        "exploration": "Исследую тему",
+        "communication": "Общаюсь",
+        "intentional_forgetting": "Освобождаю память",
         "create_draft": "Продолжаю творческий черновик",
         "write_creative_draft": "Пишу творческий черновик",
         "explore": "Исследую тему",
@@ -624,6 +630,12 @@ ACTION_PHRASES: Dict[str, Dict[str, str]] = {
     },
     "en": {
         "play": "Playing a game",
+        "see": "Watching",
+        "listening_music": "Listening to music",
+        "listen_music": "Listening to music",
+        "exploration": "Exploring a topic",
+        "communication": "Communicating",
+        "intentional_forgetting": "Freeing memory",
         "create_draft": "Continuing a creative draft",
         "write_creative_draft": "Writing a creative draft",
         "explore": "Exploring a topic",
@@ -656,6 +668,12 @@ ACTION_PHRASES: Dict[str, Dict[str, str]] = {
     },
     "zh": {
         "play": "正在对弈",
+        "see": "正在观看",
+        "listening_music": "正在听音乐",
+        "listen_music": "正在听音乐",
+        "exploration": "正在探索主题",
+        "communication": "正在交流",
+        "intentional_forgetting": "正在释放记忆",
         "create_draft": "继续创意草稿",
         "write_creative_draft": "撰写创意草稿",
         "explore": "探索主题",
@@ -1703,6 +1721,39 @@ _add(
         "источник:": "来源：",
         "развернуть статью ▾": "展开文章 ▾",
         "свернуть статью ▴": "收起文章 ▴",
+    },
+)
+
+_add(
+    {
+        "Рисунок · {theme}": "Drawing · {theme}",
+        "Мелодия · {theme}": "Melody · {theme}",
+        "Угадывание · раунд {round}": "Guessing game · round {round}",
+        "Рисунок на тему «{theme}»": "Drawing on “{theme}”",
+        "Мелодия на тему «{theme}»": "Melody on “{theme}”",
+        "Палитра": "Palette",
+        "Настроение": "Mood",
+        "Попыток": "Attempts",
+        "Раунд": "Round",
+        "Диапазон": "Range",
+        "угадано": "guessed",
+        "Завершено раундов": "Completed rounds",
+        "Угадывание числа методом сужения диапазона": "Number guessing by narrowing the range",
+    },
+    {
+        "Рисунок · {theme}": "图画 · {theme}",
+        "Мелодия · {theme}": "旋律 · {theme}",
+        "Угадывание · раунд {round}": "猜数 · 第 {round} 轮",
+        "Рисунок на тему «{theme}»": "以“{theme}”为主题的图画",
+        "Мелодия на тему «{theme}»": "以“{theme}”为主题的旋律",
+        "Палитра": "配色",
+        "Настроение": "情绪",
+        "Попыток": "尝试次数",
+        "Раунд": "轮次",
+        "Диапазон": "范围",
+        "угадано": "已猜中",
+        "Завершено раундов": "已完成轮数",
+        "Угадывание числа методом сужения диапазона": "通过缩小范围猜数字",
     },
 )
 

@@ -2,6 +2,7 @@
 
 from src.cognition.creative_catalog import catalog_for
 from src.cognition.creative_draft import MAX_DRAFTS, draft_available
+from src.core.activity_workspace import workspace_for
 
 
 def creative_choices(agent, candidate):
@@ -25,7 +26,9 @@ def creative_choices(agent, candidate):
                 },
             }
         )
-    if len(catalog) < MAX_DRAFTS and draft_available(None):
+    if len(catalog) < MAX_DRAFTS and draft_available(
+        None, workspace=workspace_for(agent)
+    ):
         choices.append(
             {
                 **candidate,
