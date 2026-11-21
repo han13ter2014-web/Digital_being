@@ -281,6 +281,31 @@ class ResponseExperience:
         self.responses = {}
         self.latest_response_id = None
         self.imitation = SpeechImitation()
+        # Только runtime-наблюдатель: в Core snapshot и checkpoint не входит.
+        self._transition_observer = None
+
+    @property
+    def transition_observer(self):
+        return self._transition_observer
+
+    def set_transition_observer(self, observer) -> None:
+        if observer is not None and not callable(observer):
+            raise TypeError("transition observer: expected callable or None")
+        self._transition_observer = observer
+
+    def _notify_transition(self, transition_kind, record, cycle) -> None:
+        observer = self._transition_observer
+        if observer is None:
+            return
+        try:
+            observer(transition_kind, deepcopy(record), cycle=cycle)
+        except Exception:
+            # Дополнительная наблюдаемость не может отменить реальный переход.
+            pass
+
+    def note_core_restore(self, cycle) -> None:
+        """Обозначить расхождение Core snapshot и независимого журнала."""
+        self._notify_transition("core_restored", None, cycle)
 
     @staticmethod
     def _verify_reference(agent, reference) -> dict:
@@ -339,6 +364,7 @@ class ResponseExperience:
             response["status"] = "expired"
             response["outcome"] = "no_observed_reaction"
             expired += 1
+            self._notify_transition("expired", response, cycle)
         return expired
 
     def consolidate(self, cycle) -> dict:
@@ -352,7 +378,8 @@ class ResponseExperience:
         excess = max(0, len(terminal_ids) - CONSOLIDATED_RESPONSE_HISTORY)
         pruned_ids = set(terminal_ids[:excess])
         for response_id in pruned_ids:
-            del self.responses[response_id]
+            record = self.responses.pop(response_id)
+            self._notify_transition("record_pruned", record, cycle)
         if self.latest_response_id in pruned_ids:
             # Не переносим будущий отзыв на более старое ожидание.
             self.latest_response_id = None
@@ -536,7 +563,8 @@ class ResponseExperience:
             raise ValueError("response_id: duplicate")
         if len(self.responses) >= MAX_RESPONSES:
             oldest = next(iter(self.responses))
-            del self.responses[oldest]
+            pruned = self.responses.pop(oldest)
+            self._notify_transition("record_pruned", pruned, cycle)
             if self.latest_response_id == oldest:
                 self.latest_response_id = None
         expected, uncertainties = self._expectation(plan["context"])
@@ -582,6 +610,7 @@ class ResponseExperience:
         }.get(act_kind, "ordinary_reply")
         record["status"] = "observed"
         record["outcome"] = outcome
+        self._notify_transition("outcome", record, cycle)
         return deepcopy(record)
 
     def observe_feedback(
@@ -611,6 +640,7 @@ class ResponseExperience:
                 cycle=cycle,
                 language_id=borrowed.get("language_id", "ru"),
             )
+        self._notify_transition("outcome", record, cycle)
         return deepcopy(record)
 
     def get_status(self) -> dict:

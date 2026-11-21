@@ -11,6 +11,17 @@
 | [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) | разработчик | в какой версии и на каком этапе что добавлено |
 | [LIFE_LETTER.md](LIFE_LETTER.md) | сама Digital Being | кто ты, твои границы, права и правила |
 | [DECISION_NO_LLM_LIFE.md](DECISION_NO_LLM_LIFE.md) | архитектурное решение | почему жизнь работает без LLM |
+| [VOICE_LLM_ARCHITECTURE_D7.md](VOICE_LLM_ARCHITECTURE_D7.md) | архитектурное решение | жизненный ствол, собственная пластичная кора, голос и карантинная роль внешней LLM |
+| [RESPONSE_EXPERIENCE_SHADOW_TICKET.md](RESPONSE_EXPERIENCE_SHADOW_TICKET.md) | implementation-тикет RE-S1 | цель, baselines, временной held-out и границы первого shadow на ResponseExperience; модель не авторизована |
+| [RESPONSE_EXPERIENCE_SHADOW_PHASE1.md](RESPONSE_EXPERIENCE_SHADOW_PHASE1.md) | controlled observation RE-S1 | фактические B0/B1/B2, split, ограничения и решение оставить baseline без реальной биографии |
+| [RESPONSE_EXPERIENCE_REAL_DATA_INVENTORY_TICKET.md](RESPONSE_EXPERIENCE_REAL_DATA_INVENTORY_TICKET.md) | выполненный RE-S1-R0 | sanitized read-only инвентаризация одной жизни: 1 retained snapshot, 0 ResponseExperience, readiness `insufficient_data` |
+| [RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_TICKET.md](RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_TICKET.md) | контракт RE-S1-PJ | prospective delivery/outcome journal, turn/episode/sequence, privacy/gap/differential gates; PJ-T, PJ-V и PJ-I завершены локально |
+| [RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_V.md](RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_V.md) | synthetic observation RE-S1-PJ-V | 20/20 synthetic gates, crash/restart/privacy/differential; на момент PJ-V production writer отсутствовал, включение не выполнялось |
+| [RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_I.md](RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_I.md) | production implementation RE-S1-PJ-I | отдельный SQLite writer, default-off, privacy/gap/restart/differential/resource gates; реальная жизнь, модель и advisor не активировались |
+| [RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_A.md](RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_A.md) | активация RE-S1-PJ-A в работе | успешный retry для одной выбранной жизни после карантина пустой mismatch-очереди; sanitized-снимок: 9 delivery, 6 outcome, integrity/hash-chain валидны, один ожидаемый unclean-gap |
+| [RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_R.md](RESPONSE_EXPERIENCE_PROSPECTIVE_JOURNAL_PJ_R.md) | выполненная RE-S1-PJ-R | read-only инвентаризация активного WAL: 32 delivery, 16 observed, 12 expired, 4 pending; temporal gates пройдены, readiness `insufficient_data`, candidate gate закрыт |
+| [STATE_OBSERVATION_JOURNAL.md](STATE_OBSERVATION_JOURNAL.md) | контракт органа «Журнал жизни» | лонгитюдные sanitized-снимки и эпизоды, privacy/gap gates, пользовательский ZIP/HTML-экспорт без диагнозов и влияния на арбитр |
+| [DECEMBER_MOTIVATION_ROADMAP.md](DECEMBER_MOTIVATION_ROADMAP.md) | завершённый маршрут | итоги D0–D8 и ссылки на наблюдения, decision gates и implementation D6-4 |
 | [FUNDING.md](FUNDING.md) | поддержка проекта | зачем нужны донаты и на что они идут |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | участники проекта | архитектурные границы, процесс и команды проверок |
 

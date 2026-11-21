@@ -793,6 +793,78 @@ class LifeDatabase:
             )
             return int(cursor.lastrowid)
 
+    def append_metric_samples(self, samples) -> int:
+        """Атомарно добавить sanitized-метрики с необязательной дедупликацией.
+
+        ``metadata.record_id`` — стабильный ключ внутри ``(name, cycle)``.
+        Он позволяет повторно прочитать retained-окно после restart, не
+        дублируя эпизоды и не перезаписывая уже сохранённую историю.
+        """
+        records = list(samples)
+        if not records:
+            return 0
+        inserted = 0
+        with self.write() as connection:
+            for record in records:
+                if not isinstance(record, dict):
+                    raise TypeError("Запись метрики должна быть словарём")
+                name = str(record["name"])
+                cycle = record.get("cycle")
+                cycle = None if cycle is None else int(cycle)
+                value_json = json.dumps(
+                    record["value"], ensure_ascii=False, allow_nan=False
+                )
+                metadata = record.get("metadata") or {}
+                if not isinstance(metadata, dict):
+                    raise TypeError("Метаданные метрики должны быть словарём")
+                metadata_json = json.dumps(
+                    metadata, ensure_ascii=False, allow_nan=False
+                )
+                record_id = metadata.get("record_id")
+                if record_id is not None:
+                    exists = connection.execute(
+                        "SELECT 1 FROM metric_samples WHERE name = ? AND cycle = ? "
+                        "AND json_extract(metadata_json, '$.record_id') = ?",
+                        (name, cycle, str(record_id)),
+                    ).fetchone()
+                    if exists is not None:
+                        continue
+                connection.execute(
+                    "INSERT INTO metric_samples"
+                    "(ts, cycle, name, value_json, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (str(record["ts"]), cycle, name, value_json, metadata_json),
+                )
+                inserted += 1
+        return inserted
+
+    def read_metric_samples(
+        self, *, names, start_cycle=None, end_cycle=None
+    ) -> list[dict]:
+        """Согласованный read-only срез; JSON разбирает доменный reader."""
+        unique_names = tuple(dict.fromkeys(str(name) for name in names))
+        if not unique_names:
+            return []
+        placeholders = ",".join("?" for _ in unique_names)
+        clauses = [f"name IN ({placeholders})"]
+        params = list(unique_names)
+        if start_cycle is not None:
+            clauses.append("cycle >= ?")
+            params.append(int(start_cycle))
+        if end_cycle is not None:
+            clauses.append("cycle <= ?")
+            params.append(int(end_cycle))
+        # Join только статических SQL-фрагментов; значения — bound-параметры SQLite.
+        query = (
+            "SELECT id, ts, cycle, name, value_json, metadata_json "
+            "FROM metric_samples WHERE " + " AND ".join(clauses) + " ORDER BY cycle, id"  # nosec B608
+        )
+        with closing(self.connect(readonly=True)) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("BEGIN")
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def save_checkpoint(
         self, state, cycle_count: int, max_checkpoints: int = 20, *, saved_at=None
     ) -> int:

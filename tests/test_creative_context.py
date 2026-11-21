@@ -121,6 +121,74 @@ def test_empty_sources_do_not_invent_material():
     assert "мысль:" not in line
 
 
+def test_raw_diagnostic_and_web_material_never_enters_draft():
+    context = fallback_creative_context("Понять, кто я")
+    context["emotions"] = [_emotion()]
+    context["thoughts"] = [
+        {
+            "text": "[Ментальная модель] 'любовь': уверенность: 57%; Связано с: ['как дела']",
+            "cycle": 4,
+            "source": "self",
+        },
+        {
+            "text": "🌐 Нашёл в интернете (Wikipedia/ru): 'Любовь' — чувство.",
+            "cycle": 5,
+            "source": "self",
+        },
+        {
+            "text": "Знаю ответ: Ностальгия — возвращение к дорогому прошлому.",
+            "cycle": 6,
+            "source": "self",
+        },
+    ]
+
+    lines = [compose_line(context, revision) for revision in range(1, 13)]
+    text = "\n".join(lines)
+
+    assert "Ностальгия — возвращение к дорогому прошлому" in text
+    for marker in (
+        "[Ментальная модель]",
+        "уверенность:",
+        "Связано с:",
+        "🌐",
+        "Wikipedia",
+        "Знаю ответ:",
+        "мысль:",
+        "память:",
+    ):
+        assert marker not in text
+
+
+def test_long_creative_material_ends_at_word_boundary():
+    context = fallback_creative_context("дорога")
+    context["thoughts"] = [{"text": "дорога " * 100, "cycle": 4, "source": "self"}]
+
+    text = "\n".join(compose_line(context, revision) for revision in range(1, 5))
+
+    assert "…" in text
+    assert "мысль:" not in text
+
+
+def test_revisions_do_not_accumulate_identical_lines(tmp_path):
+    workspace = ActivityWorkspace(tmp_path)
+    context = fallback_creative_context("дорога")
+    context["thoughts"] = [
+        {"text": "Нужно продолжить путь", "cycle": 4, "source": "self"}
+    ]
+    state = None
+    for _ in range(20):
+        state = draft_step(state, workspace=workspace, context=context)
+
+    content = (tmp_path / f"{state['id']}.txt").read_text(encoding="utf-8")
+    lines = [
+        line
+        for line in content.splitlines()
+        if line and not line.startswith("Черновик:")
+    ]
+
+    assert len(lines) == len(set(lines))
+
+
 def test_revision_nine_and_later_keep_same_work_open():
     agent = DigitalBeing(name="CreativeLongWork")
     agent.act("create_draft")

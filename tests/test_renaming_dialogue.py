@@ -400,8 +400,8 @@ async def test_gate_completed_request_is_not_a_name_proposal():
 
 
 @pytest.mark.asyncio
-async def test_gate_renaming_pending_request_cancels_and_refuses():
-    """Просьба при переспросе имени снимает кандидат и получает отказ."""
+async def test_gate_renaming_pending_request_cancels_and_describes_capability():
+    """Просьба снимает кандидат и получает честное описание реального умения."""
     nd = _completed_dialogue()
     nd.phase = NamingDialogue.PHASE_RENAMING_PENDING
     nd._rename_candidate = "Омелла"
@@ -419,7 +419,8 @@ async def test_gate_renaming_pending_request_cancels_and_refuses():
     assert nd.phase == NamingDialogue.PHASE_COMPLETED
     assert not nd._rename_candidate
     texts = [call.args[1].get("text", "") for call in runner.bus.publish.call_args_list]
-    assert any("не умею" in t for t in texts)
+    assert any("умею рисовать" in t for t in texts)
+    assert any("собственном цикле" in t for t in texts)
     assert not any("переименовать" in t for t in texts)
 
 

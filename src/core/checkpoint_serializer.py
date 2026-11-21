@@ -27,6 +27,7 @@ checkpoint_serializer.py — сериализация/десериализаци
       "naming_dialogue_phase": <str>,
       "naming_dialogue_history": <list>,
       "open_questions": <list>,
+      "hunt_misses": <dict>,              # тема → цикл последнего промаха
       "user_interaction": <dict | None>,  # история и ожидающие вопросы диалога
     }
 
@@ -200,6 +201,8 @@ def build_state_from_agent(agent) -> Dict[str, Any]:
         # «Собеседник-4»: темы, уже рассказанные человеку, — после
         # рестарта сущность не начинает повторяться.
         "shared_topics": dict(getattr(agent, "_shared_topics", {}) or {}),
+        # «Охота-1»: опыт промаха продолжается после restart той же жизни.
+        "hunt_misses": dict(getattr(agent, "_hunt_misses", {}) or {}),
         # «Собеседник»: диалоговое состояние — история вопросов-ответов
         # и ожидающие вопросы с полями цепочек сложных вопросов. Без
         # них после рестарта сущность забывает разговор, а синтез
@@ -585,6 +588,9 @@ def apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     snapshots = _capture_inplace_state(agent)
     try:
         _apply_state_to_agent(agent, state)
+        experience = getattr(agent, "response_experience", None)
+        if experience is not None:
+            experience.note_core_restore(agent.cycle_count)
     except BaseException as error:
         try:
             _restore_inplace_state(agent, agent_attributes, snapshots)
@@ -602,6 +608,8 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
     # Фаза 1: разбор и валидация. Ни одного присваивания агенту.
     # ================================================================
     validate_checkpoint_state(state)
+    # Legacy без поля означает пустой след и очищает прежнее состояние агента.
+    staged_hunt_misses = deepcopy(state.get("hunt_misses", {}))
     from src.cognition.internal_simulator import InternalSimulator
 
     staged_internal_simulation = state.get("internal_simulation")
@@ -828,6 +836,7 @@ def _apply_state_to_agent(agent, state: Dict[str, Any]) -> None:
         agent.name = state["name"]
     agent.energy = state.get("energy", 150)
     agent.cycle_count = state.get("cycle_count", 0)
+    agent._hunt_misses = staged_hunt_misses
     # Snapshot-семантика: база после рестарта равна снимку, а не
     # надмножеству. update() воскрешал записи, удалённые при жизни
     # (чистка мусора, прунинг, забытие тем). clear() перед update()

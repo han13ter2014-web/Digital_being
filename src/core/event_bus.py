@@ -474,6 +474,8 @@ class Events:
     RESUME_REQUESTED = "resume_requested"
     SHUTDOWN_REQUESTED = "shutdown_requested"
     SAVE_REQUESTED = "save_requested"
+    STATE_EXPORT_REQUESTED = "state_export_requested"
+    STATE_EXPORT_RESULT = "state_export_result"
     SPEED_CHANGED = "speed_changed"  # Смена скорости жизни: live/fast/max
     STEP_REQUESTED = "step_requested"  # Один цикл по кнопке «Шаг»
 

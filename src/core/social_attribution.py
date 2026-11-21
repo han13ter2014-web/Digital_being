@@ -299,6 +299,9 @@ class SocialAttribution:
                 lexicon.load_personal_from(state["associative_lexicon"])
                 experience = ResponseExperience()
                 experience.load_from(state["response_experience"])
+                experience.set_transition_observer(
+                    self.agent.response_experience.transition_observer
+                )
 
             lexicon_report = lexicon.consolidate(cycle)
             response_report = experience.consolidate(cycle)
