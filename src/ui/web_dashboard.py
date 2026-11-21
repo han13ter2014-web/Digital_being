@@ -999,6 +999,10 @@ async def handle_dialogue_send(request: Any) -> Any:
         return _json_response(
             {"status": "rejected", "message": str(exc)}, status=exc.status
         )
+    if text.startswith("/ask "):
+        # Паритет с Tk: бытовой /ask обязан пройти командную дверь Core,
+        # а не стать смешанной неизвестной репликой в USER_MESSAGE.
+        return _publish_event(request, Events.USER_COMMAND, {"command": text[1:]})
     return _publish_event(request, Events.USER_MESSAGE, {"text": text})
 
 
