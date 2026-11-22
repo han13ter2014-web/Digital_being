@@ -35,6 +35,7 @@ from src.core.speech_imitation import (
     normalize_expression,
 )
 from src.core.speech_imitation import validate_speech_imitation as validate_imitation
+from src.core.semantic_response_plan import SemanticResponsePlan
 
 SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
@@ -175,6 +176,24 @@ def _validate_plan(plan, path="plan") -> None:
     _text(realization.get("text"), f"{path}.realization.text", TEXT_MAX_LEN)
     borrowed = plan.get("borrowed")
     response_language = (language_context or {}).get("response_language", "ru")
+    semantic_data = plan.get("semantic_response_plan")
+    if semantic_data is not None:
+        try:
+            semantic = SemanticResponsePlan.from_dict(semantic_data)
+        except ValueError as error:
+            _fail(f"{path}.semantic_response_plan", str(error))
+        if semantic.baseline_text != realization["base_text"]:
+            _fail(
+                f"{path}.semantic_response_plan.baseline_text",
+                "must match realization.base_text",
+            )
+        if semantic.cycle != state["cycle"]:
+            _fail(f"{path}.semantic_response_plan.cycle", "must match state.cycle")
+        if semantic.language != response_language:
+            _fail(
+                f"{path}.semantic_response_plan.language",
+                "must match the response language",
+            )
     if borrowed is None:
         if realization["kind"] != "fixed_template" or len(plan["components"]) != 1:
             _fail(f"{path}.borrowed", "missing borrowed component")
@@ -237,6 +256,12 @@ def validate_response_experience(data) -> None:
         _validate_plan(response.get("plan"), f"{path}.plan")
         if response["plan"]["state"]["cycle"] != response["cycle"]:
             _fail(f"{path}.cycle", "response and plan cycles must match")
+        semantic_data = response["plan"].get("semantic_response_plan")
+        if semantic_data is not None and semantic_data["response_id"] != response_id:
+            _fail(
+                f"{path}.plan.semantic_response_plan.response_id",
+                "must match the delivered response ID",
+            )
         if response.get("expected_reaction") not in EXPECTED_REACTIONS:
             _fail(f"{path}.expected_reaction", "unknown expectation")
         uncertainties = response.get("uncertainties")
@@ -417,6 +442,7 @@ class ResponseExperience:
         english_realization=None,
         chinese_realization=None,
         expire_pending=True,
+        semantic_response_plan=None,
     ) -> dict:
         """Проверить ссылки и составить план до фактической доставки.
 
@@ -499,6 +525,12 @@ class ResponseExperience:
             "provenance_verified": True,
             "borrowed": None,
         }
+        if semantic_response_plan is not None:
+            if not isinstance(semantic_response_plan, SemanticResponsePlan):
+                raise ValueError(
+                    "semantic_response_plan: expected SemanticResponsePlan or None"
+                )
+            plan["semantic_response_plan"] = deepcopy(semantic_response_plan.to_dict())
         language_realization = english_realization or chinese_realization
         if language_realization is not None:
             plan["realization"].update(
@@ -559,6 +591,11 @@ class ResponseExperience:
         _text(response_id, "response_id", RESPONSE_ID_MAX_LEN)
         _cycle(cycle)
         _validate_plan(plan)
+        semantic_data = plan.get("semantic_response_plan")
+        if semantic_data is not None and semantic_data["response_id"] != response_id:
+            raise ValueError(
+                "semantic_response_plan.response_id: must match delivered response ID"
+            )
         if response_id in self.responses:
             raise ValueError("response_id: duplicate")
         if len(self.responses) >= MAX_RESPONSES:

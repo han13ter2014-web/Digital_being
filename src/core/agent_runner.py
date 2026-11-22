@@ -33,6 +33,7 @@ AgentRunner — оркестратор жизни агента в трей-ре�
 """
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import logging
@@ -95,6 +96,11 @@ from src.core.response_experience import parse_generic_feedback
 from src.core.response_experience_journal import (
     disabled_journal_status,
     open_response_experience_journal,
+)
+from src.core.semantic_response_plan import (
+    SemanticResponsePlan,
+    build_self_activity_plan,
+    build_self_state_plan,
 )
 from src.core.state_observation import (
     GAP_NAME,
@@ -972,12 +978,18 @@ class AgentRunner:
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
             proposed = extract_identity_check(text)
+            semantic_response_plan = None
             if proposed is not None:
                 response = self._format_identity_reply(proposed)
             else:
-                response = self._format_about_self_reply(
-                    activity=act.matched_marker in ABOUT_SELF_ACTIVITY_MARKERS
-                )
+                activity = act.matched_marker in ABOUT_SELF_ACTIVITY_MARKERS
+                response = self._format_about_self_reply(activity=activity)
+                if activity:
+                    semantic_response_plan = build_self_activity_plan(
+                        self.agent,
+                        response_id="pending:semantic-response",
+                        baseline_text=response,
+                    )
             if response:
                 await self._reply_to_user(
                     response,
@@ -985,6 +997,7 @@ class AgentRunner:
                     source="dialogue_acts",
                     user_text=text,
                     dialogue_entities=(self.agent.name,),
+                    semantic_response_plan=semantic_response_plan,
                 )
             return
 
@@ -1055,12 +1068,19 @@ class AgentRunner:
             user_model = getattr(self.agent, "user_model", None)
             if user_model is not None:
                 user_model.observe(text, cycle=self.agent.cycle_count)
+            semantic_response_plan = None
             if pending is not None and act.matched_marker in _REPEAT_PROTEST_MARKERS:
                 response = self._handle_repeat_protest(pending, interaction)
                 reply_context = "repeat_protest"
             else:
                 response = self._format_social_reply(text, pending)
                 reply_context = "social_reply"
+                if pending is None and social_reply_kind(text) == SOCIAL_KIND_STATE:
+                    semantic_response_plan = build_self_state_plan(
+                        self.agent,
+                        response_id="pending:semantic-response",
+                        baseline_text=response,
+                    )
             if response:
                 await self._reply_to_user(
                     response,
@@ -1072,6 +1092,7 @@ class AgentRunner:
                         if reply_context == "social_reply"
                         else ""
                     ),
+                    semantic_response_plan=semantic_response_plan,
                 )
             return
 
@@ -1686,6 +1707,19 @@ class AgentRunner:
                 turn_id=getattr(self, "_response_journal_turn_id", None),
             )
 
+    def _register_delivered_response(self, message_id: str, plan: dict) -> None:
+        """Связать frozen смысловой план с ID уже доставленного сообщения."""
+        semantic_data = plan.get("semantic_response_plan")
+        if semantic_data is not None:
+            semantic = SemanticResponsePlan.from_dict(semantic_data)
+            plan["semantic_response_plan"] = replace(
+                semantic, response_id=message_id
+            ).to_dict()
+        record = self.agent.response_experience.register_delivery(
+            message_id, plan, self.agent.cycle_count
+        )
+        self._record_response_delivery(record)
+
     async def _reply_to_user(
         self,
         text: str,
@@ -1700,6 +1734,7 @@ class AgentRunner:
         borrow_context="",
         english_realization=None,
         chinese_realization=None,
+        semantic_response_plan=None,
     ) -> str | None:
         """Составить план, доставить реплику и зарегистрировать её ID.
 
@@ -1720,6 +1755,7 @@ class AgentRunner:
                 borrow_context=borrow_context,
                 english_realization=english_realization,
                 chinese_realization=chinese_realization,
+                semantic_response_plan=semantic_response_plan,
             )
             text = prepared["text"]
             plan = prepared["plan"]
@@ -1764,10 +1800,7 @@ class AgentRunner:
                 dialogue_affect,
             )
             if plan is not None and isinstance(message_id, str) and message_id:
-                record = experience.register_delivery(
-                    message_id, plan, self.agent.cycle_count
-                )
-                self._record_response_delivery(record)
+                self._register_delivered_response(message_id, plan)
             return message_id
         if interaction is not None and hasattr(interaction, "send_message"):
             message_id = interaction.send_message(
@@ -1790,10 +1823,7 @@ class AgentRunner:
                 dialogue_affect,
             )
             if plan is not None and isinstance(message_id, str) and message_id:
-                record = experience.register_delivery(
-                    message_id, plan, self.agent.cycle_count
-                )
-                self._record_response_delivery(record)
+                self._register_delivered_response(message_id, plan)
             return message_id
         await self.bus.publish(
             Events.AGENT_THOUGHT,
