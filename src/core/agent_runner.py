@@ -62,6 +62,7 @@ from src.core.buffered_logger import flush_logs
 from src.core.paths import data_path
 from src.core.agent import AgentDeadSignal
 from src.core.dialogue_acts import (
+    ABOUT_SELF_ACTIVITY_MARKERS,
     ACT_ANSWER,
     ACT_ASK_ABOUT_SELF,
     ACT_FOLLOW_UP,
@@ -974,7 +975,9 @@ class AgentRunner:
             if proposed is not None:
                 response = self._format_identity_reply(proposed)
             else:
-                response = self._format_about_self_reply()
+                response = self._format_about_self_reply(
+                    activity=act.matched_marker in ABOUT_SELF_ACTIVITY_MARKERS
+                )
             if response:
                 await self._reply_to_user(
                     response,
@@ -2149,11 +2152,70 @@ class AgentRunner:
         """Сохранённое имя метода; ответ теперь различает реальные способности."""
         return request_reply(matched_marker)
 
-    def _format_about_self_reply(self) -> str:
+    def _format_activity_reply(self) -> str:
+        """Ответить из фактической истории намерений, не из истории изучения."""
+        history = getattr(self.agent, "_intention_history", None)
+        entries = history if isinstance(history, list) else []
+        activity_names = {
+            "draw": ("рисую", "рисование"),
+            "compose_music": ("сочиняю мелодию", "сочинение мелодии"),
+            "listen_music": ("слушаю музыку", "прослушивание музыки"),
+            "create_draft": ("работаю над черновиком", "работа над черновиком"),
+            "explore": ("исследую тему", "исследование темы"),
+            "reflect": ("размышляю", "размышление"),
+            "web_search": ("ищу в интернете", "поиск в интернете"),
+            "read_news": ("читаю новости", "чтение новостей"),
+            "set_own_goal": ("выбираю собственную цель", "постановка собственной цели"),
+            "play": ("играю", "игра"),
+            "rest": ("отдыхаю", "отдых"),
+            "deep_rest": ("глубоко отдыхаю", "глубокий отдых"),
+        }
+        current = next(
+            (
+                entry
+                for entry in reversed(entries)
+                if isinstance(entry, dict) and entry.get("status") == "started"
+            ),
+            None,
+        )
+        if current is not None:
+            action = str(current.get("action") or "")
+            names = activity_names.get(action)
+            if names is None:
+                return "Сейчас у меня есть незавершённое действие."
+            phrase = names[0]
+            target = self._short_quote(current.get("target", ""), 100)
+            if target and action in {"create_draft", "explore"}:
+                phrase += f" «{target}»"
+            return f"Сейчас я {phrase}."
+
+        parts = ["Сейчас у меня нет незавершённого действия."]
+        completed = next(
+            (
+                entry
+                for entry in reversed(entries)
+                if isinstance(entry, dict) and entry.get("status") == "performed"
+            ),
+            None,
+        )
+        if completed is not None:
+            action = str(completed.get("action") or "")
+            names = activity_names.get(action)
+            if names is not None:
+                phrase = names[1]
+                target = self._short_quote(completed.get("target", ""), 100)
+                if target and action in {"create_draft", "explore"}:
+                    phrase += f" «{target}»"
+                parts.append(f"Последнее завершённое действие — {phrase}.")
+        return " ".join(parts)
+
+    def _format_about_self_reply(self, activity=False) -> str:
         """Честный рассказ о себе из read-only Core — без выдумки.
 
         История исследования называется историей, а не текущим занятием.
         """
+        if activity:
+            return self._format_activity_reply()
         agent = self.agent
         concepts = getattr(getattr(agent, "mental_models", None), "concepts", None)
         known = 0
@@ -3517,7 +3579,10 @@ class AgentRunner:
                         return (
                             self._format_identity_reply(proposed)
                             if proposed is not None
-                            else self._format_about_self_reply()
+                            else self._format_about_self_reply(
+                                activity=act.matched_marker
+                                in ABOUT_SELF_ACTIVITY_MARKERS
+                            )
                         )
                     return self._format_social_reply(question, pending)
                 result = agent.ask_user(question, source="chat")

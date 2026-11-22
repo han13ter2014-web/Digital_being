@@ -349,20 +349,96 @@ async def test_ask_about_self_gets_honest_reply_not_learning_material():
     assert ui.question_history == []
     queue = getattr(runner, "_pending_user_messages", None)
     assert queue is None or queue.qsize() == 0
-    texts = _reply_texts(bus)
-    reply = next(t for t in texts if "Меня зовут" in t)
-    assert agent.name in reply
-    assert "циклов" in reply
+    reply = _reply_texts(bus)[-1]
+    assert "Сейчас у меня нет незавершённого действия" in reply
+    assert "Меня зовут" not in reply
 
 
 @pytest.mark.asyncio
-async def test_ask_about_self_reports_occupation_and_memory():
+async def test_activity_question_reports_current_intention():
+    from src.cognition.intention_history import begin_intention
+
+    agent, runner, bus = _make_runner()
+    begin_intention(
+        agent,
+        {
+            "action": "draw",
+            "source": "activity",
+            "params": {"topic": "ночной город"},
+        },
+    )
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Что делаешь?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "Сейчас я рисую" in reply
+    assert "Меня зовут" not in reply
+    assert "последняя исследованная тема" not in reply
+
+
+@pytest.mark.asyncio
+async def test_activity_question_distinguishes_last_completed_action_from_current():
+    from src.cognition.intention_history import begin_intention, finish_intention
+
+    agent, runner, bus = _make_runner()
+    entry = begin_intention(
+        agent,
+        {
+            "action": "explore",
+            "source": "activity",
+            "params": {"topic": "оптика"},
+        },
+    )
+    finish_intention(
+        entry,
+        outcome=SimpleNamespace(
+            reason="", as_dict=lambda: {"action": "explore", "had_effect": True}
+        ),
+    )
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Чем ты занята?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "Сейчас у меня нет незавершённого действия" in reply
+    assert "Последнее завершённое действие — исследование темы «оптика»" in reply
+    assert "Сейчас я исследую" not in reply
+
+
+@pytest.mark.asyncio
+async def test_activity_question_after_restore_does_not_resurrect_interrupted_action():
+    from src.cognition.intention_history import (
+        begin_intention,
+        restore_history,
+    )
+
+    agent, runner, bus = _make_runner()
+    begin_intention(
+        agent,
+        {
+            "action": "create_draft",
+            "source": "activity",
+            "params": {"topic": "тишина"},
+        },
+    )
+    agent._intention_history = restore_history(agent._intention_history)
+    assert agent._intention_history[0]["status"] == "interrupted"
+
+    await runner._on_user_message(SimpleNamespace(data={"text": "Что делаешь?"}))
+
+    reply = _reply_texts(bus)[-1]
+    assert "Сейчас у меня нет незавершённого действия" in reply
+    assert "Последнее завершённое действие" not in reply
+    assert "работаю над черновиком" not in reply
+
+
+@pytest.mark.asyncio
+async def test_general_about_self_reports_history_and_user_memory():
     agent, runner, bus = _make_runner()
     agent._exploration_history = ["квантовая запутанность"]
     agent.user_model.observe("могу отлучаться надолго — не переживай", cycle=1)
     agent.user_model.observe("я работаю по ночам", cycle=2)
 
-    await runner._on_user_message(SimpleNamespace(data={"text": "Чем ты занята?"}))
+    await runner._on_user_message(SimpleNamespace(data={"text": "Кто ты такая?"}))
 
     texts = _reply_texts(bus)
     reply = next(t for t in texts if "Меня зовут" in t)
@@ -744,8 +820,8 @@ async def test_noise_input_gets_honest_reply_not_learning_material():
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("Что делаешь?", "Меня зовут"),
-        ("Чем занят?", "Меня зовут"),
+        ("Что делаешь?", "Сейчас у меня нет незавершённого действия"),
+        ("Чем занят?", "Сейчас у меня нет незавершённого действия"),
         ("Как дела?", "Моя энергия сейчас"),
     ],
 )

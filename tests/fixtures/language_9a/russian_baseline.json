@@ -176,11 +176,13 @@
         "reference_policy": "current_plan_verified",
         "fallback_policy": "none",
         "reply_context": "about_self",
+        "contract_note": "R0: вопрос о занятии получает честный ответ из фактической истории действий.",
         "required_text": [
-          "Меня зовут Baseline9A",
-          "циклов"
+          "Сейчас у меня нет незавершённого действия."
         ],
-        "forbidden_text": [],
+        "forbidden_text": [
+          "Меня зовут Baseline9A"
+        ],
         "pending_after": false,
         "explicit_switch": "none",
         "profile_isolation": "single_profile",
@@ -822,10 +824,13 @@
         "reference_policy": "current_plan_verified",
         "fallback_policy": "none",
         "reply_context": "about_self",
+        "contract_note": "R0: вопрос о занятии получает честный ответ из фактической истории действий и после legacy restore.",
         "required_text": [
+          "Сейчас у меня нет незавершённого действия."
+        ],
+        "forbidden_text": [
           "Меня зовут Baseline9A"
         ],
-        "forbidden_text": [],
         "pending_after": false,
         "explicit_switch": "none",
         "profile_isolation": "single_profile",

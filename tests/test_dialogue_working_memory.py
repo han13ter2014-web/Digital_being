@@ -62,10 +62,10 @@ async def test_anaphora_after_about_self_uses_previous_act_metadata():
     assert _last_context(agent) == "follow_up"
     reply = _replies(bus)[-1]["content"]
     assert "предыдущ" in reply.lower()
-    assert "Афродита" in reply
-    assert (
-        agent.user_interaction.dialogue_act_ring.snapshot()[-1]["kind"] == "follow_up"
-    )
+    assert "Сейчас у меня нет незавершённого действия" in reply
+    acts = agent.user_interaction.dialogue_act_ring.snapshot()
+    assert acts[0]["entities"] == ["Афродита"]
+    assert acts[-1]["kind"] == "follow_up"
 
 
 @pytest.mark.asyncio
@@ -175,9 +175,12 @@ async def test_ring_survives_checkpoint_and_resolves_after_restore():
 
     await _say(restored_runner, "Почему?")
 
-    assert restored.user_interaction.dialogue_act_ring.snapshot()
+    acts = restored.user_interaction.dialogue_act_ring.snapshot()
+    assert acts
+    assert acts[0]["entities"] == ["Восстановленная"]
     assert _last_context(restored) == "follow_up"
-    assert "Восстановленная" in _replies(bus)[-1]["content"]
+    reply = _replies(bus)[-1]["content"]
+    assert "Сейчас у меня нет незавершённого действия" in reply
 
 
 @pytest.mark.asyncio
