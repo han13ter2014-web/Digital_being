@@ -219,6 +219,23 @@ async def test_yes_no_question_does_not_close_open_question():
 
 
 @pytest.mark.asyncio
+async def test_prepositional_question_does_not_close_open_question():
+    """Живая регрессия: «О чем…» — вопрос, а не ответ про «осень»."""
+    agent, runner, bus = _make_runner()
+    result = agent.ask_user('песня "осень"?', source="chat")
+    assert result["status"] == "queued"
+
+    await runner._on_user_message(
+        SimpleNamespace(data={"text": "О чем ностальгируешь?"})
+    )
+
+    assert agent.has_open_questions()
+    assert agent.user_interaction.question_history == []
+    texts = _reply_texts(bus)
+    assert not any("Ответ записан к вопросу" in t for t in texts)
+
+
+@pytest.mark.asyncio
 async def test_second_person_action_question_does_not_close_open_question():
     """Живая регрессия: просьба-вопрос не ответ на вопрос о черепахах."""
     agent, runner, bus = _make_runner()
