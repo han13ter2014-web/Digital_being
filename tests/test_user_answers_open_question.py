@@ -51,12 +51,13 @@ async def test_user_message_answers_latest_open_question():
     runner.name = "Alpha"
     runner.agent = agent
     runner.bus = SimpleNamespace(publish=AsyncMock())
+    runner._reply_to_user = AsyncMock(wraps=runner._reply_to_user)
+    user_text = "Да, я тебя слышу и стараюсь понять."
 
-    await runner._on_user_message(
-        SimpleNamespace(data={"text": "Да, я тебя слышу и стараюсь понять."})
-    )
+    await runner._on_user_message(SimpleNamespace(data={"text": user_text}))
 
     assert manager.list_public()[0]["answered"] is True
+    assert runner._reply_to_user.call_args.kwargs["user_text"] == user_text
     assert agent.user_interaction.get_pending_question() is None
     assert not hasattr(runner, "_pending_user_messages")
 

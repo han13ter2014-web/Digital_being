@@ -22,11 +22,13 @@ async def test_user_message_during_naming_changes_core_name():
     runner.name = "Alpha"
     runner.agent = agent
     runner.bus = SimpleNamespace(publish=AsyncMock(), publish_sync=Mock())
+    runner._reply_to_user = AsyncMock(wraps=runner._reply_to_user)
 
     event = SimpleNamespace(data={"text": "Малютка"})
     await runner._on_user_message(event)
 
     agent.propose_name.assert_called_once_with("Малютка", cycle=4)
+    assert runner._reply_to_user.call_args.kwargs["user_text"] == "Малютка"
     runner.bus.publish.assert_awaited_once()
     assert runner.bus.publish.call_args.args[0] == "agent_thought"
     assert "Малютка" in runner.bus.publish.call_args.args[1]["text"]

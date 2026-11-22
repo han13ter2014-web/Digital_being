@@ -847,7 +847,9 @@ class AgentRunner:
                 user_model = getattr(self.agent, "user_model", None)
                 if user_model is not None:
                     user_model.observe(text, cycle=self.agent.cycle_count)
-                await self._propose_affect_learning(interaction, teaching)
+                await self._propose_affect_learning(
+                    interaction, teaching, user_text=text
+                )
                 return
 
         # === «Эволюция-1»: решение человека по предложению ===
@@ -917,6 +919,7 @@ class AgentRunner:
                         reply,
                         context="evolution_decision",
                         source="architecture_proposal",
+                        user_text=text,
                     )
                     return
 
@@ -934,7 +937,10 @@ class AgentRunner:
                 else:
                     reply = f"Фразы «{forget_phrase}» я не учила — забывать нечего."
                 await self._reply_to_user(
-                    reply, context="dialogue_forget", source="dialogue_learning"
+                    reply,
+                    context="dialogue_forget",
+                    source="dialogue_learning",
+                    user_text=text,
                 )
                 return
 
@@ -1012,7 +1018,10 @@ class AgentRunner:
             response = self._format_request_refusal(act.matched_marker)
             if response:
                 await self._reply_to_user(
-                    response, context="request_refusal", source="dialogue_acts"
+                    response,
+                    context="request_refusal",
+                    source="dialogue_acts",
+                    user_text=text,
                 )
             return
 
@@ -1030,7 +1039,10 @@ class AgentRunner:
                 "Напиши текстом, и я отвечу."
             )
             await self._reply_to_user(
-                response, context="noise_input", source="dialogue_acts"
+                response,
+                context="noise_input",
+                source="dialogue_acts",
+                user_text=text,
             )
             return
 
@@ -1155,7 +1167,10 @@ class AgentRunner:
             )
             if response:
                 await self._reply_to_user(
-                    response, context="user_answer", source="user_interaction"
+                    response,
+                    context="user_answer",
+                    source="user_interaction",
+                    user_text=text,
                 )
             return
 
@@ -1181,6 +1196,7 @@ class AgentRunner:
                     response,
                     context="open_question_answer",
                     source="open_question",
+                    user_text=text,
                 )
                 return
 
@@ -1234,6 +1250,7 @@ class AgentRunner:
                 "Спроси меня о чём-нибудь — или расскажи по-другому.",
                 context="orphan_answer",
                 source="dialogue_acts",
+                user_text=text,
             )
             return
 
@@ -1427,7 +1444,9 @@ class AgentRunner:
             user_text=text,
         )
 
-    async def _propose_affect_learning(self, interaction, teaching) -> None:
+    async def _propose_affect_learning(
+        self, interaction, teaching, *, user_text: str
+    ) -> None:
         """Предложить связь, но не сохранять её до отдельного «да»."""
         learning = self.agent.dialogue_learning
         proposal = learning.build_affect_proposal(
@@ -1452,6 +1471,7 @@ class AgentRunner:
             "подтверждения. Связь пока не сохранена.",
             context="affect_learning_deferred",
             source="dialogue_learning",
+            user_text=user_text,
         )
 
     async def _handle_affect_learning_answer(self, pending, interaction, text) -> None:
@@ -1465,6 +1485,7 @@ class AgentRunner:
                 "Ответ записан, но связь не распознана и не сохранена.",
                 context="affect_learning",
                 source="dialogue_learning",
+                user_text=text,
             )
             return
         outcome = learning.resolve_affect(
@@ -1489,7 +1510,10 @@ class AgentRunner:
                 "Если захочешь, объясни её позже ещё раз."
             )
         await self._reply_to_user(
-            reply, context="affect_learning", source="dialogue_learning"
+            reply,
+            context="affect_learning",
+            source="dialogue_learning",
+            user_text=text,
         )
 
     async def _handle_learning_answer(
@@ -1542,7 +1566,10 @@ class AgentRunner:
                     "учебному вопросу; не сохранила её."
                 )
             await self._reply_to_user(
-                reply, context="dialogue_learning", source="dialogue_learning"
+                reply,
+                context="dialogue_learning",
+                source="dialogue_learning",
+                user_text=text,
             )
             return
         teaching = extract_affect_teaching(text, default_phrase=phrase)
@@ -1551,7 +1578,7 @@ class AgentRunner:
                 interaction.submit_answer(
                     pending["id"], text, cycle=self.agent.cycle_count
                 )
-            await self._propose_affect_learning(interaction, teaching)
+            await self._propose_affect_learning(interaction, teaching, user_text=text)
             return
         if interaction is not None:
             interaction.submit_answer(pending["id"], text, cycle=self.agent.cycle_count)
@@ -1560,6 +1587,7 @@ class AgentRunner:
                 "Ответ записан.",
                 context="dialogue_learning",
                 source="dialogue_learning",
+                user_text=text,
             )
             return
         outcome = learning.resolve(phrase, text, cycle=self.agent.cycle_count)
@@ -1589,7 +1617,10 @@ class AgentRunner:
                 "Если захочешь, объясни позже."
             )
         await self._reply_to_user(
-            reply, context="dialogue_learning", source="dialogue_learning"
+            reply,
+            context="dialogue_learning",
+            source="dialogue_learning",
+            user_text=text,
         )
 
     async def _handle_english_dialogue(self, recognition, pending, text) -> None:
@@ -1885,6 +1916,7 @@ class AgentRunner:
             "Это я записывать не буду — тема не подходит для моих знаний.",
             context="user_definition_refused",
             source="dialogue_acts",
+            user_text=f"{topic} — это {body}",
         )
 
     @staticmethod
@@ -1919,7 +1951,7 @@ class AgentRunner:
         return False
 
     async def _publish_naming_result(
-        self, result: Dict[str, Any], proposed: str
+        self, result: Dict[str, Any], proposed: str, *, user_text: str
     ) -> None:
         """Опубликовать ответ диалога об имени; при смене имени — событие Core."""
         if result.get("status") in {"accepted", "alternative_accepted"}:
@@ -1927,7 +1959,10 @@ class AgentRunner:
         response = self._format_name_result(result, proposed)
         if response:
             await self._reply_to_user(
-                response, context="naming_dialogue", source="naming_dialogue"
+                response,
+                context="naming_dialogue",
+                source="naming_dialogue",
+                user_text=user_text,
             )
 
     def _extract_name_proposal_guarded(self, text: str):
@@ -1968,7 +2003,7 @@ class AgentRunner:
             if proposed is None:
                 return False
             result = self.agent.propose_name(proposed, cycle=cycle)
-            await self._publish_naming_result(result, proposed)
+            await self._publish_naming_result(result, proposed, user_text=text)
             return True
 
         if phase not in {"awaiting_name", "considering", "renaming_pending"}:
@@ -1978,16 +2013,16 @@ class AgentRunner:
             decision = classify_confirmation(text)
             if decision == "affirmative":
                 result = naming.confirm_rename(agent=self.agent, cycle=cycle)
-                await self._publish_naming_result(result, text)
+                await self._publish_naming_result(result, text, user_text=text)
                 return True
             if decision == "negative":
                 result = naming.cancel_rename(agent=self.agent, cycle=cycle)
-                await self._publish_naming_result(result, text)
+                await self._publish_naming_result(result, text, user_text=text)
                 return True
             proposed = self._extract_name_proposal_guarded(text)
             if proposed is not None:
                 result = self.agent.propose_name(proposed, cycle=cycle)
-                await self._publish_naming_result(result, proposed)
+                await self._publish_naming_result(result, proposed, user_text=text)
                 return True
             # Пользователь ушёл в другую тему — тихо отменяем переспрос
             # и обрабатываем сообщение обычными дверями.
@@ -1998,17 +2033,17 @@ class AgentRunner:
             decision = classify_confirmation(text)
             if decision == "affirmative":
                 result = naming.accept_alternative(agent=self.agent, cycle=cycle)
-                await self._publish_naming_result(result, text)
+                await self._publish_naming_result(result, text, user_text=text)
                 return True
             if decision == "negative":
                 result = naming.decline_alternative(agent=self.agent, cycle=cycle)
-                await self._publish_naming_result(result, text)
+                await self._publish_naming_result(result, text, user_text=text)
                 return True
 
         proposed = self._extract_name_proposal_guarded(text)
         if proposed is not None:
             result = self.agent.propose_name(proposed, cycle=cycle)
-            await self._publish_naming_result(result, proposed)
+            await self._publish_naming_result(result, proposed, user_text=text)
             return True
 
         if phase == "considering":
@@ -2023,7 +2058,12 @@ class AgentRunner:
                 "«Пусть тебя зовут Омелла». "
                 "Остальную речь я пока не умею разбирать свободно."
             )
-        await self._reply_to_user(hint, context="naming_hint", source="naming_dialogue")
+        await self._reply_to_user(
+            hint,
+            context="naming_hint",
+            source="naming_dialogue",
+            user_text=text,
+        )
         return True
 
     def _publish_name_changed(self, result: Dict[str, Any]) -> None:
@@ -2403,7 +2443,10 @@ class AgentRunner:
             # Ответ на команду — реплика в канале диалога (AGENT_MESSAGE),
             # не мысль: комментарий ниже был честным, канал — нет.
             await self._reply_to_user(
-                response, context=f"command:{cmd}", source="runner"
+                response,
+                context=f"command:{cmd}",
+                source="runner",
+                user_text=f"/{cmd}",
             )
 
     async def _on_user_opened_chat(self, event) -> None:
