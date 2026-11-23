@@ -25,10 +25,19 @@ from src.core.response_annotation import (
 from src.core.response_experience_journal import (
     EVENT_KINDS,
     JOURNAL_SCHEMA_VERSION,
+    SEGMENT_EXCLUSION,
+    SEGMENT_JOURNAL_SCHEMA_VERSION,
+    SEGMENT_WRITER_CONTRACT_VERSION,
     WRITER_CONTRACT_VERSION,
     event_hash,
 )
 from src.core.semantic_response_plan import SemanticResponsePlan
+
+_SUPPORTED_RESPONSE_WRITERS = {
+    JOURNAL_SCHEMA_VERSION: WRITER_CONTRACT_VERSION,
+    SEGMENT_JOURNAL_SCHEMA_VERSION: SEGMENT_WRITER_CONTRACT_VERSION,
+}
+_SUPPORTED_RESPONSE_EVENT_KINDS = EVENT_KINDS | {SEGMENT_EXCLUSION}
 
 
 class ReviewError(RuntimeError):
@@ -127,11 +136,14 @@ def _read_response_events(path: Path, life_id: str) -> list[dict]:
                 raise ReviewError("response journal hash chain mismatch")
             if event["event_hash"] != event_hash(event):
                 raise ReviewError("response journal event hash mismatch")
-            if event["event_kind"] not in EVENT_KINDS:
+            if event["event_kind"] not in _SUPPORTED_RESPONSE_EVENT_KINDS:
                 raise ReviewError("response journal event kind is unsupported")
-            if event["journal_schema_version"] != JOURNAL_SCHEMA_VERSION:
+            writer_contract = _SUPPORTED_RESPONSE_WRITERS.get(
+                event["journal_schema_version"]
+            )
+            if writer_contract is None:
                 raise ReviewError("response journal schema is unsupported")
-            if event["writer_contract_version"] != WRITER_CONTRACT_VERSION:
+            if event["writer_contract_version"] != writer_contract:
                 raise ReviewError("response journal writer contract is unsupported")
             if event["life_id"] != life_id:
                 raise ReviewError("response journal life mismatch")

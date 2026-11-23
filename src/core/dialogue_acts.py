@@ -434,6 +434,9 @@ def classify_user_text(
         if marker in normalized:
             return DialogueAct(ACT_ANSWER, marker)
 
+    if re.fullmatch(r"(?:а\s+)?(?:почему|зачем|кто)\s*[?!.…]*", normalized):
+        return DialogueAct(ACT_FOLLOW_UP, normalized)
+
     # Отдельный smalltalk не перехватывает составные вопросы о состоянии.
     if normalized.strip(" \t\r\n.!?…") == "как ты себя чувствуешь":
         return DialogueAct(ACT_SOCIAL, "как ты")

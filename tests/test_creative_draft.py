@@ -94,3 +94,41 @@ def test_modified_draft_is_not_overwritten():
         agent.act("creative_act")
     assert path.read_text(encoding="utf-8") == "правка человека"
     assert agent._creative_draft == draft
+
+
+def test_modified_draft_is_not_offered_for_autonomous_continuation():
+    from src.cognition.creative_choices import creative_choices
+
+    agent = DigitalBeing(name="DraftExternalChoice")
+    agent.act("creative_act")
+    draft = dict(agent._creative_draft)
+    path = Path(data_path("delamain", "workspace", "creative")) / f"{draft['id']}.txt"
+    path.write_text("правка человека", encoding="utf-8")
+    candidate = {"action": "create_draft", "strength": 1.0, "params": {}}
+
+    choices = creative_choices(agent, candidate)
+
+    assert choices
+    assert all(choice["params"].get("draft_id") != draft["id"] for choice in choices)
+    assert any(choice["params"].get("draft_mode") == "new" for choice in choices)
+    assert path.read_text(encoding="utf-8") == "правка человека"
+    assert agent._creative_draft == draft
+
+
+def test_modified_draft_explicit_candidate_is_rejected():
+    from src.cognition.creative_choices import creative_choices
+
+    agent = DigitalBeing(name="DraftExplicitExternalChoice")
+    agent.act("creative_act")
+    draft = dict(agent._creative_draft)
+    path = Path(data_path("delamain", "workspace", "creative")) / f"{draft['id']}.txt"
+    path.write_text("правка человека", encoding="utf-8")
+    candidate = {
+        "action": "create_draft",
+        "strength": 1.0,
+        "params": {"draft_mode": "continue", "draft_id": draft["id"]},
+    }
+
+    assert creative_choices(agent, candidate) == []
+    assert path.read_text(encoding="utf-8") == "правка человека"
+    assert agent._creative_draft == draft

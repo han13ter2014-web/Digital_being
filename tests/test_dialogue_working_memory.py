@@ -269,3 +269,16 @@ def test_dispatch_order_covers_complete_canonical_chain():
     ]
     positions = [source.index(anchor) for anchor in anchors]
     assert positions == sorted(positions)
+
+
+@pytest.mark.asyncio
+async def test_anaphora_closes_previous_response_as_follow_up():
+    agent, runner, _ = _make_runner("Афродита")
+    await _say(runner, "Чем занимаешься?")
+    previous_response_id = agent.response_experience.latest_response_id
+
+    await _say(runner, "Почему?")
+
+    assert agent.response_experience.responses[previous_response_id]["outcome"] == (
+        "follow_up"
+    )

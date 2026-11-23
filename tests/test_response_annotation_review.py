@@ -529,3 +529,28 @@ def test_tk_plan_abstention_uses_selected_intent_and_disables_for_other(sandbox)
     finally:
         session.close()
         root.destroy()
+
+
+def test_loader_accepts_segment_v2_journal(sandbox, tmp_path):
+    path = tmp_path / "segment.sqlite3"
+    writer = ResponseExperienceJournal(
+        path,
+        LIFE_ID,
+        segment_id="segment-review-test",
+        boundary_cycle=0,
+        archive_manifest_hash="a" * 64,
+        preexisting={("owner", "legacy-response")},
+    )
+    experience = type("Experience", (), {})()
+    experience.responses = {}
+    for record in sandbox["records"]:
+        writer.record_delivery(experience, record, cycle=record["cycle"], turn_id=None)
+        experience.responses[record["response_id"]] = record
+    writer.close()
+
+    batch = load_review_candidates(sandbox["snapshot"], path, life_id=LIFE_ID)
+
+    assert len(batch.candidates) == 3
+    events = _response_events(path)
+    assert all(event["journal_schema_version"] == 2 for event in events)
+    assert any(event["event_kind"] == "segment_exclusion" for event in events)

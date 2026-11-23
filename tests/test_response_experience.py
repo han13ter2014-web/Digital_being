@@ -240,6 +240,21 @@ def test_recognized_then_situational_then_habit_requires_shown_supported_answers
     assert record["successful_uses"] == 2
 
 
+def test_borrowed_expression_is_not_prepended_twice():
+    agent = _agent("ResponseDuplicateBorrowing")
+    experience = agent.response_experience
+    profile_id = agent.social_registry.current_profile_id
+    _make_situational(experience, profile_id, expression="привет")
+    agent.cycle_count = 3
+
+    prepared = _prepare(experience, agent, "greeting", borrow_context="greeting")
+
+    assert prepared["text"] == "Привет. Рада тебя слышать."
+    assert prepared["plan"]["components"] == ["deterministic_reply"]
+    assert prepared["plan"]["realization"]["kind"] == "fixed_template"
+    assert prepared["plan"]["borrowed"] is None
+
+
 def test_recognized_expression_is_never_used_and_opposition_rejects_it():
     imitation = SpeechImitation()
     imitation.observe("Привет", context="greeting", profile_id="owner", cycle=1)
@@ -462,3 +477,30 @@ def test_identical_history_is_deterministic():
         return experience.to_dict()
 
     assert history() == history()
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("я согласен", "support"),
+        ("я согласна", "support"),
+        ("полностью согласен с тобой", "support"),
+        ("Полностью согласен с тобой, ты молодец", "support"),
+        ("Ты молодец, я согласен с тобой!", "support"),
+        ("ты молодец", "support"),
+        ("я не согласен", "opposition"),
+        ("я не согласна с тобой", "opposition"),
+        ("не согласен", "opposition"),
+        ("это не так", "opposition"),
+        ("Нет, ты не права", "opposition"),
+        ("ты не прав", "opposition"),
+        ("я согласен?", None),
+        ("она сказала, что согласна", None),
+        ("я согласен, продолжай", None),
+        ("я не совсем согласен", None),
+        ("не согласен, продолжай", None),
+        ("ты молодец?", None),
+    ],
+)
+def test_generic_feedback_recognizes_explicit_natural_forms(text, expected):
+    assert parse_generic_feedback(text) == expected

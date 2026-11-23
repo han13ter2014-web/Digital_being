@@ -78,9 +78,39 @@ _GENERIC_FEEDBACK = {
     "так понятно": "support",
     "теперь понятно": "support",
     "так лучше": "support",
+    "я согласен": "support",
+    "я согласна": "support",
+    "согласен": "support",
+    "согласна": "support",
+    "согласен с тобой": "support",
+    "согласна с тобой": "support",
+    "полностью согласен": "support",
+    "полностью согласна": "support",
+    "полностью согласен с тобой": "support",
+    "полностью согласна с тобой": "support",
+    "полностью согласен с тобой, ты молодец": "support",
+    "полностью согласна с тобой, ты молодец": "support",
+    "я согласен с тобой, ты молодец": "support",
+    "я согласна с тобой, ты молодец": "support",
+    "ты молодец, я согласен с тобой": "support",
+    "ты молодец, я согласна с тобой": "support",
+    "ты молодец": "support",
     "не то": "opposition",
     "ты меня не поняла": "opposition",
     "ты меня не понял": "opposition",
+    "я не согласен": "opposition",
+    "я не согласна": "opposition",
+    "не согласен": "opposition",
+    "не согласна": "opposition",
+    "я не согласен с тобой": "opposition",
+    "я не согласна с тобой": "opposition",
+    "не согласен с тобой": "opposition",
+    "не согласна с тобой": "opposition",
+    "это не так": "opposition",
+    "нет, ты не права": "opposition",
+    "нет, ты не прав": "opposition",
+    "ты не права": "opposition",
+    "ты не прав": "opposition",
 }
 
 
@@ -500,14 +530,29 @@ class ResponseExperience:
             )
             if candidate is not None:
                 expression = candidate["expression"]
-                borrowed = {
-                    "expression": expression,
-                    "context": borrow_context,
-                    "profile_id": profile_id,
-                    "language_id": response_language,
-                    "level": candidate["level"],
-                }
-                composed = expression[:1].upper() + expression[1:] + ". " + composed
+                normalized_base = " ".join(composed.casefold().split())
+                already_prefixed = (
+                    normalized_base == expression
+                    or normalized_base.startswith(
+                        (
+                            f"{expression} ",
+                            f"{expression}.",
+                            f"{expression},",
+                            f"{expression}!",
+                            f"{expression}?",
+                            f"{expression}…",
+                        )
+                    )
+                )
+                if not already_prefixed:
+                    borrowed = {
+                        "expression": expression,
+                        "context": borrow_context,
+                        "profile_id": profile_id,
+                        "language_id": response_language,
+                        "level": candidate["level"],
+                    }
+                    composed = expression[:1].upper() + expression[1:] + ". " + composed
         _text(composed, "composed text", TEXT_MAX_LEN)
         plan = {
             "observed_input": str(user_text or "")[:INPUT_MAX_LEN],

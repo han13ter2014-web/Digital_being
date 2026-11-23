@@ -22,10 +22,16 @@ from src.core.life_identity import validate_life_id
 from src.core.paths import data_path
 
 JOURNAL_SCHEMA_VERSION = 1
+SEGMENT_JOURNAL_SCHEMA_VERSION = 2
 FEATURE_CONTRACT_VERSION = "pj_structured_v1"
 WRITER_CONTRACT_VERSION = "pj_i_production_v1"
+SEGMENT_WRITER_CONTRACT_VERSION = "cs_i_segment_v1"
 RESPONSE_JOURNAL_ENV = "DIGITAL_BEING_RESPONSE_JOURNAL"
+RESPONSE_JOURNAL_SEGMENT_ENV = "DIGITAL_BEING_RESPONSE_JOURNAL_SEGMENT"
+RESPONSE_JOURNAL_SEGMENT_ID_ENV = "DIGITAL_BEING_RESPONSE_JOURNAL_SEGMENT_ID"
+RESPONSE_JOURNAL_ARCHIVE_HASH_ENV = "DIGITAL_BEING_RESPONSE_JOURNAL_ARCHIVE_HASH"
 JOURNAL_FILENAME = "response_experience_events.sqlite3"
+SEGMENT_EXCLUSION = "segment_exclusion"
 
 DEFAULT_MAX_EVENTS = 250_000
 DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024
@@ -238,8 +244,55 @@ def safe_features(record: dict, *, repeat_origin: str | None) -> dict:
     }
 
 
+def _validate_segment_options(
+    segment_id, boundary_cycle, archive_manifest_hash, preexisting
+):
+    if segment_id is None:
+        if preexisting or archive_manifest_hash is not None or boundary_cycle != 0:
+            raise ValueError("segment options require segment_id")
+        return set()
+    if (
+        not isinstance(segment_id, str)
+        or not segment_id.strip()
+        or len(segment_id) > 160
+    ):
+        raise ValueError("segment_id: expected a bounded nonempty string")
+    if (
+        isinstance(boundary_cycle, bool)
+        or not isinstance(boundary_cycle, int)
+        or boundary_cycle < 0
+    ):
+        raise ValueError("boundary_cycle: expected a nonnegative integer")
+    if (
+        not isinstance(archive_manifest_hash, str)
+        or len(archive_manifest_hash) != 64
+        or any(
+            character not in "0123456789abcdef" for character in archive_manifest_hash
+        )
+    ):
+        raise ValueError("archive_manifest_hash: expected SHA-256 hex")
+    exclusions = set()
+    for item in preexisting:
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            raise ValueError("segment exclusions: expected profile/response pairs")
+        profile_id, response_id = item
+        if any(
+            not isinstance(value, str) or not value or len(value) > 160
+            for value in (profile_id, response_id)
+        ):
+            raise ValueError("segment exclusions: invalid technical ID")
+        exclusions.add((profile_id, response_id))
+    return exclusions
+
+
 class ResponseExperienceJournal:
     """Синхронный fail-open writer без фоновых задач и сетевых вызовов."""
+
+    connection: sqlite3.Connection | None
+    degradation_reason: str | None
+    last_error: str | None
+    segment_id: str | None
+    archive_manifest_hash: str | None
 
     def __init__(
         self,
@@ -249,8 +302,22 @@ class ResponseExperienceJournal:
         max_events: int | None = DEFAULT_MAX_EVENTS,
         max_payload_bytes: int | None = DEFAULT_MAX_PAYLOAD_BYTES,
         max_storage_bytes: int | None = DEFAULT_MAX_STORAGE_BYTES,
+        segment_id: str | None = None,
+        boundary_cycle: int = 0,
+        archive_manifest_hash: str | None = None,
+        preexisting=(),
     ) -> None:
         self._initialize_state(path, life_id)
+        self.segment_id = segment_id
+        self.boundary_cycle = boundary_cycle
+        self.archive_manifest_hash = archive_manifest_hash
+        self._segment_exclusions = _validate_segment_options(
+            segment_id, boundary_cycle, archive_manifest_hash, preexisting
+        )
+        if segment_id is not None:
+            self.journal_schema_version = SEGMENT_JOURNAL_SCHEMA_VERSION
+            self.writer_contract_version = SEGMENT_WRITER_CONTRACT_VERSION
+            self.allowed_event_kinds = EVENT_KINDS | {SEGMENT_EXCLUSION}
         self.max_events = max_events
         self.max_payload_bytes = max_payload_bytes
         self.max_storage_bytes = max_storage_bytes
@@ -281,6 +348,21 @@ class ResponseExperienceJournal:
                 )
             else:
                 self._verify()
+                if self.segment_id is not None:
+                    first = self.connection.execute(
+                        "SELECT payload FROM events WHERE event_sequence=1"
+                    ).fetchone()
+                    segment_payload = json.loads(first["payload"]) if first else {}
+                    if segment_payload.get("segment_id") != self.segment_id:
+                        raise JournalCorruption("segment_mismatch")
+                    self._segment_exclusions = {
+                        (row["profile_id"], row["response_id"])
+                        for row in self.connection.execute(
+                            "SELECT profile_id, response_id FROM events"
+                            " WHERE event_kind=?",
+                            (SEGMENT_EXCLUSION,),
+                        )
+                    }
             active_writers = self._register_writer()
             head = self._head()
             if not fresh:
@@ -300,17 +382,42 @@ class ResponseExperienceJournal:
                     )
             previous_sequence = self._head()["sequence"]
             previous_hash = self._head()["event_hash"]
+            started_payload = {
+                "clean_start": fresh,
+                "previous_shutdown_unclean": previous_unclean,
+                "previous_writer_degraded": previous_degraded,
+                "previous_sequence": previous_sequence,
+                "previous_hash": previous_hash,
+            }
+            if self.segment_id is not None:
+                started_payload.update(
+                    {
+                        "segment_id": self.segment_id,
+                        "boundary_cycle": self.boundary_cycle,
+                        "archive_manifest_hash": self.archive_manifest_hash,
+                        "segment_reason": "owner_approved_clean_collection",
+                    }
+                )
             self._safe_append(
                 "journal_started",
                 event_id=f"started:{uuid4().hex}",
-                payload={
-                    "clean_start": fresh,
-                    "previous_shutdown_unclean": previous_unclean,
-                    "previous_writer_degraded": previous_degraded,
-                    "previous_sequence": previous_sequence,
-                    "previous_hash": previous_hash,
-                },
+                payload=started_payload,
             )
+            if fresh and self.segment_id is not None:
+                for profile_id, response_id in sorted(self._segment_exclusions):
+                    self._safe_append(
+                        SEGMENT_EXCLUSION,
+                        event_id=(
+                            f"segment-exclusion:{self.segment_id}:"
+                            f"{profile_id}:{response_id}"
+                        ),
+                        profile_id=profile_id,
+                        response_id=response_id,
+                        payload={
+                            "segment_id": self.segment_id,
+                            "reason": "pre_segment_response",
+                        },
+                    )
             if previous_unclean:
                 self._append_gap("previous_shutdown_unclean", completeness="unverified")
             if previous_degraded:
@@ -340,6 +447,13 @@ class ResponseExperienceJournal:
         self._last_sequence = 0
         self._last_event_hash = "0" * 64
         self._lock = threading.RLock()
+        self.segment_id = None
+        self.boundary_cycle = 0
+        self.archive_manifest_hash = None
+        self._segment_exclusions = set()
+        self.journal_schema_version = JOURNAL_SCHEMA_VERSION
+        self.writer_contract_version = WRITER_CONTRACT_VERSION
+        self.allowed_event_kinds = EVENT_KINDS
 
     @classmethod
     def unavailable(cls, path: str | Path, life_id: str, error: Exception):
@@ -358,8 +472,13 @@ class ResponseExperienceJournal:
             return str(error)[:120]
         return type(error).__name__[:120]
 
+    def _require_connection(self) -> sqlite3.Connection:
+        if self.connection is None:
+            raise JournalError("writer_unavailable")
+        return self.connection
+
     def _schema(self) -> None:
-        self.connection.executescript(
+        self._require_connection().executescript(
             """
             CREATE TABLE IF NOT EXISTS head(
                 id INTEGER PRIMARY KEY CHECK(id=1),
@@ -418,7 +537,8 @@ class ResponseExperienceJournal:
         return True
 
     def _prune_writer_leases(self) -> int:
-        rows = self.connection.execute(
+        connection = self._require_connection()
+        rows = connection.execute(
             "SELECT writer_id, process_id FROM writer_leases"
         ).fetchall()
         active = 0
@@ -426,46 +546,47 @@ class ResponseExperienceJournal:
             if self._process_alive(row["process_id"]):
                 active += 1
             else:
-                self.connection.execute(
+                connection.execute(
                     "DELETE FROM writer_leases WHERE writer_id=?", (row["writer_id"],)
                 )
         return active
 
     def _register_writer(self) -> int:
-        self.connection.execute("BEGIN IMMEDIATE")
+        connection = self._require_connection()
+        connection.execute("BEGIN IMMEDIATE")
         try:
             active = self._prune_writer_leases()
-            self.connection.execute(
+            connection.execute(
                 "INSERT INTO writer_leases(writer_id, process_id) VALUES(?, ?)",
                 (self.writer_id, os.getpid()),
             )
-            self.connection.execute("COMMIT")
+            connection.execute("COMMIT")
             return active
         except Exception:
-            self.connection.execute("ROLLBACK")
+            connection.execute("ROLLBACK")
             raise
 
     def _unregister_writer(self) -> None:
-        self.connection.execute("BEGIN IMMEDIATE")
+        connection = self._require_connection()
+        connection.execute("BEGIN IMMEDIATE")
         try:
-            self.connection.execute(
+            connection.execute(
                 "DELETE FROM writer_leases WHERE writer_id=?", (self.writer_id,)
             )
             active = self._prune_writer_leases()
-            self.connection.execute(
+            connection.execute(
                 "UPDATE head SET clean_shutdown=?, status=?, degradation_reason=?"
                 " WHERE id=1",
                 (0 if active else 1, self.status, self.degradation_reason),
             )
-            self.connection.execute("COMMIT")
+            connection.execute("COMMIT")
         except Exception:
-            self.connection.execute("ROLLBACK")
+            connection.execute("ROLLBACK")
             raise
 
     def _head(self):
-        if self.connection is None:
-            raise JournalError("writer_unavailable")
-        row = self.connection.execute("SELECT * FROM head WHERE id=1").fetchone()
+        connection = self._require_connection()
+        row = connection.execute("SELECT * FROM head WHERE id=1").fetchone()
         if row is None:
             raise JournalCorruption("missing_head")
         return row
@@ -492,12 +613,11 @@ class ResponseExperienceJournal:
         }
 
     def _verify(self) -> None:
-        integrity = [
-            row[0] for row in self.connection.execute("PRAGMA integrity_check")
-        ]
+        connection = self._require_connection()
+        integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]
         if integrity != ["ok"]:
             raise JournalCorruption("sqlite_integrity")
-        rows = self.connection.execute(
+        rows = connection.execute(
             "SELECT * FROM events ORDER BY event_sequence"
         ).fetchall()
         head = self._head()
@@ -510,11 +630,11 @@ class ResponseExperienceJournal:
                 raise JournalCorruption("hash_chain_mismatch")
             if event["event_hash"] != event_hash(event):
                 raise JournalCorruption("event_hash_mismatch")
-            if event["event_kind"] not in EVENT_KINDS:
+            if event["event_kind"] not in self.allowed_event_kinds:
                 raise JournalCorruption("unknown_event_kind")
-            if event["journal_schema_version"] != JOURNAL_SCHEMA_VERSION:
+            if event["journal_schema_version"] != self.journal_schema_version:
                 raise JournalCorruption("unsupported_journal_schema")
-            if event["writer_contract_version"] != WRITER_CONTRACT_VERSION:
+            if event["writer_contract_version"] != self.writer_contract_version:
                 raise JournalCorruption("unsupported_writer_contract")
             if event["life_id"] != self.life_id:
                 raise JournalCorruption("life_mismatch")
@@ -548,7 +668,7 @@ class ResponseExperienceJournal:
         with self._lock:
             if self.connection is None:
                 raise JournalError("writer_unavailable")
-            if event_kind not in EVENT_KINDS:
+            if event_kind not in self.allowed_event_kinds:
                 raise JournalError("unsupported_event_kind")
             if self.fail_next_append:
                 self.fail_next_append = False
@@ -613,9 +733,9 @@ class ResponseExperienceJournal:
                     "event_id": event_id,
                     "event_sequence": head["sequence"] + 1,
                     "event_kind": event_kind,
-                    "journal_schema_version": JOURNAL_SCHEMA_VERSION,
+                    "journal_schema_version": self.journal_schema_version,
                     "feature_contract_version": FEATURE_CONTRACT_VERSION,
-                    "writer_contract_version": WRITER_CONTRACT_VERSION,
+                    "writer_contract_version": self.writer_contract_version,
                     "life_id": self.life_id,
                     "profile_id": profile_id,
                     "cycle": cycle,
@@ -805,6 +925,11 @@ class ResponseExperienceJournal:
                 self.last_error = self.degradation_reason
                 self._append_gap("invalid_transition_record", completeness="unverified")
                 return None
+            if (
+                delivery is None
+                and (profile_id, response_id) in self._segment_exclusions
+            ):
+                return None
             if delivery is None and transition_kind != "record_pruned":
                 self._append_gap(
                     "orphan_outcome",
@@ -964,8 +1089,22 @@ def open_response_experience_journal(agent) -> ResponseExperienceJournal | None:
         return None
     life_id = validate_life_id(agent.life_id)
     path = Path(data_path("lives", life_id, JOURNAL_FILENAME))
+    options = {}
+    if os.environ.get(RESPONSE_JOURNAL_SEGMENT_ENV) == "1":
+        experience = agent.response_experience
+        options = {
+            "segment_id": os.environ.get(RESPONSE_JOURNAL_SEGMENT_ID_ENV, ""),
+            "boundary_cycle": agent.cycle_count,
+            "archive_manifest_hash": os.environ.get(
+                RESPONSE_JOURNAL_ARCHIVE_HASH_ENV, ""
+            ),
+            "preexisting": {
+                (record["plan"]["state"]["profile_id"], response_id)
+                for response_id, record in experience.responses.items()
+            },
+        }
     try:
-        return ResponseExperienceJournal(path, life_id)
+        return ResponseExperienceJournal(path, life_id, **options)
     except Exception as error:
         # Optional observer никогда не отменяет создание/остановку жизни.
         return ResponseExperienceJournal.unavailable(path, life_id, error)

@@ -60,6 +60,17 @@ def draft_available(state=None, workspace=None):
     return len(workspace.list()) < MAX_DRAFTS
 
 
+def draft_has_external_changes(state, workspace=None):
+    """Проверить файл перед предложением автономного продолжения."""
+    validate_draft(state)
+    workspace = workspace or ActivityWorkspace()
+    filename = f"{state['id']}.txt"
+    if not workspace.sandbox.exists(filename):
+        return False
+    previous = workspace.sandbox.read_text(filename)
+    return hashlib.sha256(previous.encode("utf-8")).hexdigest() != state["sha256"]
+
+
 def _single_line(value, limit=500):
     text = " ".join(str(value).split()).strip()
     if len(text) <= limit:

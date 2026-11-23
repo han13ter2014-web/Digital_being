@@ -393,13 +393,13 @@ async def test_english_borrowing_feedback_and_restart_follow_real_dialogue_path(
 
     for cycle in (1, 2):
         agent.cycle_count = cycle
-        await runner._on_user_message(SimpleNamespace(data={"text": "Hello"}))
+        await runner._on_user_message(SimpleNamespace(data={"text": "Hi"}))
 
     response_id = agent.response_experience.latest_response_id
     response = agent.response_experience.responses[response_id]
     assert response["plan"]["borrowed"]["language_id"] == "en"
     assert response["plan"]["realization"]["text"].startswith(
-        "Hello. Hello. I'm glad to hear from you."
+        "Hi. Hello. I'm glad to hear from you."
     )
     assert response["plan"]["provenance_verified"] is True
 
@@ -421,7 +421,7 @@ async def test_english_borrowing_feedback_and_restart_follow_real_dialogue_path(
     )
     owner = restored.social_registry.owner_profile_id
     record = restored.response_experience.imitation.expressions[
-        ("hello", "greeting", owner, "en")
+        ("hi", "greeting", owner, "en")
     ]
     assert record["successful_uses"] == 1
     assert not any(

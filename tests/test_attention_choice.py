@@ -43,3 +43,35 @@ def test_autonomous_choice_defers_without_thinking_about_stimulus():
     act.assert_called_once_with("communicate")
     assert not think.called
     assert agent._deferred_stimulus["text"] == "вопрос человека"
+
+
+def test_open_question_stimulus_outranks_routine_music():
+    agent = DigitalBeing(name="OpenQuestionAttentionTest")
+    agent._attention_stimulus = {
+        "text": "вопрос: что такое квант? [стратегия=mental_model_lookup, попытка 1/5]",
+        "user_initiated": False,
+    }
+
+    def choose(candidates, context):
+        return {
+            **next(c for c in candidates if c["action"] == "process_stimulus"),
+            "verdict": "proceed",
+        }
+
+    with patch(
+        "src.cognition.music_attention.listening_candidate",
+        return_value={
+            "source": "music_attention",
+            "action": "listen_music",
+            "strength": 0.5,
+            "params": {},
+        },
+    ), patch.object(
+        agent.decision_arbitrator, "choose_action", side_effect=choose
+    ) as choose_action:
+        result = agent.autonomous_tick()
+
+    candidates = choose_action.call_args[0][0]
+    stimulus = next(c for c in candidates if c["action"] == "process_stimulus")
+    assert stimulus["strength"] > 0.5
+    assert result["attention_selected"] is True

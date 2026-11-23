@@ -12,6 +12,7 @@ from config.simulation_config import LR_CONFIG, SIM_CONFIG
 from src.cognition.active_inference import encode_observations
 from src.core.agent_body import HEAVY_ACTIONS
 from src.core.buffered_logger import get_logger
+from src.core.stimulus_selector import is_open_question_stimulus
 
 
 def _record_active_inference_experience_impl(
@@ -191,11 +192,16 @@ def autonomous_tick_impl(self, *, AgentDeadSignal) -> Dict:
 
     pending_stimulus = getattr(self, "_attention_stimulus", None)
     if pending_stimulus is not None:
+        stimulus_strength = 0.85 if pending_stimulus["user_initiated"] else 0.3
+        if not pending_stimulus["user_initiated"] and is_open_question_stimulus(
+            pending_stimulus["text"]
+        ):
+            stimulus_strength = 0.55
         candidates.append(
             {
                 "source": "external_attention",
                 "action": "process_stimulus",
-                "strength": 0.85 if pending_stimulus["user_initiated"] else 0.3,
+                "strength": stimulus_strength,
                 "params": {"user_initiated": pending_stimulus["user_initiated"]},
             }
         )
